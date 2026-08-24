@@ -30,6 +30,7 @@ const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',
 );
+const serverWorkspaceRoot = path.join(repoRoot, 'packages', 'server');
 const sourceDir = path.join(repoRoot, 'deployment', 'enterprise-oneclick');
 const enrollmentSecretPrefix = 'config/deployment-enrollment-secret';
 
@@ -535,6 +536,7 @@ export class FeatureFlagManager {
   ).filter((name) => name !== 'otto-core' && name !== 'better-sqlite3');
   const runtimeDependencies = bundleRuntimeDependencyClosure({
     repoRoot,
+    workspaceRoot: serverWorkspaceRoot,
     releaseRoot,
     directDependencies: externalRuntimeDependencies,
   });

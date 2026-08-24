@@ -3,17 +3,38 @@
  */
 
 import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
-function packagePath(base, name) {
-  return path.join(base, 'node_modules', ...name.split('/'));
-}
-
 function resolvePackageDirectory(name, fromDirectory) {
-  let current = path.resolve(fromDirectory);
+  const resolver = createRequire(
+    path.join(
+      path.resolve(fromDirectory),
+      '__otto_runtime_dependency_resolver__.cjs',
+    ),
+  );
+  try {
+    return path.dirname(resolver.resolve(`${name}/package.json`));
+  } catch {
+    // Some packages hide package.json with exports. Resolve their public entry
+    // through Node, then walk back to the matching package boundary.
+  }
+  let entry;
+  try {
+    entry = resolver.resolve(name);
+  } catch {
+    return null;
+  }
+  let current = path.dirname(entry);
   while (true) {
-    const candidate = packagePath(current, name);
-    if (existsSync(path.join(candidate, 'package.json'))) return candidate;
+    const manifest = path.join(current, 'package.json');
+    if (existsSync(manifest)) {
+      try {
+        if (packageMetadata(current).name === name) return current;
+      } catch {
+        // Continue toward the package boundary that owns the resolved entry.
+      }
+    }
     const parent = path.dirname(current);
     if (parent === current) return null;
     current = parent;
@@ -24,14 +45,16 @@ function packageMetadata(directory) {
   return JSON.parse(readFileSync(path.join(directory, 'package.json'), 'utf8'));
 }
 
-function targetRelativePath(packageDirectory, rootNodeModules) {
-  const relative = path.relative(rootNodeModules, packageDirectory);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(
-      `runtime dependency is outside the root node_modules: ${packageDirectory}`,
-    );
+function targetRelativePath(packageDirectory, nodeModulesRoots) {
+  for (const nodeModulesRoot of nodeModulesRoots) {
+    const relative = path.relative(nodeModulesRoot, packageDirectory);
+    if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
+      return relative;
+    }
   }
-  return relative;
+  throw new Error(
+    `runtime dependency is outside the repository and workspace node_modules: ${packageDirectory}`,
+  );
 }
 
 function copyPackageWithoutNestedDependencies(
@@ -58,10 +81,12 @@ function copyPackageWithoutNestedDependencies(
 }
 
 export function collectRuntimeDependencyClosure(input) {
+  const workspaceRoot = input.workspaceRoot || input.repoRoot;
   const rootNodeModules = path.join(input.repoRoot, 'node_modules');
+  const workspaceNodeModules = path.join(workspaceRoot, 'node_modules');
   const pending = input.directDependencies.map((name) => ({
     name,
-    fromDirectory: input.repoRoot,
+    fromDirectory: workspaceRoot,
     optional: false,
   }));
   const packages = new Map();
@@ -77,7 +102,10 @@ export function collectRuntimeDependencyClosure(input) {
         `required runtime dependency is not installed: ${request.name}`,
       );
     }
-    const relative = targetRelativePath(directory, rootNodeModules);
+    const relative = targetRelativePath(directory, [
+      workspaceNodeModules,
+      rootNodeModules,
+    ]);
     if (packages.has(relative)) continue;
     const metadata = packageMetadata(directory);
     packages.set(relative, {
@@ -116,6 +144,7 @@ export function collectRuntimeDependencyClosure(input) {
 }
 
 export function bundleRuntimeDependencyClosure(input) {
+  const workspaceRoot = input.workspaceRoot || input.repoRoot;
   const packages = collectRuntimeDependencyClosure(input);
   const targetNodeModules = path.join(input.releaseRoot, 'node_modules');
   mkdirSync(targetNodeModules, { recursive: true });
@@ -130,7 +159,7 @@ export function bundleRuntimeDependencyClosure(input) {
   }
   const directVersions = {};
   for (const name of input.directDependencies) {
-    const directory = resolvePackageDirectory(name, input.repoRoot);
+    const directory = resolvePackageDirectory(name, workspaceRoot);
     const metadata = directory ? packageMetadata(directory) : null;
     if (!metadata?.version) {
       throw new Error(`unable to resolve direct runtime dependency: ${name}`);

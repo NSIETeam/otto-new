@@ -83,4 +83,58 @@ describe('enterprise runtime dependency bundler', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('uses the server workspace resolution when root versions conflict', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'otto-runtime-deps-'));
+    const serverWorkspace = path.join(root, 'packages', 'server');
+    const releaseRoot = path.join(root, 'release');
+    try {
+      writePackage(path.join(root, 'node_modules', 'pg'), {
+        name: 'pg',
+        version: '8.11.3',
+      });
+      writePackage(path.join(serverWorkspace, 'node_modules', 'pg'), {
+        name: 'pg',
+        version: '8.22.0',
+      });
+      writePackage(path.join(root, 'node_modules', 'redis'), {
+        name: 'redis',
+        version: '5.12.1',
+      });
+      writePackage(path.join(serverWorkspace, 'node_modules', 'redis'), {
+        name: 'redis',
+        version: '4.7.1',
+      });
+
+      const bundled = bundleRuntimeDependencyClosure({
+        repoRoot: root,
+        workspaceRoot: serverWorkspace,
+        releaseRoot,
+        directDependencies: ['pg', 'redis'],
+      });
+
+      expect(bundled.directVersions).toEqual({
+        pg: '8.22.0',
+        redis: '4.7.1',
+      });
+      expect(
+        JSON.parse(
+          readFileSync(
+            path.join(releaseRoot, 'node_modules', 'pg', 'package.json'),
+            'utf8',
+          ),
+        ).version,
+      ).toBe('8.22.0');
+      expect(
+        JSON.parse(
+          readFileSync(
+            path.join(releaseRoot, 'node_modules', 'redis', 'package.json'),
+            'utf8',
+          ),
+        ).version,
+      ).toBe('4.7.1');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

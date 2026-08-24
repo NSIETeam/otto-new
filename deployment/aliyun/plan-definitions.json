@@ -1,11 +1,13 @@
 {
   "format": "otto-aliyun-plan-definitions-v1",
-  "templateVersion": "0.2.0-local-preview",
+  "templateVersion": "0.3.0-local-preview",
   "plans": {
     "trial": {
       "templateFile": "trial.json",
       "availabilityZones": 1,
+      "ingressAvailabilityZones": 2,
       "statelessServers": 1,
+      "loadBalancerEdition": "Basic",
       "instanceType": "ecs.c7.large",
       "systemDiskSize": 40,
       "database": {
@@ -27,7 +29,9 @@
     "standard": {
       "templateFile": "standard.json",
       "availabilityZones": 2,
+      "ingressAvailabilityZones": 2,
       "statelessServers": 2,
+      "loadBalancerEdition": "Standard",
       "instanceType": "ecs.c7.xlarge",
       "systemDiskSize": 80,
       "database": {
@@ -49,7 +53,9 @@
     "ha": {
       "templateFile": "high-availability.json",
       "availabilityZones": 2,
+      "ingressAvailabilityZones": 2,
       "statelessServers": 2,
+      "loadBalancerEdition": "Standard",
       "instanceType": "ecs.c7.2xlarge",
       "systemDiskSize": 120,
       "database": {

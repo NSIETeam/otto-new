@@ -16,6 +16,7 @@ describe('enterprise admin operations security page', () => {
     expect(html).toContain('共享缓存');
     expect(html).toContain('KMS/HSM');
     expect(html).toContain('密钥轮换');
+    expect(html).toContain('href="/enterprise/admin/workflows"');
     const script = html.match(/<script>([\s\S]*)<\/script>/u)?.[1];
     expect(script).toBeTruthy();
     expect(() => new Function(script ?? '')).not.toThrow();

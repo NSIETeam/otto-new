@@ -29,6 +29,7 @@ import {
   type NodeRedisEnvironment,
 } from '../modules/data_platform/index.js';
 import { E2EE_ATTACHMENT_MAX_CIPHERTEXT_BYTES } from '../modules/collaboration/index.js';
+import { createPostgresDurableWorkflowRepository } from '../modules/durable_workflow/index.js';
 import { createPostgresEnterpriseCoreRepository } from './postgresCoreRepository.js';
 import { ENTERPRISE_POSTGRES_MIGRATIONS } from './postgresMigrations.js';
 import { createClusteredEnterpriseSharedState } from './clusteredSharedState.js';
@@ -189,6 +190,7 @@ export async function createClusteredEnterpriseInfrastructure(input: {
       pool,
       accountSyncKeyProvider,
     });
+    const workflowStore = createPostgresDurableWorkflowRepository({ pool });
     const attachmentStorage = createAttachmentStorageService({
       metadata: createPostgresAttachmentMetadataRepository({
         pool,
@@ -207,6 +209,7 @@ export async function createClusteredEnterpriseInfrastructure(input: {
       topology,
       topologyDescription: describeEnterpriseServiceTopology(topology),
       repository,
+      workflowStore,
       cache,
       sharedState: createClusteredEnterpriseSharedState({ repository, cache }),
       attachmentStorage,

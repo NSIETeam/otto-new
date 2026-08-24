@@ -53,6 +53,12 @@ import {
   type createAttachmentStorageService,
   type PostgresDatabaseReadiness,
 } from '../modules/data_platform/index.js';
+import {
+  createDefaultDurableWorkflowTaskRegistry,
+  handleDurableWorkflowRoutes,
+  sendDurableWorkflowAdminPage,
+  type DurableWorkflowQueueStore,
+} from '../modules/durable_workflow/index.js';
 import { createClusteredAttachmentMaintenance } from './clusteredAttachmentMaintenance.js';
 import { handleClusteredBusinessRoute } from './clusteredBusinessRoutes.js';
 import { createClusteredMlsMaintenance } from './clusteredMlsMaintenance.js';
@@ -542,6 +548,8 @@ export function createClusteredEnterpriseServer(
     smsSender?: ClusteredEnterpriseSmsSender | null;
     licensePublicKeys?: readonly string[];
     startedAt?: string;
+    workflowStore?: DurableWorkflowQueueStore;
+    workflowTaskTypes?: readonly string[];
   } = {},
 ): {
   server: Server;
@@ -565,6 +573,10 @@ export function createClusteredEnterpriseServer(
       process.env.OTTO_LICENSE_PUBLIC_KEYS,
       process.env.OTTO_LICENSE_REVOKED_KEY_IDS,
     );
+  const workflowTaskTypes = new Set(
+    options.workflowTaskTypes ??
+      createDefaultDurableWorkflowTaskRegistry().taskTypes(),
+  );
   const governanceAuthorization = {
     deploymentId:
       process.env.OTTO_DEPLOYMENT_ID?.trim() || 'clustered-enterprise',
@@ -611,6 +623,14 @@ export function createClusteredEnterpriseServer(
     const path = url.pathname;
     const method = req.method || 'GET';
     try {
+      if (
+        options.workflowStore &&
+        path === '/enterprise/admin/workflows' &&
+        method === 'GET'
+      ) {
+        sendDurableWorkflowAdminPage(res);
+        return;
+      }
       if (path === '/enterprise/health' && method === 'GET') {
         const [infrastructure, databaseProbe, authority] = await Promise.all([
           options.infrastructureReadiness?.(),
@@ -678,6 +698,9 @@ export function createClusteredEnterpriseServer(
                 ]
               : []),
             ...(options.sharedState ? ['redis_shared_state_v1'] : []),
+            ...(options.workflowStore
+              ? ['postgresql_durable_workflow_queue_v1']
+              : []),
           ],
         });
         return;
@@ -1458,6 +1481,23 @@ export function createClusteredEnterpriseServer(
           requiredFeature: commercialFeatureForEnterpriseRoute(path),
         });
         if (!license) return;
+      }
+
+      if (
+        options.workflowStore &&
+        (await handleDurableWorkflowRoutes({
+          path,
+          method,
+          req,
+          res,
+          member,
+          store: options.workflowStore,
+          allowedTaskTypes: workflowTaskTypes,
+          readBody: readJsonBody,
+          sendJson,
+        }))
+      ) {
+        return;
       }
 
       if (
@@ -2410,6 +2450,7 @@ export async function startClusteredEnterpriseServer(
       topologyDescription: infrastructure.topologyDescription,
       sharedState: infrastructure.sharedState,
       attachmentStorage: infrastructure.attachmentStorage,
+      workflowStore: infrastructure.workflowStore,
       publicUrl: options.publicUrl ?? process.env.OTTO_ENTERPRISE_PUBLIC_URL,
       licensePublicKeys: options.licensePublicKeys,
       smsSender:

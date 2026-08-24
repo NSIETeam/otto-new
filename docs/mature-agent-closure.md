@@ -22,6 +22,11 @@ test double does not satisfy an item on its own.
    replayed until reconciliation or human takeover resolves it.
 4. Every step will eventually emit an attributable trace with a run id, step
    id, approval decision, redacted evidence, and outcome.
+5. Enterprise PostgreSQL mode uses the shared queue described in
+   [PostgreSQL durable workflows](./durable-workflow-production.md), including
+   fenced leases, bounded retries, dead letters, approval deadlines, explicit
+   compensation, and administrator takeover. The local file driver remains an
+   offline-only authority.
 
 ## RPA
 
@@ -45,7 +50,8 @@ test double does not satisfy an item on its own.
 ## Migration rule
 
 The existing VM-based `workflow` tool remains exploratory and non-durable. The
-`durable_workflow` tool is the restart-safe path for supported declarative
-steps; arbitrary scripts, sub-agents, and external actions must not be
-represented as recoverable or used for irreversible workflows until they have a
-scheduler-integrated capability contract.
+local `durable_workflow` tool is restart-safe only on one machine. Enterprise
+server continuation requires a task type registered in the PostgreSQL Worker;
+arbitrary scripts, sub-agents, model turns, and external actions must not be
+represented as recoverable or used for irreversible workflows until they have
+a scheduler-integrated capability contract and failure-injection evidence.

@@ -925,6 +925,181 @@ CREATE INDEX attachment_objects_mls_message
   ) WHERE mls_conversation_id IS NOT NULL;
 `,
   },
+  {
+    version: 15,
+    name: 'mls-inbound-head-discovery-index',
+    sql: `
+CREATE INDEX mls_conversations_participant_b
+  ON mls_conversations (
+    organization_id, participant_b_account_id, participant_a_account_id
+  );
+`,
+  },
+  {
+    version: 16,
+    name: 'durable-workflow-queue',
+    sql: `
+CREATE TABLE durable_workflow_runs (
+  id TEXT PRIMARY KEY CHECK (id ~ '^wf-[0-9a-f-]{36}$'),
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  definition_id TEXT NOT NULL CHECK (length(definition_id) BETWEEN 1 AND 64),
+  definition_version INTEGER NOT NULL CHECK (definition_version = 1),
+  status TEXT NOT NULL CHECK (status IN (
+    'queued', 'running', 'waiting_approval', 'succeeded', 'failed',
+    'cancelled', 'unknown_outcome', 'dead_letter', 'compensating', 'compensated'
+  )),
+  priority SMALLINT NOT NULL DEFAULT 50 CHECK (priority BETWEEN 0 AND 100),
+  revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0),
+  created_by_account_id TEXT,
+  failure_code TEXT,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (id, organization_id),
+  FOREIGN KEY (created_by_account_id, organization_id)
+    REFERENCES accounts(id, organization_id) ON DELETE SET NULL (created_by_account_id)
+);
+
+CREATE INDEX durable_workflow_runs_queue
+  ON durable_workflow_runs (priority DESC, created_at, id)
+  WHERE status = 'queued';
+CREATE INDEX durable_workflow_runs_tenant_history
+  ON durable_workflow_runs (organization_id, updated_at DESC, id);
+
+CREATE TABLE durable_workflow_steps (
+  run_id TEXT NOT NULL,
+  organization_id TEXT NOT NULL,
+  sequence INTEGER NOT NULL CHECK (sequence >= 0),
+  step_id TEXT NOT NULL CHECK (length(step_id) BETWEEN 1 AND 64),
+  task_type TEXT NOT NULL CHECK (length(task_type) BETWEEN 1 AND 128),
+  status TEXT NOT NULL CHECK (status IN (
+    'queued', 'running', 'waiting_approval', 'succeeded', 'failed',
+    'cancelled', 'unknown_outcome', 'dead_letter'
+  )),
+  side_effect TEXT NOT NULL CHECK (side_effect IN ('none', 'idempotent', 'external')),
+  input JSONB NOT NULL DEFAULT '{}'::jsonb,
+  output JSONB,
+  error_summary TEXT,
+  attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+  max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts BETWEEN 1 AND 20),
+  idempotency_key TEXT NOT NULL,
+  requires_approval BOOLEAN NOT NULL DEFAULT FALSE,
+  approval_timeout_seconds INTEGER NOT NULL DEFAULT 86400
+    CHECK (approval_timeout_seconds BETWEEN 60 AND 2592000),
+  approval_id TEXT,
+  approval_expires_at TIMESTAMPTZ,
+  approved_by_account_id TEXT,
+  approved_at TIMESTAMPTZ,
+  available_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  lease_owner TEXT,
+  lease_token UUID,
+  lease_expires_at TIMESTAMPTZ,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  compensation JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (run_id, step_id),
+  UNIQUE (run_id, sequence),
+  FOREIGN KEY (run_id, organization_id)
+    REFERENCES durable_workflow_runs(id, organization_id) ON DELETE CASCADE,
+  FOREIGN KEY (approved_by_account_id, organization_id)
+    REFERENCES accounts(id, organization_id) ON DELETE SET NULL (approved_by_account_id),
+  CHECK (
+    (status = 'running' AND lease_owner IS NOT NULL AND lease_token IS NOT NULL AND lease_expires_at IS NOT NULL)
+    OR
+    (status <> 'running' AND lease_owner IS NULL AND lease_token IS NULL AND lease_expires_at IS NULL)
+  )
+);
+
+CREATE INDEX durable_workflow_steps_queue
+  ON durable_workflow_steps (available_at, run_id, sequence)
+  WHERE status = 'queued';
+CREATE INDEX durable_workflow_steps_expired_lease
+  ON durable_workflow_steps (lease_expires_at, run_id, step_id)
+  WHERE status = 'running';
+CREATE INDEX durable_workflow_steps_approval_timeout
+  ON durable_workflow_steps (approval_expires_at, run_id, step_id)
+  WHERE status = 'waiting_approval';
+
+CREATE TABLE durable_workflow_compensations (
+  run_id TEXT NOT NULL,
+  organization_id TEXT NOT NULL,
+  step_id TEXT NOT NULL,
+  reverse_sequence INTEGER NOT NULL CHECK (reverse_sequence >= 0),
+  task_type TEXT NOT NULL CHECK (length(task_type) BETWEEN 1 AND 128),
+  input JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'dead_letter', 'cancelled')),
+  attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+  max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts BETWEEN 1 AND 20),
+  idempotency_key TEXT NOT NULL,
+  available_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  lease_owner TEXT,
+  lease_token UUID,
+  lease_expires_at TIMESTAMPTZ,
+  error_summary TEXT,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (run_id, step_id),
+  FOREIGN KEY (run_id, organization_id)
+    REFERENCES durable_workflow_runs(id, organization_id) ON DELETE CASCADE,
+  CHECK (
+    (status = 'running' AND lease_owner IS NOT NULL AND lease_token IS NOT NULL AND lease_expires_at IS NOT NULL)
+    OR
+    (status <> 'running' AND lease_owner IS NULL AND lease_token IS NULL AND lease_expires_at IS NULL)
+  )
+);
+
+CREATE INDEX durable_workflow_compensations_queue
+  ON durable_workflow_compensations (available_at, reverse_sequence, run_id)
+  WHERE status = 'queued';
+CREATE INDEX durable_workflow_compensations_expired_lease
+  ON durable_workflow_compensations (lease_expires_at, run_id, step_id)
+  WHERE status = 'running';
+
+CREATE TABLE durable_workflow_dead_letters (
+  id UUID PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  organization_id TEXT NOT NULL,
+  step_id TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('forward', 'compensation')),
+  reason TEXT NOT NULL,
+  attempt INTEGER NOT NULL CHECK (attempt > 0),
+  resolved_by_account_id TEXT,
+  resolution_note TEXT,
+  resolved_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (run_id, organization_id)
+    REFERENCES durable_workflow_runs(id, organization_id) ON DELETE CASCADE,
+  FOREIGN KEY (resolved_by_account_id, organization_id)
+    REFERENCES accounts(id, organization_id) ON DELETE SET NULL (resolved_by_account_id)
+);
+
+CREATE INDEX durable_workflow_dead_letters_open
+  ON durable_workflow_dead_letters (organization_id, created_at, id)
+  WHERE resolved_at IS NULL;
+
+CREATE TABLE durable_workflow_events (
+  id UUID PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  organization_id TEXT NOT NULL,
+  step_id TEXT,
+  actor_account_id TEXT,
+  event_type TEXT NOT NULL,
+  summary TEXT NOT NULL CHECK (length(summary) BETWEEN 1 AND 1000),
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (run_id, organization_id)
+    REFERENCES durable_workflow_runs(id, organization_id) ON DELETE CASCADE,
+  FOREIGN KEY (actor_account_id, organization_id)
+    REFERENCES accounts(id, organization_id) ON DELETE SET NULL (actor_account_id)
+);
+
+CREATE INDEX durable_workflow_events_history
+  ON durable_workflow_events (organization_id, run_id, created_at, id);
+`,
+  },
 ];
 
 export const ENTERPRISE_POSTGRES_SCHEMA_VERSION =

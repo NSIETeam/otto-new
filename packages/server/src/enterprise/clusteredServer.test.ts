@@ -17,6 +17,7 @@ import {
   publicKeyId,
   signEd25519Envelope,
 } from '../modules/commercial_control/index.js';
+import type { DurableWorkflowQueueStore } from '../modules/durable_workflow/index.js';
 import { createClusteredEnterpriseServer } from './clusteredServer.js';
 import type { ClusteredEnterpriseSharedState } from './clusteredSharedState.js';
 import type {
@@ -310,6 +311,46 @@ describe('clustered PostgreSQL enterprise server', () => {
         'data_governance_v1',
       ]),
     });
+  });
+
+  it('publishes the durable queue and serves the administrator takeover center', async () => {
+    const listRuns = vi.fn(async () => [
+      {
+        id: 'wf-00000000-0000-4000-8000-000000000001',
+        organizationId: 'org_default',
+        definitionId: 'monthly-report',
+        status: 'dead_letter' as const,
+        priority: 50,
+        createdByAccountId: 'acc_admin',
+        failureCode: 'retry_exhausted',
+        createdAt: '2026-08-24T00:00:00.000Z',
+        updatedAt: '2026-08-24T00:01:00.000Z',
+      },
+    ]);
+    const workflowStore = {
+      listRuns,
+    } as unknown as DurableWorkflowQueueStore;
+    const { baseUrl } = await listen(repository(), { workflowStore });
+
+    const health = await fetch(`${baseUrl}/enterprise/health`);
+    expect(await health.json()).toMatchObject({
+      capabilities: expect.arrayContaining([
+        'postgresql_durable_workflow_queue_v1',
+      ]),
+    });
+
+    const page = await fetch(`${baseUrl}/enterprise/admin/workflows`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('耐久任务接管中心');
+
+    const listing = await fetch(`${baseUrl}/enterprise/workflows`, {
+      headers: { authorization: 'Bearer clustered-session-token' },
+    });
+    expect(listing.status).toBe(200);
+    expect(await listing.json()).toMatchObject({
+      runs: [expect.objectContaining({ status: 'dead_letter' })],
+    });
+    expect(listRuns).toHaveBeenCalledWith({ organizationId: 'org_default' });
   });
 
   it('serves password login and session lookup from the async repository', async () => {

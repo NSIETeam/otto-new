@@ -117,6 +117,34 @@ describe('Aliyun server artifact index', () => {
     ).toMatchObject({ ok: true, keyId: signed.envelope.keyId });
   });
 
+  it('rejects a non-Ed25519 public key as an artifact trust root', () => {
+    const signingKey = generateKeyPairSync('ed25519');
+    const wrongAlgorithmKey = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1',
+    });
+    const document = serializeAliyunServerArtifactIndex(
+      createAliyunServerArtifactIndex(fixture()),
+    );
+    const signed = signAliyunServerArtifactIndex({
+      document,
+      file: 'artifact.json',
+      privateKey: signingKey.privateKey
+        .export({ format: 'pem', type: 'pkcs8' })
+        .toString(),
+    });
+
+    expect(() =>
+      verifyAliyunServerArtifactIndexSignature({
+        document,
+        file: 'artifact.json',
+        envelope: signed.envelope,
+        trustedPublicKey: wrongAlgorithmKey.publicKey
+          .export({ format: 'pem', type: 'spki' })
+          .toString(),
+      }),
+    ).toThrow('only accepts Ed25519 public keys');
+  });
+
   it.each([
     ['tampered document', 'document'],
     ['wrong public key', 'key'],

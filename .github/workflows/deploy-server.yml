@@ -26,6 +26,9 @@ env:
   RELEASES_REPO: Felix201209/otto-releases
   DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
   DEPLOY_CONFIG_PATH: ${{ secrets.DEPLOY_CONFIG_PATH || '/etc/otto-enterprise/enterprise.env' }}
+  TARGET_ARTIFACT_VERIFIER_DIR: /usr/local/libexec/otto-enterprise
+  TARGET_ARTIFACT_VERIFIER: /usr/local/libexec/otto-enterprise/verify-aliyun-server-artifact.mjs
+  TARGET_ARTIFACT_TRUST_ROOT: /etc/otto-enterprise/trust/aliyun-artifact-signing-ed25519.pem
 
 jobs:
   deploy:
@@ -90,14 +93,6 @@ jobs:
           OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY="${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}" \
             node ../scripts/verify-aliyun-server-artifact.mjs \
               "$INDEX" "${INDEX}.sig" --architecture linux-x64
-          cp \
-            ../scripts/aliyun-server-artifact.mjs \
-            ../scripts/aliyun-server-artifact-files.mjs \
-            ../scripts/verify-aliyun-server-artifact.mjs \
-            ../scripts/verify-enterprise-package-signature.mjs \
-            .
-          printf '%s\n' "${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}" > \
-            otto-enterprise-signing-public.pem
           ls -lh
 
       - name: Configure SSH
@@ -149,9 +144,37 @@ jobs:
              if [ -f /var/lib/otto-enterprise/release-sequence ]; then
                MIN_SEQUENCE=\$(cat /var/lib/otto-enterprise/release-sequence)
              fi
-             node ./verify-aliyun-server-artifact.mjs \
+             assert_root_owned_trust_file() {
+               local trusted_path=\"\$1\"
+               local resolved_path protected_path trusted_metadata trusted_uid trusted_gid TRUSTED_MODE
+               [ -f \"\$trusted_path\" ] && [ ! -L \"\$trusted_path\" ] \
+                 || { echo \"trusted deployment file must be a regular non-symlink: \$trusted_path\" >&2; return 1; }
+               resolved_path=\$(readlink -f -- \"\$trusted_path\")
+               [ \"\$resolved_path\" = \"\$trusted_path\" ] \
+                 || { echo \"trusted deployment path must not traverse symlinks: \$trusted_path\" >&2; return 1; }
+               protected_path=\"\$trusted_path\"
+               while :; do
+                 trusted_metadata=\$(stat -c '%u:%g:%a' -- \"\$protected_path\")
+                 IFS=: read -r trusted_uid trusted_gid TRUSTED_MODE <<< \"\$trusted_metadata\"
+                 [ \"\$trusted_uid:\$trusted_gid\" = '0:0' ] \
+                   || { echo \"trusted deployment path must be owned by root:root: \$protected_path\" >&2; return 1; }
+                 [ \$((8#\$TRUSTED_MODE & 8#022)) -eq 0 ] \
+                   || { echo \"trusted deployment path must not be group/world writable: \$protected_path\" >&2; return 1; }
+                 [ \"\$protected_path\" = / ] && break
+                 protected_path=\$(dirname -- \"\$protected_path\")
+               done
+             }
+             for trusted_verifier_file in \
+               '${TARGET_ARTIFACT_VERIFIER_DIR}/aliyun-server-artifact.mjs' \
+               '${TARGET_ARTIFACT_VERIFIER_DIR}/aliyun-server-artifact-files.mjs' \
+               '${TARGET_ARTIFACT_VERIFIER_DIR}/verify-enterprise-package-signature.mjs' \
+               '${TARGET_ARTIFACT_VERIFIER}'; do
+               assert_root_owned_trust_file \"\$trusted_verifier_file\"
+             done
+             assert_root_owned_trust_file '${TARGET_ARTIFACT_TRUST_ROOT}'
+             node '${TARGET_ARTIFACT_VERIFIER}' \
                "\$INDEX" "\$INDEX.sig" \
-               --trusted-public-key-file ./otto-enterprise-signing-public.pem \
+               --trusted-public-key-file '${TARGET_ARTIFACT_TRUST_ROOT}' \
                --architecture "\$OTTO_ARCH" \
                --minimum-release-sequence "\$MIN_SEQUENCE"
              NEW_SEQUENCE=\$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).releaseSequence" "\$INDEX")

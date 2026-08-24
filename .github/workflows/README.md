@@ -82,6 +82,11 @@ Otto 的发布链路分成三段：先检查异常，再构建 GitHub Release �
 - systemd
 - 部署用户可免密 `sudo`
 - 已有部署应由 one-click current symlink 管理
+- 基础镜像或独立配置管理已预置 `/usr/local/libexec/otto-enterprise/verify-aliyun-server-artifact.mjs` 及其本地依赖模块
+- 独立预置 `/etc/otto-enterprise/trust/aliyun-artifact-signing-ed25519.pem`，内容为 Otto 制品签名 Ed25519 SPKI 公钥
+- 上述固定路径及全部父目录为 `root:root`、组和其他用户不可写且不经过符号链接；部署 workflow 只读引用，不能上传、覆盖或轮换
+
+固定验证器或信任根缺失、权限不安全、算法不是 Ed25519 或验签失败时，部署必须在解包和执行安装器前失败。普通 Release 发布权限不得同时拥有这两个目标机路径的写入权限；轮换需走基础镜像/KMS/配置管理的独立审批流程。
 
 ## Required Secrets
 

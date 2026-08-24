@@ -56,13 +56,52 @@ describe('CLOUD-02 release security boundary', () => {
     'verifies %s on the target before extracting or executing it',
     (_name, workflow) => {
       const remoteVerification = workflow.indexOf(
-        'node ./verify-aliyun-server-artifact.mjs',
+        "node '${TARGET_ARTIFACT_VERIFIER}'",
       );
       const extraction = workflow.indexOf('tar -xzf');
       expect(remoteVerification).toBeGreaterThan(0);
       expect(extraction).toBeGreaterThan(remoteVerification);
       expect(workflow).toContain('--minimum-release-sequence');
       expect(workflow).toContain('/var/lib/otto-enterprise/release-sequence');
+    },
+  );
+
+  it.each([
+    ['release deployment', releaseWorkflow],
+    ['standalone deployment', deployWorkflow],
+  ])(
+    'uses a root-owned target trust root for %s instead of uploading trust code or keys',
+    (_name, workflow) => {
+      expect(workflow).toContain(
+        'TARGET_ARTIFACT_VERIFIER: /usr/local/libexec/otto-enterprise/verify-aliyun-server-artifact.mjs',
+      );
+      expect(workflow).toContain(
+        "'${TARGET_ARTIFACT_VERIFIER_DIR}/aliyun-server-artifact.mjs'",
+      );
+      expect(workflow).toContain(
+        "'${TARGET_ARTIFACT_VERIFIER_DIR}/aliyun-server-artifact-files.mjs'",
+      );
+      expect(workflow).toContain(
+        "'${TARGET_ARTIFACT_VERIFIER_DIR}/verify-enterprise-package-signature.mjs'",
+      );
+      expect(workflow).toContain(
+        'TARGET_ARTIFACT_TRUST_ROOT: /etc/otto-enterprise/trust/aliyun-artifact-signing-ed25519.pem',
+      );
+      expect(workflow).toContain('assert_root_owned_trust_file');
+      expect(workflow).toContain('readlink -f');
+      expect(workflow).toContain("stat -c '%u:%g:%a'");
+      expect(workflow).toContain('8#\\$TRUSTED_MODE & 8#022');
+      expect(workflow).toContain("node '${TARGET_ARTIFACT_VERIFIER}'");
+      expect(workflow).toContain(
+        "--trusted-public-key-file '${TARGET_ARTIFACT_TRUST_ROOT}'",
+      );
+      expect(workflow).not.toContain(
+        '--trusted-public-key-file ./otto-enterprise-signing-public.pem',
+      );
+      expect(workflow).not.toContain(
+        'node ./verify-aliyun-server-artifact.mjs',
+      );
+      expect(workflow).not.toContain('otto-enterprise-signing-public.pem');
     },
   );
 

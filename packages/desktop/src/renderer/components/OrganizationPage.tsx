@@ -32,6 +32,15 @@ const FALLBACK_POSITION = '成员';
 
 type EnterpriseOrganizationMember = EnterpriseOrganizationView['members'][number];
 
+interface ParkAdminOrganizationSummary {
+  id: string;
+  name: string;
+  industry?: string | null;
+  employeeCount: number;
+  departmentCount: number;
+  onlineCount: number;
+}
+
 interface OrganizationPositionNode {
   key: string;
   id: string | null;
@@ -472,7 +481,20 @@ export function OrganizationPage({
         : error ? <div className="otto-org-page__empty" role="alert">{error}</div>
           : !orgView ? <div className="otto-org-page__empty">组织信息不可用</div>
             : isParkAdmin ? (
-              <ParkOrganizationOverview tenants={parkTenants} loading={parkTenantsLoading} error={parkTenantsError} onSelect={(id) => setSelectedOrganizationId(id)} />
+              <ParkOrganizationOverview
+                adminOrganization={orgView.organization ? {
+                  id: orgView.organization.id,
+                  name: orgView.organization.name,
+                  industry: orgView.organization.industry,
+                  employeeCount: totalActive,
+                  departmentCount: flatDepartments.length,
+                  onlineCount: totalOnline,
+                } : null}
+                tenants={parkTenants}
+                loading={parkTenantsLoading}
+                error={parkTenantsError}
+                onSelect={(id) => setSelectedOrganizationId(id)}
+              />
             ) : (
               <div className="otto-org-page__body">
                 <section className="otto-org-page__contacts" aria-label="常用联系人">
@@ -527,11 +549,13 @@ export function OrganizationPage({
 }
 
 function ParkOrganizationOverview({
+  adminOrganization,
   tenants,
   loading,
   error,
   onSelect,
 }: {
+  adminOrganization: ParkAdminOrganizationSummary | null;
   tenants: EnterpriseParkTenantOrganization[];
   loading: boolean;
   error: string | null;
@@ -543,48 +567,78 @@ function ParkOrganizationOverview({
     !normalizedQuery || [tenant.name, tenant.slug, tenant.industry ?? '']
       .join(' ').toLocaleLowerCase('zh-CN').includes(normalizedQuery)
   ));
-  const totalEmployees = tenants.reduce((sum, tenant) => sum + (tenant.employeeCount ?? 0), 0);
-  const totalOnline = tenants.reduce((sum, tenant) => sum + (tenant.onlineCount ?? 0), 0);
-  const totalDepartments = tenants.reduce((sum, tenant) => sum + (tenant.departmentCount ?? 0), 0);
+  const totalEmployees = (adminOrganization?.employeeCount ?? 0)
+    + tenants.reduce((sum, tenant) => sum + (tenant.employeeCount ?? 0), 0);
+  const totalOnline = (adminOrganization?.onlineCount ?? 0)
+    + tenants.reduce((sum, tenant) => sum + (tenant.onlineCount ?? 0), 0);
+  const totalDepartments = (adminOrganization?.departmentCount ?? 0)
+    + tenants.reduce((sum, tenant) => sum + (tenant.departmentCount ?? 0), 0);
 
   return (
     <div className="otto-org-page__body otto-org-page__body--park">
       <div className="otto-org-page__park-metrics" aria-label="园区概览数据">
         <div><span>入驻企业</span><strong>{tenants.length}</strong><small>家</small></div>
-        <div><span>企业员工</span><strong>{totalEmployees}</strong><small>人</small></div>
+        <div><span>园区员工</span><strong>{totalEmployees}</strong><small>人</small></div>
         <div><span>当前在线</span><strong>{totalOnline}</strong><small>人</small></div>
         <div><span>部门总数</span><strong>{totalDepartments}</strong><small>个</small></div>
       </div>
-      <div className="otto-org-page__toolbar otto-org-page__toolbar--park">
-        <label className="otto-org-page__search">
-          <IconSearch size={16} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索企业或产业类型" aria-label="搜索企业或产业类型" />
-        </label>
-        <span>{normalizedQuery ? `${visibleTenants.length} 家匹配企业` : '选择企业查看组织架构'}</span>
-      </div>
-      {loading ? <div className="otto-org-page__empty">正在加载入驻企业…</div>
-        : error ? <div className="otto-org-page__empty" role="alert">{error}</div>
-          : visibleTenants.length ? (
-            <div className="otto-org-page__tenant-grid">
-              {visibleTenants.map((tenant) => (
-                <button key={tenant.id} type="button" className="otto-org-page__tenant-card" onClick={() => onSelect(tenant.id)}>
-                  <span className="otto-org-page__tenant-brand"><IconBuilding size={18} /></span>
-                  <span className="otto-org-page__tenant-copy">
-                    <strong>{tenant.name}</strong>
-                    <small>{tenant.industry || '产业类型待完善'}</small>
-                  </span>
-                  <span className={`otto-org-page__tenant-status${tenant.status === 'active' ? ' is-active' : ''}`}>
-                    {tenant.status === 'active' ? '正常' : '已停用'}
-                  </span>
-                  <span className="otto-org-page__tenant-stats">
-                    <span>{tenant.employeeCount ?? 0} 人 · {tenant.departmentCount ?? 0} 个部门</span>
-                    <span><i className="otto-org-page__online-dot" />{tenant.onlineCount ?? 0} 人在线</span>
-                  </span>
-                  <span className="otto-org-page__tenant-action">查看架构 <IconChevronDown size={14} /></span>
-                </button>
-              ))}
-            </div>
-          ) : <div className="otto-org-page__empty">暂无匹配的入驻企业</div>}
+      {adminOrganization ? (
+        <section className="otto-org-page__park-section" role="region" aria-label="园区管理企业">
+          <div className="otto-org-page__park-section-head">
+            <div><strong>园区管理企业</strong><span>当前登录企业，可随时查看自己的成员与部门</span></div>
+          </div>
+          <div className="otto-org-page__tenant-grid">
+            <button type="button" className="otto-org-page__tenant-card otto-org-page__tenant-card--admin" onClick={() => onSelect(adminOrganization.id)}>
+              <span className="otto-org-page__tenant-brand"><IconBuilding size={18} /></span>
+              <span className="otto-org-page__tenant-copy">
+                <strong>{adminOrganization.name}</strong>
+                <small>{adminOrganization.industry || '产业类型待完善'}</small>
+              </span>
+              <span className="otto-org-page__tenant-status is-admin">管理方</span>
+              <span className="otto-org-page__tenant-stats">
+                <span>{adminOrganization.employeeCount} 人 · {adminOrganization.departmentCount} 个部门</span>
+                <span><i className="otto-org-page__online-dot" />{adminOrganization.onlineCount} 人在线</span>
+              </span>
+              <span className="otto-org-page__tenant-action">查看本企业架构 <IconChevronDown size={14} /></span>
+            </button>
+          </div>
+        </section>
+      ) : null}
+      <section className="otto-org-page__park-section" role="region" aria-label="入驻企业">
+        <div className="otto-org-page__park-section-head">
+          <div><strong>入驻企业</strong><span>{tenants.length} 家企业已加入当前园区</span></div>
+        </div>
+        <div className="otto-org-page__toolbar otto-org-page__toolbar--park">
+          <label className="otto-org-page__search">
+            <IconSearch size={16} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索企业或产业类型" aria-label="搜索企业或产业类型" />
+          </label>
+          <span>{normalizedQuery ? `${visibleTenants.length} 家匹配企业` : '选择企业查看组织架构'}</span>
+        </div>
+        {loading ? <div className="otto-org-page__empty otto-org-page__empty--compact">正在加载入驻企业…</div>
+          : error ? <div className="otto-org-page__empty otto-org-page__empty--compact" role="alert">{error}</div>
+            : visibleTenants.length ? (
+              <div className="otto-org-page__tenant-grid">
+                {visibleTenants.map((tenant) => (
+                  <button key={tenant.id} type="button" className="otto-org-page__tenant-card" onClick={() => onSelect(tenant.id)}>
+                    <span className="otto-org-page__tenant-brand"><IconBuilding size={18} /></span>
+                    <span className="otto-org-page__tenant-copy">
+                      <strong>{tenant.name}</strong>
+                      <small>{tenant.industry || '产业类型待完善'}</small>
+                    </span>
+                    <span className={`otto-org-page__tenant-status${tenant.status === 'active' ? ' is-active' : ''}`}>
+                      {tenant.status === 'active' ? '正常' : '已停用'}
+                    </span>
+                    <span className="otto-org-page__tenant-stats">
+                      <span>{tenant.employeeCount ?? 0} 人 · {tenant.departmentCount ?? 0} 个部门</span>
+                      <span><i className="otto-org-page__online-dot" />{tenant.onlineCount ?? 0} 人在线</span>
+                    </span>
+                    <span className="otto-org-page__tenant-action">查看架构 <IconChevronDown size={14} /></span>
+                  </button>
+                ))}
+              </div>
+            ) : <div className="otto-org-page__empty otto-org-page__empty--compact">{normalizedQuery ? '暂无匹配的入驻企业' : '暂无入驻企业'}</div>}
+      </section>
     </div>
   );
 }

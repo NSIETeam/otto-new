@@ -19,6 +19,8 @@
 // ── 跨进程共享的形状（preload/index.ts 里有一份结构相同的副本；本包 main 的
 //    tsconfig rootDir 限制导致两边不能互相 import，改动时两处需同步）──
 
+import type { DesktopDistributionId } from './desktop-distribution.js';
+
 /** 单个平台的安装包资产（来自 latest.json 的 assets[platformKey]）。 */
 export interface UpdateAssetInfo {
   name: string;
@@ -30,6 +32,7 @@ export interface UpdateAssetInfo {
 
 /** 解析后的更新清单（latest.json 的结构化结果）。 */
 export interface UpdateManifest {
+  distributionId: DesktopDistributionId;
   version: string;
   notes: string;
   publishedAt: string | null;
@@ -211,11 +214,19 @@ function parseAsset(
 export function parseManifest(
   json: unknown,
   extraAllowedOrigins: readonly string[] = [],
+  expectedDistributionId: DesktopDistributionId = 'otto',
 ): ManifestParseResult {
   if (typeof json !== 'object' || json === null) {
     return { ok: false, error: '更新清单不是合法的 JSON 对象' };
   }
   const j = json as Record<string, unknown>;
+  const distributionId = j.distributionId ?? 'otto';
+  if (distributionId !== expectedDistributionId) {
+    return {
+      ok: false,
+      error: `更新清单分发标识不匹配（当前 ${expectedDistributionId}，清单 ${String(distributionId)}）`,
+    };
+  }
   if (typeof j.version !== 'string' || parseSemver(j.version) === null) {
     return { ok: false, error: '更新清单缺少合法的 version 字段' };
   }
@@ -229,6 +240,7 @@ export function parseManifest(
   return {
     ok: true,
     manifest: {
+      distributionId: expectedDistributionId,
       version: j.version,
       notes: typeof j.notes === 'string' ? j.notes : '',
       publishedAt: typeof j.publishedAt === 'string' ? j.publishedAt : null,

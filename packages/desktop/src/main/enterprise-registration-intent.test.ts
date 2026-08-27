@@ -17,6 +17,14 @@ describe('enterprise registration link parsing', () => {
     });
   });
 
+  it('accepts the isolated Otto Green protocol without weakening the route shape', () => {
+    expect(parseEnterpriseRegistrationIntent(
+      'otto-green://enterprise/join?invite=Ab3D-k9Pq-Z7xY',
+    )).toEqual({
+      inviteCode: 'Ab3D-k9Pq-Z7xY',
+    });
+  });
+
   it('accepts a single safe HTTPS enterprise server URL and normalizes it to origin', () => {
     expect(parseEnterpriseRegistrationIntent(
       'otto://enterprise/join?invite=Ab3D-k9Pq-Z7xY&server=https%3A%2F%2Fenterprise.otto.test%2F',

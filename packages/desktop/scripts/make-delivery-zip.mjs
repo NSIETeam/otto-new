@@ -407,6 +407,7 @@ async function makeLatestJson(sourceCommit) {
   const publishedAt = git(['show', '-s', '--format=%cI', sourceCommit]);
 
   const manifest = {
+    distributionId: 'otto',
     version: VERSION,
     sourceCommit,
     notes,

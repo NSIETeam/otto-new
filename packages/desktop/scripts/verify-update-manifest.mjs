@@ -52,6 +52,14 @@ export function verifyUpdateManifest({
   if (!existsSync(latestPath)) throw new Error('missing latest.json');
 
   const manifest = readManifest(latestPath);
+  if (
+    manifest.distributionId !== undefined &&
+    manifest.distributionId !== 'otto'
+  ) {
+    throw new Error(
+      `latest.json distribution mismatch: ${manifest.distributionId}`,
+    );
+  }
   if (manifest.version !== version) {
     throw new Error(
       `latest.json version mismatch: manifest=${manifest.version}, expected=${version}`,

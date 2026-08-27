@@ -1,0 +1,152 @@
+name: Release Otto Green
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Source branch, tag, or commit
+        required: true
+        default: internal
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-otto-green
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22.13.0'
+  GREEN_MANIFEST_URL: 'https://59.110.154.44:7777/otto-green-releases/latest.json'
+  GREEN_ASSET_BASE_URL: 'https://59.110.154.44:7777/downloads/otto-green'
+  UPDATE_MIRROR_ROOT: '/opt/otto-website'
+
+jobs:
+  build-green:
+    name: Build Isolated Green Installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Resolve source version
+        id: version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./packages/desktop/package.json').version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Verify Green isolation contracts
+        shell: pwsh
+        working-directory: packages/desktop
+        run: |
+          ..\..\node_modules\.bin\vitest.cmd run `
+            src/main/desktop-distribution.test.ts `
+            src/main/update-core.test.ts `
+            src/main/update-sources.test.ts `
+            src/main/enterprise-registration-intent.test.ts `
+            src/renderer/components/Sidebar.test.tsx `
+            scripts/green-release.test.mjs
+          ..\..\node_modules\.bin\tsc.cmd -p tsconfig.main.json --noEmit
+          ..\..\node_modules\.bin\tsc.cmd -p tsconfig.preload.json --noEmit
+          ..\..\node_modules\.bin\tsc.cmd -p tsconfig.renderer.json --noEmit
+
+      - name: Build Otto Green Windows release
+        run: npm run release:green:win --workspace=packages/desktop
+        env:
+          OTTO_GREEN_UPDATE_ASSET_BASE_URL: ${{ env.GREEN_ASSET_BASE_URL }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: otto-green-v${{ steps.version.outputs.version }}
+          if-no-files-found: error
+          path: |
+            packages/desktop/release-green/Otto.green-${{ steps.version.outputs.version }}.exe
+            packages/desktop/release-green/Otto.green-${{ steps.version.outputs.version }}.exe.blockmap
+            packages/desktop/release-green/latest.json
+
+  deploy-green:
+    name: Deploy Green Update Channel
+    needs: build-green
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: otto-green-v${{ needs.build-green.outputs.version }}
+          path: green-release
+
+      - name: Verify deployment payload
+        run: |
+          node packages/desktop/scripts/verify-green-update-manifest.mjs \
+            green-release "${{ needs.build-green.outputs.version }}"
+          (cd green-release && sha256sum Otto.green-* latest.json > SHA256SUMS)
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          test -n "${{ secrets.DEPLOY_HOST }}"
+          test -n "${{ secrets.DEPLOY_USER }}"
+          test -n "${{ secrets.DEPLOY_SSH_KEY }}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "${DEPLOY_PORT}" "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Upload and atomically publish Green only
+        run: |
+          set -euo pipefail
+          REMOTE_DIR="/var/tmp/otto-green-${{ needs.build-green.outputs.version }}-${GITHUB_RUN_ID}"
+          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "mkdir -p '$REMOTE_DIR'"
+          scp -i ~/.ssh/id_deploy -P "${DEPLOY_PORT}" green-release/* \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$REMOTE_DIR/"
+          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "set -euo pipefail
+             cd '$REMOTE_DIR'
+             sha256sum -c SHA256SUMS
+             sudo install -d -m 0755 \
+               '${UPDATE_MIRROR_ROOT}/downloads/otto-green' \
+               '${UPDATE_MIRROR_ROOT}/otto-green-releases'
+             sudo install -m 0644 Otto.green-* \
+               '${UPDATE_MIRROR_ROOT}/downloads/otto-green/'
+             sudo install -m 0644 latest.json \
+               '${UPDATE_MIRROR_ROOT}/otto-green-releases/latest.json.next'
+             sudo mv \
+               '${UPDATE_MIRROR_ROOT}/otto-green-releases/latest.json.next' \
+               '${UPDATE_MIRROR_ROOT}/otto-green-releases/latest.json'"
+
+      - name: Verify public Green channel
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 3 \
+            "${GREEN_MANIFEST_URL}?run=${GITHUB_RUN_ID}" \
+            --output remote-green-latest.json
+          cmp green-release/latest.json remote-green-latest.json
+          curl --fail --silent --show-error --retry 3 \
+            "${GREEN_ASSET_BASE_URL}/Otto.green-${{ needs.build-green.outputs.version }}.exe" \
+            --output remote-green.exe
+          echo "$(sha256sum green-release/Otto.green-${{ needs.build-green.outputs.version }}.exe | awk '{print $1}')  remote-green.exe" \
+            | sha256sum -c -

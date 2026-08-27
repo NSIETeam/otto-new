@@ -57,6 +57,7 @@ import { EnterpriseLoginPage } from './components/EnterpriseLoginPage.js';
 import { AccountManagementPage } from './components/AccountManagementPage.js';
 import { useEnterpriseAuth } from './state/useEnterpriseAuth.js';
 import type {
+  DesktopDistributionInfo,
   EnterpriseAccount,
   EnterpriseAtoaInboxMessage,
   EnterpriseDirectMessage,
@@ -178,6 +179,22 @@ function OttoWorkspaceApp({
   const settingsData = useSettingsData();
   // 软件更新状态机：SettingsHub「软件更新」tab 与 Sidebar 入口小圆点共享一份。
   const softwareUpdate = useSoftwareUpdate();
+  const [distribution, setDistribution] = useState<DesktopDistributionInfo>({
+    id: 'otto',
+    productName: 'Otto',
+    wordmark: 'otto',
+  });
+  useEffect(() => {
+    let active = true;
+    void window.otto.appDistribution().then((next) => {
+      if (!active) return;
+      setDistribution(next);
+      document.title = next.productName;
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
   const product = useProductWorkspace();
   const [autoProfileRevision, setAutoProfileRevision] = useState(0);
   const [enterpriseUnreadCounts, setEnterpriseUnreadCounts] = useState<EnterpriseUnreadCounts>({});
@@ -839,6 +856,7 @@ function OttoWorkspaceApp({
       <Sidebar
         groups={groups}
         activeSessionId={state.activeSessionId}
+        wordmark={distribution.wordmark}
         hubActive={mainView === 'hub'}
         accountManagementActive={mainView === 'accounts'}
         updateBadge={softwareUpdate.state.badgeVisible}

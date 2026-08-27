@@ -85,6 +85,8 @@ function relativeSessionGroups(groups: SessionGroup[]): SessionGroup[] {
 interface SidebarProps {
   groups: SessionGroup[];
   activeSessionId: string | null;
+  /** 当前安装包的稳定品牌字标；普通版为 otto，Green 为 otto.green。 */
+  wordmark?: string;
   /** 当前是否停在「设置与诊断中心」页（高亮该入口）。 */
   hubActive?: boolean;
   accountManagementActive?: boolean;
@@ -114,6 +116,7 @@ interface SidebarProps {
 export function Sidebar({
   groups,
   activeSessionId,
+  wordmark = 'otto',
   hubActive = false,
   accountManagementActive = false,
   updateBadge = false,
@@ -159,7 +162,7 @@ export function Sidebar({
 
       <div className="otto-sidebar__brandrow">
         <span className="otto-brand">
-          otto
+          {wordmark}
           <IconSparkle size={12} className="otto-brand__sparkle" />
         </span>
         {unreadCount > 0 ? (

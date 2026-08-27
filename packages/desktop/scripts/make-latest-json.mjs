@@ -48,6 +48,7 @@ const { readFile } = await import('node:fs/promises');
 const notes = await readFile(notesFile, 'utf8');
 
 const manifest = {
+  distributionId: 'otto',
   version,
   notes,
   publishedAt: new Date().toISOString(),

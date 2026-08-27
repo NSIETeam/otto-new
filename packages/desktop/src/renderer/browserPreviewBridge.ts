@@ -151,6 +151,7 @@ if (!previewWindow.otto) {
     },
     parkConfig: () => Promise.resolve(null),
     onMenu: () => () => {}, onUpdateProgress: () => () => {},
+    appDistribution: () => Promise.resolve({ id: 'otto' as const, productName: 'Otto', wordmark: 'otto' }),
     appVersion: () => Promise.resolve('1.9.3-browser-preview'),
     openExternal: () => Promise.resolve(), openPath: () => Promise.resolve(), saveTextFile: () => Promise.resolve(null),
     getPathForFile: (file: File) => (file as File & { path?: string }).path || file.name,

@@ -73,6 +73,12 @@ export interface ParkServicesConfig {
 // main 的 tsconfig rootDir 限制两边不能互相 import（同 IPC 常量表的既有做法：
 // 两处各持一份、改动时同步）；renderer 一律从本文件 import type。
 
+export interface DesktopDistributionInfo {
+  id: 'otto' | 'otto-green';
+  productName: string;
+  wordmark: string;
+}
+
 /** 单个平台的安装包资产（latest.json 的 assets[platformKey]）。 */
 export interface UpdateAssetInfo {
   name: string;
@@ -697,6 +703,7 @@ const IPC = {
   saveTextFile: 'otto:save-text-file',
   menu: 'otto:menu',
   setLocalTestUrl: 'otto:set-local-test-url',
+  appDistribution: 'otto:app-distribution',
   appVersion: 'otto:app-version',
   updateCheck: 'otto:update-check',
   updateDownload: 'otto:update-download',
@@ -959,6 +966,8 @@ export interface OttoBridge {
    * 返回是否应用成功。
    */
   setLocalTestUrl?(url: string): Promise<void>;
+  /** 固化在当前安装包内的产品分发身份。 */
+  appDistribution(): Promise<DesktopDistributionInfo>;
   /** 当前 app 版本号（main 的 app.getVersion()）。 */
   appVersion(): Promise<string>;
   /**
@@ -1628,6 +1637,9 @@ const bridge: OttoBridge = {
   },
   setLocalTestUrl(url: string): Promise<void> {
     return ipcRenderer.invoke(IPC.setLocalTestUrl, url) as Promise<void>;
+  },
+  appDistribution(): Promise<DesktopDistributionInfo> {
+    return ipcRenderer.invoke(IPC.appDistribution) as Promise<DesktopDistributionInfo>;
   },
   appVersion(): Promise<string> {
     return ipcRenderer.invoke(IPC.appVersion) as Promise<string>;

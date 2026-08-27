@@ -104,6 +104,7 @@ import { resolveKernelUpdateRoot } from './incremental-kernel-store.js';
 import { installAppMenu } from './menu.js';
 import { UpdateService } from './update-service.js';
 import { IncrementalUpdateService } from './incremental-update-service.js';
+import { resolveDesktopDistribution } from './desktop-distribution.js';
 import {
   EnterpriseNotificationIdentityBoundary,
   NotificationService,
@@ -214,6 +215,46 @@ import {
 import { INTERNAL_TEST_ACCESS_ENABLED } from './internal-test-access.js';
 import { resolveVideoEditorIndex } from './video-editor-resource.js';
 import { buildRendererCsp } from './renderer-csp.js';
+
+function readPackagedDistributionId(): unknown {
+  try {
+    const metadata = JSON.parse(
+      fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    return metadata.ottoDistributionId;
+  } catch {
+    return undefined;
+  }
+}
+
+const desktopDistribution = resolveDesktopDistribution({
+  packageDistributionId: readPackagedDistributionId(),
+  developmentOverride: app.isPackaged
+    ? undefined
+    : process.env.OTTO_DISTRIBUTION_ID,
+});
+
+app.setName(desktopDistribution.productName);
+if (desktopDistribution.id === 'otto-green') {
+  if (!process.env.OTTO_USER_DATA_DIR?.trim()) {
+    app.setPath(
+      'userData',
+      path.join(
+        app.getPath('appData'),
+        desktopDistribution.userDataDirectoryName,
+      ),
+    );
+  }
+  if (!process.env.OTTO_USER_DIR?.trim()) {
+    process.env.OTTO_USER_DIR = path.join(
+      os.homedir(),
+      desktopDistribution.userRootDirectoryName,
+    );
+  }
+  if (!process.env.OTTO_SERVER_PORT?.trim()) {
+    process.env.OTTO_SERVER_PORT = String(desktopDistribution.localServerPort);
+  }
+}
 
 /** 与 packages/server/src/protocol.ts 的 DEFAULT_HOST/DEFAULT_PORT 保持一致的字面量
  * （仅用作 CSP 的兜底默认值；真实值在 ensureEndpoint() 拿到后覆盖）。 */
@@ -327,6 +368,7 @@ const IPC = {
   skillShareList: 'otto:skill-share-list',
   skillMarketplace: 'otto:skill-marketplace',
   setLocalTestUrl: 'otto:set-local-test-url',
+  appDistribution: 'otto:app-distribution',
   appVersion: 'otto:app-version',
   updateCheck: 'otto:update-check',
   updateDownload: 'otto:update-download',
@@ -622,6 +664,7 @@ function stopEnterpriseIdentityRefresh(): void {
 const updateService = new UpdateService(
   () => mainWindow?.webContents,
   IPC.updateProgress,
+  desktopDistribution.id,
 );
 const incrementalUpdateService = new IncrementalUpdateService(
   () => mainWindow?.webContents,
@@ -1052,7 +1095,7 @@ function showFallbackNotification(payload: NotificationPayload): void {
   if (process.platform !== 'win32' || !tray || tray.isDestroyed()) return;
   try {
     tray.displayBalloon({
-      title: payload.title || 'Otto 新消息',
+      title: payload.title || `${desktopDistribution.productName} 新消息`,
       content: payload.preview,
       icon: loadIcon(),
       iconType: 'custom',
@@ -1352,7 +1395,7 @@ function createWindow(): BrowserWindow {
     height: 800,
     minWidth: 720,
     minHeight: 480,
-    title: 'Otto',
+    title: desktopDistribution.productName,
     // 初始底色跟随系统深浅：暗色 #181818 / 浅色 #ffffff。硬编码任一固定色会在
     // 系统主题与之相反时于内容就绪前（及窗口边缘）闪出错误底色。themeSource 已
     // 在 whenReady 里设为 'system'，故 shouldUseDarkColors 反映的即 OS 当前主题。
@@ -1419,7 +1462,7 @@ function createVideoEditorWindow(): { ok: boolean; error?: string } {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'Otto - Video Editor',
+    title: `${desktopDistribution.productName} - Video Editor`,
     icon: loadIcon(),
     backgroundColor: '#0a0a0a',
     autoHideMenuBar: process.platform !== 'darwin',
@@ -2604,6 +2647,11 @@ function registerIpc(): void {
   // ── 软件更新：检查 / 下载 / 取消 / 安装 + 版本查询（逻辑在 update-service.ts）──
   // 结果全部结构化透传，不在这里加工：「检查失败」与「已是最新」是 UpdateService
   // 返回的两种不同 status，任何一层都不许把失败粉饰成最新。
+  ipcMain.handle(IPC.appDistribution, () => ({
+    id: desktopDistribution.id,
+    productName: desktopDistribution.productName,
+    wordmark: desktopDistribution.wordmark,
+  }));
   ipcMain.handle(IPC.appVersion, () => app.getVersion());
   ipcMain.handle(IPC.updateCheck, () => updateService.checkForUpdate());
   ipcMain.handle(IPC.updateDownload, () => updateService.downloadUpdate());
@@ -2817,7 +2865,9 @@ app.on('open-url', (event, url) => {
 
 // 在窗口、托盘和 Notification 创建前注册稳定 AUMID。部分 Windows 机器若注册过晚，
 // 通知中心无法把 toast 与安装器创建的 Otto 开始菜单快捷方式关联。
-if (process.platform === 'win32') app.setAppUserModelId('ai.otto.desktop');
+if (process.platform === 'win32') {
+  app.setAppUserModelId(desktopDistribution.appUserModelId);
+}
 
 // 单实例锁：第二次启动直接聚焦已开窗口，避免多开多个 server 抢端口。
 const gotLock = app.requestSingleInstanceLock();
@@ -2837,9 +2887,13 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     if (process.defaultApp && process.argv[1]) {
-      app.setAsDefaultProtocolClient('otto', process.execPath, [path.resolve(process.argv[1])]);
+      app.setAsDefaultProtocolClient(
+        desktopDistribution.protocolScheme,
+        process.execPath,
+        [path.resolve(process.argv[1])],
+      );
     } else {
-      app.setAsDefaultProtocolClient('otto');
+      app.setAsDefaultProtocolClient(desktopDistribution.protocolScheme);
     }
     // 外观主题：默认跟随系统（'system' 让 renderer 的 prefers-color-scheme 生效）；
     // 用户在偏好里手动选过浅色/深色则恢复上次选择（userData/theme.json）。

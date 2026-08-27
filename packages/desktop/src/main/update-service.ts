@@ -52,10 +52,10 @@ import { downloadToFile } from './update-download.js';
 import {
   FALLBACK_RELEASE_API_URL,
   GITHUB_MANIFEST_URL,
-  PRIMARY_MANIFEST_URL,
-  RELEASE_PAGE_URL,
   resolveManifestUrls,
+  updateSourcePolicy,
 } from './update-sources.js';
+import type { DesktopDistributionId } from './desktop-distribution.js';
 
 /** 检查更新的单次请求超时（任务书定 15s）。 */
 const CHECK_TIMEOUT_MS = 15_000;
@@ -159,6 +159,8 @@ export class UpdateService {
     private readonly getWebContents: () => WebContents | undefined,
     /** 进度事件的 IPC channel 名（由 index.ts 的 IPC 常量表传入，保持单一事实源）。 */
     private readonly progressChannel: string,
+    /** 固化在安装包内的分发身份；Green 不允许回落到普通 Otto 清单。 */
+    private readonly distributionId: DesktopDistributionId = 'otto',
   ) {}
 
   /**
@@ -171,16 +173,20 @@ export class UpdateService {
     this.allowedAssetOrigins = [];
     const currentVersion = app.getVersion();
     const assetKey = platformAssetKey(process.platform, process.arch);
+    const sourcePolicy = updateSourcePolicy(this.distributionId);
 
     // 1) 完整清单源。企业部署可用 OTTO_UPDATE_MANIFEST_URL 指向自己的 HTTPS 镜像；
     // 配置非法就忽略，镜像失败/清单不合法继续尝试 GitHub，绝不再硬编码未部署路由。
     const manifestErrors: string[] = [];
-    const manifestUrls = resolveManifestUrls(process.env.OTTO_UPDATE_MANIFEST_URL);
+    const manifestUrls = resolveManifestUrls(
+      process.env.OTTO_UPDATE_MANIFEST_URL,
+      this.distributionId,
+    );
     for (const manifestUrl of manifestUrls) {
       const result = await fetchJsonWithRetry(
         manifestUrl,
         CHECK_TIMEOUT_MS,
-        manifestUrl === PRIMARY_MANIFEST_URL ? 2 : 1,
+        manifestUrl === sourcePolicy.primaryManifestUrl ? 2 : 1,
       );
       const sourceName = (() => {
         try { return new URL(manifestUrl).hostname; } catch { return '更新源'; }
@@ -192,15 +198,32 @@ export class UpdateService {
       const sourceAllowedOrigins = manifestUrl === GITHUB_MANIFEST_URL
         ? []
         : [new URL(manifestUrl).origin];
-      const parsed = parseManifest(result.json, sourceAllowedOrigins);
+      const parsed = parseManifest(
+        result.json,
+        sourceAllowedOrigins,
+        this.distributionId,
+      );
       if (!parsed.ok) {
         manifestErrors.push(`${sourceName}：${parsed.error}`);
         continue;
       }
       return this.remember(
-        resolveCheckOutcome(parsed.manifest, currentVersion, assetKey, RELEASE_PAGE_URL),
+        resolveCheckOutcome(
+          parsed.manifest,
+          currentVersion,
+          assetKey,
+          sourcePolicy.releasePageUrl,
+        ),
         sourceAllowedOrigins,
       );
+    }
+
+    if (!sourcePolicy.githubFallback) {
+      return {
+        status: 'check-failed',
+        currentVersion,
+        message: `Otto Green 专属更新源检查失败（${manifestErrors.join('；')}）`,
+      };
     }
 
     // 2) 兜底：Releases API（所有完整清单源失败时）。
@@ -227,10 +250,19 @@ export class UpdateService {
         2,
       );
       if (manifestRes.ok) {
-        const parsed = parseManifest(manifestRes.json);
+        const parsed = parseManifest(
+          manifestRes.json,
+          [],
+          this.distributionId,
+        );
         if (parsed.ok) {
           return this.remember(
-            resolveCheckOutcome(parsed.manifest, currentVersion, assetKey, RELEASE_PAGE_URL),
+            resolveCheckOutcome(
+              parsed.manifest,
+              currentVersion,
+              assetKey,
+              sourcePolicy.releasePageUrl,
+            ),
           );
         }
       }
@@ -239,6 +271,7 @@ export class UpdateService {
     // 2b) 拿不到清单 → 只报版本/日志，不给资产（sha256 校验不可绕过），引导发布页。
     //     组装一个无资产清单走统一裁决（parseManifest 顺带把 tag 版本号合法性验掉）。
     const parsedFromApi = parseManifest({
+      distributionId: this.distributionId,
       version: release.release.version,
       notes: release.release.notes,
       publishedAt: release.release.publishedAt,
@@ -252,7 +285,12 @@ export class UpdateService {
       };
     }
     return this.remember(
-      resolveCheckOutcome(parsedFromApi.manifest, currentVersion, assetKey, RELEASE_PAGE_URL),
+      resolveCheckOutcome(
+        parsedFromApi.manifest,
+        currentVersion,
+        assetKey,
+        sourcePolicy.releasePageUrl,
+      ),
     );
   }
 

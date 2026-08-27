@@ -1,5 +1,6 @@
 # electron-builder 输出（.app / dmg / blockmap）—— 可重生成，不入库
 release/
+release-green/
 
 # 交付聚合临时 staging（make-delivery-zip.mjs 产出）
 release/_delivery/

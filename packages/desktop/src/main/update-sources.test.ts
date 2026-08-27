@@ -5,10 +5,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   FALLBACK_RELEASE_API_URL,
+  GREEN_PRIMARY_MANIFEST_URL,
+  GREEN_RELEASE_PAGE_URL,
   GITHUB_MANIFEST_URL,
   PRIMARY_MANIFEST_URL,
   RELEASE_PAGE_URL,
   resolveManifestUrls,
+  updateSourcePolicy,
 } from './update-sources.js';
 
 describe('桌面应用更新源', () => {
@@ -41,6 +44,24 @@ describe('桌面应用更新源', () => {
       PRIMARY_MANIFEST_URL,
       GITHUB_MANIFEST_URL,
     ]);
+  });
+
+  it('Green 只使用自己的服务器清单，绝不回落到普通 Otto 或 GitHub latest', () => {
+    expect(resolveManifestUrls(undefined, 'otto-green')).toEqual([
+      GREEN_PRIMARY_MANIFEST_URL,
+    ]);
+    expect(resolveManifestUrls(
+      'https://updates.example.com/green/latest.json',
+      'otto-green',
+    )).toEqual([
+      'https://updates.example.com/green/latest.json',
+      GREEN_PRIMARY_MANIFEST_URL,
+    ]);
+    expect(updateSourcePolicy('otto-green')).toEqual({
+      primaryManifestUrl: GREEN_PRIMARY_MANIFEST_URL,
+      releasePageUrl: GREEN_RELEASE_PAGE_URL,
+      githubFallback: false,
+    });
   });
 
   it.each([

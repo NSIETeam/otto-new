@@ -5,6 +5,8 @@
  * GitHub release 资产直链 fetch failed；GitHub 仍作为兜底。
  */
 
+import type { DesktopDistributionId } from './desktop-distribution.js';
+
 export const PRIMARY_MANIFEST_URL =
   'https://59.110.154.44:7777/otto-releases/latest.json';
 
@@ -17,12 +19,44 @@ export const FALLBACK_RELEASE_API_URL =
 export const RELEASE_PAGE_URL =
   'https://github.com/Felix201209/otto-releases/releases/latest';
 
+export const GREEN_PRIMARY_MANIFEST_URL =
+  'https://59.110.154.44:7777/otto-green-releases/latest.json';
+
+export const GREEN_RELEASE_PAGE_URL =
+  'https://59.110.154.44:7777/otto-green-releases/';
+
+export interface UpdateSourcePolicy {
+  primaryManifestUrl: string;
+  releasePageUrl: string;
+  githubFallback: boolean;
+}
+
+export function updateSourcePolicy(
+  distributionId: DesktopDistributionId,
+): UpdateSourcePolicy {
+  return distributionId === 'otto-green'
+    ? {
+        primaryManifestUrl: GREEN_PRIMARY_MANIFEST_URL,
+        releasePageUrl: GREEN_RELEASE_PAGE_URL,
+        githubFallback: false,
+      }
+    : {
+        primaryManifestUrl: PRIMARY_MANIFEST_URL,
+        releasePageUrl: RELEASE_PAGE_URL,
+        githubFallback: true,
+      };
+}
+
 /**
  * 企业可通过 OTTO_UPDATE_MANIFEST_URL 提供就近 HTTPS 镜像。地址无效、非 HTTPS、
  * 或含 URL 凭证时直接忽略；GitHub 官方清单始终保留为下一跳。
  */
-export function resolveManifestUrls(candidate?: string | null): string[] {
+export function resolveManifestUrls(
+  candidate?: string | null,
+  distributionId: DesktopDistributionId = 'otto',
+): string[] {
   const urls: string[] = [];
+  const policy = updateSourcePolicy(distributionId);
   const value = candidate?.trim();
   if (value) {
     try {
@@ -38,7 +72,10 @@ export function resolveManifestUrls(candidate?: string | null): string[] {
       // 非法配置按未配置处理，绝不能阻断官方 GitHub 更新源。
     }
   }
-  for (const fallback of [PRIMARY_MANIFEST_URL, GITHUB_MANIFEST_URL]) {
+  const fallbacks = policy.githubFallback
+    ? [policy.primaryManifestUrl, GITHUB_MANIFEST_URL]
+    : [policy.primaryManifestUrl];
+  for (const fallback of fallbacks) {
     if (!urls.includes(fallback)) urls.push(fallback);
   }
   return urls;

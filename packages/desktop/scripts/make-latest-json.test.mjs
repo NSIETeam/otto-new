@@ -45,6 +45,7 @@ describe('make-latest-json', () => {
       await readFile(path.join(dir, 'latest.json'), 'utf8'),
     );
     const assets = Object.values(manifest.assets);
+    expect(manifest.distributionId).toBe('otto');
     expect(assets.map((asset) => asset.name).sort()).toEqual(files.sort());
     for (const asset of assets) {
       const bytes = await readFile(path.join(dir, asset.name));

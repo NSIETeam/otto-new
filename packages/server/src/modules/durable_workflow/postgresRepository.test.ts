@@ -7,7 +7,11 @@ import type {
   PostgresPoolLike,
   PostgresQueryResult,
 } from '../data_platform/postgresDatabaseLifecycle.js';
-import type { DurableWorkflowClaim } from './contracts.js';
+import {
+  DurableWorkflowConflictError,
+  type DurableWorkflowClaim,
+  type DurableWorkflowDefinition,
+} from './contracts.js';
 import { createPostgresDurableWorkflowRepository } from './postgresRepository.js';
 
 function result<Row extends Record<string, unknown>>(
@@ -49,6 +53,174 @@ describe('Postgres durable workflow repository', () => {
     expect(migration!.sql).toContain('lease_token UUID');
     expect(migration!.sql).toContain('approval_expires_at TIMESTAMPTZ');
     expect(migration!.sql).toContain('FOREIGN KEY (run_id, organization_id)');
+    const idempotencyMigration = ENTERPRISE_POSTGRES_MIGRATIONS.find(
+      (candidate) => candidate.version === 17,
+    );
+    expect(idempotencyMigration).toMatchObject({
+      version: 17,
+      name: 'durable-workflow-submission-idempotency',
+    });
+    expect(idempotencyMigration!.sql).toContain(
+      'durable_workflow_runs_submission_idempotency',
+    );
+    expect(idempotencyMigration!.sql).toContain(
+      'submission_request_digest',
+    );
+  });
+
+  it('returns the original run for the same submission key and rejects a changed request', async () => {
+    let persisted: {
+      id: string;
+      organization_id: string;
+      definition_id: string;
+      priority: number;
+      created_by_account_id: string | null;
+      submission_idempotency_key: string;
+      submission_request_digest: string;
+    } | null = null;
+    let stepInsertions = 0;
+    const client: PostgresClientLike = {
+      query: vi.fn(async (sql: string, values: readonly unknown[] = []) => {
+        if (sql.includes('INSERT INTO durable_workflow_runs')) {
+          if (persisted) return result([]);
+          persisted = {
+            id: String(values[0]),
+            organization_id: String(values[1]),
+            definition_id: String(values[2]),
+            priority: Number(values[3]),
+            created_by_account_id:
+              values[4] === null ? null : String(values[4]),
+            submission_idempotency_key: String(values[5]),
+            submission_request_digest: String(values[6]),
+          };
+          return result([{ id: persisted.id }]);
+        }
+        if (sql.includes('SELECT id, submission_request_digest')) {
+          return result(
+            persisted
+              ? [
+                  {
+                    id: persisted.id,
+                    submission_request_digest:
+                      persisted.submission_request_digest,
+                    created_by_account_id: persisted.created_by_account_id,
+                  },
+                ]
+              : [],
+          );
+        }
+        if (sql.includes('INSERT INTO durable_workflow_steps')) {
+          stepInsertions += 1;
+        }
+        return result([]);
+      }),
+      release: vi.fn(),
+    };
+    const pool: PostgresPoolLike = {
+      connect: vi.fn().mockResolvedValue(client),
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes('FROM durable_workflow_runs')) {
+          return result(
+            persisted
+              ? [
+                  {
+                    id: persisted.id,
+                    organization_id: persisted.organization_id,
+                    definition_id: persisted.definition_id,
+                    status: 'queued',
+                    priority: persisted.priority,
+                    created_by_account_id: persisted.created_by_account_id,
+                    failure_code: null,
+                    created_at: new Date('2026-08-24T00:00:00.000Z'),
+                    updated_at: new Date('2026-08-24T00:00:00.000Z'),
+                  },
+                ]
+              : [],
+          );
+        }
+        if (sql.includes('FROM durable_workflow_steps')) {
+          return result([
+            {
+              run_id: persisted!.id,
+              organization_id: persisted!.organization_id,
+              definition_id: '',
+              sequence: 0,
+              step_id: 'checkpoint',
+              task_type: 'workflow.checkpoint',
+              status: 'queued',
+              side_effect: 'none',
+              input: {},
+              attempt: 0,
+              max_attempts: 3,
+              idempotency_key: `${persisted!.id}:checkpoint`,
+              requires_approval: false,
+              approval_timeout_seconds: 86_400,
+              approval_id: null,
+              approval_expires_at: null,
+              approved_at: null,
+              error_summary: null,
+              started_at: null,
+              completed_at: null,
+            },
+          ]);
+        }
+        return result([]);
+      }),
+      end: vi.fn(),
+    };
+    const repository = createPostgresDurableWorkflowRepository({ pool });
+    const definition: DurableWorkflowDefinition = {
+      id: 'safe',
+      version: 1,
+      steps: [
+        {
+          id: 'checkpoint',
+          taskType: 'workflow.checkpoint',
+          input: { beta: 2, alpha: 1 },
+          sideEffect: 'none',
+        },
+      ],
+    };
+    const common = {
+      actor: {
+        organizationId: 'org-1',
+        accountId: 'account-1',
+        display: 'Admin',
+      },
+      submissionIdempotencyKey: 'client-request-1',
+    };
+
+    const first = await repository.createRun({ definition, ...common });
+    const replay = await repository.createRun({
+      ...common,
+      definition: {
+        ...definition,
+        steps: [
+          {
+            ...definition.steps[0]!,
+            input: { alpha: 1, beta: 2 },
+          },
+        ],
+      },
+    });
+
+    expect(replay.id).toBe(first.id);
+    expect(stepInsertions).toBe(1);
+    await expect(
+      repository.createRun({
+        ...common,
+        definition: {
+          ...definition,
+          steps: [
+            {
+              ...definition.steps[0]!,
+              input: { alpha: 1, beta: 3 },
+            },
+          ],
+        },
+      }),
+    ).rejects.toBeInstanceOf(DurableWorkflowConflictError);
+    expect(stepInsertions).toBe(1);
   });
 
   it('claims one ready step with SKIP LOCKED and a stable idempotency key', async () => {

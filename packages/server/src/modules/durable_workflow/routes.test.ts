@@ -24,6 +24,128 @@ function storeStub(): DurableWorkflowQueueStore {
 }
 
 describe('durable workflow enterprise routes', () => {
+  it('requires and forwards a tenant-scoped submission idempotency key', async () => {
+    const sendJson = vi.fn();
+    const store = storeStub();
+    vi.mocked(store.createRun).mockResolvedValue({
+      id: 'wf-00000000-0000-4000-8000-000000000001',
+    } as never);
+    await handleDurableWorkflowRoutes({
+      path: '/enterprise/workflows',
+      method: 'POST',
+      req: {} as IncomingMessage,
+      res: {} as ServerResponse,
+      member: {
+        id: 'account-1',
+        organizationId: 'org-1',
+        name: 'Admin',
+        isAdmin: true,
+      },
+      store,
+      allowedTaskTypes: new Set(['workflow.checkpoint']),
+      readBody: vi.fn().mockResolvedValue({
+        submissionIdempotencyKey: 'client-request-1',
+        definition: {
+          id: 'safe',
+          version: 1,
+          steps: [
+            {
+              id: 'checkpoint',
+              taskType: 'workflow.checkpoint',
+              input: {},
+              sideEffect: 'none',
+            },
+          ],
+        },
+      }),
+      sendJson,
+    });
+
+    expect(store.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        submissionIdempotencyKey: 'client-request-1',
+      }),
+    );
+    expect(sendJson).toHaveBeenCalledWith(expect.anything(), 201, {
+      run: expect.objectContaining({
+        id: 'wf-00000000-0000-4000-8000-000000000001',
+      }),
+    });
+  });
+
+  it('rejects a create request without a submission idempotency key', async () => {
+    const sendJson = vi.fn();
+    const store = storeStub();
+    await handleDurableWorkflowRoutes({
+      path: '/enterprise/workflows',
+      method: 'POST',
+      req: {} as IncomingMessage,
+      res: {} as ServerResponse,
+      member: {
+        id: 'account-1',
+        organizationId: 'org-1',
+        name: 'Admin',
+        isAdmin: true,
+      },
+      store,
+      allowedTaskTypes: new Set(['workflow.checkpoint']),
+      readBody: vi.fn().mockResolvedValue({
+        definition: {
+          id: 'safe',
+          version: 1,
+          steps: [
+            {
+              id: 'checkpoint',
+              taskType: 'workflow.checkpoint',
+              input: {},
+              sideEffect: 'none',
+            },
+          ],
+        },
+      }),
+      sendJson,
+    });
+
+    expect(store.createRun).not.toHaveBeenCalled();
+    expect(sendJson).toHaveBeenCalledWith(
+      expect.anything(),
+      400,
+      expect.objectContaining({ code: 'WORKFLOW_REQUEST_INVALID' }),
+    );
+  });
+
+  it('does not expose internal repository errors to clients', async () => {
+    const sendJson = vi.fn();
+    const store = storeStub();
+    vi.mocked(store.listRuns).mockRejectedValue(
+      new Error(
+        'password=database-secret postgresql://admin:hunter2@db.internal/otto',
+      ),
+    );
+    await handleDurableWorkflowRoutes({
+      path: '/enterprise/workflows',
+      method: 'GET',
+      req: { url: '/enterprise/workflows' } as IncomingMessage,
+      res: {} as ServerResponse,
+      member: {
+        id: 'account-1',
+        organizationId: 'org-1',
+        name: 'Admin',
+        isAdmin: true,
+      },
+      store,
+      allowedTaskTypes: new Set(),
+      readBody: vi.fn(),
+      sendJson,
+    });
+
+    expect(sendJson).toHaveBeenCalledWith(expect.anything(), 500, {
+      error: 'workflow request failed',
+      code: 'WORKFLOW_INTERNAL_ERROR',
+    });
+    expect(JSON.stringify(sendJson.mock.calls)).not.toContain('hunter2');
+  });
+
   it('limits non-administrator history to workflows they created', async () => {
     const sendJson = vi.fn();
     const store = storeStub();

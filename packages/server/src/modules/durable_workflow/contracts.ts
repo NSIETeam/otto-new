@@ -130,6 +130,7 @@ export interface DurableWorkflowQueueStore {
   createRun(input: {
     definition: DurableWorkflowDefinition;
     actor: DurableWorkflowActor;
+    submissionIdempotencyKey: string;
     priority?: number;
   }): Promise<DurableWorkflowRunDetail>;
   claimNext(input: {
@@ -202,6 +203,13 @@ export class DurableWorkflowConflictError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'DurableWorkflowConflictError';
+  }
+}
+
+export class DurableWorkflowRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DurableWorkflowRequestError';
   }
 }
 

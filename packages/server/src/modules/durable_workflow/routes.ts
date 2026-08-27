@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
   DurableWorkflowConflictError,
+  DurableWorkflowRequestError,
   type DurableWorkflowActor,
   type DurableWorkflowDefinition,
   type DurableWorkflowQueueStore,
@@ -61,33 +62,111 @@ function text(body: JsonBody, key: string): string {
   return typeof body[key] === 'string' ? body[key].trim() : '';
 }
 
+function invalid(message: string): never {
+  throw new DurableWorkflowRequestError(message);
+}
+
+function assertOptionalInteger(
+  value: unknown,
+  label: string,
+  min: number,
+  max: number,
+): void {
+  if (
+    value !== undefined &&
+    (typeof value !== 'number' ||
+      !Number.isSafeInteger(value) ||
+      value < min ||
+      value > max)
+  ) {
+    invalid(`${label} must be from ${min} to ${max}`);
+  }
+}
+
+function assertJsonObject(
+  value: unknown,
+  label: string,
+): asserts value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    invalid(`${label} must be a JSON object`);
+  }
+  let encoded = '';
+  try {
+    encoded = JSON.stringify(value);
+  } catch {
+    invalid(`${label} must be valid JSON`);
+  }
+  if (Buffer.byteLength(encoded, 'utf8') > 256 * 1024) {
+    invalid(`${label} exceeds 256 KiB`);
+  }
+}
+
 function assertDefinition(
   value: unknown,
   allowedTaskTypes: ReadonlySet<string>,
 ): DurableWorkflowDefinition {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('workflow definition is required');
+    invalid('workflow definition is required');
   }
   const definition = value as Partial<DurableWorkflowDefinition>;
   if (
     typeof definition.id !== 'string' ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$/u.test(definition.id) ||
     definition.version !== 1 ||
-    !Array.isArray(definition.steps)
+    !Array.isArray(definition.steps) ||
+    definition.steps.length < 1 ||
+    definition.steps.length > 500
   ) {
-    throw new Error('workflow definition is invalid');
+    invalid('workflow definition is invalid');
   }
+  const stepIds = new Set<string>();
   for (const step of definition.steps) {
     if (
       !step ||
       typeof step !== 'object' ||
+      typeof step.id !== 'string' ||
+      !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,63}$/u.test(step.id) ||
+      stepIds.has(step.id) ||
       !allowedTaskTypes.has(step.taskType) ||
       !['none', 'idempotent', 'external'].includes(step.sideEffect) ||
-      !step.input ||
-      typeof step.input !== 'object' ||
-      Array.isArray(step.input)
+      (step.requiresApproval !== undefined &&
+        typeof step.requiresApproval !== 'boolean')
     ) {
-      throw new Error(
+      invalid(
         `workflow task is not allowed: ${String(step?.taskType || '')}`,
+      );
+    }
+    stepIds.add(step.id);
+    assertJsonObject(step.input, 'workflow step input');
+    assertOptionalInteger(
+      step.maxAttempts,
+      'workflow max attempts',
+      1,
+      20,
+    );
+    assertOptionalInteger(
+      step.approvalTimeoutSeconds,
+      'approval timeout',
+      60,
+      2_592_000,
+    );
+    if (step.compensation !== undefined) {
+      if (
+        !step.compensation ||
+        typeof step.compensation !== 'object' ||
+        !allowedTaskTypes.has(step.compensation.taskType)
+      ) {
+        invalid('workflow compensation task is not allowed');
+      }
+      assertJsonObject(
+        step.compensation.input,
+        'workflow compensation input',
+      );
+      assertOptionalInteger(
+        step.compensation.maxAttempts,
+        'compensation max attempts',
+        1,
+        20,
       );
     }
   }
@@ -115,7 +194,7 @@ export async function handleDurableWorkflowRoutes(input: {
         'http://127.0.0.1',
       ).searchParams.getAll('status') as DurableWorkflowRunStatus[];
       if (statuses.some((status) => !RUN_STATUSES.has(status))) {
-        throw new Error('workflow status filter is invalid');
+        invalid('workflow status filter is invalid');
       }
       input.sendJson(input.res, 200, {
         runs: await input.store.listRuns({
@@ -134,11 +213,23 @@ export async function handleDurableWorkflowRoutes(input: {
         body['definition'],
         input.allowedTaskTypes,
       );
-      const priority =
-        body['priority'] === undefined ? undefined : Number(body['priority']);
+      assertOptionalInteger(body['priority'], 'workflow priority', 0, 100);
+      const priority = body['priority'] as number | undefined;
+      const submissionIdempotencyKey = text(
+        body,
+        'submissionIdempotencyKey',
+      );
+      if (
+        !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/u.test(
+          submissionIdempotencyKey,
+        )
+      ) {
+        invalid('submissionIdempotencyKey is required and must be valid');
+      }
       const run = await input.store.createRun({
         definition,
         actor: actor(input.member),
+        submissionIdempotencyKey,
         ...(priority === undefined ? {} : { priority }),
       });
       input.sendJson(input.res, 201, { run });
@@ -185,7 +276,7 @@ export async function handleDurableWorkflowRoutes(input: {
         actor: actor(input.member),
         note: text(body, 'note'),
       };
-      if (!common.note) throw new Error('operator note is required');
+      if (!common.note) invalid('operator note is required');
       if (segment === 'cancel') await input.store.cancel(common);
       else if (segment === 'compensate')
         await input.store.requestCompensation(common);
@@ -203,13 +294,13 @@ export async function handleDurableWorkflowRoutes(input: {
       };
       if (action === 'approve') {
         const approvalId = text(body, 'approvalId');
-        if (!approvalId) throw new Error('approvalId is required');
+        if (!approvalId) invalid('approvalId is required');
         await input.store.approve({ ...base, approvalId });
       } else if (action === 'retry') {
         const note = text(body, 'note');
         const mode = body['mode'] ?? 'forward';
         if (!note || !['forward', 'compensation'].includes(String(mode))) {
-          throw new Error('retry mode and operator note are required');
+          invalid('retry mode and operator note are required');
         }
         await input.store.retryDeadLetter({
           ...base,
@@ -227,7 +318,7 @@ export async function handleDurableWorkflowRoutes(input: {
             String(resolution),
           )
         ) {
-          throw new Error('resolution and operator note are required');
+          invalid('resolution and operator note are required');
         }
         await input.store.resolveUnknown({
           ...base,
@@ -243,10 +334,22 @@ export async function handleDurableWorkflowRoutes(input: {
     return false;
   } catch (error) {
     const conflict = error instanceof DurableWorkflowConflictError;
-    input.sendJson(input.res, conflict ? 409 : 400, {
-      error: error instanceof Error ? error.message : 'workflow request failed',
-      code: conflict ? 'WORKFLOW_CONFLICT' : 'WORKFLOW_REQUEST_INVALID',
-    });
+    const invalidRequest = error instanceof DurableWorkflowRequestError;
+    input.sendJson(
+      input.res,
+      conflict ? 409 : invalidRequest ? 400 : 500,
+      conflict || invalidRequest
+        ? {
+            error: error.message,
+            code: conflict
+              ? 'WORKFLOW_CONFLICT'
+              : 'WORKFLOW_REQUEST_INVALID',
+          }
+        : {
+            error: 'workflow request failed',
+            code: 'WORKFLOW_INTERNAL_ERROR',
+          },
+    );
     return true;
   }
 }

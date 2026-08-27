@@ -1047,6 +1047,12 @@ describe('受保护 vs 公开路由边界', () => {
     );
     expect(ownOrganizationView.status).toBe(200);
 
+    const ownOrganizationSync = await fetch(
+      `${base}/enterprise/organization/sync`,
+      { headers: memberHeaders },
+    );
+    expect(ownOrganizationSync.status).toBe(200);
+
     const crossOrganizationView = await fetch(
       `${base}/enterprise/organization/view?organizationId=${encodeURIComponent(org.id)}`,
       { headers: memberHeaders },

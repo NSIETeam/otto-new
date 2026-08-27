@@ -471,6 +471,11 @@ describe('clustered PostgreSQL enterprise server', () => {
         code: 'deployment_license_inactive',
       },
       {
+        repository: repository(null),
+        path: '/enterprise/organization/view',
+        code: 'deployment_license_inactive',
+      },
+      {
         repository: repository(
           activeLicenseRecord({ expiresAt: '2020-01-01T00:00:00.000Z' }),
         ),

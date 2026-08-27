@@ -55,6 +55,8 @@ export function commercialFeatureForEnterpriseRoute(
   path: string,
   context: CommercialRouteContext = {},
 ): OrganizationFeatureKey | null {
+  // A signed deployment always exposes each member's own directory. Editing
+  // structure or reading another organization remains a paid capability.
   if (
     (path === '/enterprise/organization/view' ||
       path === '/enterprise/organization/sync') &&

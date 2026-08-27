@@ -10,10 +10,6 @@ describe('commercial enterprise route policy', () => {
   it.each([
     ['/enterprise/model-gateway/access-token', 'model_gateway'],
     ['/enterprise/atoa/inbox', 'atoa'],
-    ['/enterprise/messages/unread', 'direct_messages'],
-    ['/enterprise/message-attachments/file-1', 'direct_messages'],
-    ['/enterprise/attachments/inline', 'direct_messages'],
-    ['/enterprise/e2ee/mls/key-packages', 'direct_messages'],
     ['/enterprise/park/services/request', 'park_service'],
     ['/enterprise/park-statistics/inbox', 'park_service'],
     ['/enterprise/park-settings', 'park_service'],
@@ -73,6 +69,28 @@ describe('commercial enterprise route policy', () => {
     expect(
       commercialFeatureForEnterpriseRoute('/enterprise/organization/departments'),
     ).toBe('enterprise_tree');
+    expect(
+      commercialFeatureForEnterpriseRoute('/enterprise/organization/features', {
+        method: 'GET',
+      }),
+    ).toBeNull();
+    expect(
+      commercialFeatureForEnterpriseRoute('/enterprise/organization/features', {
+        method: 'PATCH',
+      }),
+    ).toBe('enterprise_tree');
+  });
+
+  it.each([
+    '/enterprise/messages/unread',
+    '/enterprise/messages/account-1',
+    '/enterprise/message-attachments/file-1',
+    '/enterprise/attachments/inline',
+    '/enterprise/e2ee/devices',
+    '/enterprise/e2ee/mls/key-packages',
+    '/enterprise/presence/heartbeat',
+  ])('keeps same-organization collaboration route %s outside module entitlements', (path) => {
+    expect(commercialFeatureForEnterpriseRoute(path)).toBeNull();
   });
 
   it('separates A2A federation grants from direct-message federation routes', () => {

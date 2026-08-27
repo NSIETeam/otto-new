@@ -32,16 +32,22 @@ describe('authorization composition', () => {
       audit: (event) => auditEvents.push(event),
       isLicenseUsable(feature) {
         if (feature === 'knowledge') throw new Error('license unavailable');
-        return feature === 'direct_messages' || feature === 'enterprise_tree';
+        return false;
       },
     });
 
     try {
       expect(authorization.getOrganizationFeatures('org-a')).toMatchObject({
-        enterprise_tree: true,
-        direct_messages: true,
+        enterprise_tree: false,
+        direct_messages: false,
         atoa: false,
         knowledge: false,
+      });
+      expect(
+        authorization.getConfiguredOrganizationFeatures('org-a'),
+      ).toMatchObject({
+        enterprise_tree: true,
+        direct_messages: true,
       });
       expect(
         authorization.updateOrganizationFeatures('org-a', {

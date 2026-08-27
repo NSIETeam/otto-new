@@ -20,6 +20,9 @@ export type OrganizationRouteAdminPrincipal =
     };
 
 export interface OrganizationRouteServices {
+  getConfiguredOrganizationFeatures(
+    organizationId: string,
+  ): OrganizationFeatures;
   getOrganizationFeatures(organizationId: string): OrganizationFeatures;
   updateOrganizationFeatures(
     organizationId: string,
@@ -94,8 +97,14 @@ export async function handleOrganizationRoute({
   sendJSON,
 }: OrganizationRouteDeps): Promise<boolean> {
   if (path === '/enterprise/organization/features' && method === 'GET') {
+    const organizationId = memberAccount!.organizationId;
+    const configured = services.getConfiguredOrganizationFeatures(organizationId);
     sendJSON(res, 200, {
-      features: services.getOrganizationFeatures(memberAccount!.organizationId),
+      features: {
+        ...services.getOrganizationFeatures(organizationId),
+        enterprise_tree: configured.enterprise_tree,
+        direct_messages: configured.direct_messages,
+      },
     });
     return true;
   }

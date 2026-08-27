@@ -12,10 +12,34 @@ interface CommercialRouteRule {
 export interface CommercialRouteContext {
   ticketServiceId?: string;
   crossOrganizationView?: boolean;
+  method?: string;
 }
 
 const prefix = (value: string) => (path: string): boolean =>
   path === value || path.startsWith(`${value}/`);
+
+const BASELINE_COLLABORATION_ROUTES: ReadonlyArray<
+  (path: string) => boolean
+> = [
+  prefix('/enterprise/messages'),
+  prefix('/enterprise/message-attachments'),
+  prefix('/enterprise/attachments'),
+  prefix('/enterprise/e2ee'),
+  prefix('/enterprise/presence/heartbeat'),
+] as const;
+
+/**
+ * Same-organization messaging is part of the authenticated Otto baseline.
+ * The organization switch still controls availability, while Federation and
+ * A2A remain separately licensed commercial capabilities.
+ */
+export function baselineOrganizationFeatureForEnterpriseRoute(
+  path: string,
+): OrganizationFeatureKey | null {
+  return BASELINE_COLLABORATION_ROUTES.some((matches) => matches(path))
+    ? 'direct_messages'
+    : null;
+}
 
 /**
  * Maps externally callable enterprise routes to the signed License capability
@@ -61,6 +85,15 @@ export function commercialFeatureForEnterpriseRoute(
       path === '/enterprise/organization/sync') &&
     !context.crossOrganizationView
   ) {
+    return null;
+  }
+  if (
+    path === '/enterprise/organization/features' &&
+    (context.method ?? 'GET').toUpperCase() === 'GET'
+  ) {
+    return null;
+  }
+  if (baselineOrganizationFeatureForEnterpriseRoute(path)) {
     return null;
   }
   if (path === '/enterprise/tickets') {

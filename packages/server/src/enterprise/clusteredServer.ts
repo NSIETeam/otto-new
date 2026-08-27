@@ -16,6 +16,7 @@ import {
 import { createAliyunLoginSmsFromEnv } from 'otto-core';
 
 import {
+  baselineOrganizationFeatureForEnterpriseRoute,
   commercialFeatureForEnterpriseRoute,
   isLicenseMaintenanceRoute,
 } from '../modules/authorization/index.js';
@@ -1451,6 +1452,13 @@ export function createClusteredEnterpriseServer(
           path === '/enterprise/organization/view'
             ? url.searchParams.get('organizationId')
             : null;
+        const commercialFeature = commercialFeatureForEnterpriseRoute(path, {
+          method,
+          crossOrganizationView: Boolean(
+            requestedOrganizationId &&
+              requestedOrganizationId !== member.organizationId,
+          ),
+        });
         const license = await requireClusteredLicense({
           repository,
           organizationId: member.organizationId,
@@ -1459,14 +1467,22 @@ export function createClusteredEnterpriseServer(
           res,
           deploymentId,
           publicKeys: licensePublicKeys,
-          requiredFeature: commercialFeatureForEnterpriseRoute(path, {
-            crossOrganizationView: Boolean(
-              requestedOrganizationId &&
-                requestedOrganizationId !== member.organizationId,
-            ),
-          }),
+          requiredFeature: commercialFeature,
         });
         if (!license) return;
+        if (
+          baselineOrganizationFeatureForEnterpriseRoute(path) ===
+            'direct_messages' &&
+          !(await repository.getOrganizationFeatures(member.organizationId))
+            .direct_messages
+        ) {
+          sendJson(res, 403, {
+            error: 'organization feature is disabled',
+            code: 'organization_feature_disabled',
+            feature: 'direct_messages',
+          });
+          return;
+        }
       }
 
       if (

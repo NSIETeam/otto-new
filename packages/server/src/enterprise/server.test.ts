@@ -888,6 +888,25 @@ describe('受保护 vs 公开路由边界', () => {
     });
     expect(entitledMessages.status).toBe(200);
 
+    const crossOrganizationMember = db.createAccount({
+      organizationId: org.id,
+      username: 'cross-organization-route-member',
+      password: 'cross-organization-route-password',
+      name: 'Cross Organization Route Member',
+    });
+    const crossOrganizationToken = db.createAuthSession(
+      crossOrganizationMember.id,
+    ).token;
+    const baselineOrganizationMessages = await fetch(
+      `${base}/enterprise/messages/unread`,
+      {
+        headers: {
+          authorization: `Bearer ${crossOrganizationToken}`,
+        },
+      },
+    );
+    expect(baselineOrganizationMessages.status).toBe(200);
+
     const internalTicket = await fetch(`${base}/enterprise/tickets`, {
       method: 'POST',
       headers: { ...memberHeaders, 'content-type': 'application/json' },
@@ -931,7 +950,7 @@ describe('受保护 vs 公开路由边界', () => {
       ...payload,
       id: 'lic_test_baseline_directory',
       revision: 2,
-      modules: ['direct_messages'],
+      modules: ['model_gateway'],
       issuedAtMs: payload.issuedAtMs + 1,
     };
     const baselineImported = await fetch(
@@ -958,6 +977,19 @@ describe('受保护 vs 公开路由边界', () => {
       { headers: memberHeaders },
     );
     expect(ownOrganizationSync.status).toBe(200);
+
+    const organizationFeatures = await fetch(
+      `${base}/enterprise/organization/features`,
+      { headers: memberHeaders },
+    );
+    expect(organizationFeatures.status).toBe(200);
+
+    db.updateOrganizationFeatures('org_default', { direct_messages: true });
+    const baselineMessages = await fetch(
+      `${base}/enterprise/messages/unread`,
+      { headers: memberHeaders },
+    );
+    expect(baselineMessages.status).toBe(200);
 
     const crossOrganizationView = await fetch(
       `${base}/enterprise/organization/view?organizationId=${encodeURIComponent(org.id)}`,

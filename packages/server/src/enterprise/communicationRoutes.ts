@@ -661,7 +661,8 @@ export async function handleCommunicationRoute({
 
   if (path === '/enterprise/messages/unread' && method === 'GET') {
     if (
-      !db.getOrganizationFeatures(memberAccount.organizationId).direct_messages
+      !db.getConfiguredOrganizationFeatures(memberAccount.organizationId)
+        .direct_messages
     ) {
       sendJSON(res, 403, { error: '企业内部消息功能已由管理员关闭' });
       return true;
@@ -679,7 +680,8 @@ export async function handleCommunicationRoute({
 
   if (path.startsWith('/enterprise/message-attachments/') && method === 'GET') {
     if (
-      !db.getOrganizationFeatures(memberAccount.organizationId).direct_messages
+      !db.getConfiguredOrganizationFeatures(memberAccount.organizationId)
+        .direct_messages
     ) {
       sendJSON(res, 403, { error: 'enterprise direct messages are disabled' });
       return true;
@@ -711,7 +713,8 @@ export async function handleCommunicationRoute({
     (method === 'GET' || method === 'POST')
   ) {
     if (
-      !db.getOrganizationFeatures(memberAccount.organizationId).direct_messages
+      !db.getConfiguredOrganizationFeatures(memberAccount.organizationId)
+        .direct_messages
     ) {
       sendJSON(res, 403, { error: '企业内部消息功能已由管理员关闭' });
       return true;

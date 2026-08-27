@@ -19,7 +19,7 @@
  * 预设端点是公开稳定事实（各家官方 API base）。custom 供应商让用户自填 baseUrl。
  */
 
-import type { SaveCustomModelMsg } from 'otto-server';
+import type { ModelInfo, SaveCustomModelMsg } from 'otto-server';
 
 /** 与 core CustomModelProvider 同构（协议适配器键）。 */
 export type CustomModelProvider =
@@ -274,6 +274,51 @@ export function buildSavePayload(form: SetupFormState): SaveCustomModelPayload {
     ...(form.replaceId ? { replaceId: form.replaceId } : {}),
     makeActive: !form.replaceId,
   };
+}
+
+function normalizedBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '');
+}
+
+/**
+ * 判断一帧 models_list 是否已经包含本次保存的全部模型。
+ *
+ * 设置页打开时也会主动请求 get_models，因此保存期间可能先收到一帧旧列表；不能把
+ * 任意 models_list 都当成保存成功。这里只比较非敏感的 provider/baseUrl/modelId，
+ * 不读取也不回传 API key。
+ */
+export function savePayloadAppearsInModels(
+  models: readonly ModelInfo[],
+  payload: SaveCustomModelPayload,
+): boolean {
+  const expectedModelIds = Array.from(
+    new Set(
+      (payload.modelIds?.length ? payload.modelIds : [payload.modelId])
+        .map((modelId) => modelId.trim())
+        .filter(Boolean),
+    ),
+  );
+  if (expectedModelIds.length === 0) return false;
+
+  const expectedBaseUrl = normalizedBaseUrl(payload.baseUrl);
+  const expectedProvider = payload.provider.trim();
+  return expectedModelIds.every((modelId) => {
+    const expectedId = generateCustomModelId({
+      provider: expectedProvider,
+      baseUrl: expectedBaseUrl,
+      modelId,
+    });
+    return models.some((model) => {
+      if (model.provider !== expectedProvider) return false;
+      const sameModel = model.modelId
+        ? model.modelId === modelId
+        : model.id === expectedId;
+      if (!sameModel) return false;
+      return model.baseUrl
+        ? normalizedBaseUrl(model.baseUrl) === expectedBaseUrl
+        : model.id === expectedId;
+    });
+  });
 }
 
 /**

@@ -2,7 +2,7 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.js';
 import type { EnterpriseAccount } from '../preload/index.js';
@@ -44,6 +44,8 @@ const harness = vi.hoisted(() => ({
     rejectPendingAutoSkill: vi.fn(),
     selectDate: vi.fn(),
   },
+  frameHandlers: new Set<(frame: unknown) => void>(),
+  send: vi.fn(),
 }));
 
 vi.mock('./state/useEnterpriseAuth.js', () => ({
@@ -138,10 +140,12 @@ vi.mock('./components/ChatView.js', () => ({
     rightPanelCollapsed,
     onToggleRightPanel,
     pendingAgent,
+    onOpenSetup,
   }: {
     rightPanelCollapsed?: boolean;
     onToggleRightPanel?: () => void;
     pendingAgent?: { title: string } | null;
+    onOpenSetup?: () => void;
   }) => (
     <main data-testid="chat-view">
       {pendingAgent ? <span data-testid="pending-agent">{pendingAgent.title}</span> : null}
@@ -154,7 +158,45 @@ vi.mock('./components/ChatView.js', () => ({
           toggle-right-panel
         </button>
       ) : null}
+      {onOpenSetup ? (
+        <button type="button" onClick={onOpenSetup}>open-model-settings</button>
+      ) : null}
     </main>
+  ),
+}));
+
+vi.mock('./setup/SetupPanel.js', () => ({
+  SetupPanel: ({
+    models,
+    saving,
+    onSave,
+  }: {
+    models: unknown[];
+    saving: boolean;
+    onSave: (payload: {
+      provider: string;
+      baseUrl: string;
+      apiKey: string;
+      modelId: string;
+      enabled: boolean;
+      makeActive: boolean;
+    }) => void;
+  }) => (
+    <section data-testid="setup-panel" data-model-count={models.length} data-saving={saving}>
+      <button
+        type="button"
+        onClick={() => onSave({
+          provider: 'openai',
+          baseUrl: 'https://api.deepseek.com/v1',
+          apiKey: 'test-key-never-rendered',
+          modelId: 'deepseek-chat',
+          enabled: true,
+          makeActive: true,
+        })}
+      >
+        save-deepseek
+      </button>
+    </section>
   ),
 }));
 
@@ -313,6 +355,11 @@ beforeEach(() => {
       generateCustomAgent: vi.fn(),
       onMenu: vi.fn(() => vi.fn()),
       onNotificationSessionOpen: vi.fn(() => vi.fn()),
+      send: harness.send,
+      onFrame: vi.fn((handler: (frame: unknown) => void) => {
+        harness.frameHandlers.add(handler);
+        return () => harness.frameHandlers.delete(handler);
+      }),
     } as unknown as Window['otto'],
   });
 });
@@ -320,6 +367,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  harness.frameHandlers.clear();
 });
 
 describe('App UI mode integration', () => {
@@ -450,5 +498,46 @@ describe('App UI mode integration', () => {
     expect(document.querySelector<HTMLElement>('.otto-app')?.dataset.uiMode).toBe('conversational');
     expect(screen.getByTestId('ui-mode-guide')).toBeTruthy();
     expect(localStorage.getItem(preferenceKey(accountB))).toBeNull();
+  });
+
+  it('refreshes the model list whenever personal API settings are opened', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'open-model-settings' }));
+
+    expect(screen.getByTestId('setup-panel')).toBeTruthy();
+    await waitFor(() => {
+      expect(harness.send).toHaveBeenCalledWith({ type: 'get_models', payload: {} });
+    });
+  });
+
+  it('does not miss an immediate matching models_list response after saving DeepSeek', async () => {
+    harness.send.mockImplementation((frame: { type?: string }) => {
+      if (frame.type !== 'save_custom_model') return;
+      for (const handler of harness.frameHandlers) {
+        handler({
+          type: 'models_list',
+          payload: {
+            models: [
+              {
+                id: 'custom:openai:deepseek-chat@abc123',
+                displayName: 'DeepSeek deepseek-chat',
+                provider: 'openai',
+                baseUrl: 'https://api.deepseek.com/v1',
+                modelId: 'deepseek-chat',
+                enabled: true,
+              },
+            ],
+          },
+        });
+      }
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'open-model-settings' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'save-deepseek' }));
+
+    await waitFor(() => expect(screen.getByTestId('chat-view')).toBeTruthy());
+    expect(screen.queryByTestId('setup-panel')).toBeNull();
   });
 });

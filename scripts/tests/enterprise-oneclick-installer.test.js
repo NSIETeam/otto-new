@@ -339,8 +339,18 @@ describe('enterprise one-click schema contract', () => {
     expect(verifyRelease).toContain('manifest.database.schemaTo - 1');
     expect(verifyRelease).toContain("options.delete('--allow-legacy-lstc')");
     expect(verifyRelease).toContain("? ['stable', 'transition', 'lstc']");
-    expect(upgrader).toContain('"$CURRENT_REAL" --allow-legacy-lstc');
-    expect(upgrader).toContain('--allow-registration-legal-hotfix');
+    expect(upgrader).toContain(
+      'CURRENT_VERIFY_OPTIONS=(--allow-legacy-lstc --allow-legacy-sqlite)',
+    );
+    expect(upgrader).toContain(
+      'if [ -f "${CURRENT_REAL}/HOTFIX-INFO" ] || [ -f "${CURRENT_REAL}/HOTFIX-PREVIOUS-RELEASE" ]; then',
+    );
+    expect(upgrader).toContain(
+      'CURRENT_VERIFY_OPTIONS+=(--allow-registration-legal-hotfix)',
+    );
+    expect(upgrader).toContain(
+      '"$CURRENT_REAL" "${CURRENT_VERIFY_OPTIONS[@]}"',
+    );
     expect(installer).toContain('RELEASE_SCHEMA_TO=');
     expect(installer).toContain('"$IMPORT_SCHEMA" -le "$RELEASE_SCHEMA_TO"');
     expect(exporter).toContain('SCHEMA_TO=');

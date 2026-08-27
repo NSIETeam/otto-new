@@ -343,6 +343,28 @@ describe('OrganizationTree', () => {
     expect(enterpriseOrganizationView).toHaveBeenCalledOnce();
   });
 
+  it('组织架构授权错误不向用户暴露 Electron IPC 内部文案', async () => {
+    const enterpriseOrganizationView = vi.fn(async () => {
+      throw new Error(
+        "Error invoking remote method 'otto:enterprise-organization-view': Error: commercial module is not entitled",
+      );
+    });
+    Object.assign(window.otto, { enterpriseOrganizationView });
+
+    render(
+      <OrganizationTree
+        workspace={memberWorkspace}
+        enterpriseAccount={authenticatedEnterpriseAccount}
+      />,
+    );
+    ensureOrganizationTreeOpen();
+
+    expect(await screen.findByText(
+      '组织信息加载失败：当前服务器版本或授权配置不支持组织架构，请联系管理员更新服务器',
+    )).toBeTruthy();
+    expect(screen.queryByText(/Error invoking remote method/)).toBeNull();
+  });
+
   it('邀请码认证后的真实企业账号可从默认个人工作区连接远程组织树', async () => {
     const enterpriseOrganizationView = vi.fn(async () => ({
       organization: {

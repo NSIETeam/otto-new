@@ -88,6 +88,54 @@ describe('InboxPage response hardening', () => {
     expect(screen.getByRole('region', { name: '我的消息' })).toBeTruthy();
   });
 
+  it('confirms a direct-message read only after the conversation load succeeds', async () => {
+    const peer = {
+      id: 'member-2',
+      username: 'member-2',
+      name: '同事二',
+      role: '成员',
+      department: '研发部',
+      positionId: null,
+      positionTitle: '工程师',
+      isAdmin: false,
+      status: 'active' as const,
+    };
+    let resolveMessages!: (messages: []) => void;
+    const enterpriseMessagesList = vi.fn(() => new Promise<[]>(
+      (resolve) => { resolveMessages = resolve; },
+    ));
+    const onMessageRead = vi.fn();
+    Object.assign(window.otto, {
+      enterpriseMessagesUnread: vi.fn(async () => [{
+        id: 'message-1',
+        source: 'enterprise' as const,
+        title: '同事二发来消息',
+        senderAccountId: peer.id,
+        senderName: peer.name,
+        preview: '请查看项目进度',
+        createdAt: '2026-08-27T12:00:00.000Z',
+      }]),
+      enterpriseOrganizationView: vi.fn(async () => ({ members: [peer] })),
+      enterpriseMessagesList,
+    });
+
+    render(
+      <InboxPage
+        enterpriseAccount={account}
+        enterpriseUnreadCounts={{ 'enterprise:message:member-2': 1 }}
+        onMessageRead={onMessageRead}
+        onBack={() => undefined}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('listitem', { name: /同事二/ }));
+    await waitFor(() => expect(enterpriseMessagesList).toHaveBeenCalledWith('member-2'));
+    expect(onMessageRead).not.toHaveBeenCalled();
+
+    resolveMessages([]);
+    await waitFor(() => expect(onMessageRead).toHaveBeenCalledWith('member-2'));
+  });
+
   it('opens a federated E2EE conversation from the same contact list', async () => {
     const contact: EnterpriseFederationContact = {
       id: 'contact-remote',

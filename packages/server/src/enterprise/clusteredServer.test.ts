@@ -541,7 +541,10 @@ describe('clustered PostgreSQL enterprise server', () => {
       touchAccountPresence,
       listAccountPresence,
     } as unknown as ClusteredEnterpriseSharedState;
-    const { baseUrl } = await listen(repository(), { sharedState });
+    const { baseUrl } = await listen(
+      repository(activeLicenseRecord({ modules: ['direct_messages'] })),
+      { sharedState },
+    );
     const authorization = 'Bearer clustered-session-token';
 
     const heartbeat = await fetch(`${baseUrl}/enterprise/presence/heartbeat`, {

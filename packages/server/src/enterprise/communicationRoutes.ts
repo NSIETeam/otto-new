@@ -147,10 +147,10 @@ export async function handleCommunicationRoute({
         sendJSON(res, 403, { error: '无权查看该企业组织架构' });
         return true;
       }
-    }
-    if (!db.getOrganizationFeatures(organizationId).enterprise_tree) {
-      sendJSON(res, 403, { error: '企业树功能已由管理员关闭' });
-      return true;
+      if (!db.getOrganizationFeatures(organizationId).enterprise_tree) {
+        sendJSON(res, 403, { error: '企业树功能已由管理员关闭' });
+        return true;
+      }
     }
     sendJSON(res, 200, organizationViewPayload(organizationId));
     return true;
@@ -158,11 +158,6 @@ export async function handleCommunicationRoute({
 
   if (path === '/enterprise/organization/sync' && method === 'GET') {
     const organizationId = memberAccount.organizationId;
-    const features = db.getOrganizationFeatures(organizationId);
-    if (!features.enterprise_tree) {
-      sendJSON(res, 403, { error: '企业树同步功能已由管理员关闭' });
-      return true;
-    }
     sendJSON(res, 200, organizationViewPayload(organizationId));
     return true;
   }

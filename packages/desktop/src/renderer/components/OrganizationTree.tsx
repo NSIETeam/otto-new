@@ -22,6 +22,20 @@ import type { EnterpriseUnreadCounts } from '../enterpriseUnreadNotifications.js
 const ORGANIZATION_REFRESH_MS = 10_000;
 const DIRECT_CHAT_CASCADE_PX = 28;
 
+function organizationLoadErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/commercial module is not entitled|commercial_module_not_entitled/i.test(message)) {
+    return '当前服务器版本或授权配置不支持组织架构，请联系管理员更新服务器';
+  }
+  if (/deployment license is not active|deployment_license_inactive/i.test(message)) {
+    return '企业服务器授权已失效，请联系管理员恢复授权';
+  }
+  return message
+    .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+    .replace(/^Error:\s*/i, '')
+    .trim() || '服务器暂不可用，请稍后重试';
+}
+
 export interface EnterpriseDirectChatOpenRequest {
   peerAccountId: string;
   requestId: number;
@@ -256,8 +270,7 @@ export function OrganizationTree({
         setOrgError(null);
       } catch (error: unknown) {
         if (cancelled) return;
-        const message = error instanceof Error ? error.message : String(error);
-        setOrgError(`组织信息加载失败：${message}`);
+        setOrgError(`组织信息加载失败：${organizationLoadErrorMessage(error)}`);
       } finally {
         if (!cancelled) setOrgLoading(false);
       }

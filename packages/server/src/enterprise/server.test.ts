@@ -926,6 +926,49 @@ describe('受保护 vs 公开路由边界', () => {
       code: 'organization_feature_disabled',
       feature: 'direct_messages',
     });
+
+    const baselineLicense = {
+      ...payload,
+      id: 'lic_test_baseline_directory',
+      revision: 2,
+      modules: ['direct_messages'],
+      issuedAtMs: payload.issuedAtMs + 1,
+    };
+    const baselineImported = await fetch(
+      `${base}/enterprise/deployment/license`,
+      {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          license: baselineLicense,
+          signature: signLicensePayload(baselineLicense),
+        }),
+      },
+    );
+    expect(baselineImported.status).toBe(200);
+
+    const ownOrganizationView = await fetch(
+      `${base}/enterprise/organization/view`,
+      { headers: memberHeaders },
+    );
+    expect(ownOrganizationView.status).toBe(200);
+
+    const ownOrganizationSync = await fetch(
+      `${base}/enterprise/organization/sync`,
+      { headers: memberHeaders },
+    );
+    expect(ownOrganizationSync.status).toBe(200);
+
+    const crossOrganizationView = await fetch(
+      `${base}/enterprise/organization/view?organizationId=${encodeURIComponent(org.id)}`,
+      { headers: memberHeaders },
+    );
+    expect(crossOrganizationView.status).toBe(402);
+    await expect(crossOrganizationView.json()).resolves.toEqual({
+      error: 'commercial module is not entitled',
+      code: 'commercial_module_not_entitled',
+      feature: 'enterprise_tree',
+    });
   }, 60_000);
 
   it('enforces Control credit admission before a paid mutation and finalizes it once', async () => {

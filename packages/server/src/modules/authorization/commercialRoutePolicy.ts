@@ -9,6 +9,11 @@ interface CommercialRouteRule {
   matches(path: string): boolean;
 }
 
+export interface CommercialRouteContext {
+  ticketServiceId?: string;
+  crossOrganizationView?: boolean;
+}
+
 const prefix = (value: string) => (path: string): boolean =>
   path === value || path.startsWith(`${value}/`);
 
@@ -21,6 +26,9 @@ const prefix = (value: string) => (path: string): boolean =>
  * export its data.
  */
 const COMMERCIAL_ROUTE_RULES: readonly CommercialRouteRule[] = [
+  { feature: 'model_gateway', matches: prefix('/enterprise/model-gateway') },
+  { feature: 'atoa', matches: prefix('/enterprise/federation/a2a') },
+  { feature: 'direct_messages', matches: prefix('/enterprise/federation') },
   { feature: 'atoa', matches: prefix('/enterprise/atoa') },
   { feature: 'direct_messages', matches: prefix('/enterprise/messages') },
   { feature: 'direct_messages', matches: prefix('/enterprise/message-attachments') },
@@ -44,6 +52,21 @@ const COMMERCIAL_ROUTE_RULES: readonly CommercialRouteRule[] = [
 
 export function commercialFeatureForEnterpriseRoute(
   path: string,
+  context: CommercialRouteContext = {},
 ): OrganizationFeatureKey | null {
+  // A signed deployment always exposes each member's own directory. Editing
+  // structure or reading another organization remains a paid capability.
+  if (
+    (path === '/enterprise/organization/view' ||
+      path === '/enterprise/organization/sync') &&
+    !context.crossOrganizationView
+  ) {
+    return null;
+  }
+  if (path === '/enterprise/tickets') {
+    return context.ticketServiceId && context.ticketServiceId !== 'it'
+      ? 'park_service'
+      : null;
+  }
   return COMMERCIAL_ROUTE_RULES.find((rule) => rule.matches(path))?.feature ?? null;
 }

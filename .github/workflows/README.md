@@ -97,6 +97,7 @@ Otto 的发布链路分成三段：先检查异常，再构建双仓 GitHub Rele
 - `DEPLOY_USER`
 - `DEPLOY_SSH_KEY`
 - `DEPLOY_KNOWN_HOSTS`（目标服务器的固定 OpenSSH known_hosts 条目；不得使用运行时 ssh-keyscan）
+- `DEPLOY_SUDO_PASSWORD`（仅供发布工作流通过 `sudo -S` 完成远端部署；不得写入仓库或日志）
 
 可选：
 

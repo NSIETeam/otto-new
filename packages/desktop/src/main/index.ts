@@ -2813,6 +2813,7 @@ function registerIpc(): void {
         typeof revision.changeNote === 'string'
           ? revision.changeNote
           : undefined,
+      resolveConflict: revision.resolveConflict === true,
     });
   });
   ipcMain.handle(

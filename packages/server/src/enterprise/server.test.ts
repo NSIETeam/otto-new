@@ -5957,7 +5957,35 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       }),
     });
     expect(corroboratedHighImpactCapture.status).toBe(200);
-    const highImpactPayload = (await corroboratedHighImpactCapture.json()) as {
+    expect(await corroboratedHighImpactCapture.json()).toMatchObject({
+      status: 'observed',
+      added: false,
+      outcome: 'observed',
+      retention: {
+        promoted: false,
+        reason: 'incubating',
+        verifiedEvidenceCount: 2,
+        reliabilityScore: expect.any(Number),
+      },
+    });
+
+    const independentlyRecheckedCapture = await fetch(`${base}/enterprise/knowledge`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${alphaToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...highImpactBody,
+        sourceId: 'kb_auto_incident_3',
+        sourceSessionId: 'alpha-incident-session-3',
+        sourceFingerprint: 'production-health-incident-third-check',
+        content: '生产事故复查确认：缺少健康检查是根因，健康端点校验测试通过。',
+        observedAt: '2026-08-22T08:00:00.000Z',
+      }),
+    });
+    expect(independentlyRecheckedCapture.status).toBe(200);
+    const highImpactPayload = (await independentlyRecheckedCapture.json()) as {
       knowledgeId: number;
     };
     expect(highImpactPayload).toMatchObject({
@@ -5965,7 +5993,12 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       added: true,
       outcome: 'promoted',
       reviewStatus: 'pending_review',
-      retention: { promoted: true, reason: 'high_impact_verified' },
+      retention: {
+        promoted: true,
+        reason: 'high_impact_verified',
+        verifiedEvidenceCount: 3,
+        reliabilityScore: expect.any(Number),
+      },
     });
     expect(highImpactPayload.knowledgeId).toBeGreaterThan(0);
     const captured = db
@@ -5975,8 +6008,10 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
     expect(captured[0]).toMatchObject({
       department: '研发部',
       contributor: 'Alpha 员工',
-      confidence: 0.95,
+      confidence: expect.any(Number),
     });
+    expect(captured[0].confidence).toBeGreaterThanOrEqual(0.78);
+    expect(captured[0].confidence).toBeLessThan(0.95);
 
     const ownReviewQueue = await fetch(
       `${base}/enterprise/knowledge?includeReview=true`,

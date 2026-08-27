@@ -8,6 +8,7 @@ export type EnterpriseKnowledgeRetentionReason =
   | 'contested'
   | 'long_term_recurrence'
   | 'cross_member_corroboration'
+  | 'governed_decision'
   | 'high_impact_verified';
 
 export interface EnterpriseKnowledgeObservationSignals {
@@ -27,6 +28,8 @@ export interface EnterpriseKnowledgeEvidenceSummary {
   averageConfidence: number;
   maximumImpactScore: number;
   hasVerifiedEvidence: boolean;
+  /** 有本轮局部验证依据的证据数量；比单纯的“出现过验证”更适合校准可靠度。 */
+  verifiedEvidenceCount?: number;
   /** 相似主题中互相冲突的证据条数；存在冲突时禁止自动晋升。 */
   contradictoryEvidenceCount?: number;
 }
@@ -35,6 +38,7 @@ export interface EnterpriseKnowledgeRetentionDecision {
   promote: boolean;
   reason: EnterpriseKnowledgeRetentionReason;
   impactScore: number;
+  reliabilityScore: number;
   reasons: string[];
 }
 
@@ -199,16 +203,45 @@ export function scoreEnterpriseKnowledgeImpact(
   return { score: Math.min(1, Math.max(0, score)), reasons };
 }
 
+/**
+ * 组织记忆可靠度不沿用某一次模型自报的置信度，而由证据量、独立会话、贡献者、
+ * 局部验证和时间跨度共同决定。单人重复且没有验证时设置硬上限。
+ */
+export function scoreEnterpriseKnowledgeReliability(
+  summary: EnterpriseKnowledgeEvidenceSummary,
+): number {
+  const verifiedEvidenceCount = summary.verifiedEvidenceCount
+    ?? (summary.hasVerifiedEvidence ? 1 : 0);
+  let score = 0.1
+    + (Math.min(1, Math.max(0, summary.averageConfidence)) * 0.25)
+    + (Math.min(1, summary.evidenceCount / 4) * 0.15)
+    + (Math.min(1, summary.distinctSessionCount / 3) * 0.15)
+    + (Math.min(1, summary.distinctContributorCount / 2) * 0.15)
+    + (Math.min(1, verifiedEvidenceCount / 2) * 0.15)
+    + (Math.min(1, Math.max(0, summary.spanDays) / 30) * 0.05);
+  if (summary.distinctContributorCount < 2 && verifiedEvidenceCount < 2) {
+    score = Math.min(score, 0.68);
+  }
+  if ((summary.contradictoryEvidenceCount ?? 0) > 0) {
+    score = Math.min(score, 0.3);
+  }
+  return Math.min(1, Math.max(0, score));
+}
+
 export function decideEnterpriseKnowledgeRetention(
   current: EnterpriseKnowledgeObservationSignals,
   summary: EnterpriseKnowledgeEvidenceSummary,
 ): EnterpriseKnowledgeRetentionDecision {
   const impact = scoreEnterpriseKnowledgeImpact(current);
+  const reliabilityScore = scoreEnterpriseKnowledgeReliability(summary);
+  const verifiedEvidenceCount = summary.verifiedEvidenceCount
+    ?? (summary.hasVerifiedEvidence ? 1 : 0);
   if ((summary.contradictoryEvidenceCount ?? 0) > 0) {
     return {
       promote: false,
       reason: 'contested',
       impactScore: impact.score,
+      reliabilityScore,
       reasons: ['相似证据存在相互冲突，需人工裁决', ...impact.reasons],
     };
   }
@@ -217,6 +250,7 @@ export function decideEnterpriseKnowledgeRetention(
       promote: false,
       reason: 'transient',
       impactScore: impact.score,
+      reliabilityScore,
       reasons: ['内容依赖当前对话或短期状态', ...impact.reasons],
     };
   }
@@ -225,14 +259,21 @@ export function decideEnterpriseKnowledgeRetention(
       promote: false,
       reason: 'incubating',
       impactScore: impact.score,
+      reliabilityScore,
       reasons: ['结论仍含未确认或待验证表述', ...impact.reasons],
     };
   }
   const eligibleCategory = current.category === 'decision'
     || current.category === 'solution'
     || current.category === 'convention';
-  const hasExplainableValidation = VERIFIED_RESULT.test(current.content)
-    || FINAL_DECISION.test(current.content);
+  const toolValidatedSolution = current.category === 'solution'
+    && current.verified
+    && verifiedEvidenceCount >= 2
+    && VERIFIED_RESULT.test(current.content);
+  const corroboratedOrganizationDecision = (
+    current.category === 'decision' || current.category === 'convention'
+  ) && FINAL_DECISION.test(current.content)
+    && summary.distinctContributorCount >= 2;
   if (
     eligibleCategory
     && impact.score >= 0.82
@@ -240,41 +281,49 @@ export function decideEnterpriseKnowledgeRetention(
     && summary.evidenceCount >= 2
     && summary.distinctSessionCount >= 2
     && (summary.distinctContributorCount >= 2 || summary.spanDays >= 1)
-    && summary.hasVerifiedEvidence
-    && hasExplainableValidation
+    && (toolValidatedSolution || corroboratedOrganizationDecision)
+    && reliabilityScore >= (toolValidatedSolution ? 0.78 : 0.64)
   ) {
     return {
       promote: true,
-      reason: 'high_impact_verified',
+      reason: toolValidatedSolution ? 'high_impact_verified' : 'governed_decision',
       impactScore: impact.score,
+      reliabilityScore,
       reasons: impact.reasons,
     };
   }
   if (
     current.category !== 'preference'
+    && (current.category !== 'research' || verifiedEvidenceCount >= 2)
     && summary.evidenceCount >= 3
     && summary.distinctSessionCount >= 3
+    && summary.distinctContributorCount >= 2
     && summary.spanDays >= 7
     && summary.averageConfidence >= 0.72
+    && reliabilityScore >= 0.72
   ) {
     return {
       promote: true,
       reason: 'long_term_recurrence',
       impactScore: Math.max(impact.score, summary.maximumImpactScore),
+      reliabilityScore,
       reasons: ['跨时间反复出现', ...impact.reasons],
     };
   }
   if (
     current.category !== 'preference'
+    && (current.category !== 'research' || verifiedEvidenceCount >= 2)
     && summary.evidenceCount >= 3
     && summary.distinctSessionCount >= 3
     && summary.distinctContributorCount >= 2
     && summary.averageConfidence >= 0.75
+    && reliabilityScore >= 0.7
   ) {
     return {
       promote: true,
       reason: 'cross_member_corroboration',
       impactScore: Math.max(impact.score, summary.maximumImpactScore),
+      reliabilityScore,
       reasons: ['多名员工独立印证', ...impact.reasons],
     };
   }
@@ -282,6 +331,7 @@ export function decideEnterpriseKnowledgeRetention(
     promote: false,
     reason: 'incubating',
     impactScore: impact.score,
+    reliabilityScore,
     reasons: impact.reasons,
   };
 }
@@ -357,6 +407,7 @@ export function synthesizeEnterpriseKnowledgeDocument(
     `${summary.distinctContributorCount} 名贡献者`,
     `观察跨度 ${Math.max(0, Math.round(summary.spanDays))} 天`,
     summary.hasVerifiedEvidence ? '包含已验证结果' : '尚无独立验证结果',
+    `组织可靠度 ${Math.round(scoreEnterpriseKnowledgeReliability(summary) * 100)}%`,
   ].join('；');
   const sections = [
     `## 长期结论\n${headline}。`,
@@ -373,6 +424,7 @@ export function enterpriseKnowledgeRetentionReasonLabel(
   reason: EnterpriseKnowledgeRetentionReason,
 ): string {
   if (reason === 'high_impact_verified') return '高影响且已跨会话独立验证';
+  if (reason === 'governed_decision') return '组织制度经跨成员确认';
   if (reason === 'long_term_recurrence') return '跨时间反复出现';
   if (reason === 'cross_member_corroboration') return '多名员工独立印证';
   if (reason === 'contested') return '证据存在冲突，需人工裁决';

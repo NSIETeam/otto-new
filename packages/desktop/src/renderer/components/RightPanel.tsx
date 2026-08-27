@@ -51,6 +51,7 @@ interface EnterpriseKnowledgeItem {
   evidenceCount?: number;
   distinctSessionCount?: number;
   distinctContributorCount?: number;
+  verifiedEvidenceCount?: number;
   firstObservedAt?: string | null;
   lastObservedAt?: string | null;
 }
@@ -93,6 +94,67 @@ function formatEnterpriseMemoryDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '时间未知';
   return date.toLocaleDateString('zh-CN');
+}
+
+interface EnterpriseMemorySection {
+  title: string;
+  body: string;
+}
+
+function parseEnterpriseMemorySections(content: string): EnterpriseMemorySection[] {
+  const sections: EnterpriseMemorySection[] = [];
+  let current: EnterpriseMemorySection | null = null;
+  for (const line of content.split(/\r?\n/u)) {
+    const heading = line.match(/^##\s+(.+)$/u);
+    if (heading) {
+      if (current) sections.push({ ...current, body: current.body.trim() });
+      current = { title: heading[1].trim(), body: '' };
+    } else if (current) {
+      current.body += `${current.body ? '\n' : ''}${line.replace(/^\s*-\s+/u, '• ')}`;
+    }
+  }
+  if (current) sections.push({ ...current, body: current.body.trim() });
+  return sections.filter((section) => section.title && section.body);
+}
+
+function enterpriseMemoryFreshness(item: EnterpriseKnowledgeItem): {
+  level: 'current' | 'aging' | 'stale';
+  label: string;
+} | null {
+  if (item.sourceType !== 'auto_capture') return null;
+  const reference = new Date(
+    item.lastObservedAt || item.reviewedAt || item.updatedAt || item.createdAt,
+  ).getTime();
+  if (!Number.isFinite(reference)) return null;
+  const ageDays = Math.max(0, (Date.now() - reference) / 86_400_000);
+  if (ageDays > 180) return { level: 'stale', label: '需要重新验证' };
+  if (ageDays > 90) return { level: 'aging', label: '建议关注时效' };
+  return { level: 'current', label: '近期有印证' };
+}
+
+function EnterpriseMemoryContent({ content }: { content: string }): React.JSX.Element {
+  const sections = parseEnterpriseMemorySections(content);
+  if (sections.length === 0) return <p>{content}</p>;
+  return (
+    <div className="otto-enterprise-memory-card__sections">
+      {sections.map((section) => (
+        <section key={section.title}>
+          <strong>{section.title}</strong>
+          <p>{section.body}</p>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function EnterpriseMemoryFreshnessBadge({
+  item,
+}: {
+  item: EnterpriseKnowledgeItem;
+}): React.JSX.Element | null {
+  const freshness = enterpriseMemoryFreshness(item);
+  if (!freshness) return null;
+  return <span className={`is-${freshness.level}`}>{freshness.label}</span>;
 }
 
 const TOOL_COMMANDS = SLASH_COMMANDS.filter((command) => TOOL_COMMAND_IDS.has(command.id));
@@ -222,6 +284,7 @@ export function RightPanel({
     title: string;
     category: string;
     content: string;
+    resolveConflict?: boolean;
   } | null>(null);
   const [knowledgeRevisions, setKnowledgeRevisions] = useState<Record<
     string,
@@ -452,14 +515,19 @@ export function RightPanel({
           category,
           content,
           confidence: 0.95,
-          changeNote: '管理员在企业知识面板中修订',
+          changeNote: knowledgeEditor.resolveConflict
+            ? '管理员核对证据并裁决冲突'
+            : '管理员在企业知识面板中修订',
+          resolveConflict: knowledgeEditor.resolveConflict,
         });
         setKnowledgeRevisions((current) => {
           const next = { ...current };
           delete next[knowledgeEditor.id!];
           return next;
         });
-        setKnowledgeNotice('知识已修订，新版本立即用于后续检索。');
+        setKnowledgeNotice(knowledgeEditor.resolveConflict
+          ? '冲突已裁决并形成新版本，请再次确认后发布。'
+          : '知识已修订，新版本立即用于后续检索。');
       } else {
         const uniquePart = globalThis.crypto?.randomUUID?.() || `${Date.now()}`;
         await window.otto.enterpriseKnowledgeRecord({
@@ -1046,16 +1114,23 @@ export function RightPanel({
                       <span>{item.category}</span>
                       <span>{item.status === 'pending_review' ? '待审核' : '已发布'}</span>
                       <span>v{item.version || 1}</span>
-                      <span>{Math.round(item.confidence * 100)}%</span>
+                      <span>
+                        {item.sourceType === 'auto_capture' ? '可靠度 ' : '置信度 '}
+                        {Math.round(item.confidence * 100)}%
+                      </span>
                     </div>
                     {(item.evidenceCount ?? 0) > 0 ? (
                       <div className="otto-enterprise-memory-card__evidence">
                         <strong>{item.evidenceCount} 条证据</strong>
                         <span>{item.distinctSessionCount || 0} 个会话</span>
                         <span>{item.distinctContributorCount || 0} 名贡献者</span>
+                        {(item.verifiedEvidenceCount ?? 0) > 0 ? (
+                          <span>{item.verifiedEvidenceCount} 条已验证</span>
+                        ) : null}
                         {item.lastObservedAt ? (
                           <span>最近验证 {formatEnterpriseMemoryDate(item.lastObservedAt)}</span>
                         ) : null}
+                        <EnterpriseMemoryFreshnessBadge item={item} />
                       </div>
                     ) : item.sourceType === 'manual' ? (
                       <div className="otto-enterprise-memory-card__evidence">
@@ -1067,7 +1142,7 @@ export function RightPanel({
                         {item.title}
                       </strong>
                     ) : null}
-                    <p>{item.content}</p>
+                    <EnterpriseMemoryContent content={item.content} />
                     {item.sourceLabel || item.sourceId ? (
                       <div className="otto-enterprise-memory-card__source">
                         来源：{item.sourceLabel || item.sourceId}
@@ -1082,9 +1157,15 @@ export function RightPanel({
                         {item.status === 'pending_review' ? (
                           <button
                             type="button"
-                            disabled={knowledgeBusyId === item.id}
+                            disabled={knowledgeBusyId === item.id
+                              || Boolean(item.sourceLabel?.includes('证据存在冲突'))}
                             onClick={() => void reviewKnowledge(item.id, 'approve')}
-                          >发布</button>
+                            title={item.sourceLabel?.includes('证据存在冲突')
+                              ? '请先修订内容并完成冲突裁决'
+                              : undefined}
+                          >{item.sourceLabel?.includes('证据存在冲突')
+                              ? '先裁决冲突'
+                              : '发布'}</button>
                         ) : null}
                         <button
                           type="button"
@@ -1094,6 +1175,7 @@ export function RightPanel({
                             title: item.title || item.category,
                             category: item.category,
                             content: item.content,
+                            resolveConflict: item.sourceLabel?.includes('证据存在冲突'),
                           })}
                         >修订</button>
                         <button

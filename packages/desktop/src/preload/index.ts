@@ -451,13 +451,16 @@ export interface EnterpriseKnowledgeRecordResult {
       | 'contested'
       | 'long_term_recurrence'
       | 'cross_member_corroboration'
+      | 'governed_decision'
       | 'high_impact_verified';
     evidenceCount: number;
     distinctSessionCount: number;
     distinctContributorCount: number;
     spanDays: number;
     contradictoryEvidenceCount?: number;
+    verifiedEvidenceCount?: number;
     impactScore: number;
+    reliabilityScore: number;
   };
 }
 
@@ -488,6 +491,7 @@ export interface EnterpriseKnowledgeItem {
   evidenceCount?: number;
   distinctSessionCount?: number;
   distinctContributorCount?: number;
+  verifiedEvidenceCount?: number;
   firstObservedAt?: string | null;
   lastObservedAt?: string | null;
 }
@@ -1609,6 +1613,7 @@ export interface OttoBridge {
       content: string;
       confidence?: number;
       changeNote?: string;
+      resolveConflict?: boolean;
     },
   ): Promise<EnterpriseKnowledgeItem>;
   enterpriseKnowledgeRevisions(

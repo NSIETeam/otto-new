@@ -8,6 +8,7 @@ import {
   enterpriseKnowledgeContradictoryEvidenceCount,
   enterpriseKnowledgeObservationSimilarity,
   normalizeEnterpriseKnowledgeAtom,
+  scoreEnterpriseKnowledgeReliability,
   synthesizeEnterpriseKnowledgeDocument,
 } from './knowledgeRetentionPolicy.js';
 
@@ -19,6 +20,7 @@ const emptySummary = {
   averageConfidence: 0.9,
   maximumImpactScore: 0.9,
   hasVerifiedEvidence: true,
+  verifiedEvidenceCount: 1,
 };
 
 describe('enterprise knowledge retention policy', () => {
@@ -43,6 +45,7 @@ describe('enterprise knowledge retention policy', () => {
       evidenceCount: 2,
       distinctSessionCount: 2,
       distinctContributorCount: 2,
+      verifiedEvidenceCount: 2,
     })).toMatchObject({
       promote: true,
       reason: 'high_impact_verified',
@@ -65,19 +68,41 @@ describe('enterprise knowledge retention policy', () => {
 
   it('promotes knowledge repeated across sessions and time', () => {
     expect(decideEnterpriseKnowledgeRetention({
-      category: 'research',
+      category: 'convention',
       content: '客户验收前需要先完成安全扫描。',
       confidence: 0.78,
       verified: false,
     }, {
       evidenceCount: 4,
       distinctSessionCount: 3,
-      distinctContributorCount: 1,
+      distinctContributorCount: 2,
       spanDays: 9,
       averageConfidence: 0.79,
       maximumImpactScore: 0.68,
       hasVerifiedEvidence: false,
+      verifiedEvidenceCount: 0,
     })).toMatchObject({ promote: true, reason: 'long_term_recurrence' });
+  });
+
+  it('does not turn one employee repeating an unverified claim into organization truth', () => {
+    const summary = {
+      evidenceCount: 8,
+      distinctSessionCount: 8,
+      distinctContributorCount: 1,
+      spanDays: 45,
+      averageConfidence: 0.92,
+      maximumImpactScore: 0.8,
+      hasVerifiedEvidence: false,
+      verifiedEvidenceCount: 0,
+      contradictoryEvidenceCount: 0,
+    };
+    expect(scoreEnterpriseKnowledgeReliability(summary)).toBeLessThan(0.7);
+    expect(decideEnterpriseKnowledgeRetention({
+      category: 'research',
+      content: '该客户一直要求使用蓝色交付模板。',
+      confidence: 0.92,
+      verified: false,
+    }, summary)).toMatchObject({ promote: false, reason: 'incubating' });
   });
 
   it('never promotes a personal preference merely because one person repeats it', () => {

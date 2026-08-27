@@ -214,13 +214,16 @@ export interface EnterpriseKnowledgeRecordResult {
       | 'contested'
       | 'long_term_recurrence'
       | 'cross_member_corroboration'
+      | 'governed_decision'
       | 'high_impact_verified';
     evidenceCount: number;
     distinctSessionCount: number;
     distinctContributorCount: number;
     spanDays: number;
     contradictoryEvidenceCount?: number;
+    verifiedEvidenceCount?: number;
     impactScore: number;
+    reliabilityScore: number;
   };
 }
 
@@ -251,6 +254,7 @@ export interface EnterpriseKnowledgeItem {
   evidenceCount?: number;
   distinctSessionCount?: number;
   distinctContributorCount?: number;
+  verifiedEvidenceCount?: number;
   firstObservedAt?: string | null;
   lastObservedAt?: string | null;
 }
@@ -352,6 +356,8 @@ interface EnterpriseKnowledgeRow {
   distinctSessionCount?: number;
   distinct_contributor_count?: number;
   distinctContributorCount?: number;
+  verified_evidence_count?: number;
+  verifiedEvidenceCount?: number;
   first_observed_at?: string | null;
   firstObservedAt?: string | null;
   last_observed_at?: string | null;
@@ -418,6 +424,12 @@ function mapEnterpriseKnowledgeItem(
       ? {
           distinctContributorCount:
             item.distinctContributorCount ?? item.distinct_contributor_count,
+        }
+      : {}),
+    ...((item.verifiedEvidenceCount ?? item.verified_evidence_count) !== undefined
+      ? {
+          verifiedEvidenceCount:
+            item.verifiedEvidenceCount ?? item.verified_evidence_count,
         }
       : {}),
     ...((item.firstObservedAt ?? item.first_observed_at) !== undefined
@@ -2542,6 +2554,7 @@ export class EnterpriseClient {
       content: string;
       confidence?: number;
       changeNote?: string;
+      resolveConflict?: boolean;
     },
   ): Promise<EnterpriseKnowledgeItem> {
     if (!this.token) throw new Error('登录已失效，请重新登录');

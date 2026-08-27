@@ -398,7 +398,9 @@ export async function handleMemberWorkflowRoute({
           distinctContributorCount: observed.distinctContributorCount,
           spanDays: observed.spanDays,
           contradictoryEvidenceCount: observed.contradictoryEvidenceCount,
+          verifiedEvidenceCount: observed.verifiedEvidenceCount,
           impactScore: observed.impactScore,
+          reliabilityScore: observed.reliabilityScore,
         },
       });
       return true;
@@ -484,6 +486,7 @@ export async function handleMemberWorkflowRoute({
         : undefined,
       changedBy: memberAccount!.name,
       changeNote: typeof body.changeNote === 'string' ? body.changeNote : undefined,
+      resolveConflict: body.resolveConflict === true,
     });
     if (!knowledge) {
       sendJSON(res, 404, { error: 'knowledge not found' });

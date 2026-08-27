@@ -9099,6 +9099,14 @@ h6.otto-prose__h {
 .otto-enterprise-memory-card__source { margin: -2px 0 8px; color: var(--otto-text-tertiary); font-size: 8.5px; line-height: 1.4; overflow-wrap: anywhere; }
 .otto-enterprise-memory-card__evidence { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; color: var(--otto-text-tertiary); font-size: 8.5px; }
 .otto-enterprise-memory-card__evidence strong { color: var(--otto-accent); font-weight: 600; }
+.otto-enterprise-memory-card__evidence .is-current { color: #2d7a55; }
+.otto-enterprise-memory-card__evidence .is-aging { color: #9a681b; }
+.otto-enterprise-memory-card__evidence .is-stale { color: #b04343; font-weight: 650; }
+.otto-enterprise-memory-card__sections { display: grid; gap: 7px; margin: 8px 0; }
+.otto-enterprise-memory-card__sections section { border-left: 2px solid var(--otto-border-strong); padding-left: 8px; }
+.otto-enterprise-memory-card__sections section:first-child { border-left-color: var(--otto-accent); }
+.otto-enterprise-memory-card__sections section > strong { display: block; color: var(--otto-text-secondary); font-size: 9px; }
+.otto-enterprise-memory-card__sections section > p { margin: 2px 0 0; }
 .otto-enterprise-memory-card__foot { justify-content: space-between; }
 .otto-enterprise-memory-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; margin-top: 10px; }
 .otto-enterprise-memory-search input { min-width: 0; height: 30px; border: 1px solid var(--otto-border); border-radius: 6px; background: var(--otto-bg); color: var(--otto-text); padding: 0 9px; font: inherit; font-size: 10px; outline: none; }

@@ -623,15 +623,16 @@ describe('RightPanel fixed Agent catalog', () => {
         sourceId: 's1',
         department: '研发部',
         category: 'solution',
-        content: '客户部署必须先完成企业邀请码校验。',
+        content: '## 长期结论\n客户部署必须先完成企业邀请码校验。\n\n## 适用范围\n研发部。',
         contributor: 'Felix',
         confidence: 0.86,
         sourceType: 'auto_capture',
         evidenceCount: 4,
         distinctSessionCount: 3,
         distinctContributorCount: 2,
-        lastObservedAt: '2026-07-20T04:00:00.000Z',
-        createdAt: '2026-07-20T04:00:00.000Z',
+        verifiedEvidenceCount: 2,
+        lastObservedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
       },
     ]);
 
@@ -647,13 +648,17 @@ describe('RightPanel fixed Agent catalog', () => {
     fireEvent.click(await screen.findByRole('tab', { name: '企业记忆' }));
 
     expect(await screen.findByText('客户部署必须先完成企业邀请码校验。')).toBeTruthy();
+    expect(screen.getByText('长期结论')).toBeTruthy();
+    expect(screen.getByText('适用范围')).toBeTruthy();
     expect(screen.getByText('研发部')).toBeTruthy();
     expect(screen.getByText('solution')).toBeTruthy();
-    expect(screen.getByText('86%')).toBeTruthy();
+    expect(screen.getByText('可靠度 86%')).toBeTruthy();
     expect(screen.getByText('Felix')).toBeTruthy();
     expect(screen.getByText('4 条证据')).toBeTruthy();
     expect(screen.getByText('3 个会话')).toBeTruthy();
     expect(screen.getByText('2 名贡献者')).toBeTruthy();
+    expect(screen.getByText('2 条已验证')).toBeTruthy();
+    expect(screen.getByText('近期有印证')).toBeTruthy();
   });
 
   it('separates approved enterprise knowledge from its revision timeline', async () => {
@@ -788,6 +793,52 @@ describe('RightPanel fixed Agent catalog', () => {
     fireEvent.click(await screen.findByRole('button', { name: '版本' }));
     expect(await screen.findByText('首次发布')).toBeTruthy();
     expect(bridge.enterpriseKnowledgeRevisions).toHaveBeenCalledWith('12');
+  });
+
+  it('requires an administrator revision before a contested candidate can be published', async () => {
+    const bridge = installBridge([], true);
+    bridge.enterpriseKnowledgeList.mockResolvedValue([{
+      id: 'conflict-1',
+      organizationId: 'org-1',
+      sourceId: 'retention:conflict-1',
+      title: '生产环境认证规则',
+      department: '安全部',
+      category: 'convention',
+      content: '## 长期结论\n生产环境必须启用双因素认证。',
+      contributor: null,
+      confidence: 0.3,
+      sourceType: 'auto_capture',
+      sourceLabel: '证据存在冲突，需人工裁决；2 条冲突证据，禁止自动发布',
+      status: 'pending_review',
+      version: 2,
+      createdAt: new Date().toISOString(),
+    }]);
+
+    render(
+      <RightPanel
+        busy={false}
+        mode="enterprise"
+        enterpriseRole="company_admin"
+        workspace={enterpriseWorkspace()}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('tab', { name: '企业记忆' }));
+    const blockedPublish = await screen.findByRole('button', { name: '先裁决冲突' });
+    expect((blockedPublish as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: '修订' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '知识内容' }), {
+      target: { value: '生产环境必须启用双因素认证；例外由安全负责人书面批准。' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存修订' }));
+
+    await waitFor(() => expect(bridge.enterpriseKnowledgeRevise).toHaveBeenCalledWith(
+      'conflict-1',
+      expect.objectContaining({
+        resolveConflict: true,
+        changeNote: '管理员核对证据并裁决冲突',
+      }),
+    ));
   });
 
   it('组织未启用知识功能时隐藏企业记忆且不调用 list', async () => {

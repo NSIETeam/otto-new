@@ -158,6 +158,29 @@ const HIGH_IMPACT_SIGNALS = [
   '金额', '成本', '收入', '损失', 'sla', '生产环境',
 ];
 
+function toolSupportsKnowledgeVerification(
+  message: SimpleMessage,
+  category: KnowledgeCandidate['category'],
+): boolean {
+  if (message.role !== 'tool' || message.toolSuccess !== true) return false;
+  const name = (message.toolName ?? '').toLowerCase();
+  const output = message.text.toLowerCase();
+  if (category === 'solution') {
+    if (/(?:exec|shell|command|test|build|lint|deploy|http|browser|database|write|patch)/u.test(name)) {
+      return true;
+    }
+    return VERIFIED_RESULT_SIGNALS.some((signal) => output.includes(signal.toLowerCase()))
+      || /(?:tests?|测试|验证).{0,16}(?:passed|通过|成功)/u.test(output);
+  }
+  if (category === 'research') {
+    return /(?:read|search|fetch|open|browser|query|database)/u.test(name)
+      || output.trim().length > 0;
+  }
+  return /(?:document|policy|approval|database|query)/u.test(name)
+    || VERIFIED_RESULT_SIGNALS.some((signal) => output.includes(signal.toLowerCase()))
+    || /(?:tests?|测试|验证).{0,16}(?:passed|通过|成功)/u.test(output);
+}
+
 // ---------------------------------------------------------------------------
 // KnowledgeCapture 类
 // ---------------------------------------------------------------------------
@@ -255,10 +278,6 @@ export class KnowledgeCapture {
     sessionId: string,
   ): KnowledgeCandidate[] {
     const candidates: KnowledgeCandidate[] = [];
-    const hasSuccessfulTool = messages.some(
-      (message) => message.role === 'tool' && message.toolSuccess === true,
-    );
-
     // 收集所有 assistant 回复（整段）
     const assistantBlocks: Array<{ text: string; index: number }> = [];
     for (let i = 0; i < messages.length; i++) {
@@ -270,25 +289,44 @@ export class KnowledgeCapture {
 
     for (const block of assistantBlocks) {
       const text = block.text;
-      const extracted = this.tryExtract(text, sessionId, hasSuccessfulTool);
+      let turnStart = -1;
+      for (let index = block.index - 1; index >= 0; index -= 1) {
+        if (messages[index].role === 'user') {
+          turnStart = index;
+          break;
+        }
+      }
+      // 验证证据必须属于当前用户轮次。早先轮次里一次无关的工具成功，不能给后续结论背书。
+      const turnLocalTools = messages
+        .slice(turnStart + 1, block.index)
+        .filter((message) => message.role === 'tool' && message.toolSuccess === true);
+      const hasTurnLocalSuccessfulTool = turnLocalTools.length > 0;
+      const extracted = this.tryExtract(text, sessionId, hasTurnLocalSuccessfulTool);
       for (const entry of extracted) {
         const verifiedByLanguage = VERIFIED_RESULT_SIGNALS.some((signal) =>
           text.toLowerCase().includes(signal.toLowerCase()));
         const highImpactHits = HIGH_IMPACT_SIGNALS.filter((signal) =>
           text.toLowerCase().includes(signal.toLowerCase()));
-        const verified = hasSuccessfulTool || verifiedByLanguage;
+        const hasTurnLocalValidation = turnLocalTools.some((message) =>
+          toolSupportsKnowledgeVerification(message, entry.category));
+        const verified = hasTurnLocalValidation && verifiedByLanguage;
         const impactScore = Math.min(
           1,
           0.45 + (verified ? 0.2 : 0) + Math.min(0.3, highImpactHits.length * 0.1),
         );
         candidates.push({
           ...entry,
-          confidence: verified ? Math.max(entry.confidence, 0.85) : entry.confidence,
+          confidence: verified
+            ? Math.max(entry.confidence, 0.85)
+            : hasTurnLocalValidation
+              ? Math.max(entry.confidence, 0.82)
+              : entry.confidence,
           verified,
           impactScore,
           significanceSignals: [
-            ...(hasSuccessfulTool ? ['successful_tool_result'] : []),
-            ...(verifiedByLanguage ? ['verified_result'] : []),
+            ...(hasTurnLocalValidation ? ['successful_tool_result'] : []),
+            ...(verifiedByLanguage ? ['claimed_verified_result'] : []),
+            ...(verified ? ['tool_corroborated_result'] : []),
             ...highImpactHits.slice(0, 4).map((signal) => `impact:${signal}`),
           ],
         });

@@ -48,6 +48,7 @@ export interface EnterpriseKnowledgeEntryView {
   evidence_count?: number;
   distinct_session_count?: number;
   distinct_contributor_count?: number;
+  verified_evidence_count?: number;
   first_observed_at?: string | null;
   last_observed_at?: string | null;
 }
@@ -109,6 +110,8 @@ export interface ReviseEnterpriseKnowledgeInput {
   sourceLabel?: string | null;
   changedBy: string;
   changeNote?: string;
+  /** 管理员已检查冲突证据，并以本次人工修订作为裁决结论。 */
+  resolveConflict?: boolean;
 }
 
 function requireOrganization(store: EnterpriseKnowledgeRepositoryStore, value?: string): string {
@@ -413,6 +416,10 @@ const KNOWLEDGE_WITH_EVIDENCE_SELECT = `SELECT k.*,
     FROM knowledge_retention_evidence e
     WHERE e.organization_id = k.organization_id AND e.promoted_knowledge_id = k.id), 0)
     AS distinct_contributor_count,
+  COALESCE((SELECT SUM(e.verified)
+    FROM knowledge_retention_evidence e
+    WHERE e.organization_id = k.organization_id AND e.promoted_knowledge_id = k.id), 0)
+    AS verified_evidence_count,
   (SELECT MIN(e.observed_at) FROM knowledge_retention_evidence e
     WHERE e.organization_id = k.organization_id AND e.promoted_knowledge_id = k.id)
     AS first_observed_at,
@@ -658,6 +665,12 @@ export function reviewEnterpriseKnowledgeInRepository(
     if (input.action === 'approve' && entry.status !== 'pending_review') {
       throw new Error('only pending knowledge can be approved');
     }
+    if (
+      input.action === 'approve'
+      && entry.source_label?.includes('证据存在冲突')
+    ) {
+      throw new Error('contested knowledge must be resolved before approval');
+    }
     let canonicalSourceId = entry.source_id;
     if (input.action === 'approve' && entry.supersedes_id) {
       const superseded = getEntry(database, entry.supersedes_id, organizationId);
@@ -728,9 +741,12 @@ export function reviseEnterpriseKnowledgeInRepository(
     const confidence = input.confidence === undefined
       ? current.confidence
       : normalizeConfidence(input.confidence);
-    const sourceLabel = input.sourceLabel === undefined
-      ? current.source_label
-      : normalizeOptionalText(
+    const sourceLabel = input.resolveConflict === true
+      && current.source_label?.includes('证据存在冲突')
+      ? '管理员已裁决冲突；以本次人工修订结论为准'
+      : input.sourceLabel === undefined
+        ? current.source_label
+        : normalizeOptionalText(
           input.sourceLabel,
           ENTERPRISE_KNOWLEDGE_MAX_SOURCE_LABEL_LENGTH,
           'knowledge source label',

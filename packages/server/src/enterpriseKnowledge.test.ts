@@ -46,7 +46,7 @@ describe('enterprise knowledge kernel', () => {
       const ordinary = {
         organizationId: 'org-a',
         department: '客服部',
-        category: 'research',
+        category: 'convention',
         content: '客户验收前需要先核对交付清单。',
         tags: ['acceptance'],
         contributor: '张三',
@@ -99,6 +99,9 @@ describe('enterprise knowledge kernel', () => {
       expect(promoted.knowledge?.content).toContain('## 长期结论');
       expect(promoted.knowledge?.content).toContain('## 形成依据');
       expect(promoted.knowledge?.content).toContain('3 条独立证据');
+      expect(promoted.reliabilityScore).toBeGreaterThanOrEqual(0.7);
+      expect(promoted.knowledge!.confidence).toBe(promoted.reliabilityScore);
+      expect(promoted.knowledge!.confidence).toBeLessThan(ordinary.confidence);
 
       const deep = knowledge.observeKnowledge({
         organizationId: 'org-a',
@@ -134,8 +137,11 @@ describe('enterprise knowledge kernel', () => {
         outcome: 'promoted',
         reason: 'high_impact_verified',
         evidenceCount: 2,
+        verifiedEvidenceCount: 2,
         knowledge: expect.objectContaining({ status: 'pending_review' }),
       });
+      expect(corroboratedDeep.reliabilityScore).toBeGreaterThanOrEqual(0.78);
+      expect(corroboratedDeep.knowledge!.confidence).toBe(corroboratedDeep.reliabilityScore);
       const refinedDeep = knowledge.observeKnowledge({
         organizationId: 'org-a',
         department: '研发部',
@@ -210,6 +216,74 @@ describe('enterprise knowledge kernel', () => {
         contradictoryEvidenceCount: 3,
       });
       expect(knowledge.getKnowledgeForAdministration('', undefined, 'org-a')).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('requires an explicit administrator resolution before publishing a contested candidate', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+
+    try {
+      const base = {
+        organizationId: 'org-a',
+        department: '安全部',
+        category: 'convention',
+        confidence: 0.92,
+        verified: true,
+      };
+      knowledge.observeKnowledge({
+        ...base,
+        content: '生产环境必须启用双因素认证并完成安全验证。',
+        contributor: '张三',
+        contributorAccountId: 'account-1',
+        sourceId: 'mfa-1',
+        sourceSessionId: 'mfa-session-1',
+      });
+      const promoted = knowledge.observeKnowledge({
+        ...base,
+        content: '安全制度要求生产环境必须启用双因素认证，验证通过。',
+        contributor: '李四',
+        contributorAccountId: 'account-2',
+        sourceId: 'mfa-2',
+        sourceSessionId: 'mfa-session-2',
+      });
+      expect(promoted).toMatchObject({ promoted: true });
+
+      const contested = knowledge.observeKnowledge({
+        ...base,
+        content: '生产环境禁止启用双因素认证。',
+        contributor: '王五',
+        contributorAccountId: 'account-3',
+        sourceId: 'mfa-3',
+        sourceSessionId: 'mfa-session-3',
+      });
+      expect(contested).toMatchObject({ reason: 'contested' });
+      expect(contested.knowledge?.source_label).toContain('证据存在冲突');
+      expect(() => knowledge.reviewKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        action: 'approve',
+        reviewer: '管理员',
+      })).toThrow('contested knowledge must be resolved before approval');
+
+      const resolved = knowledge.reviseKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        title: '生产环境双因素认证规则',
+        content: '生产环境必须启用双因素认证；例外情况由安全负责人书面批准。',
+        changedBy: '管理员',
+        changeNote: '核对安全制度后裁决冲突',
+        resolveConflict: true,
+      });
+      expect(resolved?.source_label).toContain('管理员已裁决冲突');
+      expect(() => knowledge.reviewKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        action: 'approve',
+        reviewer: '管理员',
+      })).not.toThrow();
     } finally {
       database.close();
     }

@@ -27,6 +27,21 @@ describe('enterprise knowledge prompt context', () => {
     expect(context).not.toContain('不能进入回答');
   });
 
+  it('marks stale auto-captured memory as historical instead of silently treating it as current', () => {
+    const context = buildEnterpriseKnowledgePromptContext([{
+      id: 'stale-1', organizationId: 'org-1', sourceId: 'retention-1', title: '旧部署流程',
+      department: '研发部', category: 'solution', content: '生产部署使用旧网关。',
+      contributor: null, confidence: 0.74, status: 'active', version: 2,
+      sourceType: 'auto_capture', evidenceCount: 4, distinctSessionCount: 4,
+      distinctContributorCount: 2, verifiedEvidenceCount: 1,
+      lastObservedAt: '2020-01-01T00:00:00.000Z', createdAt: '2020-01-01T00:00:00.000Z',
+    }]);
+
+    expect(context).toContain('组织可靠度 74%');
+    expect(context).toContain('超过 180 天未获新证据');
+    expect(context).toContain('回答前必须重新确认');
+  });
+
   it('bounds context size', () => {
     const context = buildEnterpriseKnowledgePromptContext(Array.from({ length: 20 }, (_, index) => ({
       id: String(index), organizationId: 'org-1', sourceId: null, department: null,

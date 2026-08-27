@@ -138,6 +138,7 @@ describe('enterprise knowledge composition', () => {
         evidence_count: 2,
         distinct_session_count: 2,
         distinct_contributor_count: 2,
+        verified_evidence_count: 2,
       });
     } finally {
       database.close();

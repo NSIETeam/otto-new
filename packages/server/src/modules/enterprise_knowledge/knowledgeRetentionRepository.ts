@@ -47,7 +47,9 @@ export interface ObserveEnterpriseKnowledgeResult {
   distinctContributorCount: number;
   spanDays: number;
   contradictoryEvidenceCount: number;
+  verifiedEvidenceCount: number;
   impactScore: number;
+  reliabilityScore: number;
   knowledge: EnterpriseKnowledgeEntryView | null;
 }
 
@@ -65,6 +67,7 @@ interface EvidenceAggregateRow {
   average_confidence: number;
   maximum_impact_score: number;
   has_verified_evidence: number;
+  verified_evidence_count: number;
   promoted_knowledge_id: number | null;
 }
 
@@ -241,6 +244,7 @@ export function observeEnterpriseKnowledgeInRepository(
           AVG(confidence) AS average_confidence,
           MAX(impact_score) AS maximum_impact_score,
           MAX(verified) AS has_verified_evidence,
+          SUM(verified) AS verified_evidence_count,
           MAX(promoted_knowledge_id) AS promoted_knowledge_id
        FROM knowledge_retention_evidence
        WHERE organization_id = ? AND topic_id = ?`,
@@ -260,6 +264,7 @@ export function observeEnterpriseKnowledgeInRepository(
       averageConfidence: Number(aggregate.average_confidence || 0),
       maximumImpactScore: Number(aggregate.maximum_impact_score || 0),
       hasVerifiedEvidence: Number(aggregate.has_verified_evidence || 0) === 1,
+      verifiedEvidenceCount: Number(aggregate.verified_evidence_count || 0),
       contradictoryEvidenceCount: enterpriseKnowledgeContradictoryEvidenceCount(
         topicEvidence.map((evidence) => evidence.content),
       ),
@@ -296,6 +301,7 @@ export function observeEnterpriseKnowledgeInRepository(
         reason: decision.reason,
         ...summary,
         impactScore: decision.impactScore,
+        reliabilityScore: decision.reliabilityScore,
         knowledge,
       };
     }
@@ -332,7 +338,7 @@ export function observeEnterpriseKnowledgeInRepository(
           content: synthesized.content,
           contributor: representative.contributor ?? contributor ?? undefined,
           contributorAccountId: representative.contributor_account_id,
-          confidence: Math.max(representative.confidence, summary.averageConfidence),
+          confidence: decision.reliabilityScore,
           sourceType: 'auto_capture',
           sourceLabel,
           status: 'pending_review',
@@ -350,6 +356,7 @@ export function observeEnterpriseKnowledgeInRepository(
         reason: decision.reason,
         ...summary,
         impactScore: decision.impactScore,
+        reliabilityScore: decision.reliabilityScore,
         knowledge,
       };
     }
@@ -362,7 +369,7 @@ export function observeEnterpriseKnowledgeInRepository(
       content: synthesized.content,
       contributor: representative.contributor ?? contributor ?? undefined,
       contributorAccountId: representative.contributor_account_id,
-      confidence: Math.max(representative.confidence, summary.averageConfidence),
+      confidence: decision.reliabilityScore,
       sourceType: 'auto_capture',
       sourceLabel,
       status: 'pending_review',
@@ -377,6 +384,7 @@ export function observeEnterpriseKnowledgeInRepository(
       reason: decision.reason,
       ...summary,
       impactScore: decision.impactScore,
+      reliabilityScore: decision.reliabilityScore,
       knowledge: saved.entry,
     };
   });

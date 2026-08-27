@@ -235,6 +235,8 @@ function repository(
     getAccount: vi.fn(async (id: string) =>
       id === peerAccount.id ? peerAccount : id === account.id ? account : null,
     ),
+    listUnreadE2eeNotifications: vi.fn(async () => []),
+    listE2eeDirectMessages: vi.fn(async () => []),
     getOrganization: vi.fn(async (id: string) =>
       id === account.organizationId
         ? {
@@ -593,6 +595,52 @@ describe('clustered PostgreSQL enterprise server', () => {
       'acc_admin',
       'acc_peer',
     ]);
+  });
+
+  it('keeps same-organization directory, feature discovery, presence, and chat in the licensed baseline', async () => {
+    const repo = repository(activeLicenseRecord({ modules: [] }));
+    const sharedState = {
+      getAccountBySession: vi.fn(async () => account),
+      touchAccountPresence: vi.fn(async () => ({
+        accountId: account.id,
+        online: true,
+        lastSeenAt: '2026-08-01T00:00:00.000Z',
+      })),
+      listAccountPresence: vi.fn(async () => []),
+    } as unknown as ClusteredEnterpriseSharedState;
+    const { baseUrl } = await listen(repo, { sharedState });
+    const headers = { authorization: 'Bearer clustered-session-token' };
+
+    for (const request of [
+      fetch(`${baseUrl}/enterprise/organization/view`, { headers }),
+      fetch(`${baseUrl}/enterprise/organization/features`, { headers }),
+      fetch(`${baseUrl}/enterprise/messages/unread`, { headers }),
+      fetch(`${baseUrl}/enterprise/presence/heartbeat`, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ clientId: 'desktop-main' }),
+      }),
+    ]) {
+      expect((await request).status).toBe(200);
+    }
+
+    repo.getOrganizationFeatures = vi.fn(async () => ({
+      enterprise_tree: true,
+      direct_messages: false,
+      atoa: true,
+      park_services: true,
+      knowledge: true,
+      skill_market: true,
+    }));
+    const disabledMessages = await fetch(
+      `${baseUrl}/enterprise/messages/unread`,
+      { headers },
+    );
+    expect(disabledMessages.status).toBe(403);
+    await expect(disabledMessages.json()).resolves.toMatchObject({
+      code: 'organization_feature_disabled',
+      feature: 'direct_messages',
+    });
   });
 
   it('serves complete versioned legal text and records exact document consent', async () => {

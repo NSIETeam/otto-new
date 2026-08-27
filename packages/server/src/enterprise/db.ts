@@ -656,6 +656,7 @@ export type OrganizationDepartmentView = IdentityOrganizationDepartmentView;
 export type OrganizationFeatures = IdentityOrganizationFeatures;
 
 export const {
+  getConfiguredOrganizationFeatures,
   getOrganizationFeatures,
   updateOrganizationFeatures,
   isOrganizationFeatureEnabled,

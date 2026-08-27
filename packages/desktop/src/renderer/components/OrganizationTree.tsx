@@ -38,6 +38,20 @@ function organizationLoadErrorMessage(error: unknown): string {
     .trim() || '服务器暂不可用，请稍后重试';
 }
 
+export function enterpriseCollaborationErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/commercial module is not entitled|commercial_module_not_entitled/i.test(message)) {
+    return '当前企业服务器尚未提供基础私聊，请联系管理员更新服务器授权配置';
+  }
+  if (/deployment license is not active|deployment_license_inactive/i.test(message)) {
+    return '企业服务器授权已失效，请联系管理员恢复授权';
+  }
+  return message
+    .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+    .replace(/^Error:\s*/i, '')
+    .trim() || '消息服务暂不可用，请稍后重试';
+}
+
 export interface EnterpriseDirectChatOpenRequest {
   peerAccountId: string;
   requestId: number;
@@ -850,7 +864,7 @@ export function DirectMessagePanel({
           }
         }
       } catch (reason) {
-        if (active) setError(reason instanceof Error ? reason.message : String(reason));
+        if (active) setError(enterpriseCollaborationErrorMessage(reason));
       }
     };
     const stopPolling = startVisiblePolling(load, DIRECT_MESSAGE_REFRESH_MS);
@@ -970,7 +984,7 @@ export function DirectMessagePanel({
       setDraft('');
       setError('');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(enterpriseCollaborationErrorMessage(reason));
     } finally {
       setAskingOwnOtto(false);
     }
@@ -987,7 +1001,7 @@ export function DirectMessagePanel({
       setDraft('');
       setError('');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(enterpriseCollaborationErrorMessage(reason));
     } finally {
       setAskingPeerOtto(false);
     }
@@ -1022,7 +1036,7 @@ export function DirectMessagePanel({
       setAttachmentError('');
       setError('');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(enterpriseCollaborationErrorMessage(reason));
     } finally {
       setSending(false);
     }
@@ -1044,7 +1058,7 @@ export function DirectMessagePanel({
       setError('');
     } catch (reason) {
       setSecurityNotice('');
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(enterpriseCollaborationErrorMessage(reason));
     } finally {
       setResettingSecurity(false);
     }

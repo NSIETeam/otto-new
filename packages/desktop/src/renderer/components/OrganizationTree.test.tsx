@@ -17,6 +17,7 @@ import type { EnterpriseAccount, EnterpriseDirectMessage } from '../../preload/i
 import {
   DirectMessagePanel,
   OrganizationTree,
+  enterpriseCollaborationErrorMessage,
   parseDirectMessageTimestamp,
 } from './OrganizationTree.js';
 
@@ -363,6 +364,12 @@ describe('OrganizationTree', () => {
       '组织信息加载失败：当前服务器版本或授权配置不支持组织架构，请联系管理员更新服务器',
     )).toBeTruthy();
     expect(screen.queryByText(/Error invoking remote method/)).toBeNull();
+  });
+
+  it('企业私聊授权错误不向用户暴露 Electron IPC 内部文案', () => {
+    expect(enterpriseCollaborationErrorMessage(new Error(
+      "Error invoking remote method 'otto:enterprise-messages-list': Error: commercial module is not entitled",
+    ))).toBe('当前企业服务器尚未提供基础私聊，请联系管理员更新服务器授权配置');
   });
 
   it('邀请码认证后的真实企业账号可从默认个人工作区连接远程组织树', async () => {

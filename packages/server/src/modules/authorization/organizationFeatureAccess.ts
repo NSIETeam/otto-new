@@ -14,6 +14,9 @@ export interface OrganizationFeatureAccessDependencies {
 }
 
 export interface OrganizationFeatureAccessFacade {
+  getConfiguredOrganizationFeatures(
+    organizationId: string,
+  ): OrganizationFeatures;
   getOrganizationFeatures(organizationId: string): OrganizationFeatures;
   updateOrganizationFeatures(
     organizationId: string,
@@ -72,6 +75,10 @@ export function createOrganizationFeatureAccessFacade(
     );
 
   return {
+    getConfiguredOrganizationFeatures: (organizationId) =>
+      dependencies.configuration.getConfiguredOrganizationFeatures(
+        organizationId,
+      ),
     getOrganizationFeatures: effectiveFeatures,
     updateOrganizationFeatures(organizationId, patch) {
       const configured =

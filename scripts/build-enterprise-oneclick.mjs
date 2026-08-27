@@ -23,6 +23,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { supportedEnterpriseSchemaVersions } from './enterprise-release-contract.mjs';
+import { copyEnterpriseRuntimeDependencies } from './enterprise-runtime-dependencies.mjs';
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -240,6 +241,7 @@ const sourceScope = [
   'packages/core/src/services/aliyunSmsSender.ts',
   'deployment/enterprise-oneclick',
   'scripts/build-enterprise-oneclick.mjs',
+  'scripts/enterprise-runtime-dependencies.mjs',
   'scripts/verify-enterprise-package-signature.mjs',
 ];
 const sourceStatus = run(
@@ -263,6 +265,7 @@ const sourceInputFiles = [
   'packages/core/tsconfig.json',
   'packages/core/src/services/aliyunSmsSender.ts',
   'scripts/build-enterprise-oneclick.mjs',
+  'scripts/enterprise-runtime-dependencies.mjs',
   'scripts/verify-enterprise-package-signature.mjs',
   ...filesBelow(sourceDir).map((relative) =>
     path.join('deployment/enterprise-oneclick', relative),
@@ -437,6 +440,30 @@ export class FeatureFlagManager {
       2,
     )}\n`,
   );
+  const betterSqliteSource = path.join(
+    repoRoot,
+    'node_modules',
+    'better-sqlite3',
+  );
+  const betterSqliteTarget = path.join(
+    releaseRoot,
+    'node_modules',
+    'better-sqlite3',
+  );
+  mkdirSync(betterSqliteTarget, { recursive: true });
+  cpSync(
+    path.join(betterSqliteSource, 'lib'),
+    path.join(betterSqliteTarget, 'lib'),
+    { recursive: true },
+  );
+  cpSync(
+    path.join(betterSqliteSource, 'package.json'),
+    path.join(betterSqliteTarget, 'package.json'),
+  );
+  const runtimeDependencies = copyEnterpriseRuntimeDependencies({
+    repoRoot,
+    releaseRoot,
+  });
   writeFileSync(
     path.join(releaseRoot, 'package.json'),
     `${JSON.stringify(
@@ -446,10 +473,19 @@ export class FeatureFlagManager {
         private: true,
         type: 'module',
         engines: { node: '>=22.16.0 <23' },
+        dependencies: {
+          ...runtimeDependencies.directVersions,
+          'better-sqlite3': '12.11.1',
+          'otto-core': '1.1.0-enterprise-adapter',
+        },
       },
       null,
       2,
     )}\n`,
+  );
+  writeFileSync(
+    path.join(releaseRoot, 'runtime-dependencies.json'),
+    `${JSON.stringify(runtimeDependencies, null, 2)}\n`,
   );
   cpSync(
     path.join(sourceDir, 'runtime', 'run.mjs'),

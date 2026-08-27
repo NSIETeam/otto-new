@@ -225,6 +225,8 @@ jobs:
           npm run build
           npm run typecheck
           npm run test:ci
+          npm run test:scripts -- --run \
+            scripts/tests/enterprise-runtime-dependencies.test.js
 
       - name: Focused regression tests
         run: |

@@ -987,19 +987,12 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
     await presentation.writeFile({ fileName: outPath, compression: true });
   }
 
-  /** Smart routing: decide if a slide should use native pptxgenjs or HTML→PNG. */
+  /** Smart routing: decide if a slide should use native pptxgenjs or HTML->PNG. */
   private canUseNativeText(sec: ParsedSlideSection, index?: number, total?: number): boolean {
     const layout = sec.requestedLayout ?? this.inferSlideLayout(sec, index ?? 0, total);
-    // Native objects are reserved for the two content-dense layouts they can
-    // faithfully reproduce. Statement/timeline/split and explicit art
-    // direction rely on the HTML composition and must not silently collapse
-    // into the generic editable-text renderer.
-    if (layout !== 'list' && layout !== 'editorial') return false;
-    if (sec.requestedLayout) return false;
-    // Images + quotes look better as styled HTML
+    if (layout === 'visual') return false;
     const hasImg = sec.body.some((l) => /^!\[[^\]]*\]\(.+\)$/.test(l.trim()));
     if (hasImg) return false;
-    // Everything else benefits from native editable text
     return true;
   }
 
@@ -1252,7 +1245,7 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
       if (!ln) { cur = null; continue; }
 
       // Table row
-      if (/^\|.+\\|$/.test(ln)) {
+      if (/^\|.+\|$/.test(ln)) {
         if (ln.includes('---')) continue;
         inTable = true;
         const cells = ln.split('|').slice(1, -1).map((c: string) => this.stripMarkdown(c.trim()));

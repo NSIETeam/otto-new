@@ -219,8 +219,14 @@ describe('desktop packaging contract', () => {
     expect(workflow.indexOf('name: Upload workflow artifacts')).toBeLessThan(
       workflow.indexOf('name: Create draft GitHub release'),
     );
-    expect(workflow).toContain("if: github.repository == 'Felix201209/otto'");
-    expect(workflow).toContain('token: ${{ secrets.OTTO_RELEASES_TOKEN }}');
+    expect(workflow).toContain("if: github.repository == 'NSIETeam/otto-new'");
+    expect(workflow).toContain('RELEASES_REPO: NSIETeam/otto-new');
+    expect(workflow).toContain('LEGACY_RELEASES_REPO: Felix201209/otto-releases');
+    expect(workflow).toContain('token: ${{ github.token }}');
+    expect(workflow).toContain('token: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}');
+    expect(workflow).toContain('name: Create legacy compatibility draft release');
+    expect(workflow).toContain('name: Publish legacy compatibility release');
+    expect(workflow).toContain('name: Publish canonical release');
     expect(workflow).not.toContain(
       'secrets.OTTO_RELEASES_TOKEN || secrets.GITHUB_TOKEN',
     );

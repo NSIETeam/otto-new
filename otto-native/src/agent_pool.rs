@@ -1,8 +1,8 @@
+use parking_lot::RwLock;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use parking_lot::RwLock;
-use serde::Serialize;
 
 struct AgentState {
     id: String,
@@ -47,7 +47,8 @@ impl AgentPool {
 
         // 淘汰最久未使用的 agent
         if agents.len() >= self.max_agents {
-            let oldest = agents.iter()
+            let oldest = agents
+                .iter()
                 .min_by_key(|(_, a)| a.last_accessed)
                 .map(|(id, _)| id.clone());
             if let Some(oldest_id) = oldest {
@@ -64,14 +65,17 @@ impl AgentPool {
         }
 
         let now = Instant::now();
-        agents.insert(id.clone(), AgentState {
-            id,
-            created_at: now,
-            last_accessed: now,
-            memory_bytes: initial_memory,
-            execution_log: Vec::new(),
-            pending_results: Vec::new(),
-        });
+        agents.insert(
+            id.clone(),
+            AgentState {
+                id,
+                created_at: now,
+                last_accessed: now,
+                memory_bytes: initial_memory,
+                execution_log: Vec::new(),
+                pending_results: Vec::new(),
+            },
+        );
         *current_memory += initial_memory;
         Ok(true)
     }
@@ -143,21 +147,26 @@ impl AgentPool {
     }
 
     pub fn list_agents(&self) -> Vec<AgentInfo> {
-        self.agents.read().values().map(|a| AgentInfo {
-            id: a.id.clone(),
-            memory_mb: a.memory_bytes as f64 / 1024.0 / 1024.0,
-            log_count: a.execution_log.len() as u32,
-            pending_count: a.pending_results.len() as u32,
-            created_secs_ago: a.created_at.elapsed().as_secs(),
-            last_accessed_secs_ago: a.last_accessed.elapsed().as_secs(),
-        }).collect()
+        self.agents
+            .read()
+            .values()
+            .map(|a| AgentInfo {
+                id: a.id.clone(),
+                memory_mb: a.memory_bytes as f64 / 1024.0 / 1024.0,
+                log_count: a.execution_log.len() as u32,
+                pending_count: a.pending_results.len() as u32,
+                created_secs_ago: a.created_at.elapsed().as_secs(),
+                last_accessed_secs_ago: a.last_accessed.elapsed().as_secs(),
+            })
+            .collect()
     }
 
     pub fn cleanup_idle(&self, idle_seconds: u32) -> u32 {
         let mut agents = self.agents.write();
         let mut current_memory = self.current_memory.write();
         let idle_duration = std::time::Duration::from_secs(idle_seconds as u64);
-        let to_remove: Vec<String> = agents.iter()
+        let to_remove: Vec<String> = agents
+            .iter()
             .filter(|(_, a)| a.last_accessed.elapsed() > idle_duration)
             .map(|(id, _)| id.clone())
             .collect();

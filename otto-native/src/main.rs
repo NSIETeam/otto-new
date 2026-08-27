@@ -1,15 +1,17 @@
+use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
-use serde::{Serialize, Deserialize};
 
-mod session_store;
-mod encryption;
-mod tokenizer;
 mod agent_pool;
+mod encryption;
+mod mls;
+mod session_store;
+mod tokenizer;
 
-use session_store::SessionStore;
-use encryption::EncryptionStore;
-use tokenizer::Tokenizer;
 use agent_pool::AgentPool;
+use encryption::EncryptionStore;
+use mls::MlsEngine;
+use session_store::SessionStore;
+use tokenizer::Tokenizer;
 
 #[derive(Deserialize)]
 struct Request {
@@ -34,6 +36,7 @@ fn main() {
     let mut enc_store: Option<EncryptionStore> = None;
     let mut tok: Option<Tokenizer> = None;
     let mut pool: Option<AgentPool> = None;
+    let mut mls: Option<MlsEngine> = None;
 
     for line in stdin.lock().lines() {
         let line = match line {
@@ -48,17 +51,36 @@ fn main() {
         let req: Request = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
-                let resp = Response { id: None, result: None, error: Some(format!("Parse error: {}", e)) };
+                let resp = Response {
+                    id: None,
+                    result: None,
+                    error: Some(format!("Parse error: {}", e)),
+                };
                 let _ = writeln!(stdout, "{}", serde_json::to_string(&resp).unwrap());
                 continue;
             }
         };
 
-        let resp = match handle_request(&req, &mut store, &mut enc_store, &mut tok, &mut pool) {
-            Ok(v) => Response { id: req.id, result: Some(v), error: None },
-            Err(e) => Response { id: req.id, result: None, error: Some(e) },
+        let resp = match handle_request(
+            &req,
+            &mut store,
+            &mut enc_store,
+            &mut tok,
+            &mut pool,
+            &mut mls,
+        ) {
+            Ok(v) => Response {
+                id: req.id,
+                result: Some(v),
+                error: None,
+            },
+            Err(e) => Response {
+                id: req.id,
+                result: None,
+                error: Some(e),
+            },
         };
-        
+
         let _ = writeln!(stdout, "{}", serde_json::to_string(&resp).unwrap());
         let _ = stdout.flush();
     }
@@ -70,13 +92,14 @@ fn handle_request(
     enc_store: &mut Option<EncryptionStore>,
     tok: &mut Option<Tokenizer>,
     pool: &mut Option<AgentPool>,
+    mls: &mut Option<MlsEngine>,
 ) -> Result<serde_json::Value, String> {
     let params = req.params.as_ref();
-    
+
     match req.method.as_str() {
         // === No-params methods ===
         "ping" => Ok(serde_json::json!({"pong": true})),
-        
+
         "session_store.list" => {
             let s = store.as_ref().ok_or("Store not opened")?;
             let sessions = s.list()?;
@@ -86,7 +109,7 @@ fn handle_request(
             let s = store.as_ref().ok_or("Store not opened")?;
             Ok(serde_json::json!({"size": s.size_bytes()}))
         }
-        
+
         "encryption.generate_key" => {
             Ok(serde_json::json!({"key": EncryptionStore::generate_key()}))
         }
@@ -95,11 +118,11 @@ fn handle_request(
             let ids = es.list_ids()?;
             Ok(serde_json::json!({"ids": ids}))
         }
-        
+
         "tokenizer.supported_models" => {
             Ok(serde_json::json!({"models": tokenizer::supported_models()}))
         }
-        
+
         "agent_pool.stats" => {
             let p = pool.as_ref().ok_or("Pool not created")?;
             Ok(serde_json::json!({
@@ -112,6 +135,20 @@ fn handle_request(
             let p = pool.as_ref().ok_or("Pool not created")?;
             let agents = p.list_agents();
             Ok(serde_json::to_value(agents).unwrap())
+        }
+        "mls.status" => {
+            let engine = mls.as_ref().ok_or("MLS engine not opened")?;
+            serde_json::to_value(engine.status()).map_err(|e| e.to_string())
+        }
+        "mls.generate_key_package" => {
+            let engine = mls.as_ref().ok_or("MLS engine not opened")?;
+            serde_json::to_value(engine.generate_key_package()?).map_err(|e| e.to_string())
+        }
+        "mls.close" => {
+            if let Some(engine) = mls.take() {
+                engine.persist()?;
+            }
+            Ok(serde_json::json!({"status": "closed"}))
         }
 
         // === Session Store ===
@@ -128,9 +165,9 @@ fn handle_request(
             let s = store.as_ref().ok_or("Store not opened")?;
             let id = p["id"].as_str().ok_or("Missing id")?.to_string();
             let title = p["title"].as_str().unwrap_or("").to_string();
-            let messages: Vec<session_store::Message> = serde_json::from_value(
-                p["messages"].clone()
-            ).map_err(|e| format!("Bad messages: {}", e))?;
+            let messages: Vec<session_store::Message> =
+                serde_json::from_value(p["messages"].clone())
+                    .map_err(|e| format!("Bad messages: {}", e))?;
             s.save(id, title, messages)?;
             Ok(serde_json::json!({"status": "ok"}))
         }
@@ -179,6 +216,94 @@ fn handle_request(
             let id = p["id"].as_str().ok_or("Missing id")?;
             let deleted = es.delete(id)?;
             Ok(serde_json::json!({"deleted": deleted}))
+        }
+
+        // === MLS 1.0 End-to-End Encryption ===
+        "mls.open" => {
+            let p = params.ok_or("Missing params")?;
+            let path = p["path"].as_str().ok_or("Missing path")?;
+            let key = p["key"].as_str().ok_or("Missing key")?;
+            let scope = p["scope"].as_str().ok_or("Missing scope")?;
+            let identity = p["identity"].as_str().ok_or("Missing identity")?;
+            let engine = MlsEngine::open(
+                path.to_string(),
+                key.to_string(),
+                scope.to_string(),
+                identity.to_string(),
+            )?;
+            let status = engine.status();
+            *mls = Some(engine);
+            serde_json::to_value(status).map_err(|e| e.to_string())
+        }
+        "mls.create_group" => {
+            let p = params.ok_or("Missing params")?;
+            let conversation_id = p["conversation_id"]
+                .as_str()
+                .ok_or("Missing conversation_id")?;
+            let engine = mls.as_ref().ok_or("MLS engine not opened")?;
+            serde_json::to_value(engine.create_group(conversation_id)?).map_err(|e| e.to_string())
+        }
+        "mls.add_member" => {
+            let p = params.ok_or("Missing params")?;
+            let conversation_id = p["conversation_id"]
+                .as_str()
+                .ok_or("Missing conversation_id")?;
+            let key_package = p["key_package"].as_str().ok_or("Missing key_package")?;
+            let engine = mls.as_ref().ok_or("MLS engine not opened")?;
+            serde_json::to_value(engine.add_member(conversation_id, key_package)?)
+                .map_err(|e| e.to_string())
+        }
+        "mls.join_group" => {
+            let p = params.ok_or("Missing params")?;
+            let conversation_id = p["conversation_id"]
+                .as_str()
+                .ok_or("Missing conversation_id")?;
+            let welcome = p["welcome"].as_str().ok_or("Missing welcome")?;
+            let engine = mls.as_ref().ok_or("MLS engine not opened")?;
+            serde_json::to_value(engine.join_group(conversation_id, welcome)?)
+                .map_err(|e| e.to_string())
+        }
+        "mls.process_commit" => {
+            let p = params.ok_or("Missing params")?;
+            let conversation_id = p["conversation_id"]
+                .as_str()
+                .ok_or("Missing conversation_id")?;
+            let commit = p["commit"].as_str().ok_or("Missing commit")?;
+            let engine = mls.as_ref().ok_or("MLS engine not opened")?;
+            serde_json::to_value(engine.process_commit(conversation_id, commit)?)
+                .map_err(|e| e.to_string())
+        }
+        "mls.encrypt" => {
+            let p = params.ok_or("Missing params")?;
+            let conversation_id = p["conversation_id"]
+                .as_str()
+                .ok_or("Missing conversation_id")?;
+            let plaintext = p["plaintext"].as_str().ok_or("Missing plaintext")?;
+            let aad = p["aad"].as_str().unwrap_or("");
+            let engine = mls.as_ref().ok_or("MLS engine not opened")?;
+            serde_json::to_value(engine.encrypt(conversation_id, plaintext, aad)?)
+                .map_err(|e| e.to_string())
+        }
+        "mls.decrypt" => {
+            let p = params.ok_or("Missing params")?;
+            let conversation_id = p["conversation_id"]
+                .as_str()
+                .ok_or("Missing conversation_id")?;
+            let message = p["message"].as_str().ok_or("Missing message")?;
+            let expected_aad = p["expected_aad"].as_str().unwrap_or("");
+            let engine = mls.as_ref().ok_or("MLS engine not opened")?;
+            serde_json::to_value(engine.decrypt(conversation_id, message, expected_aad)?)
+                .map_err(|e| e.to_string())
+        }
+        "mls.delete_group" => {
+            let p = params.ok_or("Missing params")?;
+            let conversation_id = p["conversation_id"]
+                .as_str()
+                .ok_or("Missing conversation_id")?;
+            let engine = mls.as_ref().ok_or("MLS engine not opened")?;
+            Ok(serde_json::json!({
+                "deleted": engine.delete_group(conversation_id)?
+            }))
         }
 
         // === Tokenizer ===

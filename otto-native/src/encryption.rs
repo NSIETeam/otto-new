@@ -1,9 +1,9 @@
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-use aes_gcm::aead::{Aead, KeyInit, OsRng};
 use aes_gcm::aead::rand_core::RngCore;
+use aes_gcm::aead::{Aead, KeyInit, OsRng};
+use aes_gcm::{Aes256Gcm, Key, Nonce};
+use parking_lot::RwLock;
 use sled::Db;
 use std::sync::Arc;
-use parking_lot::RwLock;
 
 pub struct EncryptionStore {
     db: Arc<Db>,
@@ -20,25 +20,33 @@ impl EncryptionStore {
         }
         let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
         let cipher = Aes256Gcm::new(key);
-        let cache = Arc::new(RwLock::new(
-            lru::LruCache::new(std::num::NonZeroUsize::new(50).unwrap())
-        ));
-        Ok(Self { db: Arc::new(db), cipher: Arc::new(cipher), cache })
+        let cache = Arc::new(RwLock::new(lru::LruCache::new(
+            std::num::NonZeroUsize::new(50).unwrap(),
+        )));
+        Ok(Self {
+            db: Arc::new(db),
+            cipher: Arc::new(cipher),
+            cache,
+        })
     }
 
     pub fn save_encrypted(&self, id: String, data: String) -> Result<(), String> {
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
-        let ciphertext = self.cipher.encrypt(nonce, data.as_bytes())
+        let ciphertext = self
+            .cipher
+            .encrypt(nonce, data.as_bytes())
             .map_err(|e| format!("Encrypt: {}", e))?;
         let mut stored = Vec::with_capacity(12 + ciphertext.len());
         stored.extend_from_slice(&nonce_bytes);
         stored.extend_from_slice(&ciphertext);
-        
+
         // Clone for cache before moving into db
         let stored_clone = stored.clone();
-        self.db.insert(id.as_bytes(), stored).map_err(|e| format!("DB insert: {}", e))?;
+        self.db
+            .insert(id.as_bytes(), stored)
+            .map_err(|e| format!("DB insert: {}", e))?;
         self.db.flush().map_err(|e| format!("DB flush: {}", e))?;
         self.cache.write().put(id, stored_clone);
         Ok(())
@@ -62,7 +70,10 @@ impl EncryptionStore {
 
     pub fn delete(&self, id: &str) -> Result<bool, String> {
         self.cache.write().pop(id);
-        let existed = self.db.remove(id.as_bytes()).map_err(|e| format!("DB remove: {}", e))?;
+        let existed = self
+            .db
+            .remove(id.as_bytes())
+            .map_err(|e| format!("DB remove: {}", e))?;
         Ok(existed.is_some())
     }
 
@@ -89,7 +100,9 @@ impl EncryptionStore {
         }
         let (nonce_bytes, ciphertext) = stored.split_at(12);
         let nonce = Nonce::from_slice(nonce_bytes);
-        let plaintext = self.cipher.decrypt(nonce, ciphertext)
+        let plaintext = self
+            .cipher
+            .decrypt(nonce, ciphertext)
             .map_err(|e| format!("Decrypt: {}", e))?;
         String::from_utf8(plaintext).map_err(|e| format!("UTF-8: {}", e))
     }

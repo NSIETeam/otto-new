@@ -1,7 +1,7 @@
-use sled::Db;
-use serde::{Serialize, Deserialize};
-use std::sync::Arc;
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
+use sled::Db;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionMeta {
@@ -35,10 +35,13 @@ impl SessionStore {
     pub fn new(path: String, cache_size: Option<usize>) -> Result<Self, String> {
         let db = sled::open(&path).map_err(|e| format!("Failed to open db: {}", e))?;
         let cache_size = cache_size.unwrap_or(100);
-        let cache = Arc::new(RwLock::new(
-            lru::LruCache::new(std::num::NonZeroUsize::new(cache_size).unwrap())
-        ));
-        Ok(Self { db: Arc::new(db), cache })
+        let cache = Arc::new(RwLock::new(lru::LruCache::new(
+            std::num::NonZeroUsize::new(cache_size).unwrap(),
+        )));
+        Ok(Self {
+            db: Arc::new(db),
+            cache,
+        })
     }
 
     pub fn save(&self, id: String, title: String, messages: Vec<Message>) -> Result<(), String> {
@@ -58,7 +61,9 @@ impl SessionStore {
         };
 
         let value = serde_json::to_vec(&session).map_err(|e| format!("Serialize: {}", e))?;
-        self.db.insert(id.as_bytes(), value).map_err(|e| format!("DB insert: {}", e))?;
+        self.db
+            .insert(id.as_bytes(), value)
+            .map_err(|e| format!("DB insert: {}", e))?;
         self.db.flush().map_err(|e| format!("DB flush: {}", e))?;
         self.cache.write().put(id, session);
         Ok(())
@@ -70,8 +75,8 @@ impl SessionStore {
         }
         match self.db.get(id.as_bytes()) {
             Ok(Some(data)) => {
-                let session: SessionData = serde_json::from_slice(&data)
-                    .map_err(|e| format!("Deserialize: {}", e))?;
+                let session: SessionData =
+                    serde_json::from_slice(&data).map_err(|e| format!("Deserialize: {}", e))?;
                 self.cache.write().put(id.to_string(), session.clone());
                 Ok(Some(session))
             }
@@ -82,7 +87,10 @@ impl SessionStore {
 
     pub fn delete(&mut self, id: &str) -> Result<bool, String> {
         self.cache.write().pop(id);
-        let existed = self.db.remove(id.as_bytes()).map_err(|e| format!("DB remove: {}", e))?;
+        let existed = self
+            .db
+            .remove(id.as_bytes())
+            .map_err(|e| format!("DB remove: {}", e))?;
         Ok(existed.is_some())
     }
 

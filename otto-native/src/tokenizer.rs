@@ -1,4 +1,4 @@
-use tiktoken_rs::{CoreBPE, get_bpe_from_model};
+use tiktoken_rs::{get_bpe_from_model, CoreBPE};
 
 pub struct Tokenizer {
     bpe: CoreBPE,
@@ -22,7 +22,8 @@ impl Tokenizer {
             return text.to_string();
         }
         let truncated = &tokens[..max_tokens as usize];
-        self.bpe.decode(truncated.to_vec())
+        self.bpe
+            .decode(truncated.to_vec())
             .unwrap_or_else(|_| text.chars().take(max_tokens as usize * 4).collect())
     }
 }

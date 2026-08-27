@@ -45,7 +45,10 @@ import { ParkServicesPlugin } from './components/ParkServicesPlugin.js';
 import { AllConversations } from './components/AllConversations.js';
 import { AgentGallery } from './components/AgentGallery.js';
 import { SetupPanel } from './setup/SetupPanel.js';
-import type { SaveCustomModelPayload } from './setup/presets.js';
+import {
+  savePayloadAppearsInModels,
+  type SaveCustomModelPayload,
+} from './setup/presets.js';
 import * as transport from './transport.js';
 import { useSettingsData } from './state/useSettingsData.js';
 import { useSoftwareUpdate } from './state/useSoftwareUpdate.js';
@@ -774,6 +777,7 @@ function OttoWorkspaceApp({
   const setupOpen = mainView === 'settings';
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const pendingModelSave = useRef<SaveCustomModelPayload | null>(null);
   const autoFloated = useRef(false);
   const [exemptActive, setExemptActive] = useState(false);
   useEffect(() => {
@@ -805,30 +809,44 @@ function OttoWorkspaceApp({
   ]);
 
   useEffect(() => {
-    if (!setupOpen || !saving) return;
     const off = transport.onFrame((frame) => {
       if (frame.type === 'models_list') {
+        const pending = pendingModelSave.current;
+        if (!pending || !savePayloadAppearsInModels(frame.payload.models, pending)) {
+          return;
+        }
+        pendingModelSave.current = null;
         setSaving(false);
         setSaveError(null);
         setMainView('chat');
       } else if (
         frame.type === 'error' &&
-        frame.payload.code === 'save_failed'
+        frame.payload.code === 'save_failed' &&
+        pendingModelSave.current
       ) {
+        pendingModelSave.current = null;
         setSaving(false);
         setSaveError(frame.payload.message || '保存失败，请重试');
       }
     });
     return off;
-  }, [setupOpen, saving]);
+  }, []);
+
+  useEffect(() => {
+    if (!setupOpen || state.connection !== 'connected') return;
+    transport.send({ type: 'get_models', payload: {} });
+  }, [setupOpen, state.connection]);
 
   const closeSetup = (): void => {
+    pendingModelSave.current = null;
     setMainView('chat');
     setSaving(false);
     setSaveError(null);
   };
 
   const handleSaveModel = (payload: SaveCustomModelPayload): void => {
+    // ref 必须在 send 前同步写入，避免本地 server 极快回包时监听器还看不到待确认请求。
+    pendingModelSave.current = payload;
     setSaveError(null);
     setSaving(true);
     transport.send({ type: 'save_custom_model', payload });

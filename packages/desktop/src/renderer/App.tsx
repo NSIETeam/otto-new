@@ -255,6 +255,7 @@ function OttoWorkspaceApp({
   const softwareUpdate = useSoftwareUpdate();
   const product = useProductWorkspace(state.activeSessionId);
   const [enterpriseUnreadCounts, setEnterpriseUnreadCounts] = useState<EnterpriseUnreadCounts>({});
+  const enterpriseUnreadTrackerRef = useRef<EnterpriseUnreadNotificationTracker | null>(null);
   const centralIdentity = useMemo(
     () => resolveCentralEnterpriseIdentity(account),
     [account],
@@ -434,6 +435,7 @@ function OttoWorkspaceApp({
       markRead: (sessionId) => window.otto.notificationMarkRead(sessionId),
       onUnreadCountsChange: (counts) => { localUnreadCounts = counts; },
     });
+    enterpriseUnreadTrackerRef.current = tracker;
 
     const poll = async (): Promise<void> => {
       if (polling || cancelled) return;
@@ -489,6 +491,9 @@ function OttoWorkspaceApp({
         void window.otto.notificationMarkRead(sessionId).catch(() => undefined);
       }
       federationMarkers.clear();
+      if (enterpriseUnreadTrackerRef.current === tracker) {
+        enterpriseUnreadTrackerRef.current = null;
+      }
       void tracker.clear();
     };
   }, [account.accountType, account.id, account.organizationId, internalAdminPreview]);
@@ -513,7 +518,10 @@ function OttoWorkspaceApp({
     };
   }, [account.accountType, account.id, account.organizationId, internalAdminPreview]);
 
-  const markEnterpriseDirectMessageRead = useCallback((peerAccountId: string): void => {
+  const markEnterpriseDirectMessageRead = useCallback((
+    peerAccountId: string,
+    messageIds: readonly string[] = [],
+  ): void => {
     const sessionId = `enterprise:message:${peerAccountId}`;
     setEnterpriseUnreadCounts((current) => {
       if (!current[sessionId]) return current;
@@ -521,7 +529,12 @@ function OttoWorkspaceApp({
       delete next[sessionId];
       return next;
     });
-    void window.otto.notificationMarkRead(sessionId).catch(() => undefined);
+    const tracker = enterpriseUnreadTrackerRef.current;
+    if (tracker) {
+      void tracker.markSenderRead(peerAccountId, messageIds).catch(() => undefined);
+    } else {
+      void window.otto.notificationMarkRead(sessionId).catch(() => undefined);
+    }
   }, []);
 
   const markEnterpriseFederationMessageRead = useCallback((contactId: string): void => {

@@ -38,6 +38,7 @@ describe('EnterpriseUnreadNotificationTracker', () => {
 
     expect(show).toHaveBeenCalledTimes(2);
     expect(show).toHaveBeenCalledWith({
+      messageId: 'msg-2',
       sessionId: 'enterprise:message:alice',
       source: 'enterprise',
       sender: 'Alice',
@@ -64,6 +65,52 @@ describe('EnterpriseUnreadNotificationTracker', () => {
     expect(markRead).toHaveBeenCalledWith('enterprise:message:alice');
   });
 
+  it('does not restore a message from an in-flight unread snapshot after the conversation was read', async () => {
+    const show = vi.fn(async () => undefined);
+    const markRead = vi.fn(async () => undefined);
+    const onUnreadCountsChange = vi.fn();
+    const tracker = new EnterpriseUnreadNotificationTracker({
+      show,
+      markRead,
+      onUnreadCountsChange,
+    });
+    const staleSnapshot = [
+      message(),
+      message({ id: 'msg-2', preview: '最新进度' }),
+    ];
+
+    await tracker.reconcile(staleSnapshot);
+    await tracker.markSenderRead('alice');
+    await tracker.reconcile(staleSnapshot);
+
+    expect(show).toHaveBeenCalledOnce();
+    expect(markRead).toHaveBeenCalledOnce();
+    expect(markRead).toHaveBeenCalledWith('enterprise:message:alice');
+    expect(onUnreadCountsChange).toHaveBeenLastCalledWith({});
+
+    await tracker.reconcile([]);
+    await tracker.reconcile([
+      message({ id: 'msg-3', preview: '真正的新消息' }),
+    ]);
+
+    expect(show).toHaveBeenCalledTimes(2);
+  });
+
+  it('suppresses a stale snapshot that started before the successful read', async () => {
+    const show = vi.fn(async () => undefined);
+    const onUnreadCountsChange = vi.fn();
+    const tracker = new EnterpriseUnreadNotificationTracker({
+      show,
+      markRead: vi.fn(async () => undefined),
+      onUnreadCountsChange,
+    });
+    await tracker.markSenderRead('alice', ['msg-1']);
+    await tracker.reconcile([message()]);
+
+    expect(show).not.toHaveBeenCalled();
+    expect(onUnreadCountsChange).toHaveBeenLastCalledWith({});
+  });
+
   it('shows OS notifications for both ATOA requests and responses without exposing protocol JSON', async () => {
     const show = vi.fn(async () => undefined);
     const tracker = new EnterpriseUnreadNotificationTracker({
@@ -83,12 +130,14 @@ describe('EnterpriseUnreadNotificationTracker', () => {
 
     expect(show).toHaveBeenCalledTimes(2);
     expect(show).toHaveBeenNthCalledWith(1, {
+      messageId: 'request',
       sessionId: 'enterprise:message:alice',
       source: 'atoa',
       sender: 'Alice',
       preview: '对方正在请求你的 Otto 协作',
     });
     expect(show).toHaveBeenNthCalledWith(2, {
+      messageId: 'response',
       sessionId: 'enterprise:message:bob',
       source: 'atoa',
       sender: 'Bob',
@@ -106,6 +155,7 @@ describe('EnterpriseUnreadNotificationTracker', () => {
     await tracker.reconcile([message({ id: 'direct-1', preview: '下午方便同步吗？' })]);
 
     expect(show).toHaveBeenCalledWith({
+      messageId: 'direct-1',
       sessionId: 'enterprise:message:alice',
       source: 'enterprise',
       sender: 'Alice',

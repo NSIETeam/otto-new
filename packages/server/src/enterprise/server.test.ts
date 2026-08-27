@@ -5786,7 +5786,7 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       name: 'Alpha 员工',
       department: '研发部',
     });
-    const admin = db.createAccount({
+    db.createAccount({
       organizationId: organization.id,
       username: 'knowledge.disabled.admin',
       password: 'knowledge-disabled-admin-password',

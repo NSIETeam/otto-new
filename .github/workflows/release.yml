@@ -553,6 +553,9 @@ jobs:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
 
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
       - name: Validate deployment secrets
         shell: bash
         run: |

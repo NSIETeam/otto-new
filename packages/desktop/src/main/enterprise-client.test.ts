@@ -192,6 +192,7 @@ const API_V2_HEALTH = {
     'usage_summary',
     'admin_console',
     'account_deletion',
+    'versioned_legal_consent_v1',
     'multi_organization',
     'direct_messages',
     'e2ee_private_messages_v1',
@@ -1020,12 +1021,13 @@ describe('EnterpriseClient', () => {
     ]);
   });
 
-  it('首次注册先请求挑战，再提交姓名、密码和验证码并保存会话', async () => {
+  it('首次注册绑定服务器返回的协议版本后继续注册', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(200, API_V2_HEALTH))
       .mockResolvedValueOnce(jsonResponse(200, {
         challengeId: 'sms_1', expiresAt: '2099-01-01', retryAfterSeconds: 60, message: '已发送',
         organization: { id: 'org_acme', name: '星河科技' },
+        legalDocuments: LEGAL_DOCUMENTS,
       }))
       .mockResolvedValueOnce(jsonResponse(200, {
         account: ACCOUNT, token: 'sms-session', expiresAt: '2099-01-02',
@@ -1039,6 +1041,7 @@ describe('EnterpriseClient', () => {
     );
     expect(challenge.challengeId).toBe('sms_1');
     expect(challenge.organization).toEqual({ id: 'org_acme', name: '星河科技' });
+    expect(challenge.legalDocuments).toEqual(LEGAL_DOCUMENTS);
     const loggedIn = await client.registerWithSms({
       challengeId: 'sms_1', code: '042731', name: '员工一号', password: 'registered-password', legalConsent: true,
       legalDocuments: LEGAL_DOCUMENTS,
@@ -1059,12 +1062,57 @@ describe('EnterpriseClient', () => {
     });
   });
 
+  it('旧服务器未声明版本化协议能力时在发送短信前拒绝注册', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, {
+        ...API_V2_HEALTH,
+        capabilities: API_V2_HEALTH.capabilities.filter(
+          (capability) => capability !== 'versioned_legal_consent_v1',
+        ),
+      }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+
+    await expect(client.requestRegistrationCode(
+      'https://enterprise.otto.test',
+      '13800138000',
+      'Ab3D-k9Pq-Z7xY',
+    )).rejects.toThrow(/升级/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('协议引用畸形时保留短信冷却信息但不允许客户端提交同意', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, API_V2_HEALTH))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        challengeId: 'sms_invalid_legal',
+        expiresAt: '2099-01-01',
+        retryAfterSeconds: 60,
+        message: '已发送',
+        organization: null,
+        legalDocuments: [LEGAL_DOCUMENTS[0], LEGAL_DOCUMENTS[0]],
+      }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+
+    const challenge = await client.requestRegistrationCode(
+      'https://enterprise.otto.test',
+      '13800138000',
+    );
+
+    expect(challenge.challengeId).toBe('sms_invalid_legal');
+    expect(challenge.retryAfterSeconds).toBe(60);
+    expect(challenge.legalDocuments).toEqual([]);
+  });
+
   it('普通注册不发送邀请码，且只要求个人注册能力', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(200, {
         status: 'ok',
         apiVersion: 3,
-        capabilities: ['sms_registration', 'personal_registration'],
+        capabilities: [
+          'sms_registration',
+          'personal_registration',
+          'versioned_legal_consent_v1',
+        ],
       }))
       .mockResolvedValueOnce(jsonResponse(200, {
         challengeId: 'sms_personal',
@@ -1073,6 +1121,7 @@ describe('EnterpriseClient', () => {
         message: '已发送',
         registrationMode: 'personal',
         organization: null,
+        legalDocuments: LEGAL_DOCUMENTS,
       }));
     const client = new EnterpriseClient(fetchMock as typeof fetch);
 
@@ -2317,6 +2366,7 @@ describe('EnterpriseClient', () => {
           retryAfterSeconds: 60,
           message: '已发送',
           organization: { id: 'org_a', name: '企业 A' },
+          legalDocuments: LEGAL_DOCUMENTS,
         }));
       }
       if (url === 'https://a.otto.test/enterprise/auth/register/sms/verify') {

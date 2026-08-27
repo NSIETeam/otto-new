@@ -171,6 +171,7 @@ const ENTERPRISE_CAPABILITIES = [
   'account_deletion',
   'data_governance_v1',
   'privacy_self_service',
+  'versioned_legal_consent_v1',
   'multi_organization',
   'direct_messages',
   'federation_chat_v1',

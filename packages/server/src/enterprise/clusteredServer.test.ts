@@ -826,6 +826,7 @@ describe('clustered PostgreSQL enterprise server', () => {
     expect(health.capabilities).toContain(
       'e2ee_mls_transport_session_reset_v1',
     );
+    expect(health.capabilities).toContain('versioned_legal_consent_v1');
     expect(health.capabilities).not.toContain('e2ee_mls_v1');
   });
 

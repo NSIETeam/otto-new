@@ -1238,6 +1238,7 @@ describe('受保护 vs 公开路由边界', () => {
     expect(health.status).toBe(200);
     const body = await health.json() as { capabilities: string[] };
     expect(body.capabilities).toContain('modular_update_push_v1');
+    expect(body.capabilities).toContain('versioned_legal_consent_v1');
     expect(body).not.toHaveProperty('deployment');
   });
 

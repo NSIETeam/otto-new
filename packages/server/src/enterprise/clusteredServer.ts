@@ -673,6 +673,7 @@ export function createClusteredEnterpriseServer(
             'organization_invites_v1',
             'data_governance_v1',
             'legal_documents_v1',
+            'versioned_legal_consent_v1',
             'account_data_sync_v1',
             'enterprise_knowledge_v1',
             'enterprise_skill_market_v1',

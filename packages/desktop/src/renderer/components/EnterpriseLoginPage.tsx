@@ -70,6 +70,33 @@ export function isAcceptableRegistrationPassword(password: string): boolean {
   return true;
 }
 
+export function sanitizeLegalDocumentReferences(
+  value: unknown,
+): EnterpriseLegalDocumentReference[] {
+  if (!Array.isArray(value) || value.length !== 2) return [];
+  const seen = new Set<EnterpriseLegalDocumentReference['id']>();
+  const references: EnterpriseLegalDocumentReference[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const record = entry as Record<string, unknown>;
+    if (
+      (record.id !== 'terms' && record.id !== 'privacy')
+      || typeof record.version !== 'string'
+      || !record.version.trim()
+      || typeof record.hash !== 'string'
+      || !/^[0-9a-f]{64}$/u.test(record.hash)
+      || seen.has(record.id)
+    ) return [];
+    seen.add(record.id);
+    references.push({
+      id: record.id,
+      version: record.version,
+      hash: record.hash,
+    });
+  }
+  return seen.has('terms') && seen.has('privacy') ? references : [];
+}
+
 export function isRegistrationReady(input: {
   inviteCode: string;
   inviteRequired?: boolean;
@@ -248,6 +275,7 @@ export function EnterpriseLoginPage({
     setNotice('');
     setOrganizationName('');
     setLegalDocuments([]);
+    setLegalConsent(false);
     setCountdown(0);
     setRequesting(false);
     onClearError();
@@ -292,10 +320,16 @@ export function EnterpriseLoginPage({
         ...(mode === 'join' ? { inviteCode } : {}),
       });
       if (requestEpoch !== requestEpochRef.current) return;
+      const nextLegalDocuments = sanitizeLegalDocumentReferences(
+        result.legalDocuments,
+      );
+      setLegalConsent(false);
       setChallengeId(result.challengeId);
-      setNotice(result.message);
+      setNotice(nextLegalDocuments.length === 2
+        ? result.message
+        : '验证码已发送，但服务器协议数据不完整，请联系管理员升级服务器后重试');
       setOrganizationName(result.organization?.name ?? '');
-      setLegalDocuments(result.legalDocuments);
+      setLegalDocuments(nextLegalDocuments);
       setCountdown(result.retryAfterSeconds);
     } catch {
       // 具体错误由 useEnterpriseAuth 写入 error，表单只负责结束 loading。
@@ -344,6 +378,7 @@ export function EnterpriseLoginPage({
     setNotice('');
     setOrganizationName('');
     setLegalDocuments([]);
+    setLegalConsent(false);
     setCountdown(0);
   };
 
@@ -359,6 +394,8 @@ export function EnterpriseLoginPage({
     setCode('');
     setNotice('');
     setOrganizationName('');
+    setLegalDocuments([]);
+    setLegalConsent(false);
     setCountdown(0);
   }, [initialServerUrl]);
 
@@ -479,6 +516,8 @@ export function EnterpriseLoginPage({
               disabled={formPending}
               onChange={(event) => {
                 setServerUrl(event.target.value);
+                invalidateRegistrationChallenge();
+                invalidateLoginChallenge();
                 onClearError();
               }}
             />
@@ -656,7 +695,7 @@ export function EnterpriseLoginPage({
                 <input
                   type="checkbox"
                   checked={legalConsent}
-                  disabled={formPending}
+                  disabled={formPending || legalDocuments.length !== 2}
                   onChange={(event) => {
                     setLegalConsent(event.target.checked);
                     onClearError();

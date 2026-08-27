@@ -9,6 +9,7 @@ import {
   EnterpriseLoginPage,
   isCompleteOrganizationInviteCode,
   isRegistrationReady,
+  sanitizeLegalDocumentReferences,
   sanitizeOrganizationInviteCode,
   sanitizeSmsCode,
 } from './EnterpriseLoginPage.js';
@@ -52,6 +53,12 @@ describe('企业首次注册输入规则', () => {
     expect(isRegistrationReady({ inviteCode: 'Ab3D-k9Pq-Z7xY', name: '小明', password: 'short', confirmPassword: 'short', challengeId: 'sms_1', code: '042731', legalConsent: true, legalDocuments: LEGAL_DOCUMENTS })).toBe(false);
     expect(isRegistrationReady({ inviteCode: 'Ab3D-k9Pq-Z7xY', name: '小明', password: 'password-1', confirmPassword: 'different', challengeId: 'sms_1', code: '042731', legalConsent: true, legalDocuments: LEGAL_DOCUMENTS })).toBe(false);
     expect(isRegistrationReady({ inviteCode: 'Ab3D-k9Pq-Z7xY', inviteRequired: true, name: '小明', password: 'password-1', confirmPassword: 'password-1', challengeId: 'sms_1', code: '042731', legalConsent: true, legalDocuments: LEGAL_DOCUMENTS })).toBe(true);
+    expect(sanitizeLegalDocumentReferences(undefined)).toEqual([]);
+    expect(sanitizeLegalDocumentReferences([
+      LEGAL_DOCUMENTS[0],
+      { id: 'privacy', version: '2026-08-03' },
+    ])).toEqual([]);
+    expect(sanitizeLegalDocumentReferences(LEGAL_DOCUMENTS)).toEqual(LEGAL_DOCUMENTS);
   });
 });
 
@@ -204,6 +211,54 @@ describe('专业登录入口', () => {
       serverUrl: 'https://enterprise.otto.test',
       phone: '13800138000',
     }));
+    const consent = screen.getByRole('checkbox') as HTMLInputElement;
+    await waitFor(() => expect(consent.disabled).toBe(false));
+    fireEvent.click(consent);
+    expect(consent.checked).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('手机号'), { target: { value: '13900139000' } });
+    expect(consent.checked).toBe(false);
+    expect(consent.disabled).toBe(true);
+  });
+
+  it('服务器短信响应缺少协议字段时显示升级提示、保留冷却且禁止同意', async () => {
+    const onRequestRegistrationCode = vi.fn(async () => ({
+      challengeId: 'sms_legacy',
+      message: '验证码已发送',
+      retryAfterSeconds: 60,
+      organization: { id: 'org_acme', name: '星河科技' },
+      legalDocuments: undefined,
+    } as unknown as {
+      challengeId: string;
+      message: string;
+      retryAfterSeconds: number;
+      organization: { id: string; name: string } | null;
+      legalDocuments: typeof LEGAL_DOCUMENTS;
+    }));
+    render(
+      <EnterpriseLoginPage {...serverPreparationProps('https://enterprise.otto.test')}
+        initialServerUrl="https://enterprise.otto.test"
+        busy={false}
+        error={null}
+        onPasswordLogin={async () => undefined}
+        onRequestRegistrationCode={onRequestRegistrationCode}
+        onRegister={async () => undefined}
+        onClearError={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '使用邀请码加入企业' }));
+    fireEvent.change(screen.getByLabelText('企业邀请码'), { target: { value: 'Ab3D-k9Pq-Z7xY' } });
+    fireEvent.change(screen.getByLabelText('手机号'), { target: { value: '13800138000' } });
+    fireEvent.click(screen.getByRole('button', { name: '获取验证码' }));
+
+    expect(await screen.findByText(
+      '验证码已发送，但服务器协议数据不完整，请联系管理员升级服务器后重试',
+    )).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '加入企业' })).toBeTruthy();
+    expect((screen.getByRole('checkbox') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /后重试/u }) as HTMLButtonElement).disabled)
+      .toBe(true);
   });
 
   it('手机号验证码登录不需要邀请码或密码', async () => {

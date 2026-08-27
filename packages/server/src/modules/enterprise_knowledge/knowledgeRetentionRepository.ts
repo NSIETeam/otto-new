@@ -5,15 +5,18 @@
 import { createHash } from 'node:crypto';
 import {
   saveEnterpriseKnowledgeInRepository,
+  reviseEnterpriseKnowledgeInRepository,
   type EnterpriseKnowledgeEntryView,
   type EnterpriseKnowledgeRepositoryStore,
 } from './knowledgeRepository.js';
 import {
   decideEnterpriseKnowledgeRetention,
+  enterpriseKnowledgeContradictoryEvidenceCount,
   enterpriseKnowledgeObservationSimilarity,
   enterpriseKnowledgeRetentionReasonLabel,
   normalizeEnterpriseKnowledgeAtom,
   scoreEnterpriseKnowledgeImpact,
+  synthesizeEnterpriseKnowledgeDocument,
   type EnterpriseKnowledgeRetentionReason,
 } from './knowledgeRetentionPolicy.js';
 
@@ -43,6 +46,7 @@ export interface ObserveEnterpriseKnowledgeResult {
   distinctSessionCount: number;
   distinctContributorCount: number;
   spanDays: number;
+  contradictoryEvidenceCount: number;
   impactScore: number;
   knowledge: EnterpriseKnowledgeEntryView | null;
 }
@@ -69,6 +73,16 @@ interface RepresentativeRow {
   contributor: string | null;
   contributor_account_id: string;
   confidence: number;
+}
+
+interface EvidenceDetailRow {
+  content: string;
+  contributor: string | null;
+  contributor_account_id: string;
+  confidence: number;
+  verified: number;
+  impact_score: number;
+  observed_at: string;
 }
 
 const MAX_ATOM_LENGTH = 900;
@@ -118,12 +132,6 @@ function runTransaction<T>(store: EnterpriseKnowledgeRepositoryStore, operation:
   }
 }
 
-function retentionTitle(content: string, category: string): string {
-  return (content.split(/\r?\n|(?<=[。！？!?])/u).find((item) => item.trim()) || category)
-    .trim()
-    .slice(0, 160);
-}
-
 export function observeEnterpriseKnowledgeInRepository(
   store: EnterpriseKnowledgeRepositoryStore,
   input: ObserveEnterpriseKnowledgeInput,
@@ -169,15 +177,15 @@ export function observeEnterpriseKnowledgeInRepository(
     database.prepare(
       `DELETE FROM knowledge_retention_evidence
        WHERE promoted_knowledge_id IS NULL
-         AND datetime(created_at) < datetime('now', '-180 days')`,
+         AND datetime(observed_at) < datetime('now', '-180 days')`,
     ).run();
     const candidates = database.prepare(
       `SELECT topic_id, content, source_fingerprint
        FROM knowledge_retention_evidence
        WHERE organization_id = ? AND category = ?
          AND COALESCE(department, '') = COALESCE(?, '')
-         AND datetime(created_at) >= datetime('now', '-180 days')
-       ORDER BY datetime(created_at) DESC LIMIT 300`,
+         AND datetime(observed_at) >= datetime('now', '-180 days')
+       ORDER BY datetime(observed_at) DESC LIMIT 300`,
     ).all(organizationId, category, department) as EvidenceRow[];
     let topicId = '';
     let bestSimilarity = 0;
@@ -190,7 +198,7 @@ export function observeEnterpriseKnowledgeInRepository(
         topicId = candidate.topic_id;
       }
     }
-    if (!topicId || bestSimilarity < 0.46) {
+    if (!topicId || bestSimilarity < 0.4) {
       topicId = `topic_${digest(organizationId, department ?? '', category, atom).slice(0, 24)}`;
     }
     const evidenceKey = digest(
@@ -229,7 +237,7 @@ export function observeEnterpriseKnowledgeInRepository(
       `SELECT COUNT(*) AS evidence_count,
           COUNT(DISTINCT contributor_account_id || ':' || source_session_id) AS distinct_session_count,
           COUNT(DISTINCT contributor_account_id) AS distinct_contributor_count,
-          COALESCE(julianday(MAX(created_at)) - julianday(MIN(created_at)), 0) AS span_days,
+          COALESCE(julianday(MAX(observed_at)) - julianday(MIN(observed_at)), 0) AS span_days,
           AVG(confidence) AS average_confidence,
           MAX(impact_score) AS maximum_impact_score,
           MAX(verified) AS has_verified_evidence,
@@ -237,6 +245,13 @@ export function observeEnterpriseKnowledgeInRepository(
        FROM knowledge_retention_evidence
        WHERE organization_id = ? AND topic_id = ?`,
     ).get(organizationId, topicId) as EvidenceAggregateRow;
+    const topicEvidence = database.prepare(
+      `SELECT content, contributor, contributor_account_id, confidence, verified,
+          impact_score, observed_at
+       FROM knowledge_retention_evidence
+       WHERE organization_id = ? AND topic_id = ?
+       ORDER BY datetime(observed_at) ASC, id ASC`,
+    ).all(organizationId, topicId) as EvidenceDetailRow[];
     const summary = {
       evidenceCount: Number(aggregate.evidence_count || 0),
       distinctSessionCount: Number(aggregate.distinct_session_count || 0),
@@ -245,6 +260,9 @@ export function observeEnterpriseKnowledgeInRepository(
       averageConfidence: Number(aggregate.average_confidence || 0),
       maximumImpactScore: Number(aggregate.maximum_impact_score || 0),
       hasVerifiedEvidence: Number(aggregate.has_verified_evidence || 0) === 1,
+      contradictoryEvidenceCount: enterpriseKnowledgeContradictoryEvidenceCount(
+        topicEvidence.map((evidence) => evidence.content),
+      ),
     };
     const decision = decideEnterpriseKnowledgeRetention({
       category,
@@ -254,38 +272,99 @@ export function observeEnterpriseKnowledgeInRepository(
       clientImpactScore: input.impactScore,
       clientSignals,
     }, summary);
-    if (!decision.promote || aggregate.promoted_knowledge_id) {
+    const existingKnowledge = aggregate.promoted_knowledge_id
+      ? database.prepare('SELECT * FROM knowledge WHERE id = ? AND organization_id = ?')
+        .get(aggregate.promoted_knowledge_id, organizationId) as
+          | EnterpriseKnowledgeEntryView
+          | undefined
+      : undefined;
+    if (!decision.promote) {
+      let knowledge = existingKnowledge ?? null;
+      if (knowledge?.status === 'pending_review' && decision.reason === 'contested') {
+        knowledge = reviseEnterpriseKnowledgeInRepository(store, {
+          id: knowledge.id,
+          organizationId,
+          sourceLabel: `${enterpriseKnowledgeRetentionReasonLabel(decision.reason)}；`
+            + `${summary.contradictoryEvidenceCount} 条冲突证据，禁止自动发布`,
+          changedBy: 'Otto 企业记忆保留策略',
+          changeNote: '新观察与现有候选冲突，等待管理员裁决',
+        }) ?? knowledge;
+      }
       return {
         outcome: Number(inserted.changes) > 0 ? 'observed' : 'duplicate',
-        promoted: Boolean(aggregate.promoted_knowledge_id),
-        reason: aggregate.promoted_knowledge_id ? decision.reason : 'incubating',
+        promoted: Boolean(existingKnowledge),
+        reason: decision.reason,
         ...summary,
         impactScore: decision.impactScore,
-        knowledge: aggregate.promoted_knowledge_id
-          ? database.prepare('SELECT * FROM knowledge WHERE id = ? AND organization_id = ?')
-            .get(aggregate.promoted_knowledge_id, organizationId) as EnterpriseKnowledgeEntryView
-          : null,
+        knowledge,
       };
     }
     const representative = database.prepare(
       `SELECT content, contributor, contributor_account_id, confidence
        FROM knowledge_retention_evidence
        WHERE organization_id = ? AND topic_id = ?
-       ORDER BY impact_score DESC, confidence DESC, datetime(created_at) DESC LIMIT 1`,
+       ORDER BY impact_score DESC, confidence DESC, datetime(observed_at) DESC LIMIT 1`,
     ).get(organizationId, topicId) as RepresentativeRow;
     const reasonLabel = enterpriseKnowledgeRetentionReasonLabel(decision.reason);
+    const synthesized = synthesizeEnterpriseKnowledgeDocument({
+      category,
+      department,
+      summary,
+      evidence: topicEvidence.map((evidence) => ({
+        content: evidence.content,
+        confidence: Number(evidence.confidence),
+        verified: Number(evidence.verified) === 1,
+        impactScore: Number(evidence.impact_score),
+      })),
+    });
+    const sourceLabel = `${reasonLabel}；${summary.evidenceCount} 条证据，`
+      + `${summary.distinctSessionCount} 个独立会话，`
+      + `${summary.distinctContributorCount} 名贡献者`;
+    if (existingKnowledge) {
+      let knowledge = existingKnowledge;
+      if (existingKnowledge.status === 'pending_review') {
+        knowledge = saveEnterpriseKnowledgeInRepository(store, {
+          organizationId,
+          sourceId: `retention:${topicId}`.slice(0, MAX_SOURCE_LENGTH),
+          department: department ?? undefined,
+          title: synthesized.title,
+          category,
+          content: synthesized.content,
+          contributor: representative.contributor ?? contributor ?? undefined,
+          contributorAccountId: representative.contributor_account_id,
+          confidence: Math.max(representative.confidence, summary.averageConfidence),
+          sourceType: 'auto_capture',
+          sourceLabel,
+          status: 'pending_review',
+        }).entry;
+      }
+      // 只有继续支持当前结论的证据才挂到已生成知识上；争议证据保留在主题证据池，
+      // 不计入已发布知识的支持强度。
+      database.prepare(
+        `UPDATE knowledge_retention_evidence SET promoted_knowledge_id = ?
+         WHERE organization_id = ? AND topic_id = ? AND promoted_knowledge_id IS NULL`,
+      ).run(knowledge.id, organizationId, topicId);
+      return {
+        outcome: Number(inserted.changes) > 0 ? 'observed' : 'duplicate',
+        promoted: true,
+        reason: decision.reason,
+        ...summary,
+        impactScore: decision.impactScore,
+        knowledge,
+      };
+    }
     const saved = saveEnterpriseKnowledgeInRepository(store, {
       organizationId,
       sourceId: `retention:${topicId}`.slice(0, MAX_SOURCE_LENGTH),
       department: department ?? undefined,
-      title: retentionTitle(representative.content, category),
+      title: synthesized.title,
       category,
-      content: representative.content,
+      content: synthesized.content,
       contributor: representative.contributor ?? contributor ?? undefined,
       contributorAccountId: representative.contributor_account_id,
       confidence: Math.max(representative.confidence, summary.averageConfidence),
       sourceType: 'auto_capture',
-      sourceLabel: `${reasonLabel}；${summary.evidenceCount} 条证据，${summary.distinctSessionCount} 个独立会话，${summary.distinctContributorCount} 名贡献者`,
+      sourceLabel,
       status: 'pending_review',
     });
     database.prepare(

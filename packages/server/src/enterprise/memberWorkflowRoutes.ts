@@ -397,6 +397,7 @@ export async function handleMemberWorkflowRoute({
           distinctSessionCount: observed.distinctSessionCount,
           distinctContributorCount: observed.distinctContributorCount,
           spanDays: observed.spanDays,
+          contradictoryEvidenceCount: observed.contradictoryEvidenceCount,
           impactScore: observed.impactScore,
         },
       });

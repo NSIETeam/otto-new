@@ -5924,6 +5924,7 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       content: '重大生产事故的根因是缺少健康检查，加入健康端点校验后验证通过。',
       confidence: 0.95,
       verified: true,
+      observedAt: '2026-08-20T08:00:00.000Z',
     };
     const highImpactCapture = await fetch(`${base}/enterprise/knowledge`, {
       method: 'POST',
@@ -5934,7 +5935,29 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       body: JSON.stringify(highImpactBody),
     });
     expect(highImpactCapture.status).toBe(200);
-    const highImpactPayload = (await highImpactCapture.json()) as {
+    expect(await highImpactCapture.json()).toMatchObject({
+      status: 'observed',
+      added: false,
+      outcome: 'observed',
+      retention: { promoted: false, reason: 'incubating', evidenceCount: 1 },
+    });
+
+    const corroboratedHighImpactCapture = await fetch(`${base}/enterprise/knowledge`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${alphaToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...highImpactBody,
+        sourceId: 'kb_auto_incident_2',
+        sourceSessionId: 'alpha-incident-session-2',
+        sourceFingerprint: 'production-health-incident-repeat',
+        observedAt: '2026-08-21T08:00:00.000Z',
+      }),
+    });
+    expect(corroboratedHighImpactCapture.status).toBe(200);
+    const highImpactPayload = (await corroboratedHighImpactCapture.json()) as {
       knowledgeId: number;
     };
     expect(highImpactPayload).toMatchObject({
@@ -5947,9 +5970,7 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
     expect(highImpactPayload.knowledgeId).toBeGreaterThan(0);
     const captured = db
       .getKnowledgeForAdministration('', '研发部', alpha.id, 'pending_review')
-      .filter(
-        (item: { content: string }) => item.content === highImpactBody.content,
-      );
+      .filter((item: { content: string }) => item.content.includes('## 长期结论'));
     expect(captured).toHaveLength(1);
     expect(captured[0]).toMatchObject({
       department: '研发部',
@@ -5964,7 +5985,7 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       },
     );
     const ownReviewPayload = JSON.stringify(await ownReviewQueue.json());
-    expect(ownReviewPayload).toContain(highImpactBody.content);
+    expect(ownReviewPayload).toContain('长期结论');
     expect(ownReviewPayload).not.toContain(autoKnowledgeBody.content);
   });
 

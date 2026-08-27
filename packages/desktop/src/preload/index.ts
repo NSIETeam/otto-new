@@ -447,6 +447,8 @@ export interface EnterpriseKnowledgeRecordResult {
     promoted: boolean;
     reason:
       | 'incubating'
+      | 'transient'
+      | 'contested'
       | 'long_term_recurrence'
       | 'cross_member_corroboration'
       | 'high_impact_verified';
@@ -454,6 +456,7 @@ export interface EnterpriseKnowledgeRecordResult {
     distinctSessionCount: number;
     distinctContributorCount: number;
     spanDays: number;
+    contradictoryEvidenceCount?: number;
     impactScore: number;
   };
 }

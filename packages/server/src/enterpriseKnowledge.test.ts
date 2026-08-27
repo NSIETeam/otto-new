@@ -96,7 +96,9 @@ describe('enterprise knowledge kernel', () => {
           contributor_account_id: 'account-2',
         }),
       });
-      expect(promoted.knowledge?.content).toBe('客户验收前需要先核对交付清单。');
+      expect(promoted.knowledge?.content).toContain('## 长期结论');
+      expect(promoted.knowledge?.content).toContain('## 形成依据');
+      expect(promoted.knowledge?.content).toContain('3 条独立证据');
 
       const deep = knowledge.observeKnowledge({
         organizationId: 'org-a',
@@ -111,13 +113,103 @@ describe('enterprise knowledge kernel', () => {
         verified: true,
       });
       expect(deep).toMatchObject({
+        outcome: 'observed',
+        promoted: false,
+        reason: 'incubating',
+        evidenceCount: 1,
+      });
+      const corroboratedDeep = knowledge.observeKnowledge({
+        organizationId: 'org-a',
+        department: '研发部',
+        category: 'solution',
+        content: '隔离复测确认：生产事故源于租户缓存键未包含企业编号，修复后验证通过。',
+        contributor: '李工',
+        contributorAccountId: 'account-4',
+        sourceId: 'incident-2',
+        sourceSessionId: 'incident-session-2',
+        confidence: 0.91,
+        verified: true,
+      });
+      expect(corroboratedDeep).toMatchObject({
         outcome: 'promoted',
         reason: 'high_impact_verified',
-        evidenceCount: 1,
+        evidenceCount: 2,
         knowledge: expect.objectContaining({ status: 'pending_review' }),
       });
+      const refinedDeep = knowledge.observeKnowledge({
+        organizationId: 'org-a',
+        department: '研发部',
+        category: 'solution',
+        content: '生产隔离回归测试再次通过：缓存键必须包含企业编号，避免租户数据串读。',
+        contributor: '王工',
+        contributorAccountId: 'account-3',
+        sourceId: 'incident-3',
+        sourceSessionId: 'incident-session-3',
+        confidence: 0.9,
+        verified: true,
+      });
+      expect(refinedDeep).toMatchObject({
+        promoted: true,
+        evidenceCount: 3,
+        knowledge: expect.objectContaining({
+          status: 'pending_review',
+          version: 2,
+        }),
+      });
+      expect(refinedDeep.knowledge?.content).toContain('3 条独立证据');
       expect(JSON.stringify(knowledge.getKnowledgeForAdministration('', undefined, 'org-b')))
         .not.toContain('租户缓存');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('uses observed time for long-term recurrence and blocks contradictory evidence', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+
+    try {
+      const base = {
+        organizationId: 'org-a',
+        department: '交付部',
+        category: 'convention',
+        tags: ['acceptance'],
+        contributor: '张三',
+        contributorAccountId: 'account-1',
+        confidence: 0.9,
+        verified: true,
+      };
+      knowledge.observeKnowledge({
+        ...base,
+        content: '客户验收前必须完成安全扫描。',
+        sourceId: 'policy-observation-1',
+        sourceSessionId: 'policy-session-1',
+        observedAt: '2026-07-01T00:00:00.000Z',
+      });
+      knowledge.observeKnowledge({
+        ...base,
+        contributor: '李四',
+        contributorAccountId: 'account-2',
+        content: '客户验收前无需完成安全扫描。',
+        sourceId: 'policy-observation-2',
+        sourceSessionId: 'policy-session-2',
+        observedAt: '2026-07-10T00:00:00.000Z',
+      });
+      const contested = knowledge.observeKnowledge({
+        ...base,
+        content: '客户验收前必须先完成安全扫描。',
+        sourceId: 'policy-observation-3',
+        sourceSessionId: 'policy-session-3',
+        observedAt: '2026-07-20T00:00:00.000Z',
+      });
+      expect(contested).toMatchObject({
+        promoted: false,
+        reason: 'contested',
+        evidenceCount: 3,
+        spanDays: 19,
+        contradictoryEvidenceCount: 3,
+      });
+      expect(knowledge.getKnowledgeForAdministration('', undefined, 'org-a')).toEqual([]);
     } finally {
       database.close();
     }

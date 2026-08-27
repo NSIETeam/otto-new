@@ -40,6 +40,7 @@ import {
   buildHelpMarkdown,
 } from './components/SlashCommands.js';
 import { RightPanel } from './components/RightPanel.js';
+import { UiModeGuide } from './components/UiModeGuide.js';
 import { ParkServicesPlugin } from './components/ParkServicesPlugin.js';
 import { AllConversations } from './components/AllConversations.js';
 import { AgentGallery } from './components/AgentGallery.js';
@@ -50,6 +51,7 @@ import { useSettingsData } from './state/useSettingsData.js';
 import { useSoftwareUpdate } from './state/useSoftwareUpdate.js';
 import { SettingsHubPage, type TabId as HubTabId } from './components/SettingsHubPage.js';
 import { WhatsNewDialog } from './components/WhatsNewDialog.js';
+import { FirstRunGuide } from './components/FirstRunGuide.js';
 import { ProactiveToast } from './components/ProactiveToast.js';
 import { useProductWorkspace } from './state/useProductWorkspace.js';
 import { DayAgenda } from './components/DayAgenda.js';
@@ -95,6 +97,12 @@ import {
   type AgentProfile,
 } from './agents/departmentAgents.js';
 import {
+  DEFAULT_UI_MODE,
+  readUiModePreference,
+  writeUiModePreference,
+  type UiMode,
+} from './uiModePreference.js';
+import {
   buildCustomAgentKickoff,
   createCustomAgent,
   customAgentStorageKey,
@@ -128,7 +136,7 @@ export function App(): React.JSX.Element {
   });
 
   if (accessMode === 'internal-workspace') {
-    return <OttoWorkspaceApp account={INTERNAL_TEST_ACCOUNT} />;
+    return <OttoWorkspaceApp account={INTERNAL_TEST_ACCOUNT} serverUrl="internal://test" />;
   }
   if (accessMode === 'booting') {
     return (
@@ -156,8 +164,9 @@ export function App(): React.JSX.Element {
   }
   return (
     <OttoWorkspaceApp
-      key={`${auth.state.account.id}:${auth.state.account.organizationId}`}
+      key={`${auth.state.serverUrl}:${auth.state.account.id}:${auth.state.account.organizationId}`}
       account={auth.state.account}
+      serverUrl={auth.state.serverUrl}
       onJoinEnterprise={auth.actions.joinEnterprise}
       onLogout={auth.actions.logout}
     />
@@ -166,10 +175,12 @@ export function App(): React.JSX.Element {
 
 function OttoWorkspaceApp({
   account,
+  serverUrl,
   onJoinEnterprise,
   onLogout,
 }: {
   account: EnterpriseAccount;
+  serverUrl?: string;
   onJoinEnterprise?: (input: { inviteCode: string }) => Promise<void>;
   onLogout?: () => Promise<void>;
 }): React.JSX.Element {
@@ -208,12 +219,17 @@ function OttoWorkspaceApp({
   const permissionResolver = useRef<((decision: AtoaPermissionDecision) => void) | null>(null);
   const [pendingAtoaPermission, setPendingAtoaPermission] = useState<AtoaPermissionRequest | null>(null);
   const requestAtoaPermission = useCallback(
-    (request: AtoaPermissionRequest): Promise<AtoaPermissionDecision> =>
-      new Promise((resolve) => {
+    async (
+      request: Omit<AtoaPermissionRequest, 'messages'>,
+    ): Promise<AtoaPermissionDecision> => {
+      const messages = await window.otto.enterpriseMessagesList(request.peer.id);
+      return new Promise((resolve) => {
+        // 服务器一次只 claim 一条；若界面状态异常叠加，旧请求按拒绝收口。
         permissionResolver.current?.({ kind: 'deny' });
         permissionResolver.current = resolve;
-        setPendingAtoaPermission(request);
-      }),
+        setPendingAtoaPermission({ ...request, messages });
+      });
+    },
     [],
   );
   const completeAtoaPermission = useCallback(
@@ -277,7 +293,8 @@ function OttoWorkspaceApp({
       if (polling || cancelled) return;
       polling = true;
       try {
-        const notifications = await window.otto.enterpriseMessagesUnread();
+        const response = await window.otto.enterpriseMessagesUnread();
+        const notifications = Array.isArray(response) ? response : [];
         if (!cancelled) await tracker.reconcile(notifications);
       } catch {
       } finally {
@@ -349,9 +366,10 @@ function OttoWorkspaceApp({
         await processEnterpriseAtoaRequest({
           request,
           requestPermission: requestAtoaPermission,
-          collectContext: (sources) =>
+          collectContext: (sources, authorizedMessageIds) =>
             collectAuthorizedAtoaContext({
               sources,
+              authorizedMessageIds,
               peerAccountId: request.peerAccountId,
               currentAccountId: account.id,
               currentAccountName: account.name,
@@ -434,14 +452,28 @@ function OttoWorkspaceApp({
     return () => window.clearTimeout(timer);
   }, [softwareUpdate.actions]);
 
+  // —— 统一消息中心：会话历史、未读状态与企业通知 ——
   const [allConvOpen, setAllConvOpen] = useState(false);
   const [mainView, setMainView] = useState<MainView>('chat');
+  const uiModeScope = useMemo(() => ({
+    serverUrl,
+    organizationId: account.organizationId,
+    accountId: account.id,
+  }), [account.id, account.organizationId, serverUrl]);
+  const [savedUiMode, setSavedUiMode] = useState<UiMode | null>(
+    () => readUiModePreference(uiModeScope),
+  );
+  const uiMode = savedUiMode ?? DEFAULT_UI_MODE;
+  const selectUiMode = useCallback((nextMode: UiMode): void => {
+    writeUiModePreference(uiModeScope, nextMode);
+    setSavedUiMode(nextMode);
+  }, [uiModeScope]);
   const [organizationRefreshRevision, setOrganizationRefreshRevision] = useState(0);
   const [enterpriseDirectChatOpenRequest, setEnterpriseDirectChatOpenRequest] = useState<{
     peerAccountId: string;
     requestId: number;
   }>();
-  useEffect(() => window.otto.onNotificationSessionOpen((sessionId) => {
+  const openNotificationSession = useCallback((sessionId: string): void => {
     const prefix = 'enterprise:message:';
     if (!sessionId.startsWith(prefix)) return;
     const peerAccountId = sessionId.slice(prefix.length);
@@ -451,7 +483,12 @@ function OttoWorkspaceApp({
       peerAccountId,
       requestId: (current?.requestId ?? 0) + 1,
     }));
-  }), []);
+  }, []);
+  useEffect(
+    () => window.otto.onNotificationSessionOpen(openNotificationSession),
+    [openNotificationSession],
+  );
+  // 打开「设置与诊断中心」时默认停在哪个 tab（斜杠命令 /doctor /memory /skills 直达用）。
   const [hubInitialTab, setHubInitialTab] = useState<HubTabId>('prefs');
   const openHub = (tab: HubTabId = 'prefs'): void => {
     setHubInitialTab(tab);
@@ -716,7 +753,6 @@ function OttoWorkspaceApp({
 
       void executeEnterpriseCollaborationRelay(tool.parameters, account, {
         getOrganizationView: window.otto.enterpriseOrganizationView,
-        listMessages: window.otto.enterpriseMessagesList,
         sendMessage: window.otto.enterpriseMessageSend,
         requestConsult: requestToolConsult,
         updateAccount: window.otto.enterpriseAccountUpdate,
@@ -761,7 +797,7 @@ function OttoWorkspaceApp({
   };
 
   return (
-    <div className="otto-app" data-connection={state.connection}>
+    <div className="otto-app" data-connection={state.connection} data-ui-mode={uiMode}>
       <Sidebar
         groups={groups}
         activeSessionId={state.activeSessionId}
@@ -847,7 +883,7 @@ function OttoWorkspaceApp({
           onBack={() => setMainView('chat')}
         />
       ) : mainView === 'workspace' ? (
-        <section className="otto-workspace-page" aria-label="Workspace">
+        <section className="otto-workspace-page" aria-label="工作台">
           <header className="otto-workspace-page__head">
             <div>
               <div className="otto-workspace-page__title">专家与工作区</div>
@@ -888,7 +924,7 @@ function OttoWorkspaceApp({
           />
         </section>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'row', flex: 1, minWidth: 0, height: '100%' }}>
+        <div className="otto-content-layout">
           {mainView === 'agenda' ? (
             <DayAgenda
               date={selectedDate}
@@ -910,6 +946,7 @@ function OttoWorkspaceApp({
               models={state.models}
               currentModel={state.currentModel}
               userInitial={account.name.slice(0, 1).toUpperCase() || 'O'}
+              identityLabel={centralIdentity.identityLabel}
               modelManagementLabel="模型与个人 API 设置"
               busy={busy}
               onSend={handleSend}
@@ -947,6 +984,34 @@ function OttoWorkspaceApp({
               }}
             />
           )}
+          {mainView === 'chat' && uiMode === 'work' ? (
+            <RightPanel
+              busy={busy}
+              mode={edition}
+              enterpriseRole={centralIdentity.role}
+              enterpriseOrganizationId={account.organizationId}
+              workspace={product.state.workspace}
+              profiles={centralIdentity.profiles}
+              customAgents={customAgents}
+              onLaunchAgentProfile={handleLaunchProfile}
+              onCreateCustomAgent={handleCreateCustomAgent}
+              onLaunchCustomAgent={handleLaunchCustomAgent}
+              onDeleteCustomAgent={handleDeleteCustomAgent}
+              onOpenAgents={() => setMainView('agents')}
+              onOpenSkillZone={() => setMainView('skillzone')}
+              onSelectDate={(date) => {
+                product.actions.selectDate(date);
+                setMainView('agenda');
+              }}
+              onOpenOrganization={() => setMainView('organization')}
+              onAddFriend={product.actions.addFriend}
+              autoSkillCandidates={product.state.pendingAutoSkills}
+              autoSkillLastAction={product.state.lastAutoSkillAction}
+              onRefreshAutoSkills={product.actions.refreshPendingAutoSkills}
+              onConfirmAutoSkill={product.actions.confirmPendingAutoSkill}
+              onRejectAutoSkill={product.actions.rejectPendingAutoSkill}
+            />
+          ) : null}
         </div>
       )}
 
@@ -964,10 +1029,12 @@ function OttoWorkspaceApp({
           sessions={selectSortedSessions(state)}
           activeSessionId={state.activeSessionId}
           unreadSessions={state.unreadSessions}
+          enterpriseUnreadCounts={enterpriseUnreadCounts}
           onSelect={(id) => {
             setMainView('chat');
             actions.selectSession(id);
           }}
+          onOpenNotification={openNotificationSession}
           onClose={() => setAllConvOpen(false)}
           onDelete={actions.deleteSession}
         />
@@ -1011,6 +1078,8 @@ function OttoWorkspaceApp({
               product={product}
               models={state.models}
               enterpriseAccount={account}
+              uiMode={uiMode}
+              onUiModeChange={selectUiMode}
               onManageAccounts={account.isAdmin ? () => setMainView('accounts') : undefined}
             />
           </div>
@@ -1035,8 +1104,15 @@ function OttoWorkspaceApp({
         />
       ) : null}
 
-      <WhatsNewDialog />
+      {savedUiMode ? (
+        <>
+          <WhatsNewDialog />
+          <FirstRunGuide />
+        </>
+      ) : null}
+      {/* 主动服务提醒：右下角 toast（日程/洞察/日报等） */}
       <ProactiveToast />
+      {!savedUiMode ? <UiModeGuide onSelect={selectUiMode} /> : null}
     </div>
   );
 }

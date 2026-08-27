@@ -121,11 +121,9 @@ jobs:
           if [ "$DRY_RUN_INPUT" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
           fi
-          printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
           ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
             "set -euo pipefail
-             sudo -S -p '' -v
              cd '$REMOTE_DIR'
              sha256sum -c ./*.sha256
              ARCHIVE=\$(ls otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz | head -n 1)
@@ -133,8 +131,77 @@ jobs:
              mkdir unpack
              tar -xzf \"\$ARCHIVE\" -C unpack
              PKG_DIR=\$(find unpack -mindepth 1 -maxdepth 1 -type d | head -n 1)
+             test -n \"\$PKG_DIR\"
              if [ -L /opt/otto-enterprise/current ]; then
-               sudo \"\$PKG_DIR/upgrade.sh\" --config '${DEPLOY_CONFIG_PATH}' $DRY_RUN_FLAG
+               printf upgrade
              else
-               sudo \"\$PKG_DIR/install.sh\" --config '${DEPLOY_CONFIG_PATH}' $DRY_RUN_FLAG
+               printf install
+             fi" > deployment-action.txt
+          DEPLOY_ACTION="$(cat deployment-action.txt)"
+          case "$DEPLOY_ACTION" in
+            install|upgrade) ;;
+            *) echo "unexpected deployment action: $DEPLOY_ACTION" >&2; exit 4 ;;
+          esac
+          if [ "$DRY_RUN_INPUT" != "true" ] && [ "$DEPLOY_ACTION" = "upgrade" ]; then
+            printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
+            ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              "set -euo pipefail
+               cd '$REMOTE_DIR'
+               PKG_DIR=\$(find unpack -mindepth 1 -maxdepth 1 -type d | head -n 1)
+               test -n \"\$PKG_DIR\"
+               sudo -k -S -p '' \"\$PKG_DIR/backup-now.sh\" '${DEPLOY_CONFIG_PATH}'"
+          fi
+          printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
+          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "set -euo pipefail
+             cd '$REMOTE_DIR'
+             PKG_DIR=\$(find unpack -mindepth 1 -maxdepth 1 -type d | head -n 1)
+             test -n \"\$PKG_DIR\"
+             if [ '$DEPLOY_ACTION' = upgrade ]; then
+               sudo -k -S -p '' \"\$PKG_DIR/upgrade.sh\" --config '${DEPLOY_CONFIG_PATH}' $DRY_RUN_FLAG
+             else
+               sudo -k -S -p '' \"\$PKG_DIR/install.sh\" --config '${DEPLOY_CONFIG_PATH}' $DRY_RUN_FLAG
              fi"
+
+      - name: Verify production version and public contracts
+        if: ${{ inputs.dry_run == false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "set -euo pipefail
+             CURRENT=\$(readlink -f /opt/otto-enterprise/current)
+             case \"\$CURRENT\" in
+               /opt/otto-enterprise/releases/${{ steps.version.outputs.version }}-*) ;;
+               *) echo \"unexpected current release: \$CURRENT\" >&2; exit 5 ;;
+             esac
+             curl --fail --silent --show-error --retry 5 \
+               http://127.0.0.1:7778/enterprise/health > /tmp/otto-health-${GITHUB_RUN_ID}.json
+             curl --fail --silent --show-error --retry 5 \
+               http://127.0.0.1:7778/enterprise/legal > /tmp/otto-legal-${GITHUB_RUN_ID}.json
+             /opt/otto-enterprise/runtime/current/bin/node -e '
+               const fs = require(\"node:fs\");
+               const health = JSON.parse(fs.readFileSync(process.argv[1], \"utf8\"));
+               const legal = JSON.parse(fs.readFileSync(process.argv[2], \"utf8\"));
+               if (health.status !== \"ok\" || health.version !== \"${{ steps.version.outputs.version }}\") {
+                 throw new Error(\"health identity mismatch\");
+               }
+               const documents = Array.isArray(legal) ? legal : legal.documents;
+               if (!Array.isArray(documents) || documents.length < 2) {
+                 throw new Error(\"legal documents missing\");
+               }
+               for (const document of documents) {
+                 if (!/^[0-9a-f]{64}$/.test(document.hash || \"\")) {
+                   throw new Error(\"legal document hash invalid\");
+                 }
+               }
+               console.log(JSON.stringify({
+                 status: health.status,
+                 version: health.version,
+                 apiVersion: health.apiVersion,
+                 legalDocuments: documents.map(({ id, version }) => ({ id, version })),
+               }));
+             ' /tmp/otto-health-${GITHUB_RUN_ID}.json /tmp/otto-legal-${GITHUB_RUN_ID}.json"

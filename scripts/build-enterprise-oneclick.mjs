@@ -561,7 +561,7 @@ export class FeatureFlagManager {
     releaseRoot,
   ]);
 
-  const finalPackageName = `${packageNameBase}-${buildCommit.slice(0, 12)}`;
+  const finalPackageName = `${packageNameBase}-${buildCommit.slice(0, 12)}-${sourceInputSha256.slice(0, 12)}`;
   const finalPackageRoot = path.join(temporaryRoot, finalPackageName);
   cpSync(packageRoot, finalPackageRoot, { recursive: true });
   rmSync(packageRoot, { recursive: true, force: true });

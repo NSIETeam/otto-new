@@ -22,8 +22,15 @@ describe('enterprise production deployment workflow', () => {
     );
   });
 
-  it('does not pin deployment to the retired V1.9.13 source line', () => {
+  it('uses an exact signed package identity without pinning the retired V1.9.13 line', () => {
     expect(workflow).not.toContain('DEPLOY_V1.9.13');
     expect(workflow).not.toContain('test "$TAG" = \'1.9.13\'');
+    expect(workflow).toContain('package_identity:');
+    expect(workflow).toContain(
+      '[[ "$PACKAGE_ID" =~ ^[0-9a-f]{12}-[0-9a-f]{12}$ ]]',
+    );
+    expect(workflow).toContain(
+      '${{ steps.version.outputs.package_id }}.tar.gz',
+    );
   });
 });

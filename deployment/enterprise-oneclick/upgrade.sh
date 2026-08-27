@@ -82,9 +82,14 @@ BUILD_ID="$("$NODE_PATH" -e "const x=JSON.parse(process.argv[1]);console.log(x.b
 RELEASE_SCHEMA_TO="$("$NODE_PATH" -e "const x=JSON.parse(process.argv[1]);console.log(x.database.schemaTo)" "$RELEASE_INFO")"
 RELEASE_NAME="${RELEASE_VERSION}-${BUILD_ID:0:12}"
 TARGET_RELEASE="${INSTALL_ROOT}/releases/${RELEASE_NAME}"
+RUNTIME_ARCH="$(otto_arch)"
+SQLCIPHER_RELEASE_BINDING="${SCRIPT_DIR}/release/native/sqlcipher/linux-${RUNTIME_ARCH}/better_sqlite3.node"
+[ -f "$SQLCIPHER_RELEASE_BINDING" ] && [ ! -L "$SQLCIPHER_RELEASE_BINDING" ] \
+  || otto_die "升级包缺少当前架构的 SQLCipher Node.js 原生产物：linux-${RUNTIME_ARCH}" 3
 
 CURRENT_INFO="$("$NODE_PATH" "${SCRIPT_DIR}/tools/verify-release.mjs" \
-  "$CURRENT_REAL" --allow-legacy-lstc)"
+  "$CURRENT_REAL" --allow-legacy-lstc --allow-legacy-sqlite \
+  --allow-registration-legal-hotfix)"
 CURRENT_BUILD="$("$NODE_PATH" -e "const x=JSON.parse(process.argv[1]);console.log(x.buildCommit)" "$CURRENT_INFO")"
 if [ "$CURRENT_BUILD" = "$BUILD_ID" ]; then
   otto_log "相同 release 已安装；执行幂等验收"

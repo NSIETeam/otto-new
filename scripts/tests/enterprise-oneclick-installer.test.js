@@ -819,6 +819,19 @@ describe('enterprise one-click runtime configuration contract', () => {
     }
   });
 
+  it('updates the deployed runtime identity transactionally during cutover', () => {
+    const upgrade = readFileSync(UPGRADE_SH, 'utf8');
+
+    expect(upgrade).toContain('"$RELEASE_VERSION" "$BUILD_ID" <<\'NODE\'');
+    expect(upgrade).toContain("'OTTO_APP_VERSION'");
+    expect(upgrade).toContain("'OTTO_BUILD_COMMIT'");
+    expect(upgrade).toContain("['OTTO_APP_VERSION', appVersion]");
+    expect(upgrade).toContain("['OTTO_BUILD_COMMIT', buildCommit]");
+    expect(upgrade).toContain('enterprise.env.before');
+    expect(upgrade).toContain(
+      'install -o root -g root -m 0600 "$CONFIG_BACKUP" "$CONFIG_PATH"',
+    );
+  });
   it('preserves repair notification and Feishu configuration through installation', () => {
     const envExample = readFileSync(ENV_EXAMPLE, 'utf8');
     const common = readFileSync(COMMON_SH, 'utf8');

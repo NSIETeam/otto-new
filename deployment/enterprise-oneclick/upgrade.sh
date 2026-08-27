@@ -110,8 +110,11 @@ OLD_DATA_BACKUP="${TXN_DIR}/data.db.before"
 NEW_DATA="${TXN_DIR}/data.db.next"
 ROLLBACK_NEEDED=0
 OLD_DEPLOY_BACKUP="${TXN_DIR}/deploy.before"
+CONFIG_BACKUP="${TXN_DIR}/enterprise.env.before"
 SERVICE_STOPPED=0
 UPGRADE_SUCCEEDED=0
+
+cp -p "$CONFIG_PATH" "$CONFIG_BACKUP"
 
 cleanup() {
   local rollback_ok=1
@@ -133,6 +136,9 @@ cleanup() {
           "$OLD_DATA_BACKUP" "${DATA_DIR}/data.db" || rollback_ok=0
       else
         rollback_ok=0
+      fi
+      if [ -f "$CONFIG_BACKUP" ]; then
+        install -o root -g root -m 0600 "$CONFIG_BACKUP" "$CONFIG_PATH" || true
       fi
       if [ -d "$OLD_DEPLOY_BACKUP" ]; then
         if rm -rf "${INSTALL_ROOT}/deploy.rollback" \
@@ -273,6 +279,29 @@ if [ -d "${INSTALL_ROOT}/deploy" ] && [ ! -L "${INSTALL_ROOT}/deploy" ]; then
 fi
 systemctl stop otto-enterprise
 install -o otto-enterprise -g otto-enterprise -m 0600 "${CANARY_DIR}/data.db" "${DATA_DIR}/data.db"
+UPDATED_CONFIG="${TXN_DIR}/enterprise.env.next"
+"$NODE_PATH" --input-type=module - "$CONFIG_PATH" "$UPDATED_CONFIG" \
+  "$RELEASE_VERSION" "$BUILD_ID" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const [source, target, appVersion, buildCommit] = process.argv.slice(2);
+const managedKeys = new Set([
+  'OTTO_APP_VERSION',
+  'OTTO_BUILD_COMMIT',
+]);
+const retained = readFileSync(source, 'utf8')
+  .split(/\r?\n/)
+  .filter((line) => {
+    const match = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=/.exec(line);
+    return !match || !managedKeys.has(match[1]);
+  });
+while (retained.at(-1) === '') retained.pop();
+for (const [key, value] of [
+  ['OTTO_APP_VERSION', appVersion],
+  ['OTTO_BUILD_COMMIT', buildCommit],
+]) retained.push(`${key}=${JSON.stringify(value)}`);
+writeFileSync(target, `${retained.join('\n')}\n`, { mode: 0o600 });
+NODE
+install -o root -g root -m 0600 "$UPDATED_CONFIG" "$CONFIG_PATH"
 ln -s "$TARGET_RELEASE" "${INSTALL_ROOT}/current.next"
 mv -Tf "${INSTALL_ROOT}/current.next" "${INSTALL_ROOT}/current"
 install -o root -g root -m 0644 "${SCRIPT_DIR}/templates/otto-enterprise.service" "$SERVICE_UNIT"

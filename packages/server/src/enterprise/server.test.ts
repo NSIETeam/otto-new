@@ -977,6 +977,32 @@ describe('受保护 vs 公开路由边界', () => {
     );
     expect(baselineOrganizationMessages.status).toBe(200);
 
+    const crossOrganizationHeaders = {
+      authorization: `Bearer ${crossOrganizationToken}`,
+    };
+    for (const route of [
+      '/enterprise/organization/view',
+      '/enterprise/organization/sync',
+      '/enterprise/organization/features',
+    ]) {
+      const response = await fetch(`${base}${route}`, {
+        headers: crossOrganizationHeaders,
+      });
+      expect(response.status, route).toBe(200);
+    }
+
+    const crossOrganizationPeer = db.createAccount({
+      organizationId: org.id,
+      username: 'cross-organization-route-peer',
+      password: 'cross-organization-peer-password',
+      name: 'Cross Organization Route Peer',
+    });
+    const baselinePeerMessages = await fetch(
+      `${base}/enterprise/messages/${encodeURIComponent(crossOrganizationPeer.id)}`,
+      { headers: crossOrganizationHeaders },
+    );
+    expect(baselinePeerMessages.status).toBe(200);
+
     const internalTicket = await fetch(`${base}/enterprise/tickets`, {
       method: 'POST',
       headers: { ...memberHeaders, 'content-type': 'application/json' },

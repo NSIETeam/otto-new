@@ -33,4 +33,10 @@ describe('enterprise production deployment workflow', () => {
       '${{ steps.version.outputs.package_id }}.tar.gz',
     );
   });
+
+  it('verifies the deployed legal-document hashes after cutover', () => {
+    expect(workflow).toContain('typeof document.hash === \\"string\\"');
+    expect(workflow).toContain(': document.sha256;');
+    expect(workflow).toContain('legal document hash invalid');
+  });
 });

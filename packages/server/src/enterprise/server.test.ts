@@ -579,6 +579,84 @@ describe('受保护 vs 公开路由边界', () => {
     });
   });
 
+  it('admin publishes modular update manifest and health exposes the active result', async () => {
+    const { base } = await startIsolated(ADMIN_TOKEN);
+    const headers = { 'x-otto-admin-token': ADMIN_TOKEN, 'content-type': 'application/json' };
+
+    const denied = await fetch(`${base}/enterprise/modules/updates`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ module: 'park_service', version: '1.9.5-park.1' }),
+    });
+    expect(denied.status).toBe(401);
+
+    const published = await fetch(`${base}/enterprise/modules/updates`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({
+        module: 'park_service',
+        version: '1.9.5-park.1',
+        rollout: 'stable',
+        notes: 'park service prerelease',
+        minAppVersion: '1.9.5',
+        sha256: 'a'.repeat(64),
+      }),
+    });
+    expect(published.status).toBe(200);
+    await expect(published.json()).resolves.toMatchObject({
+      moduleUpdate: {
+        module: 'park_service',
+        version: '1.9.5-park.1',
+        rollout: 'stable',
+        sha256: 'a'.repeat(64),
+      },
+      manifest: {
+        format: 'otto-module-updates-v1',
+        modules: [
+          expect.objectContaining({ module: 'park_service', version: '1.9.5-park.1' }),
+        ],
+      },
+    });
+
+    const manifest = await fetch(`${base}/enterprise/modules/updates`, {
+      headers: { 'x-otto-admin-token': ADMIN_TOKEN },
+    });
+    expect(manifest.status).toBe(200);
+    await expect(manifest.json()).resolves.toMatchObject({
+      modules: [expect.objectContaining({ module: 'park_service', rollout: 'stable' })],
+      catalog: expect.arrayContaining([
+        expect.objectContaining({ module: 'park_service' }),
+      ]),
+    });
+
+    const anonymousClientManifest = await fetch(`${base}/enterprise/modules/updates/client`);
+    expect(anonymousClientManifest.status).toBe(401);
+
+    const database = await import('./db.js');
+    const member = database.createAccount({
+      username: 'module-reader',
+      password: 'module-reader-password',
+      name: 'Module Reader',
+    });
+    const session = database.createAuthSession(member.id);
+    const clientManifest = await fetch(`${base}/enterprise/modules/updates/client`, {
+      headers: { authorization: `Bearer ${session.token}` },
+    });
+    expect(clientManifest.status).toBe(200);
+    await expect(clientManifest.json()).resolves.toMatchObject({
+      modules: [expect.objectContaining({ module: 'park_service', rollout: 'stable' })],
+    });
+
+    const health = await fetch(`${base}/enterprise/health`);
+    expect(health.status).toBe(200);
+    const body = await health.json() as {
+      capabilities: string[];
+      deployment: { moduleUpdates: { modules: unknown[] } };
+    };
+    expect(body.capabilities).toContain('modular_update_push_v1');
+    expect(body.deployment.moduleUpdates.modules).toHaveLength(1);
+  });
+
   it('企业知识库无登录会话不可读取', async () => {
     const { base } = await startIsolated(ADMIN_TOKEN);
     const res = await fetch(`${base}/enterprise/knowledge`);

@@ -162,10 +162,31 @@ export interface EnterpriseOrganizationFeatures {
   enterprise_tree: boolean;
   park_service: boolean;
   feishu_auto_reply: boolean;
-  tui_sync: boolean;
   direct_messages: boolean;
   atoa: boolean;
   knowledge: boolean;
+}
+
+export type EnterpriseModuleUpdateRollout = 'off' | 'canary' | 'stable' | 'required';
+
+export interface EnterpriseModuleUpdateDescriptor {
+  module: string;
+  version: string;
+  rollout: EnterpriseModuleUpdateRollout;
+  notes: string;
+  minAppVersion: string | null;
+  manifestUrl: string | null;
+  sha256: string | null;
+  publishedAt: string | null;
+  updatedAt: string;
+}
+
+export interface EnterpriseModuleUpdateManifest {
+  format: 'otto-module-updates-v1';
+  deploymentId: string;
+  generatedAt: string;
+  modules: EnterpriseModuleUpdateDescriptor[];
+  catalog: Array<{ module: string; features: string[] }>;
 }
 
 export type EnterprisePositionRoleMapping = 'member' | 'department_admin' | 'enterprise_admin';
@@ -731,9 +752,9 @@ export class EnterpriseClient {
     if (this.currentAccount.accountType !== 'personal') {
       throw new Error('当前账号已经属于企业');
     }
-    const normalizedInviteCode = inviteCode.trim().toUpperCase();
-    if (!/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/.test(normalizedInviteCode)) {
-      throw new Error('请输入有效的 8 位企业邀请码');
+    const normalizedInviteCode = inviteCode.trim();
+    if (!/^[A-HJ-NP-Za-km-z2-9]{4}-[A-HJ-NP-Za-km-z2-9]{4}-[A-HJ-NP-Za-km-z2-9]{4}$/.test(normalizedInviteCode)) {
+      throw new Error('请输入有效的 12 位大小写敏感企业邀请码');
     }
     const requestGeneration = this.authOperationGeneration;
     const requestToken = this.token;
@@ -941,6 +962,12 @@ export class EnterpriseClient {
     return (await this.request<{ features: EnterpriseOrganizationFeatures }>(
       '/enterprise/organization/features',
     )).features;
+  }
+
+  async getModuleUpdates(): Promise<EnterpriseModuleUpdateManifest> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    await this.assertCompatibleServer(this.serverUrl, ['modular_update_push_v1']);
+    return this.request('/enterprise/modules/updates/client');
   }
 
   async updateOrganizationFeatures(

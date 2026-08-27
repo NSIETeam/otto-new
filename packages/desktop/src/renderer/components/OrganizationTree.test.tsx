@@ -198,6 +198,38 @@ describe('OrganizationTree', () => {
     );
   });
 
+  it('keeps the unread reminder when the conversation cannot persist the read state', async () => {
+    const enterpriseMessagesList = vi.fn(async () => {
+      throw new Error('服务器暂时不可用');
+    });
+    const onMessageRead = vi.fn();
+    Object.assign(window.otto, { enterpriseMessagesList });
+
+    render(
+      <DirectMessagePanel
+        member={{
+          id: 'acc_2',
+          username: 'bob',
+          name: 'Bob',
+          role: 'Manager',
+          department: 'R&D',
+          isAdmin: false,
+          status: 'active',
+        }}
+        currentAccount={authenticatedEnterpriseAccount}
+        initialPosition={{ left: 0, top: 0 }}
+        stackOrder={1}
+        onActivate={vi.fn()}
+        onMessageRead={onMessageRead}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(enterpriseMessagesList).toHaveBeenCalledWith('acc_2'));
+    expect(await screen.findByText('服务器暂时不可用')).toBeTruthy();
+    expect(onMessageRead).not.toHaveBeenCalled();
+  });
+
   it('treats SQLite chat timestamps without a timezone as UTC', () => {
     expect(
       parseDirectMessageTimestamp('2026-07-28 03:51:00').toISOString(),
@@ -809,8 +841,8 @@ describe('OrganizationTree', () => {
     expect(await screen.findByText('在线')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /Bob/ }));
-    expect(onMessageRead).toHaveBeenCalledWith('acc_2');
     await waitFor(() => expect(enterpriseMessagesList).toHaveBeenCalledWith('acc_2'));
+    await waitFor(() => expect(onMessageRead).toHaveBeenCalledWith('acc_2'));
     expect(await screen.findByText('还没有消息，开始聊聊吧。')).toBeTruthy();
   });
 
@@ -1004,7 +1036,7 @@ describe('OrganizationTree', () => {
       expect(scrollIntoView).toHaveBeenCalled();
       expect(onMessageRead).toHaveBeenCalledTimes(2);
     }, { timeout: 3_000 });
-    expect(onMessageRead).toHaveBeenLastCalledWith('acc_2');
+    expect(onMessageRead).toHaveBeenLastCalledWith('acc_2', ['dm_old', 'dm_new']);
 
     scrollIntoView.mockClear();
     await act(async () => {

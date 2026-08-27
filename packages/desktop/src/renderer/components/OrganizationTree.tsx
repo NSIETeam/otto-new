@@ -153,7 +153,7 @@ export function OrganizationTree({
   refreshRevision?: number;
   unreadCounts?: EnterpriseUnreadCounts;
   directChatOpenRequest?: EnterpriseDirectChatOpenRequest;
-  onMessageRead?: (peerAccountId: string) => void;
+  onMessageRead?: (peerAccountId: string, messageIds?: readonly string[]) => void;
 }): React.JSX.Element | null {
   const [open, setOpen] = useState(true);
   const [orgView, setOrgView] = useState<EnterpriseOrganizationView | null>(null);
@@ -205,12 +205,11 @@ export function OrganizationTree({
     return result;
   }, [enterpriseAccount?.id, orgView?.members]);
   const openDirectChat = useCallback((member: EnterpriseOrganizationView['members'][number]): void => {
-    onMessageRead?.(member.id);
     setChatMembers((current) => [
       ...current.filter((candidate) => candidate.id !== member.id),
       member,
     ]);
-  }, [onMessageRead]);
+  }, []);
   const activateDirectChat = useCallback((memberId: string): void => {
     setChatMembers((current) => {
       const activeIndex = current.findIndex((candidate) => candidate.id === memberId);
@@ -743,7 +742,7 @@ export function DirectMessagePanel({
   initialPosition: { left: number; top: number };
   stackOrder: number;
   onActivate: () => void;
-  onMessageRead?: (peerAccountId: string) => void;
+  onMessageRead?: (peerAccountId: string, messageIds?: readonly string[]) => void;
   onClose: () => void;
 }): React.JSX.Element {
   const [messages, setMessages] = useState<EnterpriseDirectMessage[]>([]);
@@ -824,12 +823,19 @@ export function DirectMessagePanel({
           setError('');
           knownMessageIds.current = new Set(next.map((message) => message.id));
           if (
-            previousIds
-            && next.some((message) => (
+            previousIds === null
+            || next.some((message) => (
               message.senderAccountId === member.id && !previousIds.has(message.id)
             ))
           ) {
-            onMessageRead?.(member.id);
+            const inboundMessageIds = next
+              .filter((message) => message.senderAccountId === member.id)
+              .map((message) => message.id);
+            if (inboundMessageIds.length > 0) {
+              onMessageRead?.(member.id, inboundMessageIds);
+            } else {
+              onMessageRead?.(member.id);
+            }
           }
         }
       } catch (reason) {

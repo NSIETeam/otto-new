@@ -20,6 +20,7 @@ export interface EnterpriseUnreadMessageNotification {
 }
 
 export interface EnterpriseUnreadNotificationPayload {
+  messageId: string;
   sessionId: string;
   source: 'enterprise' | 'atoa';
   sender: string;
@@ -52,6 +53,7 @@ function toPayload(
   const atoaRequest = isAtoaRequest(notification);
   const atoaResponse = isAtoaResponse(notification);
   return {
+    messageId: notification.id,
     sessionId: sessionIdForSender(notification.senderAccountId),
     source: atoaRequest || atoaResponse ? 'atoa' : 'enterprise',
     sender: notification.senderName,
@@ -70,17 +72,40 @@ function toPayload(
  */
 export class EnterpriseUnreadNotificationTracker {
   private latestMessageBySender = new Map<string, string>();
+  private observedMessageIdsBySender = new Map<string, Set<string>>();
+  private readMessageIdsBySender = new Map<string, Set<string>>();
+  private unreadCounts: EnterpriseUnreadCounts = {};
 
   constructor(private readonly options: EnterpriseUnreadNotificationTrackerOptions) {}
 
   async reconcile(notifications: readonly EnterpriseUnreadMessageNotification[]): Promise<void> {
     const latest = new Map<string, EnterpriseUnreadMessageNotification>();
+    const observed = new Map<string, Set<string>>();
     const counts: EnterpriseUnreadCounts = {};
     for (const notification of notifications) {
+      const observedIds = observed.get(notification.senderAccountId) ?? new Set<string>();
+      observedIds.add(notification.id);
+      observed.set(notification.senderAccountId, observedIds);
+      if (this.readMessageIdsBySender.get(notification.senderAccountId)?.has(notification.id)) {
+        continue;
+      }
       latest.set(notification.senderAccountId, notification);
       const sessionId = sessionIdForSender(notification.senderAccountId);
       counts[sessionId] = (counts[sessionId] ?? 0) + 1;
     }
+    this.observedMessageIdsBySender = observed;
+    for (const [senderAccountId, readIds] of this.readMessageIdsBySender) {
+      const observedIds = observed.get(senderAccountId);
+      if (!observedIds) {
+        this.readMessageIdsBySender.delete(senderAccountId);
+        continue;
+      }
+      for (const id of readIds) {
+        if (!observedIds.has(id)) readIds.delete(id);
+      }
+      if (readIds.size === 0) this.readMessageIdsBySender.delete(senderAccountId);
+    }
+    this.unreadCounts = counts;
     this.options.onUnreadCountsChange?.(counts);
 
     for (const senderAccountId of [...this.latestMessageBySender.keys()]) {
@@ -96,10 +121,40 @@ export class EnterpriseUnreadNotificationTracker {
     }
   }
 
+  /**
+   * A successful conversation load is the durable read boundary. Suppress the
+   * already-observed ids until a later backend snapshot confirms they are gone,
+   * so an in-flight stale snapshot cannot restore the badge or OS notification.
+   */
+  async markSenderRead(
+    senderAccountId: string,
+    messageIds: readonly string[] = [],
+  ): Promise<void> {
+    const observedIds = this.observedMessageIdsBySender.get(senderAccountId);
+    if (observedIds?.size || messageIds.length > 0) {
+      const readIds = this.readMessageIdsBySender.get(senderAccountId) ?? new Set<string>();
+      for (const id of observedIds ?? []) readIds.add(id);
+      for (const id of messageIds) readIds.add(id);
+      this.readMessageIdsBySender.set(senderAccountId, readIds);
+    }
+    this.latestMessageBySender.delete(senderAccountId);
+    const sessionId = sessionIdForSender(senderAccountId);
+    if (this.unreadCounts[sessionId]) {
+      const counts = { ...this.unreadCounts };
+      delete counts[sessionId];
+      this.unreadCounts = counts;
+      this.options.onUnreadCountsChange?.(counts);
+    }
+    await this.options.markRead(sessionId);
+  }
+
   /** Clear local unread markers when switching or logging out of an enterprise account. */
   async clear(): Promise<void> {
     const senders = [...this.latestMessageBySender.keys()];
     this.latestMessageBySender.clear();
+    this.observedMessageIdsBySender.clear();
+    this.readMessageIdsBySender.clear();
+    this.unreadCounts = {};
     this.options.onUnreadCountsChange?.({});
     await Promise.all(
       senders.map((senderAccountId) =>

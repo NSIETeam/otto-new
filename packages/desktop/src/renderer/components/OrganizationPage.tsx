@@ -64,7 +64,7 @@ export interface OrganizationPageProps {
   organizationRefreshRevision?: number;
   enterpriseUnreadCounts?: EnterpriseUnreadCounts;
   enterpriseDirectChatOpenRequest?: { peerAccountId: string; requestId: number };
-  onMessageRead?: (peerAccountId: string) => void;
+  onMessageRead?: (peerAccountId: string, messageIds?: readonly string[]) => void;
   onBack: () => void;
 }
 
@@ -280,12 +280,11 @@ export function OrganizationPage({
   }, [hasAuth, enterpriseAccount?.organizationId, enterpriseAccount?.updatedAt, organizationRefreshRevision, selectedOrganizationId]);
 
   const openChat = useCallback((member: EnterpriseOrganizationView['members'][number]) => {
-    onMessageRead?.(member.id);
     setChatMembers((current) => [
       ...current.filter((candidate) => candidate.id !== member.id),
       member,
     ]);
-  }, [onMessageRead]);
+  }, []);
 
   useEffect(() => {
     const isParkAdmin = Boolean(

@@ -65,7 +65,7 @@ export interface InboxPageProps {
   enterpriseUnreadCounts?: Record<string, number>;
   onOpenDirectChat?: (peerAccountId: string) => void;
   /** 打开某会话后将该 peer 标记为已读（联动导航未读角标）。 */
-  onMessageRead?: (peerAccountId: string) => void;
+  onMessageRead?: (peerAccountId: string, messageIds?: readonly string[]) => void;
   federationContactOpenRequest?: { contactId: string; requestId: number };
   onFederationMessageRead?: (contactId: string) => void;
   onBack: () => void;
@@ -264,10 +264,17 @@ export function InboxPage({
           [selectedPeer]: { lastMessage: last.content, lastMessageAt: last.createdAt },
         }));
       }
+      const inboundMessageIds = safeMessages
+        .filter((message) => message.senderAccountId === selectedPeer)
+        .map((message) => message.id);
+      if (inboundMessageIds.length > 0) {
+        onMessageRead?.(selectedPeer, inboundMessageIds);
+      } else {
+        onMessageRead?.(selectedPeer);
+      }
     }).catch(() => { /* 忽略 */ }).finally(() => {
       if (!cancelled) setMessagesLoading(false);
     });
-    onMessageRead?.(selectedPeer);
     return () => { cancelled = true; };
   }, [selectedFederationContactId, selectedPeer, onMessageRead]);
 

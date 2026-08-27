@@ -72,6 +72,8 @@ Worker 只执行编译进发布物且在 `DurableWorkflowTaskRegistry` 中登记
 
 登录成员可以提交允许列表内的任务并查看自己创建的任务。企业管理员可以查看本企业全部任务并进行人工处理。
 
+创建任务时必须提供租户内唯一的 `submissionIdempotencyKey`。服务端会对标准化后的工作流定义和优先级计算 SHA-256 摘要：同一账号使用同一个键重放同一请求时返回原任务；同键对应不同账号或不同请求内容时返回 409。该提交键用于防止客户端超时重试创建两份工作流，不能用每一步的执行幂等键替代。
+
 - `POST /enterprise/workflows`
 - `GET /enterprise/workflows`
 - `GET /enterprise/workflows/{runId}`
@@ -82,6 +84,8 @@ Worker 只执行编译进发布物且在 `DurableWorkflowTaskRegistry` 中登记
 - `POST /enterprise/workflows/{runId}/compensate`
 
 API 以 PostgreSQL 元数据和登录账号的企业 ID 做租户隔离，不能依赖 URL 中的任务 ID 判断权限。
+
+输入校验错误返回 400，提交幂等冲突和状态冲突返回 409；数据库或其他内部异常只返回通用 500，不向客户端回显连接串、密码或底层错误消息。
 
 ## 当前内置任务
 

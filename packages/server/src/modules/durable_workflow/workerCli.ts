@@ -53,6 +53,33 @@ async function closeServer(server: Server): Promise<void> {
   });
 }
 
+export async function startManagedDurableWorkflowWorkerRuntime(input: {
+  initializeDatabase(): Promise<void>;
+  startWorker(): Promise<void>;
+  listenHealth(): Promise<void>;
+  closeHealth(): Promise<void>;
+  closeWorker(): Promise<void>;
+  closeDatabase(): Promise<void>;
+}): Promise<{ close(): Promise<void> }> {
+  let closing: Promise<void> | null = null;
+  const close = (): Promise<void> => {
+    closing ??= (async () => {
+      await Promise.allSettled([input.closeHealth(), input.closeWorker()]);
+      await input.closeDatabase();
+    })();
+    return closing;
+  };
+  try {
+    await input.initializeDatabase();
+    await input.startWorker();
+    await input.listenHealth();
+  } catch (error) {
+    await close().catch(() => undefined);
+    throw error;
+  }
+  return { close };
+}
+
 export async function startDurableWorkflowWorkerProcess(): Promise<{
   close(): Promise<void>;
 }> {
@@ -65,24 +92,13 @@ export async function startDurableWorkflowWorkerProcess(): Promise<{
       'Durable workflow Worker requires PostgreSQL enterprise mode',
     );
   }
-  const pool = createNodePostgresPool(
-    buildNodePostgresPoolConfig({
-      connectionString: topology.connectionString,
-      environment: process.env,
-    }),
-  );
-  const database = createPostgresDatabaseLifecycle({
-    pool,
-    migrations: ENTERPRISE_POSTGRES_MIGRATIONS,
-  });
-  await database.initialize();
-  const store = createPostgresDurableWorkflowRepository({ pool });
-  const registry = createDefaultDurableWorkflowTaskRegistry();
-  const workerId =
-    process.env.OTTO_WORKFLOW_WORKER_ID?.trim() ||
-    `${hostname()}:${process.pid}`;
-  const worker = new DurableWorkflowWorker(store, registry, workerId, {
-    leaseMs: integerSetting('OTTO_WORKFLOW_LEASE_MS', 30_000, 1_000, 600_000),
+  const workerSettings = {
+    leaseMs: integerSetting(
+      'OTTO_WORKFLOW_LEASE_MS',
+      30_000,
+      1_000,
+      600_000,
+    ),
     pollMs: integerSetting('OTTO_WORKFLOW_POLL_MS', 1_000, 25, 60_000),
     concurrency: integerSetting('OTTO_WORKFLOW_CONCURRENCY', 2, 1, 32),
     shutdownGraceMs: integerSetting(
@@ -97,9 +113,7 @@ export async function startDurableWorkflowWorkerProcess(): Promise<{
       100,
       60_000,
     ),
-  });
-  await worker.start();
-
+  };
   const healthHost =
     process.env.OTTO_WORKFLOW_HEALTH_HOST?.trim() || '127.0.0.1';
   const healthPort = integerSetting(
@@ -107,6 +121,34 @@ export async function startDurableWorkflowWorkerProcess(): Promise<{
     7781,
     1,
     65_535,
+  );
+  const poolConfig = buildNodePostgresPoolConfig({
+    connectionString: topology.connectionString,
+    environment: process.env,
+  });
+  poolConfig.connectionTimeoutMillis = Math.min(
+    poolConfig.connectionTimeoutMillis ?? workerSettings.shutdownGraceMs,
+    workerSettings.shutdownGraceMs,
+  );
+  poolConfig.statement_timeout = Math.min(
+    Number(poolConfig.statement_timeout ?? workerSettings.shutdownGraceMs),
+    workerSettings.shutdownGraceMs,
+  );
+  const pool = createNodePostgresPool(poolConfig);
+  const database = createPostgresDatabaseLifecycle({
+    pool,
+    migrations: ENTERPRISE_POSTGRES_MIGRATIONS,
+  });
+  const store = createPostgresDurableWorkflowRepository({ pool });
+  const registry = createDefaultDurableWorkflowTaskRegistry();
+  const workerId =
+    process.env.OTTO_WORKFLOW_WORKER_ID?.trim() ||
+    `${hostname()}:${process.pid}`;
+  const worker = new DurableWorkflowWorker(
+    store,
+    registry,
+    workerId,
+    workerSettings,
   );
   const health = createServer((req, res) => {
     if (req.method !== 'GET' || req.url !== '/health') {
@@ -139,18 +181,16 @@ export async function startDurableWorkflowWorkerProcess(): Promise<{
       );
     })();
   });
-  await listen(health, healthPort, healthHost);
-
-  let closing: Promise<void> | null = null;
-  return {
-    close(): Promise<void> {
-      closing ??= (async () => {
-        await Promise.allSettled([closeServer(health), worker.close()]);
-        await database.close();
-      })();
-      return closing;
+  return startManagedDurableWorkflowWorkerRuntime({
+    initializeDatabase: async () => {
+      await database.initialize();
     },
-  };
+    startWorker: () => worker.start(),
+    listenHealth: () => listen(health, healthPort, healthHost),
+    closeHealth: () => closeServer(health),
+    closeWorker: () => worker.close(),
+    closeDatabase: () => database.close(),
+  });
 }
 
 async function main(): Promise<void> {

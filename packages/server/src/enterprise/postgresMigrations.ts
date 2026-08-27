@@ -1100,6 +1100,30 @@ CREATE INDEX durable_workflow_events_history
   ON durable_workflow_events (organization_id, run_id, created_at, id);
 `,
   },
+  {
+    version: 17,
+    name: 'durable-workflow-submission-idempotency',
+    sql: `
+ALTER TABLE durable_workflow_runs
+  ADD COLUMN submission_idempotency_key TEXT,
+  ADD COLUMN submission_request_digest TEXT,
+  ADD CONSTRAINT durable_workflow_submission_key_format CHECK (
+    submission_idempotency_key IS NULL
+    OR submission_idempotency_key ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+  ),
+  ADD CONSTRAINT durable_workflow_submission_digest_format CHECK (
+    submission_request_digest IS NULL
+    OR submission_request_digest ~ '^[0-9a-f]{64}$'
+  ),
+  ADD CONSTRAINT durable_workflow_submission_pair CHECK (
+    (submission_idempotency_key IS NULL) = (submission_request_digest IS NULL)
+  );
+
+CREATE UNIQUE INDEX durable_workflow_runs_submission_idempotency
+  ON durable_workflow_runs (organization_id, submission_idempotency_key)
+  WHERE submission_idempotency_key IS NOT NULL;
+`,
+  },
 ];
 
 export const ENTERPRISE_POSTGRES_SCHEMA_VERSION =

@@ -142,7 +142,7 @@ export class DurableWorkflowWorker {
       workerId: this.workerId,
       leaseMs: this.leaseMs,
     });
-    if (!claim) return false;
+    if (!claim || this.lifecycle.signal.aborted) return false;
     this.lastClaimedAt = new Date().toISOString();
     await this.executeClaim(claim);
     return true;
@@ -163,9 +163,12 @@ export class DurableWorkflowWorker {
   async close(): Promise<void> {
     if (!this.lifecycle.signal.aborted) this.lifecycle.abort();
     for (const controller of this.claimControllers) controller.abort();
-    await this.loopPromise;
+    const pending = [
+      ...(this.loopPromise ? [this.loopPromise] : []),
+      ...this.active,
+    ];
     await Promise.race([
-      Promise.allSettled([...this.active]),
+      Promise.allSettled(pending),
       delay(this.shutdownGraceMs, new AbortController().signal),
     ]);
   }
@@ -198,7 +201,7 @@ export class DurableWorkflowWorker {
           this.lastError = errorSummary(error);
           break;
         }
-        if (!claim) break;
+        if (!claim || this.lifecycle.signal.aborted) break;
         claimed = true;
         this.lastClaimedAt = new Date().toISOString();
         const execution = this.executeClaim(claim).finally(() => {

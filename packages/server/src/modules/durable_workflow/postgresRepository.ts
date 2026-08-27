@@ -2,7 +2,7 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type {
   PostgresClientLike,
@@ -39,6 +39,12 @@ interface RunRow extends Record<string, unknown> {
   failure_code: string | null;
   created_at: Date | string;
   updated_at: Date | string;
+}
+
+interface RunSubmissionRow extends Record<string, unknown> {
+  id: string;
+  submission_request_digest: string;
+  created_by_account_id: string | null;
 }
 
 interface StepRow extends Record<string, unknown> {
@@ -157,6 +163,61 @@ function bounded(
     throw new Error(`${label} must be from ${min} to ${max}`);
   }
   return selected;
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === 'boolean' || typeof value === 'string') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new Error('Durable workflow payload contains an invalid number');
+    }
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item ?? null)).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .filter((key) => record[key] !== undefined)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .join(',')}}`;
+  }
+  throw new Error('Durable workflow payload is not valid JSON');
+}
+
+function submissionRequestDigest(input: {
+  definition: DurableWorkflowDefinition;
+  priority: number;
+}): string {
+  const normalized = {
+    definition: {
+      id: input.definition.id,
+      version: input.definition.version,
+      steps: input.definition.steps.map((step) => ({
+        id: step.id,
+        taskType: step.taskType,
+        input: step.input,
+        sideEffect: step.sideEffect,
+        requiresApproval:
+          step.requiresApproval === true || step.sideEffect === 'external',
+        approvalTimeoutSeconds: step.approvalTimeoutSeconds ?? 86_400,
+        maxAttempts: step.maxAttempts ?? 3,
+        compensation: step.compensation
+          ? {
+              taskType: step.compensation.taskType,
+              input: step.compensation.input,
+              maxAttempts: step.compensation.maxAttempts ?? 3,
+            }
+          : null,
+      })),
+    },
+    priority: input.priority,
+  };
+  return createHash('sha256').update(canonicalJson(normalized)).digest('hex');
 }
 
 function validateDefinition(definition: DurableWorkflowDefinition): void {
@@ -332,6 +393,7 @@ export function createPostgresDurableWorkflowRepository(input: {
   async function createRun(createInput: {
     definition: DurableWorkflowDefinition;
     actor: DurableWorkflowActor;
+    submissionIdempotencyKey: string;
     priority?: number;
   }): Promise<DurableWorkflowRunDetail> {
     validateDefinition(createInput.definition);
@@ -349,14 +411,57 @@ export function createPostgresDurableWorkflowRepository(input: {
       100,
       'Workflow priority',
     );
+    const submissionIdempotencyKey = assertIdentifier(
+      createInput.submissionIdempotencyKey,
+      'Submission idempotency key',
+    );
+    const requestDigest = submissionRequestDigest({
+      definition: createInput.definition,
+      priority,
+    });
     const runId = `wf-${randomUUID()}`;
-    await transaction(input.pool, async (client) => {
-      await client.query(
+    const persistedRunId = await transaction(input.pool, async (client) => {
+      const inserted = await client.query<{ id: string }>(
         `INSERT INTO durable_workflow_runs
-           (id, organization_id, definition_id, definition_version, status, priority, created_by_account_id)
-         VALUES ($1, $2, $3, 1, 'queued', $4, $5)`,
-        [runId, organizationId, createInput.definition.id, priority, accountId],
+           (id, organization_id, definition_id, definition_version, status, priority,
+            created_by_account_id, submission_idempotency_key, submission_request_digest)
+         VALUES ($1, $2, $3, 1, 'queued', $4, $5, $6, $7)
+         ON CONFLICT (organization_id, submission_idempotency_key)
+           WHERE submission_idempotency_key IS NOT NULL
+         DO NOTHING
+         RETURNING id`,
+        [
+          runId,
+          organizationId,
+          createInput.definition.id,
+          priority,
+          accountId,
+          submissionIdempotencyKey,
+          requestDigest,
+        ],
       );
+      if (!inserted.rows[0]) {
+        const existing = await client.query<RunSubmissionRow>(
+          `SELECT id, submission_request_digest, created_by_account_id
+             FROM durable_workflow_runs
+            WHERE organization_id = $1 AND submission_idempotency_key = $2
+            FOR UPDATE`,
+          [organizationId, submissionIdempotencyKey],
+        );
+        const prior = existing.rows[0];
+        if (!prior) {
+          throw new Error('Durable workflow idempotency lookup failed');
+        }
+        if (
+          prior.submission_request_digest !== requestDigest ||
+          prior.created_by_account_id !== accountId
+        ) {
+          throw new DurableWorkflowConflictError(
+            'Submission idempotency key was reused for a different workflow request',
+          );
+        }
+        return prior.id;
+      }
       for (
         let sequence = 0;
         sequence < createInput.definition.steps.length;
@@ -393,8 +498,9 @@ export function createPostgresDurableWorkflowRepository(input: {
         summary: `Workflow ${createInput.definition.id}@1 queued`,
         metadata: { priority, stepCount: createInput.definition.steps.length },
       });
+      return runId;
     });
-    const created = await getRun({ organizationId, runId });
+    const created = await getRun({ organizationId, runId: persistedRunId });
     if (!created) throw new Error('Durable workflow creation did not persist');
     return created;
   }

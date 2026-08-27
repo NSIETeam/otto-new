@@ -142,4 +142,25 @@ describe('DurableWorkflowWorker', () => {
       1,
     );
   });
+
+  it('bounds the entire shutdown even when the claim query is stuck', async () => {
+    const store = storeStub(null);
+    vi.mocked(store.claimNext).mockImplementation(
+      async () => await new Promise<null>(() => undefined),
+    );
+    const worker = new DurableWorkflowWorker(
+      store,
+      { execute: vi.fn() },
+      'worker-1',
+      { pollMs: 25, shutdownGraceMs: 100 },
+    );
+
+    await worker.start();
+    const startedAt = Date.now();
+    await worker.close();
+
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(90);
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(worker.status().running).toBe(false);
+  });
 });

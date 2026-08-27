@@ -14,15 +14,31 @@
 
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import './browserPreviewBridge.js';
-import { App } from './App.js';
+import {
+  RendererErrorBoundary,
+  RendererRecoveryScreen,
+} from './components/RendererErrorBoundary.js';
 
 const container = document.getElementById('root');
-if (!container) {
-  throw new Error('找不到 #root 容器');
+if (!container) throw new Error('找不到 #root 容器');
+
+const root = createRoot(container);
+
+async function mountRenderer(): Promise<void> {
+  try {
+    await import('./browserPreviewBridge.js');
+    const { App } = await import('./App.js');
+    root.render(
+      <React.StrictMode>
+        <RendererErrorBoundary>
+          <App />
+        </RendererErrorBoundary>
+      </React.StrictMode>,
+    );
+  } catch (error) {
+    console.error('[otto-desktop] renderer startup failed', error);
+    root.render(<RendererRecoveryScreen />);
+  }
 }
-createRoot(container).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+
+void mountRenderer();

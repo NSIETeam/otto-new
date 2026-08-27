@@ -673,6 +673,7 @@ export function createClusteredEnterpriseServer(
             'organization_invites_v1',
             'data_governance_v1',
             'legal_documents_v1',
+            'versioned_legal_consent_v1',
             'account_data_sync_v1',
             'enterprise_knowledge_v1',
             'enterprise_skill_market_v1',
@@ -1591,6 +1592,10 @@ export function createClusteredEnterpriseServer(
       }
 
       if (!isLicenseMaintenanceRoute(path, method)) {
+        const requestedOrganizationId =
+          path === '/enterprise/organization/view'
+            ? url.searchParams.get('organizationId')
+            : null;
         const license = await requireClusteredLicense({
           repository,
           organizationId: member.organizationId,
@@ -1599,7 +1604,12 @@ export function createClusteredEnterpriseServer(
           res,
           deploymentId,
           publicKeys: licensePublicKeys,
-          requiredFeature: commercialFeatureForEnterpriseRoute(path),
+          requiredFeature: commercialFeatureForEnterpriseRoute(path, {
+            crossOrganizationView: Boolean(
+              requestedOrganizationId &&
+                requestedOrganizationId !== member.organizationId,
+            ),
+          }),
         });
         if (!license) return;
       }

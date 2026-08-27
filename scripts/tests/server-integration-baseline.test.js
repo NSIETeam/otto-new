@@ -17,10 +17,7 @@ const ledger = JSON.parse(
   ),
 );
 const currentClientVersion = JSON.parse(
-  readFileSync(
-    path.join(rootDir, 'packages/desktop/package.json'),
-    'utf8',
-  ),
+  readFileSync(path.join(rootDir, 'packages/desktop/package.json'), 'utf8'),
 ).version;
 const fetchedInternalTip = execFileSync(
   'git',
@@ -114,25 +111,17 @@ describe('server integration baseline', () => {
 
   it('fails when the candidate does not contain the authoritative internal baseline', () => {
     const candidate = ledger.authority.integratedSources[0].tip;
+    const errors = validateServerIntegrationBaseline({
+      rootDir,
+      verifyGitRefs: true,
+      remoteBranchTips,
+      candidateHead: candidate,
+    });
 
-    expect(
-      validateServerIntegrationBaseline({
-        rootDir,
-        verifyGitRefs: true,
-        remoteBranchTips,
-        candidateHead: candidate,
-      }),
-    ).toContain(
+    expect(errors).toContain(
       `candidate ${candidate} does not contain authority baseline ${ledger.authority.baselineCommit}`,
     );
-    expect(
-      validateServerIntegrationBaseline({
-        rootDir,
-        verifyGitRefs: true,
-        remoteBranchTips,
-        candidateHead: candidate,
-      }),
-    ).toContain(
+    expect(errors).toContain(
       `candidate ${candidate} does not contain latest origin/internal ${fetchedInternalTip}`,
     );
   });

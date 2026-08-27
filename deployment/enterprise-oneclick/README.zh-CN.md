@@ -114,7 +114,7 @@ chmod 600 ./enterprise.env
 
 - `OTTO_PUBLIC_HOST`：最终企业域名；
 - 阿里云短信四项：`ACCESS_KEY_ID`、`ACCESS_KEY_SECRET`、签名和模板；
-- 若不用包管理 Caddy，把 `OTTO_CADDY_MODE` 改为 `external`。
+- 计算巢 ALB 部署把 `OTTO_CADDY_MODE` 改为 `alb`、`OTTO_PUBLIC_PORT` 改为 `443`；完全自行管理代理时改为 `external`。
 
 园区报修通知为可选配置：
 
@@ -155,6 +155,10 @@ Edge Gateway。企业 Server 使用当前在线 License 租约为已登录账号
 数据库强制使用 SQLCipher。`OTTO_DATABASE_ENCRYPTION_KEY_FILE` 留空时，安装器会生成独立密钥并以 `root:otto-enterprise 0640` 保存到 `/etc/otto-enterprise/database-sqlcipher.key`；也可以提供服务账号可读的外部绝对路径。密钥不会写入数据目录、日志、备份对象或发布包；密钥缺失、不可读或原生产物不匹配时服务拒绝启动。
 
 `external` 表示你自行管理 Nginx/Caddy/负载均衡器。安装器不会验证外置证书、公网 health 或 404 屏蔽规则，完成提示也会明确标为“待外置代理验收”。
+
+`alb` 是计算巢专用的私网源站模式。企业 Server 仍只监听 `127.0.0.1:7778`；Caddy 在 ECS 私网 `7777` 提供无 TLS 的受控源站，由公网 ALB 的 HTTPS 443 Listener 终止 TLS。该模式会校验 Host、清除 `X-Forwarded-Host`、把 ALB 生成的客户端地址链交给仅信任本机一跳代理的 Server，并保留 HSTS、安全响应头、上传大小限制和未完成功能 404。ECS 安全组必须只允许两个专用 ALB 子网访问 7777，绝不能向公网开放该端口。
+
+安装器只能验证本机 ALB 源站；证书、DNS、TLS 1.2/1.3、双后端切换和公网负向测试必须在 ROS/计算巢完成。`alb` 模式不会在 ECS 申请证书，也不会把证书私钥写入配置或部署日志。
 
 正式迁移不要把 `OTTO_ALLOW_SMS_DISABLED` 设为 `1`。短信未配置时，邀请码注册必然不可用，安装器会默认阻断。
 

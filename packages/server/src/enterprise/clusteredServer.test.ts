@@ -471,6 +471,11 @@ describe('clustered PostgreSQL enterprise server', () => {
         code: 'deployment_license_inactive',
       },
       {
+        repository: repository(null),
+        path: '/enterprise/organization/view',
+        code: 'deployment_license_inactive',
+      },
+      {
         repository: repository(
           activeLicenseRecord({ expiresAt: '2020-01-01T00:00:00.000Z' }),
         ),
@@ -541,7 +546,10 @@ describe('clustered PostgreSQL enterprise server', () => {
       touchAccountPresence,
       listAccountPresence,
     } as unknown as ClusteredEnterpriseSharedState;
-    const { baseUrl } = await listen(repository(), { sharedState });
+    const { baseUrl } = await listen(
+      repository(activeLicenseRecord({ modules: ['direct_messages'] })),
+      { sharedState },
+    );
     const authorization = 'Bearer clustered-session-token';
 
     const heartbeat = await fetch(`${baseUrl}/enterprise/presence/heartbeat`, {
@@ -826,6 +834,7 @@ describe('clustered PostgreSQL enterprise server', () => {
     expect(health.capabilities).toContain(
       'e2ee_mls_transport_session_reset_v1',
     );
+    expect(health.capabilities).toContain('versioned_legal_consent_v1');
     expect(health.capabilities).not.toContain('e2ee_mls_v1');
   });
 

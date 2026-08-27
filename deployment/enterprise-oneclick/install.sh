@@ -110,21 +110,28 @@ OTTO_CROSS_BORDER_DATA_ENABLED="${OTTO_CROSS_BORDER_DATA_ENABLED:-false}"
   && [ "$OTTO_PUBLIC_PORT" -le 65535 ] \
   || otto_die "OTTO_PUBLIC_PORT 必须是 1-65535"
 case "$OTTO_CADDY_MODE" in
-  managed|external) ;;
-  *) otto_die "OTTO_CADDY_MODE 只能是 managed 或 external" ;;
+  managed|external|alb) ;;
+  *) otto_die "OTTO_CADDY_MODE 只能是 managed、alb 或 external" ;;
 esac
-if [ "$OTTO_CADDY_MODE" = "managed" ]; then
+if [ "$OTTO_CADDY_MODE" != "external" ]; then
   [[ "$OTTO_PUBLIC_HOST" == *.* ]] \
-    || otto_die "managed Caddy 需要可公开签发证书的 FQDN，不能使用裸主机名或 IP"
+    || otto_die "受管边缘模式需要 FQDN，不能使用裸主机名或 IP"
   [[ "$OTTO_PUBLIC_HOST" =~ [A-Za-z] ]] \
-    || otto_die "managed Caddy 不接受裸 IP；请使用域名或选择 external"
+    || otto_die "受管边缘模式不接受裸 IP；请使用域名或选择 external"
+fi
+if [ "$OTTO_CADDY_MODE" = "alb" ] && [ "$OTTO_PUBLIC_PORT" -ne 443 ]; then
+  otto_die "alb 模式的公网端口必须是 443"
 fi
 
-EXPECTED_PUBLIC_URL="https://${OTTO_PUBLIC_HOST}:${OTTO_PUBLIC_PORT}"
+if [ "$OTTO_PUBLIC_PORT" -eq 443 ]; then
+  EXPECTED_PUBLIC_URL="https://${OTTO_PUBLIC_HOST}"
+else
+  EXPECTED_PUBLIC_URL="https://${OTTO_PUBLIC_HOST}:${OTTO_PUBLIC_PORT}"
+fi
 OTTO_ENTERPRISE_PUBLIC_URL="${OTTO_ENTERPRISE_PUBLIC_URL:-$EXPECTED_PUBLIC_URL}"
-if [ "$OTTO_CADDY_MODE" = "managed" ] \
+if [ "$OTTO_CADDY_MODE" != "external" ] \
   && [ "$OTTO_ENTERPRISE_PUBLIC_URL" != "$EXPECTED_PUBLIC_URL" ]; then
-  otto_die "managed 模式下 OTTO_ENTERPRISE_PUBLIC_URL 必须为 ${EXPECTED_PUBLIC_URL}"
+  otto_die "受管边缘模式下 OTTO_ENTERPRISE_PUBLIC_URL 必须为 ${EXPECTED_PUBLIC_URL}"
 fi
 [[ "$OTTO_ENTERPRISE_PUBLIC_URL" == https://* ]] \
   || otto_die "OTTO_ENTERPRISE_PUBLIC_URL 必须使用 HTTPS"
@@ -349,7 +356,7 @@ else
     || otto_die "发现未受 current release 管理的现有配置，拒绝覆盖：${CONFIG_DIR}/enterprise.env" 3
   [ ! -e "$SERVICE_UNIT" ] && [ ! -L "$SERVICE_UNIT" ] \
     || otto_die "发现未受 current release 管理的 systemd 单元，拒绝覆盖：${SERVICE_UNIT}" 3
-  if [ "$OTTO_CADDY_MODE" = "managed" ]; then
+  if [ "$OTTO_CADDY_MODE" != "external" ]; then
     [ ! -e "$CADDY_FRAGMENT" ] && [ ! -L "$CADDY_FRAGMENT" ] \
       || otto_die "发现现有 Otto Caddy 片段，拒绝覆盖：${CADDY_FRAGMENT}" 3
   fi
@@ -1015,7 +1022,7 @@ install -o root -g root -m 0644 \
 CREATED_SERVICE=1
 systemctl daemon-reload
 
-if [ "$OTTO_CADDY_MODE" = "managed" ]; then
+if [ "$OTTO_CADDY_MODE" != "external" ]; then
   if ! command -v caddy >/dev/null 2>&1; then
     otto_log "安装 Caddy 官方 Ubuntu 软件包"
     apt-get update
@@ -1042,17 +1049,22 @@ if [ "$OTTO_CADDY_MODE" = "managed" ]; then
   else
     : > "${TXN_DIR}/created-caddy-fragment"
   fi
-  if grep -Fq "${OTTO_PUBLIC_HOST}:${OTTO_PUBLIC_PORT}" "$CADDY_MAIN"; then
-    otto_die "主 Caddyfile 已包含同一站点，拒绝制造重复路由" 3
+  if grep -Fxq "import ${CADDY_FRAGMENT}" "$CADDY_MAIN" \
+    && [ ! -f "$CADDY_FRAGMENT" ]; then
+    otto_die "主 Caddyfile 引用了缺失的 Otto 边缘配置，拒绝继续" 3
+  fi
+  CADDY_TEMPLATE="${SCRIPT_DIR}/templates/otto-enterprise.caddy"
+  if [ "$OTTO_CADDY_MODE" = "alb" ]; then
+    CADDY_TEMPLATE="${SCRIPT_DIR}/templates/otto-enterprise-alb.caddy"
   fi
   sed \
     -e "s/__OTTO_PUBLIC_HOST__/${OTTO_PUBLIC_HOST}/g" \
     -e "s/__OTTO_PUBLIC_PORT__/${OTTO_PUBLIC_PORT}/g" \
-    "${SCRIPT_DIR}/templates/otto-enterprise.caddy" > "${TXN_DIR}/otto-enterprise.caddy"
+    "$CADDY_TEMPLATE" > "${TXN_DIR}/otto-enterprise.caddy"
   install -o root -g caddy -m 0644 \
     "${TXN_DIR}/otto-enterprise.caddy" "$CADDY_FRAGMENT"
   if ! grep -Fxq "import ${CADDY_FRAGMENT}" "$CADDY_MAIN"; then
-    printf '\n# Otto Enterprise managed import\nimport %s\n' "$CADDY_FRAGMENT" >> "$CADDY_MAIN"
+    printf '\n# Otto Enterprise managed edge import\nimport %s\n' "$CADDY_FRAGMENT" >> "$CADDY_MAIN"
   fi
   caddy validate --config "$CADDY_MAIN" --adapter caddyfile
 fi
@@ -1060,8 +1072,10 @@ fi
 systemctl enable --now otto-enterprise
 OTTO_ALLOW_SMS_DISABLED="$OTTO_ALLOW_SMS_DISABLED" "${INSTALL_ROOT}/deploy/verify.sh"
 
-if [ "$OTTO_CADDY_MODE" = "managed" ]; then
+if [ "$OTTO_CADDY_MODE" != "external" ]; then
   systemctl reload caddy
+fi
+if [ "$OTTO_CADDY_MODE" = "managed" ]; then
   EDGE_OK=0
   for _ in $(seq 1 30); do
     if "$NODE_PATH" "${SCRIPT_DIR}/tools/health-check.mjs" \
@@ -1085,6 +1099,29 @@ if [ "$OTTO_CADDY_MODE" = "managed" ]; then
       "${OTTO_ENTERPRISE_PUBLIC_URL}${blocked}")"
     [ "$STATUS" = "404" ] \
       || otto_die "未完成功能没有在公网屏蔽：${blocked} -> HTTP ${STATUS}" 5
+  done
+elif [ "$OTTO_CADDY_MODE" = "alb" ]; then
+  ALB_ORIGIN_OK=0
+  for _ in $(seq 1 30); do
+    if curl --silent --show-error --fail --max-time 5 \
+      -H "Host: ${OTTO_PUBLIC_HOST}" \
+      http://127.0.0.1:7777/enterprise/health \
+      >/dev/null 2>&1; then
+      ALB_ORIGIN_OK=1
+      break
+    fi
+    sleep 1
+  done
+  [ "$ALB_ORIGIN_OK" -eq 1 ] \
+    || otto_die "ALB 私网源站 health 验收失败" 5
+  for blocked in \
+    /enterprise/local-agent \
+    /enterprise/local-agent/pair \
+    /enterprise/sdk/otto-discovery.js; do
+    STATUS="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out '%{http_code}' \
+      -H "Host: ${OTTO_PUBLIC_HOST}" "http://127.0.0.1:7777${blocked}")"
+    [ "$STATUS" = "404" ] \
+      || otto_die "未完成功能没有在 ALB 私网源站屏蔽：${blocked} -> HTTP ${STATUS}" 5
   done
 fi
 
@@ -1111,6 +1148,9 @@ TRANSACTION_MARKER_CREATED=0
 INSTALL_COMMITTED=1
 if [ "$OTTO_CADDY_MODE" = "managed" ]; then
   otto_log "安装、迁移、本机服务与公网 HTTPS 验收全部通过"
+elif [ "$OTTO_CADDY_MODE" = "alb" ]; then
+  otto_log "安装、迁移、本机服务与 ALB 私网源站验收通过"
+  otto_warn "公网 ALB、证书、DNS 与故障切换仍须由计算巢完成验收"
 else
   otto_log "安装、迁移与本机 systemd/health 验收通过"
   otto_warn "external 模式未验证外置 HTTPS、证书或三个公网 404 屏蔽路径；当前结果不代表公网交付完成"
@@ -1119,11 +1159,18 @@ printf '  版本：%s\n  构建 ID：%s\n  本机后端：http://127.0.0.1:7778\
   "$RELEASE_VERSION" "$BUILD_ID"
 if [ "$OTTO_CADDY_MODE" = "managed" ]; then
   printf '  已验收公网入口：%s\n' "$OTTO_ENTERPRISE_PUBLIC_URL"
+elif [ "$OTTO_CADDY_MODE" = "alb" ]; then
+  printf '  ALB 私网源站验收通过：http://127.0.0.1:7777\n'
+  printf '  待计算巢验收公网入口：%s\n' "$OTTO_ENTERPRISE_PUBLIC_URL"
 else
   printf '  待外置代理验收入口：%s\n' "$OTTO_ENTERPRISE_PUBLIC_URL"
 fi
 if [ -n "$BOOTSTRAP_CREDENTIALS_FINAL" ]; then
   printf '  首次管理员凭据：%s（登录后请立即删除）\n' "$BOOTSTRAP_CREDENTIALS_FINAL"
 fi
-printf '  下一步：确认云安全组开放 TCP 80、443、%s；然后用真实客户端完成邀请码注册与组织树验收。\n' \
-  "$OTTO_PUBLIC_PORT"
+if [ "$OTTO_CADDY_MODE" = "alb" ]; then
+  printf '  下一步：确认公网仅开放 ALB TCP 443，ECS 7777 仅允许 ALB 子网；然后完成真实客户端验收。\n'
+else
+  printf '  下一步：确认云安全组开放 TCP 80、443、%s；然后用真实客户端完成邀请码注册与组织树验收。\n' \
+    "$OTTO_PUBLIC_PORT"
+fi

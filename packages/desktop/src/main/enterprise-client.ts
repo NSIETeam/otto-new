@@ -154,6 +154,33 @@ export interface EnterpriseLegalDocumentReference {
   hash: string;
 }
 
+function parseEnterpriseLegalDocumentReferences(
+  value: unknown,
+): EnterpriseLegalDocumentReference[] | null {
+  if (!Array.isArray(value) || value.length !== 2) return null;
+  const seen = new Set<EnterpriseLegalDocumentReference['id']>();
+  const references: EnterpriseLegalDocumentReference[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    const record = entry as Record<string, unknown>;
+    if (
+      (record.id !== 'terms' && record.id !== 'privacy')
+      || typeof record.version !== 'string'
+      || !record.version.trim()
+      || typeof record.hash !== 'string'
+      || !/^[0-9a-f]{64}$/u.test(record.hash)
+      || seen.has(record.id)
+    ) return null;
+    seen.add(record.id);
+    references.push({
+      id: record.id,
+      version: record.version,
+      hash: record.hash,
+    });
+  }
+  return seen.has('terms') && seen.has('privacy') ? references : null;
+}
+
 export interface EnterpriseLegalDocumentSection {
   id: string;
   title: string;
@@ -2356,8 +2383,17 @@ export class EnterpriseClient {
     await this.assertCompatibleServer(
       targetServerUrl,
       inviteCode.trim()
-        ? ['sms_registration', 'organization_invites', 'position_invites']
-        : ['sms_registration', 'personal_registration'],
+        ? [
+            'sms_registration',
+            'organization_invites',
+            'position_invites',
+            'versioned_legal_consent_v1',
+          ]
+        : [
+            'sms_registration',
+            'personal_registration',
+            'versioned_legal_consent_v1',
+          ],
     );
     this.assertAuthOperationCurrent(generation, targetServerUrl);
     const challenge = await this.request<SmsChallenge>(
@@ -2375,10 +2411,19 @@ export class EnterpriseClient {
       },
     );
     this.assertAuthOperationCurrent(generation, targetServerUrl);
+    const legalDocuments = parseEnterpriseLegalDocumentReferences(
+      (challenge as unknown as Record<string, unknown>).legalDocuments,
+    );
     this.pendingRegistrationMode =
       challenge.registrationMode ??
       (inviteCode.trim() ? 'enterprise' : 'personal');
-    return challenge;
+    return {
+      ...challenge,
+      message: typeof challenge.message === 'string' && challenge.message.trim()
+        ? challenge.message
+        : '验证码已发送，5 分钟内有效',
+      legalDocuments: legalDocuments ?? [],
+    };
   }
 
   async registerWithSms(input: {
@@ -2398,8 +2443,17 @@ export class EnterpriseClient {
     await this.assertCompatibleServer(
       targetServerUrl,
       this.pendingRegistrationMode === 'enterprise'
-        ? ['sms_registration', 'organization_invites', 'position_invites']
-        : ['sms_registration', 'personal_registration'],
+        ? [
+            'sms_registration',
+            'organization_invites',
+            'position_invites',
+            'versioned_legal_consent_v1',
+          ]
+        : [
+            'sms_registration',
+            'personal_registration',
+            'versioned_legal_consent_v1',
+          ],
     );
     this.assertAuthOperationCurrent(generation, targetServerUrl);
     const result = await this.request<{

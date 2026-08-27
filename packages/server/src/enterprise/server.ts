@@ -171,6 +171,7 @@ const ENTERPRISE_CAPABILITIES = [
   'account_deletion',
   'data_governance_v1',
   'privacy_self_service',
+  'versioned_legal_consent_v1',
   'multi_organization',
   'direct_messages',
   'federation_chat_v1',
@@ -466,7 +467,16 @@ function makeHandler(
         sendJSON(res, 402, licenseBlockedPayload());
         return;
       }
-      const commercialFeature = commercialFeatureForEnterpriseRoute(path);
+      const requestedOrganizationId =
+        path === '/enterprise/organization/view'
+          ? url.searchParams.get('organizationId')
+          : null;
+      const commercialFeature = commercialFeatureForEnterpriseRoute(path, {
+        crossOrganizationView: Boolean(
+          requestedOrganizationId &&
+            requestedOrganizationId !== commercialOrganizationId,
+        ),
+      });
       if (
         commercialFeature &&
         !db.isLicenseUsableForOrganizationFeature(

@@ -466,7 +466,16 @@ function makeHandler(
         sendJSON(res, 402, licenseBlockedPayload());
         return;
       }
-      const commercialFeature = commercialFeatureForEnterpriseRoute(path);
+      const requestedOrganizationId =
+        path === '/enterprise/organization/view'
+          ? url.searchParams.get('organizationId')
+          : null;
+      const commercialFeature = commercialFeatureForEnterpriseRoute(path, {
+        crossOrganizationView: Boolean(
+          requestedOrganizationId &&
+            requestedOrganizationId !== commercialOrganizationId,
+        ),
+      });
       if (
         commercialFeature &&
         !db.isLicenseUsableForOrganizationFeature(

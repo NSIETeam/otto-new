@@ -28,6 +28,13 @@ const BASELINE_COLLABORATION_ROUTES: ReadonlyArray<
   prefix('/enterprise/presence/heartbeat'),
 ] as const;
 
+const BASELINE_MEMBER_ADMINISTRATION_ROUTES: ReadonlyArray<
+  (path: string) => boolean
+> = [
+  prefix('/enterprise/accounts'),
+  (path) => path === '/enterprise/organization/invite',
+] as const;
+
 /**
  * Same-organization messaging is part of the authenticated Otto baseline.
  * The organization switch still controls availability, while Federation and
@@ -79,6 +86,13 @@ export function commercialFeatureForEnterpriseRoute(
   path: string,
   context: CommercialRouteContext = {},
 ): OrganizationFeatureKey | null {
+  // A private enterprise deployment must always be able to onboard and manage
+  // its own members. Authentication and enterprise-admin authorization still
+  // protect these routes; enterprise_tree is reserved for advanced structure
+  // editing and cross-organization directory access.
+  if (BASELINE_MEMBER_ADMINISTRATION_ROUTES.some((matches) => matches(path))) {
+    return null;
+  }
   // A signed deployment always exposes each member's own directory. Editing
   // structure or reading another organization remains a paid capability.
   if (

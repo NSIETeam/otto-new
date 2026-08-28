@@ -1080,6 +1080,55 @@ describe('受保护 vs 公开路由边界', () => {
     );
     expect(organizationFeatures.status).toBe(200);
 
+    const baselineAdmin = db.createAccount({
+      username: 'baseline-directory-admin',
+      password: 'baseline-directory-admin-password',
+      name: 'Baseline Directory Admin',
+      isAdmin: true,
+    });
+    const baselineAdminHeaders = {
+      authorization: `Bearer ${db.createAuthSession(baselineAdmin.id).token}`,
+    };
+    const baselineAccounts = await fetch(`${base}/enterprise/accounts`, {
+      headers: baselineAdminHeaders,
+    });
+    expect(baselineAccounts.status).toBe(200);
+    await expect(baselineAccounts.json()).resolves.toMatchObject({
+      accounts: expect.arrayContaining([
+        expect.objectContaining({ id: baselineAdmin.id }),
+      ]),
+    });
+
+    const baselineInvite = await fetch(
+      `${base}/enterprise/organization/invite`,
+      { headers: baselineAdminHeaders },
+    );
+    expect(baselineInvite.status).toBe(200);
+
+    const issuedBaselineInvite = await fetch(
+      `${base}/enterprise/organization/invite`,
+      {
+        method: 'POST',
+        headers: {
+          ...baselineAdminHeaders,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ positionTitle: 'Baseline Member' }),
+      },
+    );
+    expect(issuedBaselineInvite.status).toBe(201);
+
+    const advancedOrganizationStructure = await fetch(
+      `${base}/enterprise/organization/departments`,
+      { headers: baselineAdminHeaders },
+    );
+    expect(advancedOrganizationStructure.status).toBe(402);
+    await expect(advancedOrganizationStructure.json()).resolves.toEqual({
+      error: 'commercial module is not entitled',
+      code: 'commercial_module_not_entitled',
+      feature: 'enterprise_tree',
+    });
+
     db.updateOrganizationFeatures('org_default', { direct_messages: true });
     const baselineMessages = await fetch(
       `${base}/enterprise/messages/unread`,

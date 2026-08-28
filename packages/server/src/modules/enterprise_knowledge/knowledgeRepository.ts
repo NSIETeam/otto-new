@@ -4,6 +4,7 @@
 
 import { createHash } from 'node:crypto';
 import type { Database } from '../data_platform/index.js';
+import { enterpriseKnowledgeContradictoryEvidenceIndexes } from './knowledgeRetentionPolicy.js';
 
 export const ENTERPRISE_KNOWLEDGE_MAX_DEPARTMENT_LENGTH = 120;
 export const ENTERPRISE_KNOWLEDGE_MAX_CATEGORY_LENGTH = 120;
@@ -71,6 +72,24 @@ export interface EnterpriseKnowledgeRevisionView {
   changed_by: string | null;
   change_note: string | null;
   created_at: string;
+  adjudication?: EnterpriseKnowledgeAdjudicationView;
+}
+
+export interface EnterpriseKnowledgeAdjudicationInput {
+  acceptedEvidenceIds: number[];
+  rejectedEvidenceIds: number[];
+  rationale: string;
+}
+
+export interface EnterpriseKnowledgeAdjudicationView {
+  id: number;
+  knowledgeId: number;
+  revisionVersion: number;
+  acceptedEvidenceIds: number[];
+  rejectedEvidenceIds: number[];
+  rationale: string;
+  adjudicatedBy: string;
+  createdAt: string;
 }
 
 export interface EnterpriseKnowledgeRepositoryStore {
@@ -112,6 +131,7 @@ export interface ReviseEnterpriseKnowledgeInput {
   changeNote?: string;
   /** 管理员已检查冲突证据，并以本次人工修订作为裁决结论。 */
   resolveConflict?: boolean;
+  adjudication?: EnterpriseKnowledgeAdjudicationInput;
 }
 
 export interface RefreshEnterpriseKnowledgeEvidenceInput {
@@ -164,6 +184,28 @@ function normalizeStatus(value: unknown): EnterpriseKnowledgeStatus {
   if (value === undefined) return 'active';
   if (value === 'pending_review' || value === 'active' || value === 'archived') return value;
   throw new Error('knowledge status is invalid');
+}
+
+function normalizeAdjudicationEvidenceIds(value: unknown, field: string): number[] {
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new Error(`${field} is invalid`);
+  }
+  const normalized = [...new Set(value)];
+  if (!normalized.every((id) => Number.isSafeInteger(id) && Number(id) > 0)) {
+    throw new Error(`${field} is invalid`);
+  }
+  return normalized as number[];
+}
+
+function parseAdjudicationEvidenceIds(value: string): number[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is number => Number.isSafeInteger(id) && id > 0)
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function normalizeSourceType(value: unknown): EnterpriseKnowledgeSourceType {
@@ -798,6 +840,60 @@ export function reviseEnterpriseKnowledgeInRepository(
     const current = getEntry(database, input.id, organizationId);
     if (!current) return null;
     if (current.status === 'archived') throw new Error('archived knowledge cannot be revised');
+    const contested = Boolean(current.source_label?.includes('证据存在冲突'));
+    if (input.resolveConflict === true && !contested) {
+      throw new Error('knowledge is not contested');
+    }
+    if (input.adjudication && input.resolveConflict !== true) {
+      throw new Error('adjudication requires conflict resolution');
+    }
+    let adjudication: EnterpriseKnowledgeAdjudicationInput | null = null;
+    if (contested && input.resolveConflict === true) {
+      if (!input.adjudication) {
+        throw new Error('contested knowledge requires an evidence adjudication');
+      }
+      const acceptedEvidenceIds = normalizeAdjudicationEvidenceIds(
+        input.adjudication.acceptedEvidenceIds,
+        'accepted evidence ids',
+      );
+      const rejectedEvidenceIds = normalizeAdjudicationEvidenceIds(
+        input.adjudication.rejectedEvidenceIds,
+        'rejected evidence ids',
+      );
+      if (acceptedEvidenceIds.length === 0 || rejectedEvidenceIds.length === 0) {
+        throw new Error('adjudication must accept and reject evidence');
+      }
+      if (acceptedEvidenceIds.some((id) => rejectedEvidenceIds.includes(id))) {
+        throw new Error('adjudication evidence cannot be both accepted and rejected');
+      }
+      const rationale = normalizeRequiredText(
+        input.adjudication.rationale,
+        1_000,
+        'adjudication rationale',
+      );
+      if (rationale.length < 12) throw new Error('adjudication rationale is too short');
+      const evidence = database.prepare(
+        `SELECT id, content FROM knowledge_retention_evidence
+         WHERE organization_id = ? AND promoted_knowledge_id = ?
+         ORDER BY datetime(observed_at), id`,
+      ).all(organizationId, current.id) as Array<{ id: number; content: string }>;
+      const evidenceIds = new Set(evidence.map((item) => item.id));
+      const selectedIds = [...acceptedEvidenceIds, ...rejectedEvidenceIds];
+      if (selectedIds.some((id) => !evidenceIds.has(id))) {
+        throw new Error('adjudication evidence does not belong to this knowledge');
+      }
+      const contradictoryIndexes = enterpriseKnowledgeContradictoryEvidenceIndexes(
+        evidence.map((item) => item.content),
+      );
+      const contradictoryEvidenceIds = [...contradictoryIndexes]
+        .map((index) => evidence[index]?.id)
+        .filter((id): id is number => id !== undefined);
+      const selectedSet = new Set(selectedIds);
+      if (contradictoryEvidenceIds.some((id) => !selectedSet.has(id))) {
+        throw new Error('every contested evidence item must be adjudicated');
+      }
+      adjudication = { acceptedEvidenceIds, rejectedEvidenceIds, rationale };
+    }
     const title = input.title === undefined
       ? current.title
       : normalizeRequiredText(input.title, ENTERPRISE_KNOWLEDGE_MAX_TITLE_LENGTH, 'knowledge title');
@@ -851,6 +947,23 @@ export function reviseEnterpriseKnowledgeInRepository(
       changedBy,
       normalizeOptionalText(input.changeNote, 500, 'knowledge change note') ?? 'knowledge revised',
     );
+    if (adjudication) {
+      database.prepare(
+        `INSERT INTO knowledge_adjudications
+         (knowledge_id, organization_id, revision_version,
+          accepted_evidence_ids_json, rejected_evidence_ids_json,
+          rationale, adjudicated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        updated.id,
+        organizationId,
+        updated.version,
+        JSON.stringify(adjudication.acceptedEvidenceIds),
+        JSON.stringify(adjudication.rejectedEvidenceIds),
+        adjudication.rationale,
+        changedBy,
+      );
+    }
     return updated;
   });
 }
@@ -861,9 +974,41 @@ export function listEnterpriseKnowledgeRevisionsFromRepository(
   organizationId?: string,
 ): EnterpriseKnowledgeRevisionView[] {
   const normalizedOrganizationId = requireOrganization(store, organizationId);
-  return store.db().prepare(
+  const database = store.db();
+  const revisions = database.prepare(
     `SELECT * FROM knowledge_revisions
      WHERE organization_id = ? AND knowledge_id = ?
      ORDER BY version DESC, id DESC`,
   ).all(normalizedOrganizationId, id) as EnterpriseKnowledgeRevisionView[];
+  const adjudications = database.prepare(
+    `SELECT * FROM knowledge_adjudications
+     WHERE organization_id = ? AND knowledge_id = ?
+     ORDER BY revision_version DESC, id DESC`,
+  ).all(normalizedOrganizationId, id) as Array<{
+    id: number;
+    knowledge_id: number;
+    revision_version: number;
+    accepted_evidence_ids_json: string;
+    rejected_evidence_ids_json: string;
+    rationale: string;
+    adjudicated_by: string;
+    created_at: string;
+  }>;
+  const adjudicationByVersion = new Map(adjudications.map((item) => [
+    item.revision_version,
+    {
+      id: item.id,
+      knowledgeId: item.knowledge_id,
+      revisionVersion: item.revision_version,
+      acceptedEvidenceIds: parseAdjudicationEvidenceIds(item.accepted_evidence_ids_json),
+      rejectedEvidenceIds: parseAdjudicationEvidenceIds(item.rejected_evidence_ids_json),
+      rationale: item.rationale,
+      adjudicatedBy: item.adjudicated_by,
+      createdAt: item.created_at,
+    } satisfies EnterpriseKnowledgeAdjudicationView,
+  ]));
+  return revisions.map((revision) => {
+    const adjudication = adjudicationByVersion.get(revision.version);
+    return adjudication ? { ...revision, adjudication } : revision;
+  });
 }

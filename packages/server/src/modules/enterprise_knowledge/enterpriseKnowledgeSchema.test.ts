@@ -47,6 +47,7 @@ describe('enterprise knowledge schema contributor', () => {
           )
           .all(),
       ).toEqual([
+        { name: 'idx_knowledge_adjudication_entry' },
         { name: 'idx_knowledge_contributor' },
         { name: 'idx_knowledge_dept' },
         { name: 'idx_knowledge_organization' },

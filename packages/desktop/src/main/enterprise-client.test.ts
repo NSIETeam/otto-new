@@ -1362,6 +1362,16 @@ describe('EnterpriseClient', () => {
           changed_by: '管理员',
           change_note: '补充监控',
           created_at: '2026-07-20T05:00:00.000Z',
+          adjudication: {
+            id: 7,
+            knowledgeId: 12,
+            revisionVersion: 2,
+            acceptedEvidenceIds: [41],
+            rejectedEvidenceIds: [42],
+            rationale: '依据正式上线制度裁决。',
+            adjudicatedBy: '管理员',
+            createdAt: '2026-07-20T05:00:00.000Z',
+          },
         }],
       }))
       .mockResolvedValueOnce(jsonResponse(200, {
@@ -1389,10 +1399,23 @@ describe('EnterpriseClient', () => {
       category: '流程',
       content: '检查备份、监控和回滚。',
       changeNote: '补充回滚',
+      resolveConflict: true,
+      adjudication: {
+        acceptedEvidenceIds: ['41'],
+        rejectedEvidenceIds: ['42'],
+        rationale: '依据正式上线制度裁决。',
+      },
     })).resolves.toMatchObject({ id: '12', version: 3, content: knowledgeRow.content });
     expect(fetchMock.mock.calls[2]?.[0])
       .toBe('https://enterprise.otto.test/enterprise/knowledge/12');
     expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: 'PATCH' });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      adjudication: {
+        acceptedEvidenceIds: [41],
+        rejectedEvidenceIds: [42],
+        rationale: '依据正式上线制度裁决。',
+      },
+    });
 
     await expect(client.listKnowledgeRevisions('12')).resolves.toEqual([
       expect.objectContaining({
@@ -1400,6 +1423,13 @@ describe('EnterpriseClient', () => {
         knowledgeId: '12',
         version: 2,
         changeNote: '补充监控',
+        adjudication: {
+          id: '7',
+          acceptedEvidenceIds: ['41'],
+          rejectedEvidenceIds: ['42'],
+          rationale: '依据正式上线制度裁决。',
+          adjudicatedBy: '管理员',
+        },
       }),
     ]);
     expect(fetchMock.mock.calls[3]?.[0])

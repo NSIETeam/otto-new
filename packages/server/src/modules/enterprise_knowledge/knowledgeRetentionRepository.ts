@@ -417,6 +417,12 @@ export function observeEnterpriseKnowledgeInRepository(
             changeNote: '已发布结论因新证据冲突转入隔离',
           }) ?? successor;
         } else if (knowledge.status === 'pending_review') {
+          // 冲突证据也必须归入候选的审查链，否则管理员只能看到旧的支持证据，
+          // 无法完成覆盖全部冲突证据的可审计裁决。
+          database.prepare(
+            `UPDATE knowledge_retention_evidence SET promoted_knowledge_id = ?
+             WHERE organization_id = ? AND topic_id = ? AND promoted_knowledge_id IS NULL`,
+          ).run(knowledge.id, organizationId, topicId);
           knowledge = reviseEnterpriseKnowledgeInRepository(store, {
             id: knowledge.id,
             organizationId,

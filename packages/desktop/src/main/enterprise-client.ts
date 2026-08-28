@@ -271,6 +271,15 @@ export interface EnterpriseKnowledgeRevision {
   changedBy: string | null;
   changeNote: string | null;
   createdAt: string;
+  adjudication?: EnterpriseKnowledgeAdjudication;
+}
+
+export interface EnterpriseKnowledgeAdjudication {
+  id: string;
+  acceptedEvidenceIds: string[];
+  rejectedEvidenceIds: string[];
+  rationale: string;
+  adjudicatedBy: string;
 }
 
 export interface EnterpriseKnowledgeEvidence {
@@ -398,6 +407,13 @@ interface EnterpriseKnowledgeRevisionRow {
   changeNote?: string | null;
   created_at?: string;
   createdAt?: string;
+  adjudication?: {
+    id: string | number;
+    acceptedEvidenceIds?: Array<string | number>;
+    rejectedEvidenceIds?: Array<string | number>;
+    rationale?: string;
+    adjudicatedBy?: string;
+  };
 }
 
 interface EnterpriseKnowledgeEvidenceRow {
@@ -2606,12 +2622,33 @@ export class EnterpriseClient {
       confidence?: number;
       changeNote?: string;
       resolveConflict?: boolean;
+      adjudication?: {
+        acceptedEvidenceIds: string[];
+        rejectedEvidenceIds: string[];
+        rationale: string;
+      };
     },
   ): Promise<EnterpriseKnowledgeItem> {
     if (!this.token) throw new Error('登录已失效，请重新登录');
+    const adjudication = input.adjudication
+      ? {
+        acceptedEvidenceIds: input.adjudication.acceptedEvidenceIds.map((evidenceId) => {
+          if (!/^\d+$/u.test(evidenceId)) throw new Error('裁决证据编号不正确');
+          return Number(evidenceId);
+        }),
+        rejectedEvidenceIds: input.adjudication.rejectedEvidenceIds.map((evidenceId) => {
+          if (!/^\d+$/u.test(evidenceId)) throw new Error('裁决证据编号不正确');
+          return Number(evidenceId);
+        }),
+        rationale: input.adjudication.rationale,
+      }
+      : undefined;
     const response = await this.request<{ knowledge: EnterpriseKnowledgeRow }>(
       `/enterprise/knowledge/${encodeURIComponent(id)}`,
-      { method: 'PATCH', body: JSON.stringify(input) },
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ ...input, ...(adjudication ? { adjudication } : {}) }),
+      },
     );
     return mapEnterpriseKnowledgeItem(response.knowledge);
   }
@@ -2634,6 +2671,15 @@ export class EnterpriseClient {
       changedBy: item.changedBy ?? item.changed_by ?? null,
       changeNote: item.changeNote ?? item.change_note ?? null,
       createdAt: item.createdAt || item.created_at || '',
+      adjudication: item.adjudication
+        ? {
+          id: String(item.adjudication.id),
+          acceptedEvidenceIds: (item.adjudication.acceptedEvidenceIds ?? []).map(String),
+          rejectedEvidenceIds: (item.adjudication.rejectedEvidenceIds ?? []).map(String),
+          rationale: item.adjudication.rationale ?? '',
+          adjudicatedBy: item.adjudication.adjudicatedBy ?? '',
+        }
+        : undefined,
     }));
   }
 

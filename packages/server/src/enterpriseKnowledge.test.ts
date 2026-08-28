@@ -268,6 +268,46 @@ describe('enterprise knowledge kernel', () => {
         reviewer: '管理员',
       })).toThrow('contested knowledge must be resolved before approval');
 
+      const evidence = knowledge.getKnowledgeEvidence(promoted.knowledge!.id, 'org-a')!;
+      expect(() => knowledge.reviseKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        content: '生产环境必须启用双因素认证；例外情况由安全负责人书面批准。',
+        changedBy: '管理员',
+        resolveConflict: true,
+      })).toThrow('contested knowledge requires an evidence adjudication');
+      expect(() => knowledge.reviseKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        content: '生产环境必须启用双因素认证；例外情况由安全负责人书面批准。',
+        changedBy: '管理员',
+        resolveConflict: true,
+        adjudication: {
+          acceptedEvidenceIds: [evidence[0]!.id],
+          rejectedEvidenceIds: [999_999],
+          rationale: '依据现行安全制度原文，保留强制认证要求。',
+        },
+      })).toThrow('adjudication evidence does not belong to this knowledge');
+
+      const acceptedEvidenceIds = evidence
+        .filter((item) => item.stance === 'affirmative')
+        .map((item) => item.id);
+      const rejectedEvidenceIds = evidence
+        .filter((item) => item.stance === 'negative')
+        .map((item) => item.id);
+      expect(() => knowledge.reviseKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        content: '生产环境必须启用双因素认证；例外情况由安全负责人书面批准。',
+        changedBy: '管理员',
+        resolveConflict: true,
+        adjudication: {
+          acceptedEvidenceIds: acceptedEvidenceIds.slice(0, 1),
+          rejectedEvidenceIds,
+          rationale: '依据现行安全制度原文，保留强制认证要求。',
+        },
+      })).toThrow('every contested evidence item must be adjudicated');
+
       const resolved = knowledge.reviseKnowledge({
         id: promoted.knowledge!.id,
         organizationId: 'org-a',
@@ -276,8 +316,22 @@ describe('enterprise knowledge kernel', () => {
         changedBy: '管理员',
         changeNote: '核对安全制度后裁决冲突',
         resolveConflict: true,
+        adjudication: {
+          acceptedEvidenceIds,
+          rejectedEvidenceIds,
+          rationale: '依据现行安全制度原文，保留强制认证要求并限定书面例外。',
+        },
       });
       expect(resolved?.source_label).toContain('管理员已裁决冲突');
+      expect(knowledge.getKnowledgeRevisions(promoted.knowledge!.id, 'org-a')[0])
+        .toMatchObject({
+          adjudication: {
+            acceptedEvidenceIds,
+            rejectedEvidenceIds,
+            rationale: '依据现行安全制度原文，保留强制认证要求并限定书面例外。',
+            adjudicatedBy: '管理员',
+          },
+        });
       expect(() => knowledge.reviewKnowledge({
         id: promoted.knowledge!.id,
         organizationId: 'org-a',
@@ -377,6 +431,15 @@ describe('enterprise knowledge kernel', () => {
         changedBy: '安全管理员',
         changeNote: '核对制度原文后裁决新冲突',
         resolveConflict: true,
+        adjudication: {
+          acceptedEvidenceIds: evidence
+            .filter((item) => item.stance === 'affirmative')
+            .map((item) => item.id),
+          rejectedEvidenceIds: evidence
+            .filter((item) => item.stance === 'negative')
+            .map((item) => item.id),
+          rationale: '现行制度要求启用双因素认证，禁用说法不符合正式制度。',
+        },
       })!;
       knowledge.reviewKnowledge({
         id: resolved.id,

@@ -508,6 +508,15 @@ export interface EnterpriseKnowledgeRevision {
   changedBy: string | null;
   changeNote: string | null;
   createdAt: string;
+  adjudication?: EnterpriseKnowledgeAdjudication;
+}
+
+export interface EnterpriseKnowledgeAdjudication {
+  id: string;
+  acceptedEvidenceIds: string[];
+  rejectedEvidenceIds: string[];
+  rationale: string;
+  adjudicatedBy: string;
 }
 
 export interface EnterpriseKnowledgeEvidence {
@@ -1632,6 +1641,11 @@ export interface OttoBridge {
       confidence?: number;
       changeNote?: string;
       resolveConflict?: boolean;
+      adjudication?: {
+        acceptedEvidenceIds: string[];
+        rejectedEvidenceIds: string[];
+        rationale: string;
+      };
     },
   ): Promise<EnterpriseKnowledgeItem>;
   enterpriseKnowledgeRevisions(

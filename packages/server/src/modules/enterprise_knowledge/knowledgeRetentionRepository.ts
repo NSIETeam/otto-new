@@ -4,6 +4,8 @@
 
 import { createHash } from 'node:crypto';
 import {
+  refreshEnterpriseKnowledgeEvidenceInRepository,
+  reviewEnterpriseKnowledgeInRepository,
   saveEnterpriseKnowledgeInRepository,
   reviseEnterpriseKnowledgeInRepository,
   type EnterpriseKnowledgeEntryView,
@@ -285,15 +287,53 @@ export function observeEnterpriseKnowledgeInRepository(
       : undefined;
     if (!decision.promote) {
       let knowledge = existingKnowledge ?? null;
-      if (knowledge?.status === 'pending_review' && decision.reason === 'contested') {
-        knowledge = reviseEnterpriseKnowledgeInRepository(store, {
-          id: knowledge.id,
-          organizationId,
-          sourceLabel: `${enterpriseKnowledgeRetentionReasonLabel(decision.reason)}；`
-            + `${summary.contradictoryEvidenceCount} 条冲突证据，禁止自动发布`,
-          changedBy: 'Otto 企业记忆保留策略',
-          changeNote: '新观察与现有候选冲突，等待管理员裁决',
-        }) ?? knowledge;
+      if (knowledge && decision.reason === 'contested') {
+        const contestedLabel = `${enterpriseKnowledgeRetentionReasonLabel(decision.reason)}；`
+          + `${summary.contradictoryEvidenceCount} 条冲突证据，禁止自动发布`;
+        if (knowledge.status === 'active') {
+          const successor = saveEnterpriseKnowledgeInRepository(store, {
+            organizationId,
+            sourceId: `retention:${topicId}`.slice(0, MAX_SOURCE_LENGTH),
+            department: knowledge.department ?? undefined,
+            title: knowledge.title,
+            category: knowledge.category,
+            content: knowledge.content,
+            contributor: knowledge.contributor ?? contributor ?? undefined,
+            contributorAccountId: knowledge.contributor_account_id ?? contributorAccountId,
+            confidence: decision.reliabilityScore,
+            sourceType: 'auto_capture',
+            sourceLabel: contestedLabel,
+            status: 'pending_review',
+          }).entry;
+          reviewEnterpriseKnowledgeInRepository(store, {
+            id: knowledge.id,
+            organizationId,
+            action: 'archive',
+            reviewer: 'Otto 企业记忆保留策略',
+            note: `因新冲突证据隔离；后继记忆 #${successor.id}`,
+          });
+          database.prepare(
+            `UPDATE knowledge_retention_evidence SET promoted_knowledge_id = ?
+             WHERE organization_id = ? AND topic_id = ?`,
+          ).run(successor.id, organizationId, topicId);
+          knowledge = refreshEnterpriseKnowledgeEvidenceInRepository(store, {
+            id: successor.id,
+            organizationId,
+            confidence: decision.reliabilityScore,
+            sourceLabel: contestedLabel,
+            changedBy: 'Otto 企业记忆保留策略',
+            changeNote: '已发布结论因新证据冲突转入隔离',
+          }) ?? successor;
+        } else if (knowledge.status === 'pending_review') {
+          knowledge = reviseEnterpriseKnowledgeInRepository(store, {
+            id: knowledge.id,
+            organizationId,
+            confidence: decision.reliabilityScore,
+            sourceLabel: contestedLabel,
+            changedBy: 'Otto 企业记忆保留策略',
+            changeNote: '新观察与现有候选冲突，等待管理员裁决',
+          }) ?? knowledge;
+        }
       }
       return {
         outcome: Number(inserted.changes) > 0 ? 'observed' : 'duplicate',
@@ -328,7 +368,8 @@ export function observeEnterpriseKnowledgeInRepository(
       + `${summary.distinctContributorCount} 名贡献者`;
     if (existingKnowledge) {
       let knowledge = existingKnowledge;
-      if (existingKnowledge.status === 'pending_review') {
+      if (existingKnowledge.status === 'pending_review'
+        || existingKnowledge.status === 'archived') {
         knowledge = saveEnterpriseKnowledgeInRepository(store, {
           organizationId,
           sourceId: `retention:${topicId}`.slice(0, MAX_SOURCE_LENGTH),
@@ -344,12 +385,24 @@ export function observeEnterpriseKnowledgeInRepository(
           status: 'pending_review',
         }).entry;
       }
-      // 只有继续支持当前结论的证据才挂到已生成知识上；争议证据保留在主题证据池，
-      // 不计入已发布知识的支持强度。
+      // 只有保留策略确认仍支持当前结论时，才把新证据挂到已生成知识上。
       database.prepare(
-        `UPDATE knowledge_retention_evidence SET promoted_knowledge_id = ?
-         WHERE organization_id = ? AND topic_id = ? AND promoted_knowledge_id IS NULL`,
+        existingKnowledge.status === 'archived'
+          ? `UPDATE knowledge_retention_evidence SET promoted_knowledge_id = ?
+             WHERE organization_id = ? AND topic_id = ?`
+          : `UPDATE knowledge_retention_evidence SET promoted_knowledge_id = ?
+             WHERE organization_id = ? AND topic_id = ? AND promoted_knowledge_id IS NULL`,
       ).run(knowledge.id, organizationId, topicId);
+      knowledge = refreshEnterpriseKnowledgeEvidenceInRepository(store, {
+        id: knowledge.id,
+        organizationId,
+        confidence: decision.reliabilityScore,
+        sourceLabel,
+        changedBy: 'Otto 企业记忆保留策略',
+        changeNote: existingKnowledge.status === 'active'
+          ? '新增支持证据，已刷新组织可靠度'
+          : '候选证据摘要已刷新',
+      }) ?? knowledge;
       return {
         outcome: Number(inserted.changes) > 0 ? 'observed' : 'duplicate',
         promoted: true,

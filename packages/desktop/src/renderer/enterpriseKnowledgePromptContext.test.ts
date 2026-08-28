@@ -27,7 +27,7 @@ describe('enterprise knowledge prompt context', () => {
     expect(context).not.toContain('不能进入回答');
   });
 
-  it('marks stale auto-captured memory as historical instead of silently treating it as current', () => {
+  it('excludes stale auto-captured memory from operational context', () => {
     const context = buildEnterpriseKnowledgePromptContext([{
       id: 'stale-1', organizationId: 'org-1', sourceId: 'retention-1', title: '旧部署流程',
       department: '研发部', category: 'solution', content: '生产部署使用旧网关。',
@@ -37,9 +37,22 @@ describe('enterprise knowledge prompt context', () => {
       lastObservedAt: '2020-01-01T00:00:00.000Z', createdAt: '2020-01-01T00:00:00.000Z',
     }]);
 
-    expect(context).toContain('组织可靠度 74%');
+    expect(context).not.toContain('生产部署使用旧网关');
+    expect(context).toContain('已排除 1 条不可直接使用的企业记忆');
     expect(context).toContain('超过 180 天未获新证据');
-    expect(context).toContain('回答前必须重新确认');
+  });
+
+  it('fails closed when an active record still carries a conflict marker', () => {
+    const context = buildEnterpriseKnowledgePromptContext([{
+      id: 'conflict-1', organizationId: 'org-1', sourceId: 'retention-conflict',
+      title: '生产认证规则', department: '安全部', category: 'convention',
+      content: '生产环境禁止启用双因素认证。', contributor: null,
+      confidence: 0.3, status: 'active', version: 3, sourceType: 'auto_capture',
+      sourceLabel: '证据存在冲突，需人工裁决', createdAt: new Date().toISOString(),
+    }]);
+
+    expect(context).not.toContain('生产环境禁止启用双因素认证');
+    expect(context).toContain('存在尚未裁决的证据冲突');
   });
 
   it('bounds context size', () => {

@@ -247,6 +247,7 @@ export interface EnterpriseKnowledgeItem {
   sourceLabel: string | null;
   status: 'pending_review' | 'active' | 'archived';
   version: number;
+  supersedesId: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
   createdAt: string;
@@ -342,6 +343,8 @@ interface EnterpriseKnowledgeRow {
   sourceLabel?: string | null;
   status?: EnterpriseKnowledgeItem['status'];
   version?: number;
+  supersedes_id?: string | number | null;
+  supersedesId?: string | number | null;
   reviewed_by?: string | null;
   reviewedBy?: string | null;
   reviewed_at?: string | null;
@@ -401,6 +404,11 @@ function mapEnterpriseKnowledgeItem(
     sourceLabel: item.sourceLabel ?? item.source_label ?? null,
     status: item.status || 'active',
     version: typeof item.version === 'number' ? item.version : 1,
+    supersedesId: item.supersedesId !== undefined
+      ? item.supersedesId === null ? null : String(item.supersedesId)
+      : item.supersedes_id === null || item.supersedes_id === undefined
+        ? null
+        : String(item.supersedes_id),
     reviewedBy: item.reviewedBy ?? item.reviewed_by ?? null,
     reviewedAt: item.reviewedAt ?? item.reviewed_at ?? null,
     createdAt: item.createdAt || item.created_at || '',

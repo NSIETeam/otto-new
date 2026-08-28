@@ -1293,6 +1293,7 @@ describe('EnterpriseClient', () => {
           content: '合同审查先核对违约条款。',
           contributor: '员工一号',
           confidence: 0.9,
+          supersedes_id: 7,
           created_at: '2026-07-20T04:00:00.000Z',
         }],
       }));
@@ -1313,6 +1314,7 @@ describe('EnterpriseClient', () => {
       sourceLabel: null,
       status: 'active',
       version: 1,
+      supersedesId: '7',
       reviewedBy: null,
       reviewedAt: null,
       createdAt: '2026-07-20T04:00:00.000Z',

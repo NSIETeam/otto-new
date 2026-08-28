@@ -114,6 +114,15 @@ export interface ReviseEnterpriseKnowledgeInput {
   resolveConflict?: boolean;
 }
 
+export interface RefreshEnterpriseKnowledgeEvidenceInput {
+  id: number;
+  organizationId?: string;
+  confidence: number;
+  sourceLabel: string;
+  changedBy: string;
+  changeNote: string;
+}
+
 function requireOrganization(store: EnterpriseKnowledgeRepositoryStore, value?: string): string {
   const organizationId = value?.trim() || store.defaultOrganizationId;
   if (!organizationId || !store.organizationExists(organizationId)) {
@@ -304,7 +313,7 @@ export function saveEnterpriseKnowledgeInRepository(
         ).get(organizationId, sourceId) as EnterpriseKnowledgeEntryView | undefined
       : undefined;
 
-    if (existing?.content_hash === contentHash) {
+    if (existing?.content_hash === contentHash && existing.status === status) {
       return { outcome: 'unchanged', entry: existing };
     }
 
@@ -354,6 +363,13 @@ export function saveEnterpriseKnowledgeInRepository(
       if (duplicateRevision) {
         return { outcome: 'unchanged', entry: duplicateRevision };
       }
+    } else if (!existing && sourceId && status === 'pending_review') {
+      const archivedPredecessor = database.prepare(
+        `SELECT * FROM knowledge
+         WHERE organization_id = ? AND source_id = ? AND status = 'archived'
+         ORDER BY datetime(updated_at) DESC, id DESC LIMIT 1`,
+      ).get(organizationId, sourceId) as EnterpriseKnowledgeEntryView | undefined;
+      supersedesId = archivedPredecessor?.id ?? null;
     }
 
     const result = database.prepare(
@@ -427,6 +443,59 @@ const KNOWLEDGE_WITH_EVIDENCE_SELECT = `SELECT k.*,
     WHERE e.organization_id = k.organization_id AND e.promoted_knowledge_id = k.id)
     AS last_observed_at
   FROM knowledge k`;
+
+function getEntryWithEvidence(
+  database: Database,
+  id: number,
+  organizationId: string,
+): EnterpriseKnowledgeEntryView | null {
+  return (database.prepare(
+    `${KNOWLEDGE_WITH_EVIDENCE_SELECT}
+     WHERE k.id = ? AND k.organization_id = ?`,
+  ).get(id, organizationId) as EnterpriseKnowledgeEntryView | undefined) ?? null;
+}
+
+/**
+ * Refreshes evidence-derived metadata without pretending that an administrator
+ * re-reviewed the published conclusion. The revision trail still records why
+ * the reliability changed.
+ */
+export function refreshEnterpriseKnowledgeEvidenceInRepository(
+  store: EnterpriseKnowledgeRepositoryStore,
+  input: RefreshEnterpriseKnowledgeEvidenceInput,
+): EnterpriseKnowledgeEntryView | null {
+  const organizationId = requireOrganization(store, input.organizationId);
+  const confidence = normalizeConfidence(input.confidence);
+  const sourceLabel = normalizeRequiredText(
+    input.sourceLabel,
+    ENTERPRISE_KNOWLEDGE_MAX_SOURCE_LABEL_LENGTH,
+    'knowledge source label',
+  );
+  const changedBy = normalizeRequiredText(
+    input.changedBy,
+    ENTERPRISE_KNOWLEDGE_MAX_CONTRIBUTOR_LENGTH,
+    'knowledge editor',
+  );
+  const changeNote = normalizeRequiredText(input.changeNote, 500, 'knowledge change note');
+  const database = store.db();
+  return runTransaction(database, () => {
+    const current = getEntry(database, input.id, organizationId);
+    if (!current) return null;
+    if (current.status === 'archived') {
+      throw new Error('archived knowledge evidence cannot be refreshed');
+    }
+    if (current.confidence === confidence && current.source_label === sourceLabel) {
+      return getEntryWithEvidence(database, current.id, organizationId);
+    }
+    database.prepare(
+      `UPDATE knowledge SET confidence = ?, source_label = ?, version = version + 1,
+       updated_at = datetime('now') WHERE id = ? AND organization_id = ?`,
+    ).run(confidence, sourceLabel, current.id, organizationId);
+    const updated = getEntry(database, current.id, organizationId)!;
+    writeRevision(database, updated, changedBy, changeNote);
+    return getEntryWithEvidence(database, current.id, organizationId);
+  });
+}
 
 function queryTerms(query: string): string[] {
   const normalized = query.trim().toLowerCase();

@@ -20,6 +20,7 @@ import { GeneratedIcon } from './GeneratedIcon.js';
 import { openParkServices, useParkBrand } from './ParkServicesPlugin.js';
 import type { CentralEnterpriseRole } from '../state/centralEnterpriseIdentity.js';
 import { getEnterpriseOrganizationFeatures } from '../state/enterpriseOrganizationFeatures.js';
+import { evaluateEnterpriseKnowledgeApplicability } from '../enterpriseKnowledgeApplicability.js';
 import { IconChevron, IconChevronDown } from './icons.js';
 
 type TabType = 'agents' | 'documents' | 'memory' | 'worklog';
@@ -44,6 +45,7 @@ interface EnterpriseKnowledgeItem {
   sourceLabel?: string | null;
   status?: 'pending_review' | 'active' | 'archived';
   version?: number;
+  supersedesId?: string | null;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
   createdAt: string;
@@ -121,14 +123,18 @@ function enterpriseMemoryFreshness(item: EnterpriseKnowledgeItem): {
   level: 'current' | 'aging' | 'stale';
   label: string;
 } | null {
+  const applicability = evaluateEnterpriseKnowledgeApplicability(item);
+  if (applicability.state === 'blocked'
+    && applicability.reason === '存在尚未裁决的证据冲突') {
+    return { level: 'stale', label: '冲突已隔离' };
+  }
   if (item.sourceType !== 'auto_capture') return null;
-  const reference = new Date(
-    item.lastObservedAt || item.reviewedAt || item.updatedAt || item.createdAt,
-  ).getTime();
-  if (!Number.isFinite(reference)) return null;
-  const ageDays = Math.max(0, (Date.now() - reference) / 86_400_000);
-  if (ageDays > 180) return { level: 'stale', label: '需要重新验证' };
-  if (ageDays > 90) return { level: 'aging', label: '建议关注时效' };
+  if (applicability.state === 'historical') {
+    return { level: 'stale', label: '仅作历史' };
+  }
+  if (applicability.state === 'verify_before_use') {
+    return { level: 'aging', label: '回答前需复核' };
+  }
   return { level: 'current', label: '近期有印证' };
 }
 
@@ -1119,16 +1125,27 @@ export function RightPanel({
                         {Math.round(item.confidence * 100)}%
                       </span>
                     </div>
-                    {(item.evidenceCount ?? 0) > 0 ? (
+                    {(item.evidenceCount ?? 0) > 0
+                      || item.sourceType === 'auto_capture'
+                      || Boolean(item.supersedesId) ? (
                       <div className="otto-enterprise-memory-card__evidence">
-                        <strong>{item.evidenceCount} 条证据</strong>
-                        <span>{item.distinctSessionCount || 0} 个会话</span>
-                        <span>{item.distinctContributorCount || 0} 名贡献者</span>
+                        {(item.evidenceCount ?? 0) > 0 ? (
+                          <>
+                            <strong>{item.evidenceCount} 条证据</strong>
+                            <span>{item.distinctSessionCount || 0} 个会话</span>
+                            <span>{item.distinctContributorCount || 0} 名贡献者</span>
+                          </>
+                        ) : item.sourceType === 'auto_capture' ? (
+                          <strong>自动记忆候选</strong>
+                        ) : null}
                         {(item.verifiedEvidenceCount ?? 0) > 0 ? (
                           <span>{item.verifiedEvidenceCount} 条已验证</span>
                         ) : null}
                         {item.lastObservedAt ? (
                           <span>最近验证 {formatEnterpriseMemoryDate(item.lastObservedAt)}</span>
+                        ) : null}
+                        {item.supersedesId ? (
+                          <span>替代记忆 #{item.supersedesId}</span>
                         ) : null}
                         <EnterpriseMemoryFreshnessBadge item={item} />
                       </div>

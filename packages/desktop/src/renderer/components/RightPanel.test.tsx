@@ -811,6 +811,7 @@ describe('RightPanel fixed Agent catalog', () => {
       sourceLabel: '证据存在冲突，需人工裁决；2 条冲突证据，禁止自动发布',
       status: 'pending_review',
       version: 2,
+      supersedesId: 'published-7',
       createdAt: new Date().toISOString(),
     }]);
 
@@ -825,6 +826,8 @@ describe('RightPanel fixed Agent catalog', () => {
     fireEvent.click(await screen.findByRole('tab', { name: '企业记忆' }));
     const blockedPublish = await screen.findByRole('button', { name: '先裁决冲突' });
     expect((blockedPublish as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('冲突已隔离')).toBeTruthy();
+    expect(screen.getByText('替代记忆 #published-7')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '修订' }));
     fireEvent.change(screen.getByRole('textbox', { name: '知识内容' }), {

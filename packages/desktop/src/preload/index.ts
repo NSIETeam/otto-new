@@ -484,6 +484,7 @@ export interface EnterpriseKnowledgeItem {
   sourceLabel?: string | null;
   status?: 'pending_review' | 'active' | 'archived';
   version?: number;
+  supersedesId?: string | null;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
   createdAt: string;

@@ -20,7 +20,6 @@ describe('commercial enterprise route policy', () => {
     ['/enterprise/platform/customer-modules/com.acme.report/1.0.0/review', 'skill_market'],
     ['/enterprise/knowledge/revisions', 'knowledge'],
     ['/enterprise/organization/departments', 'enterprise_tree'],
-    ['/enterprise/accounts/account-1', 'enterprise_tree'],
     ['/enterprise/platform/organizations/org-a', 'enterprise_tree'],
   ] as const)('maps %s to %s', (path, feature) => {
     expect(commercialFeatureForEnterpriseRoute(path)).toBe(feature);
@@ -80,6 +79,20 @@ describe('commercial enterprise route policy', () => {
       }),
     ).toBe('enterprise_tree');
   });
+
+  it.each([
+    ['/enterprise/accounts', 'GET'],
+    ['/enterprise/accounts', 'POST'],
+    ['/enterprise/accounts/account-1', 'PATCH'],
+    ['/enterprise/accounts/account-1', 'DELETE'],
+    ['/enterprise/organization/invite', 'GET'],
+    ['/enterprise/organization/invite', 'POST'],
+  ] as const)(
+    'keeps same-organization member administration %s %s in the enterprise baseline',
+    (path, method) => {
+      expect(commercialFeatureForEnterpriseRoute(path, { method })).toBeNull();
+    },
+  );
 
   it.each([
     '/enterprise/messages/unread',

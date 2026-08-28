@@ -779,6 +779,7 @@ if (!previewWindow.otto) {
     enterpriseKnowledgeRevise: () =>
       Promise.reject(new Error('预览模式不支持知识修订')),
     enterpriseKnowledgeRevisions: () => Promise.resolve([]),
+    enterpriseKnowledgeEvidence: () => Promise.resolve([]),
   };
 
   previewWindow.otto = new Proxy(bridge, {

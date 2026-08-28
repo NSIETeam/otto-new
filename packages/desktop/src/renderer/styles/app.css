@@ -9138,6 +9138,15 @@ h6.otto-prose__h {
 .otto-enterprise-memory-candidate strong { overflow: hidden; color: var(--otto-text); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
 .otto-enterprise-memory-candidate small { color: var(--otto-text-tertiary); font-size: 8px; }
 .otto-enterprise-memory-card__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--otto-border); }
+.otto-enterprise-memory-evidence { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; border-top: 1px solid var(--otto-border); padding-top: 8px; }
+.otto-enterprise-memory-evidence > article { border: 1px solid var(--otto-border); border-radius: 6px; background: var(--otto-bg); padding: 8px; }
+.otto-enterprise-memory-evidence__badges { display: flex; flex-wrap: wrap; gap: 5px; color: var(--otto-text-tertiary); font-size: 8px; }
+.otto-enterprise-memory-evidence__badges span,
+.otto-enterprise-memory-evidence__badges strong { border-radius: 4px; background: var(--otto-surface); padding: 2px 5px; font-weight: 500; }
+.otto-enterprise-memory-evidence__badges strong { color: #b04343; }
+.otto-enterprise-memory-evidence > article p { margin: 6px 0; font-size: 9.5px; line-height: 1.5; }
+.otto-enterprise-memory-evidence > article small { display: block; margin-top: 2px; color: var(--otto-text-tertiary); font-size: 8px; line-height: 1.45; overflow-wrap: anywhere; }
+.otto-enterprise-memory-evidence__empty { color: var(--otto-text-tertiary); font-size: 8.5px; }
 .otto-enterprise-memory-revisions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; border-top: 1px solid var(--otto-border); padding-top: 8px; }
 .otto-enterprise-memory-revisions > div { border-left: 2px solid var(--otto-border-strong); padding-left: 7px; }
 .otto-enterprise-memory-revisions span { display: block; color: var(--otto-text-tertiary); font-size: 8px; }

@@ -834,6 +834,65 @@ describe('clustered PostgreSQL enterprise server', () => {
     );
   });
 
+  it('keeps the administrator evidence endpoint compatible until clustered evidence is retained', async () => {
+    const repo = {
+      ...repository(),
+      getBusinessRecord: vi.fn(async (input: {
+        domain: string;
+        resourceType: string;
+        resourceId: string;
+      }) => {
+        if (input.domain === 'commercial_control' && input.resourceId === 'current') {
+          return activeLicenseRecord();
+        }
+        if (input.domain === 'knowledge' && input.resourceId === 'knowledge-1') {
+          return {
+            organizationId: account.organizationId,
+            domain: 'knowledge',
+            resourceType: 'entry',
+            resourceId: 'knowledge-1',
+            ownerAccountId: account.id,
+            status: 'active',
+            version: 1,
+            payload: {
+              title: 'Runbook',
+              department: null,
+              category: 'runbook',
+              content: 'Restore from PITR.',
+              tags: [],
+              contributor: account.name,
+              contributorAccountId: account.id,
+              confidence: 0.9,
+              sourceType: 'manual',
+              sourceId: null,
+              sourceLabel: null,
+              reviewedBy: account.name,
+              reviewedAt: '2026-08-01T00:00:00.000Z',
+              reviewNote: null,
+            },
+            createdAt: '2026-08-01T00:00:00.000Z',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+          };
+        }
+        return null;
+      }),
+    } as unknown as PostgresEnterpriseCoreRepository;
+    const { baseUrl } = await listen(repo);
+
+    const evidence = await fetch(
+      `${baseUrl}/enterprise/knowledge/knowledge-1/evidence`,
+      { headers: { authorization: 'Bearer clustered-session-token' } },
+    );
+    expect(evidence.status).toBe(200);
+    await expect(evidence.json()).resolves.toEqual({ evidence: [] });
+
+    const memberEvidence = await fetch(
+      `${baseUrl}/enterprise/knowledge/knowledge-1/evidence`,
+      { headers: { authorization: 'Bearer peer-session-token' } },
+    );
+    expect(memberEvidence.status).toBe(403);
+  });
+
   it('accepts the desktop feature PATCH contract for migrated domains', async () => {
     const repo = repository();
     const { baseUrl } = await listen(repo);

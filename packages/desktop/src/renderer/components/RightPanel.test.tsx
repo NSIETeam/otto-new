@@ -82,6 +82,7 @@ function installBridge(
   const enterpriseKnowledgeReview = vi.fn(async () => ({}));
   const enterpriseKnowledgeRevise = vi.fn(async () => ({}));
   const enterpriseKnowledgeRevisions = vi.fn(async (): Promise<unknown[]> => []);
+  const enterpriseKnowledgeEvidence = vi.fn(async (): Promise<unknown[]> => []);
   const organizationFeatures = {
     enterprise_tree: true,
     park_service: true,
@@ -118,6 +119,7 @@ function installBridge(
     enterpriseKnowledgeReview,
     enterpriseKnowledgeRevise,
     enterpriseKnowledgeRevisions,
+    enterpriseKnowledgeEvidence,
     enterpriseOrganizationFeaturesGet,
     workLogReport,
     openPath,
@@ -140,6 +142,7 @@ function installBridge(
     enterpriseKnowledgeReview,
     enterpriseKnowledgeRevise,
     enterpriseKnowledgeRevisions,
+    enterpriseKnowledgeEvidence,
     enterpriseOrganizationFeaturesGet,
   };
 }
@@ -797,6 +800,35 @@ describe('RightPanel fixed Agent catalog', () => {
 
   it('requires an administrator revision before a contested candidate can be published', async () => {
     const bridge = installBridge([], true);
+    bridge.enterpriseKnowledgeEvidence.mockResolvedValue([{
+      id: 'evidence-1',
+      knowledgeId: 'conflict-1',
+      sourceId: 'security-policy-1',
+      content: '生产环境必须启用双因素认证。',
+      tags: ['安全制度'],
+      contributor: '安全负责人',
+      confidence: 0.95,
+      verified: true,
+      impactScore: 0.9,
+      impactReasons: ['明确制度或最终决策'],
+      observedAt: '2026-08-21T08:00:00.000Z',
+      stance: 'affirmative',
+      contested: true,
+    }, {
+      id: 'evidence-2',
+      knowledgeId: 'conflict-1',
+      sourceId: 'security-policy-2',
+      content: '生产环境禁止启用双因素认证。',
+      tags: [],
+      contributor: '运维负责人',
+      confidence: 0.8,
+      verified: false,
+      impactScore: 0.75,
+      impactReasons: [],
+      observedAt: '2026-08-22T08:00:00.000Z',
+      stance: 'negative',
+      contested: true,
+    }]);
     bridge.enterpriseKnowledgeList.mockResolvedValue([{
       id: 'conflict-1',
       organizationId: 'org-1',
@@ -829,7 +861,16 @@ describe('RightPanel fixed Agent catalog', () => {
     expect(screen.getByText('冲突已隔离')).toBeTruthy();
     expect(screen.getByText('替代记忆 #published-7')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '修订' }));
+    const adjudicate = screen.getByRole('button', { name: '审查并裁决' });
+    expect((adjudicate as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '证据' }));
+    expect(await screen.findByText('生产环境必须启用双因素认证。')).toBeTruthy();
+    expect(screen.getByText('肯定 / 要求')).toBeTruthy();
+    expect(screen.getAllByText('涉及冲突')).toHaveLength(2);
+    expect(screen.getByText('来源：security-policy-1')).toBeTruthy();
+    expect(bridge.enterpriseKnowledgeEvidence).toHaveBeenCalledWith('conflict-1');
+    await waitFor(() => expect((adjudicate as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(adjudicate);
     fireEvent.change(screen.getByRole('textbox', { name: '知识内容' }), {
       target: { value: '生产环境必须启用双因素认证；例外由安全负责人书面批准。' },
     });

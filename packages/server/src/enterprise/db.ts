@@ -1170,6 +1170,7 @@ export const {
   getKnowledge,
   getKnowledgeForAdministration,
   getKnowledgeForBackup,
+  getKnowledgeEvidence,
   getKnowledgeRevisions,
   getMemberKnowledge,
   reviewKnowledge,

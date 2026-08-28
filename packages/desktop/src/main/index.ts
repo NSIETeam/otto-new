@@ -551,6 +551,7 @@ const IPC = {
   enterpriseKnowledgeReview: 'otto:enterprise-knowledge-review',
   enterpriseKnowledgeRevise: 'otto:enterprise-knowledge-revise',
   enterpriseKnowledgeRevisions: 'otto:enterprise-knowledge-revisions',
+  enterpriseKnowledgeEvidence: 'otto:enterprise-knowledge-evidence',
   enterpriseOrganizationView: 'otto:enterprise-organization-view',
   enterprisePresenceHeartbeat: 'otto:enterprise-presence-heartbeat',
   enterpriseOrganizationFeaturesGet:
@@ -2828,6 +2829,19 @@ function registerIpc(): void {
         throw new Error('知识版本参数不正确');
       }
       return enterpriseClient.listKnowledgeRevisions(body.id);
+    },
+  );
+  ipcMain.handle(
+    IPC.enterpriseKnowledgeEvidence,
+    async (_e, input: unknown) => {
+      loadEnterpriseSession();
+      const body = input && typeof input === 'object'
+        ? input as Record<string, unknown>
+        : {};
+      if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
+        throw new Error('知识证据参数不正确');
+      }
+      return enterpriseClient.listKnowledgeEvidence(body.id);
     },
   );
   ipcMain.handle(

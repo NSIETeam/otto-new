@@ -13,13 +13,16 @@ import {
 } from './knowledgeRepository.js';
 import {
   decideEnterpriseKnowledgeRetention,
+  enterpriseKnowledgeContradictoryEvidenceIndexes,
   enterpriseKnowledgeContradictoryEvidenceCount,
+  enterpriseKnowledgeEvidenceStance,
   enterpriseKnowledgeObservationSimilarity,
   enterpriseKnowledgeRetentionReasonLabel,
   normalizeEnterpriseKnowledgeAtom,
   scoreEnterpriseKnowledgeImpact,
   synthesizeEnterpriseKnowledgeDocument,
   type EnterpriseKnowledgeRetentionReason,
+  type EnterpriseKnowledgeEvidenceStance,
 } from './knowledgeRetentionPolicy.js';
 
 export interface ObserveEnterpriseKnowledgeInput {
@@ -90,6 +93,36 @@ interface EvidenceDetailRow {
   observed_at: string;
 }
 
+interface EvidenceReviewRow {
+  id: number;
+  promoted_knowledge_id: number;
+  source_id: string;
+  content: string;
+  tags_json: string;
+  contributor: string | null;
+  confidence: number;
+  verified: number;
+  impact_score: number;
+  impact_reasons_json: string;
+  observed_at: string;
+}
+
+export interface EnterpriseKnowledgeEvidenceView {
+  id: number;
+  knowledgeId: number;
+  sourceId: string;
+  content: string;
+  tags: string[];
+  contributor: string | null;
+  confidence: number;
+  verified: boolean;
+  impactScore: number;
+  impactReasons: string[];
+  observedAt: string;
+  stance: EnterpriseKnowledgeEvidenceStance;
+  contested: boolean;
+}
+
 const MAX_ATOM_LENGTH = 900;
 const MAX_SOURCE_LENGTH = 200;
 const MAX_CATEGORY_LENGTH = 120;
@@ -119,6 +152,18 @@ function safeJsonStrings(value: unknown, maximumItems: number, maximumLength: nu
     .slice(0, maximumItems);
 }
 
+function storedJsonStrings(value: string, maximumItems: number, maximumLength: number): string[] {
+  try {
+    return safeJsonStrings(JSON.parse(value), maximumItems, maximumLength);
+  } catch {
+    return [];
+  }
+}
+
+function publicEvidenceSourceId(value: string): string {
+  return value.replace(/^account:[^:]+:/u, '');
+}
+
 function digest(...parts: string[]): string {
   return createHash('sha256').update(parts.join('\0')).digest('hex');
 }
@@ -135,6 +180,53 @@ function runTransaction<T>(store: EnterpriseKnowledgeRepositoryStore, operation:
     if (owns && database.inTransaction) database.exec('ROLLBACK');
     throw error;
   }
+}
+
+/**
+ * Returns the administrator-facing evidence chain without internal fingerprints,
+ * session identifiers, evidence keys, or contributor account identifiers.
+ */
+export function listEnterpriseKnowledgeEvidenceInRepository(
+  store: EnterpriseKnowledgeRepositoryStore,
+  id: number,
+  organizationId?: string,
+): EnterpriseKnowledgeEvidenceView[] | null {
+  const tenantId = required(
+    organizationId ?? store.defaultOrganizationId,
+    160,
+    'organization id',
+  );
+  if (!store.organizationExists(tenantId)) throw new Error('Organization not found');
+  const database = store.db();
+  const knowledge = database.prepare(
+    'SELECT id FROM knowledge WHERE id = ? AND organization_id = ?',
+  ).get(id, tenantId) as { id: number } | undefined;
+  if (!knowledge) return null;
+  const rows = database.prepare(
+    `SELECT id, promoted_knowledge_id, source_id, content, tags_json, contributor,
+        confidence, verified, impact_score, impact_reasons_json, observed_at
+     FROM knowledge_retention_evidence
+     WHERE promoted_knowledge_id = ? AND organization_id = ?
+     ORDER BY datetime(observed_at) ASC, id ASC`,
+  ).all(id, tenantId) as EvidenceReviewRow[];
+  const contradictory = enterpriseKnowledgeContradictoryEvidenceIndexes(
+    rows.map((row) => row.content),
+  );
+  return rows.map((row, index) => ({
+    id: Number(row.id),
+    knowledgeId: Number(row.promoted_knowledge_id),
+    sourceId: publicEvidenceSourceId(row.source_id),
+    content: row.content,
+    tags: storedJsonStrings(row.tags_json, 8, 40),
+    contributor: row.contributor,
+    confidence: Math.min(1, Math.max(0, Number(row.confidence) || 0)),
+    verified: Number(row.verified) === 1,
+    impactScore: Math.min(1, Math.max(0, Number(row.impact_score) || 0)),
+    impactReasons: storedJsonStrings(row.impact_reasons_json, 8, 80),
+    observedAt: row.observed_at,
+    stance: enterpriseKnowledgeEvidenceStance(row.content),
+    contested: contradictory.has(index),
+  }));
 }
 
 export function observeEnterpriseKnowledgeInRepository(

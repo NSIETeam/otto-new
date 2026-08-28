@@ -5787,6 +5787,20 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       name: 'Alpha 员工',
       department: '研发部',
     });
+    const alphaAdmin = db.createAccount({
+      organizationId: alpha.id,
+      username: 'alpha.knowledge.admin',
+      password: 'alpha-knowledge-admin-password',
+      name: 'Alpha 知识管理员',
+      isAdmin: true,
+    });
+    const betaAdmin = db.createAccount({
+      organizationId: beta.id,
+      username: 'beta.knowledge.admin',
+      password: 'beta-knowledge-admin-password',
+      name: 'Beta 知识管理员',
+      isAdmin: true,
+    });
     db.addKnowledge({
       organizationId: alpha.id,
       category: 'alpha',
@@ -5801,6 +5815,16 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       base,
       alphaAccount.username,
       'alpha-worker-password',
+    );
+    const alphaAdminToken = await login(
+      base,
+      alphaAdmin.username,
+      'alpha-knowledge-admin-password',
+    );
+    const betaAdminToken = await login(
+      base,
+      betaAdmin.username,
+      'beta-knowledge-admin-password',
     );
 
     const crossTenant = await fetch(`${base}/enterprise/task`, {
@@ -6001,6 +6025,40 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       },
     });
     expect(highImpactPayload.knowledgeId).toBeGreaterThan(0);
+    const memberEvidence = await fetch(
+      `${base}/enterprise/knowledge/${highImpactPayload.knowledgeId}/evidence`,
+      { headers: { authorization: `Bearer ${alphaToken}` } },
+    );
+    expect(memberEvidence.status).toBe(403);
+
+    const adminEvidence = await fetch(
+      `${base}/enterprise/knowledge/${highImpactPayload.knowledgeId}/evidence`,
+      { headers: { authorization: `Bearer ${alphaAdminToken}` } },
+    );
+    expect(adminEvidence.status).toBe(200);
+    const adminEvidencePayload = await adminEvidence.json() as {
+      evidence: Array<Record<string, unknown>>;
+    };
+    expect(adminEvidencePayload.evidence).toHaveLength(3);
+    expect(adminEvidencePayload.evidence[0]).toMatchObject({
+      knowledgeId: highImpactPayload.knowledgeId,
+      sourceId: expect.any(String),
+      contributor: 'Alpha 员工',
+      verified: true,
+      stance: expect.stringMatching(/^(affirmative|negative|neutral)$/u),
+      contested: false,
+    });
+    const serializedEvidence = JSON.stringify(adminEvidencePayload);
+    expect(serializedEvidence).not.toContain('sourceFingerprint');
+    expect(serializedEvidence).not.toContain('sourceSessionId');
+    expect(serializedEvidence).not.toContain('contributorAccountId');
+    expect(serializedEvidence).not.toContain(alphaAccount.id);
+
+    const crossTenantEvidence = await fetch(
+      `${base}/enterprise/knowledge/${highImpactPayload.knowledgeId}/evidence`,
+      { headers: { authorization: `Bearer ${betaAdminToken}` } },
+    );
+    expect(crossTenantEvidence.status).toBe(404);
     const captured = db
       .getKnowledgeForAdministration('', '研发部', alpha.id, 'pending_review')
       .filter((item: { content: string }) => item.content.includes('## 长期结论'));

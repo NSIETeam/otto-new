@@ -1363,6 +1363,23 @@ describe('EnterpriseClient', () => {
           change_note: '补充监控',
           created_at: '2026-07-20T05:00:00.000Z',
         }],
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        evidence: [{
+          id: 41,
+          knowledgeId: 12,
+          sourceId: 'delivery-review-1',
+          content: '上线前必须检查备份和回滚。',
+          tags: ['上线'],
+          contributor: '交付负责人',
+          confidence: 0.93,
+          verified: true,
+          impactScore: 0.88,
+          impactReasons: ['明确制度或最终决策'],
+          observedAt: '2026-07-19T05:00:00.000Z',
+          stance: 'affirmative',
+          contested: false,
+        }],
       }));
     const client = new EnterpriseClient(fetchMock as typeof fetch);
     await client.loginWithPassword('https://enterprise.otto.test', 'staff01', 'password');
@@ -1387,6 +1404,24 @@ describe('EnterpriseClient', () => {
     ]);
     expect(fetchMock.mock.calls[3]?.[0])
       .toBe('https://enterprise.otto.test/enterprise/knowledge/12/revisions');
+
+    await expect(client.listKnowledgeEvidence('12')).resolves.toEqual([{
+      id: '41',
+      knowledgeId: '12',
+      sourceId: 'delivery-review-1',
+      content: '上线前必须检查备份和回滚。',
+      tags: ['上线'],
+      contributor: '交付负责人',
+      confidence: 0.93,
+      verified: true,
+      impactScore: 0.88,
+      impactReasons: ['明确制度或最终决策'],
+      observedAt: '2026-07-19T05:00:00.000Z',
+      stance: 'affirmative',
+      contested: false,
+    }]);
+    expect(fetchMock.mock.calls[4]?.[0])
+      .toBe('https://enterprise.otto.test/enterprise/knowledge/12/evidence');
   });
 
   it('登录成员通过 main 内的会话令牌读取完整组织架构', async () => {

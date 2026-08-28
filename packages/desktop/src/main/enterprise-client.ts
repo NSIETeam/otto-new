@@ -273,6 +273,22 @@ export interface EnterpriseKnowledgeRevision {
   createdAt: string;
 }
 
+export interface EnterpriseKnowledgeEvidence {
+  id: string;
+  knowledgeId: string;
+  sourceId: string;
+  content: string;
+  tags: string[];
+  contributor: string | null;
+  confidence: number;
+  verified: boolean;
+  impactScore: number;
+  impactReasons: string[];
+  observedAt: string;
+  stance: 'affirmative' | 'negative' | 'neutral';
+  contested: boolean;
+}
+
 export type EnterpriseSkillVisibility = 'department' | 'company';
 export type EnterpriseSkillStatus = 'pending_review' | 'active' | 'archived';
 export type EnterpriseSkillScope = 'department' | 'company' | 'mine' | 'review';
@@ -382,6 +398,33 @@ interface EnterpriseKnowledgeRevisionRow {
   changeNote?: string | null;
   created_at?: string;
   createdAt?: string;
+}
+
+interface EnterpriseKnowledgeEvidenceRow {
+  id: string | number;
+  knowledgeId?: string | number;
+  knowledge_id?: string | number;
+  sourceId?: string;
+  source_id?: string;
+  content: string;
+  tags?: unknown;
+  contributor?: string | null;
+  confidence?: number;
+  verified?: boolean;
+  impactScore?: number;
+  impact_score?: number;
+  impactReasons?: unknown;
+  impact_reasons?: unknown;
+  observedAt?: string;
+  observed_at?: string;
+  stance?: EnterpriseKnowledgeEvidence['stance'];
+  contested?: boolean;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }
 
 function mapEnterpriseKnowledgeItem(
@@ -2591,6 +2634,36 @@ export class EnterpriseClient {
       changedBy: item.changedBy ?? item.changed_by ?? null,
       changeNote: item.changeNote ?? item.change_note ?? null,
       createdAt: item.createdAt || item.created_at || '',
+    }));
+  }
+
+  async listKnowledgeEvidence(
+    id: string,
+  ): Promise<EnterpriseKnowledgeEvidence[]> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    const response = await this.request<{
+      evidence: EnterpriseKnowledgeEvidenceRow[];
+    }>(`/enterprise/knowledge/${encodeURIComponent(id)}/evidence`);
+    return response.evidence.map((item) => ({
+      id: String(item.id),
+      knowledgeId: String(item.knowledgeId ?? item.knowledge_id ?? id),
+      sourceId: item.sourceId ?? item.source_id ?? '',
+      content: item.content,
+      tags: stringArray(item.tags),
+      contributor: item.contributor ?? null,
+      confidence: typeof item.confidence === 'number'
+        ? Math.min(1, Math.max(0, item.confidence))
+        : 0,
+      verified: item.verified === true,
+      impactScore: typeof (item.impactScore ?? item.impact_score) === 'number'
+        ? Math.min(1, Math.max(0, item.impactScore ?? item.impact_score ?? 0))
+        : 0,
+      impactReasons: stringArray(item.impactReasons ?? item.impact_reasons),
+      observedAt: item.observedAt ?? item.observed_at ?? '',
+      stance: item.stance === 'affirmative' || item.stance === 'negative'
+        ? item.stance
+        : 'neutral',
+      contested: item.contested === true,
     }));
   }
 

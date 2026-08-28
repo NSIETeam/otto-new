@@ -118,10 +118,14 @@ export function enterpriseKnowledgeObservationSimilarity(left: string, right: st
   return (jaccard * 0.35) + (containment * 0.65);
 }
 
-function evidenceStance(content: string): -1 | 0 | 1 {
+export type EnterpriseKnowledgeEvidenceStance = 'affirmative' | 'negative' | 'neutral';
+
+export function enterpriseKnowledgeEvidenceStance(
+  content: string,
+): EnterpriseKnowledgeEvidenceStance {
   // “不需要”“禁止使用”本身也包含“需要”“使用”等正向词，否定规则必须优先。
-  if (NEGATIVE_STANCE.test(content)) return -1;
-  return AFFIRMATIVE_STANCE.test(content) ? 1 : 0;
+  if (NEGATIVE_STANCE.test(content)) return 'negative';
+  return AFFIRMATIVE_STANCE.test(content) ? 'affirmative' : 'neutral';
 }
 
 function quantifiedClaims(content: string): Set<string> {
@@ -135,9 +139,9 @@ function quantifiedClaims(content: string): Set<string> {
  * 统计同主题证据中的冲突条目。相反的规范措辞，或同一高相似陈述中互斥的量化值，
  * 都会进入争议态；争议只能由管理员审核解决，不能靠票数自动覆盖少数证据。
  */
-export function enterpriseKnowledgeContradictoryEvidenceCount(
+export function enterpriseKnowledgeContradictoryEvidenceIndexes(
   contents: readonly string[],
-): number {
+): Set<number> {
   const contradictory = new Set<number>();
   for (let leftIndex = 0; leftIndex < contents.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < contents.length; rightIndex += 1) {
@@ -145,9 +149,11 @@ export function enterpriseKnowledgeContradictoryEvidenceCount(
       const right = contents[rightIndex];
       const similarity = enterpriseKnowledgeObservationSimilarity(left, right);
       if (similarity < 0.3) continue;
-      const leftStance = evidenceStance(left);
-      const rightStance = evidenceStance(right);
-      const oppositeStance = leftStance !== 0 && rightStance !== 0 && leftStance !== rightStance;
+      const leftStance = enterpriseKnowledgeEvidenceStance(left);
+      const rightStance = enterpriseKnowledgeEvidenceStance(right);
+      const oppositeStance = leftStance !== 'neutral'
+        && rightStance !== 'neutral'
+        && leftStance !== rightStance;
       const leftClaims = quantifiedClaims(left);
       const rightClaims = quantifiedClaims(right);
       const differentQuantities = similarity >= 0.42
@@ -160,7 +166,13 @@ export function enterpriseKnowledgeContradictoryEvidenceCount(
       }
     }
   }
-  return contradictory.size;
+  return contradictory;
+}
+
+export function enterpriseKnowledgeContradictoryEvidenceCount(
+  contents: readonly string[],
+): number {
+  return enterpriseKnowledgeContradictoryEvidenceIndexes(contents).size;
 }
 
 function isTransientOrConversationDependent(content: string): boolean {

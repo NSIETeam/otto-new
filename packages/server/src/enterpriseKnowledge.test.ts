@@ -348,6 +348,28 @@ describe('enterprise knowledge kernel', () => {
       expect(knowledge.getKnowledgeForAdministration('', undefined, 'org-a', 'archived'))
         .toEqual([expect.objectContaining({ id: active.id })]);
 
+      const evidence = knowledge.getKnowledgeEvidence(contested.knowledge!.id, 'org-a');
+      expect(evidence).toHaveLength(3);
+      expect(evidence).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          sourceId: 'active-mfa-1',
+          contributor: '张三',
+          verified: true,
+          stance: 'affirmative',
+          contested: true,
+        }),
+        expect.objectContaining({
+          sourceId: 'active-mfa-3',
+          contributor: '王五',
+          verified: true,
+          stance: 'negative',
+          contested: true,
+        }),
+      ]));
+      expect(JSON.stringify(evidence)).not.toContain('account-1');
+      expect(JSON.stringify(evidence)).not.toContain('active-mfa-session-1');
+      expect(knowledge.getKnowledgeEvidence(contested.knowledge!.id, 'org-b')).toBeNull();
+
       const resolved = knowledge.reviseKnowledge({
         id: contested.knowledge!.id,
         organizationId: 'org-a',

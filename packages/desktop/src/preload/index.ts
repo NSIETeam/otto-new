@@ -510,6 +510,22 @@ export interface EnterpriseKnowledgeRevision {
   createdAt: string;
 }
 
+export interface EnterpriseKnowledgeEvidence {
+  id: string;
+  knowledgeId: string;
+  sourceId: string;
+  content: string;
+  tags: string[];
+  contributor: string | null;
+  confidence: number;
+  verified: boolean;
+  impactScore: number;
+  impactReasons: string[];
+  observedAt: string;
+  stance: 'affirmative' | 'negative' | 'neutral';
+  contested: boolean;
+}
+
 export type EnterpriseSkillVisibility = 'department' | 'company';
 export type EnterpriseSkillStatus = 'pending_review' | 'active' | 'archived';
 export type EnterpriseSkillScope = 'department' | 'company' | 'mine' | 'review';
@@ -1136,6 +1152,7 @@ const IPC = {
   enterpriseKnowledgeReview: 'otto:enterprise-knowledge-review',
   enterpriseKnowledgeRevise: 'otto:enterprise-knowledge-revise',
   enterpriseKnowledgeRevisions: 'otto:enterprise-knowledge-revisions',
+  enterpriseKnowledgeEvidence: 'otto:enterprise-knowledge-evidence',
   enterpriseOrganizationView: 'otto:enterprise-organization-view',
   enterprisePresenceHeartbeat: 'otto:enterprise-presence-heartbeat',
   enterpriseOrganizationFeaturesGet:
@@ -1620,6 +1637,9 @@ export interface OttoBridge {
   enterpriseKnowledgeRevisions(
     id: string,
   ): Promise<EnterpriseKnowledgeRevision[]>;
+  enterpriseKnowledgeEvidence(
+    id: string,
+  ): Promise<EnterpriseKnowledgeEvidence[]>;
   enterpriseOrganizationView(
     organizationId?: string,
   ): Promise<EnterpriseOrganizationView>;
@@ -2761,6 +2781,11 @@ const bridge: OttoBridge = {
     return ipcRenderer.invoke(IPC.enterpriseKnowledgeRevisions, {
       id,
     }) as Promise<EnterpriseKnowledgeRevision[]>;
+  },
+  enterpriseKnowledgeEvidence(id) {
+    return ipcRenderer.invoke(IPC.enterpriseKnowledgeEvidence, {
+      id,
+    }) as Promise<EnterpriseKnowledgeEvidence[]>;
   },
   enterpriseOrganizationView(
     organizationId?: string,

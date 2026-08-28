@@ -19,6 +19,7 @@ import {
   type EnterpriseKnowledgeRepositoryStore,
 } from './knowledgeRepository.js';
 import {
+  listEnterpriseKnowledgeEvidenceInRepository,
   observeEnterpriseKnowledgeInRepository,
   type ObserveEnterpriseKnowledgeInput,
 } from './knowledgeRetentionRepository.js';
@@ -105,6 +106,9 @@ export function createEnterpriseKnowledgeFacade(
     },
     getKnowledgeRevisions(id: number, organizationId?: string) {
       return listEnterpriseKnowledgeRevisionsFromRepository(store, id, organizationId);
+    },
+    getKnowledgeEvidence(id: number, organizationId?: string) {
+      return listEnterpriseKnowledgeEvidenceInRepository(store, id, organizationId);
     },
   };
 }

@@ -446,6 +446,32 @@ async function handleKnowledge(
     return true;
   }
 
+  const evidence = /^\/enterprise\/knowledge\/([^/]+)\/evidence$/u.exec(
+    input.path,
+  );
+  if (evidence && input.method === 'GET') {
+    if (!input.member.isAdmin) {
+      input.sendJson(input.res, 403, {
+        error: 'administrator permission required',
+      });
+      return true;
+    }
+    const knowledge = await input.repository.getBusinessRecord<KnowledgePayload>({
+      organizationId,
+      domain: 'knowledge',
+      resourceType: 'entry',
+      resourceId: decodeURIComponent(evidence[1]!),
+    });
+    input.sendJson(
+      input.res,
+      knowledge ? 200 : 404,
+      knowledge
+        ? { evidence: [] }
+        : { error: 'knowledge not found' },
+    );
+    return true;
+  }
+
   const entry = /^\/enterprise\/knowledge\/([^/]+)$/u.exec(input.path);
   if (entry && input.method === 'PATCH') {
     if (!input.member.isAdmin) {

@@ -515,5 +515,27 @@ export async function handleMemberWorkflowRoute({
     return true;
   }
 
+  const evidenceMatch = path.match(/^\/enterprise\/knowledge\/(\d+)\/evidence$/u);
+  if (evidenceMatch && method === 'GET') {
+    if (!db.getOrganizationFeatures(memberAccount!.organizationId).knowledge) {
+      sendJSON(res, 403, { error: '企业知识功能已由管理员关闭' });
+      return true;
+    }
+    if (!memberAccount!.isAdmin) {
+      sendJSON(res, 403, { error: '只有企业管理员可以查看知识证据' });
+      return true;
+    }
+    const evidence = db.getKnowledgeEvidence(
+      Number(evidenceMatch[1]),
+      memberAccount!.organizationId,
+    );
+    if (!evidence) {
+      sendJSON(res, 404, { error: 'knowledge not found' });
+      return true;
+    }
+    sendJSON(res, 200, { evidence });
+    return true;
+  }
+
   return false;
 }

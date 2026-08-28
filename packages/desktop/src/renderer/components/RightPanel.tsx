@@ -71,6 +71,22 @@ interface EnterpriseKnowledgeRevision {
   createdAt: string;
 }
 
+interface EnterpriseKnowledgeEvidence {
+  id: string;
+  knowledgeId: string;
+  sourceId: string;
+  content: string;
+  tags: string[];
+  contributor: string | null;
+  confidence: number;
+  verified: boolean;
+  impactScore: number;
+  impactReasons: string[];
+  observedAt: string;
+  stance: 'affirmative' | 'negative' | 'neutral';
+  contested: boolean;
+}
+
 const TAB_LABEL: Record<TabType, string> = {
   agents: '专家',
   documents: '文档',
@@ -296,6 +312,10 @@ export function RightPanel({
     string,
     EnterpriseKnowledgeRevision[]
   >>({});
+  const [knowledgeEvidence, setKnowledgeEvidence] = useState<Record<
+    string,
+    EnterpriseKnowledgeEvidence[]
+  >>({});
   const profiles = useMemo(
     () => providedProfiles ?? visibleProfiles(mode, enterpriseRole),
     [enterpriseRole, mode, providedProfiles],
@@ -311,6 +331,7 @@ export function RightPanel({
     setKnowledgeEditor(null);
     setKnowledgeView('knowledge');
     setKnowledgeRevisions({});
+    setKnowledgeEvidence({});
     if (!enterpriseOrganizationId) return () => { cancelled = true; };
     void getEnterpriseOrganizationFeatures(enterpriseOrganizationId, { force: true })
       .then((features) => {
@@ -492,6 +513,11 @@ export function RightPanel({
         delete next[id];
         return next;
       });
+      setKnowledgeEvidence((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
       setKnowledgeNotice(action === 'approve' ? '知识已发布，可供 Otto 检索引用。' : '知识候选已归档。');
       await refreshEnterpriseKnowledge();
     } catch (error) {
@@ -527,6 +553,11 @@ export function RightPanel({
           resolveConflict: knowledgeEditor.resolveConflict,
         });
         setKnowledgeRevisions((current) => {
+          const next = { ...current };
+          delete next[knowledgeEditor.id!];
+          return next;
+        });
+        setKnowledgeEvidence((current) => {
           const next = { ...current };
           delete next[knowledgeEditor.id!];
           return next;
@@ -576,6 +607,27 @@ export function RightPanel({
       setKnowledgeBusyId('');
     }
   }, [knowledgeRevisions]);
+
+  const toggleKnowledgeEvidence = useCallback(async (id: string): Promise<void> => {
+    if (knowledgeEvidence[id] !== undefined) {
+      setKnowledgeEvidence((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      return;
+    }
+    setKnowledgeBusyId(id);
+    setKnowledgeError('');
+    try {
+      const evidence = await window.otto.enterpriseKnowledgeEvidence(id);
+      setKnowledgeEvidence((current) => ({ ...current, [id]: evidence }));
+    } catch (error) {
+      setKnowledgeError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setKnowledgeBusyId('');
+    }
+  }, [knowledgeEvidence]);
 
   useEffect(() => {
     if (activeTab === 'worklog') void refreshWorkLog();
@@ -1171,6 +1223,13 @@ export function RightPanel({
                     </div>
                     {enterpriseRole === 'company_admin' ? (
                       <div className="otto-enterprise-memory-card__actions">
+                        {item.sourceType === 'auto_capture' || (item.evidenceCount ?? 0) > 0 ? (
+                          <button
+                            type="button"
+                            disabled={knowledgeBusyId === item.id}
+                            onClick={() => void toggleKnowledgeEvidence(item.id)}
+                          >{knowledgeEvidence[item.id] !== undefined ? '收起证据' : '证据'}</button>
+                        ) : null}
                         {item.status === 'pending_review' ? (
                           <button
                             type="button"
@@ -1186,7 +1245,13 @@ export function RightPanel({
                         ) : null}
                         <button
                           type="button"
-                          disabled={knowledgeBusyId === item.id}
+                          disabled={knowledgeBusyId === item.id
+                            || (Boolean(item.sourceLabel?.includes('证据存在冲突'))
+                              && (knowledgeEvidence[item.id]?.length ?? 0) === 0)}
+                          title={item.sourceLabel?.includes('证据存在冲突')
+                            && (knowledgeEvidence[item.id]?.length ?? 0) === 0
+                            ? '请先打开证据并核对冲突来源'
+                            : undefined}
                           onClick={() => setKnowledgeEditor({
                             id: item.id,
                             title: item.title || item.category,
@@ -1194,7 +1259,9 @@ export function RightPanel({
                             content: item.content,
                             resolveConflict: item.sourceLabel?.includes('证据存在冲突'),
                           })}
-                        >修订</button>
+                        >{item.sourceLabel?.includes('证据存在冲突')
+                            ? '审查并裁决'
+                            : '修订'}</button>
                         <button
                           type="button"
                           disabled={knowledgeBusyId === item.id}
@@ -1205,6 +1272,37 @@ export function RightPanel({
                           disabled={knowledgeBusyId === item.id}
                           onClick={() => void reviewKnowledge(item.id, 'archive')}
                         >归档</button>
+                      </div>
+                    ) : null}
+                    {knowledgeEvidence[item.id] !== undefined ? (
+                      <div className="otto-enterprise-memory-evidence" aria-label="知识证据明细">
+                        {knowledgeEvidence[item.id].length === 0 ? (
+                          <div className="otto-enterprise-memory-evidence__empty">
+                            此条知识没有可展示的自动提炼证据。
+                          </div>
+                        ) : knowledgeEvidence[item.id].map((evidence) => (
+                          <article key={evidence.id}>
+                            <div className="otto-enterprise-memory-evidence__badges">
+                              <span>{evidence.stance === 'affirmative'
+                                ? '肯定 / 要求'
+                                : evidence.stance === 'negative'
+                                  ? '否定 / 禁止'
+                                  : '中性描述'}</span>
+                              {evidence.contested ? <strong>涉及冲突</strong> : null}
+                              <span>{evidence.verified ? '已验证' : '未验证'}</span>
+                            </div>
+                            <p>{evidence.content}</p>
+                            <small>
+                              {evidence.contributor || '系统观察'} · {formatEnterpriseMemoryDate(evidence.observedAt)}
+                              {' · '}置信度 {Math.round(evidence.confidence * 100)}%
+                              {' · '}影响 {Math.round(evidence.impactScore * 100)}%
+                            </small>
+                            <small>来源：{evidence.sourceId || '来源编号不可用'}</small>
+                            {evidence.tags.length > 0 || evidence.impactReasons.length > 0 ? (
+                              <small>{[...evidence.tags, ...evidence.impactReasons].join(' · ')}</small>
+                            ) : null}
+                          </article>
+                        ))}
                       </div>
                     ) : null}
                     {knowledgeRevisions[item.id] ? (

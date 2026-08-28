@@ -120,6 +120,7 @@ export function prepareDesktopSqlCipherRuntime(
   options: {
     homeDirectory?: string;
     resourcesPath?: string;
+    developmentBindingPath?: string;
   } = {},
 ): { keyPath: string | null; nativeBindingPath: string | null } {
   const encryptionMode = environment.OTTO_DATABASE_ENCRYPTION
@@ -182,6 +183,13 @@ export function prepareDesktopSqlCipherRuntime(
     if (fs.existsSync(packagedBinding)) {
       nativeBindingPath = packagedBinding;
       environment.OTTO_SQLCIPHER_NATIVE_BINDING = packagedBinding;
+    }
+  }
+  if (!nativeBindingPath && options.developmentBindingPath) {
+    const developmentBinding = path.resolve(options.developmentBindingPath);
+    if (fs.existsSync(developmentBinding)) {
+      nativeBindingPath = developmentBinding;
+      environment.OTTO_SQLCIPHER_NATIVE_BINDING = developmentBinding;
     }
   }
 
@@ -316,6 +324,15 @@ export class ServerManager {
       prepareDesktopSqlCipherRuntime(process.env, {
         homeDirectory: os.homedir(),
         resourcesPath: process.resourcesPath,
+        developmentBindingPath: path.resolve(
+          __dirname,
+          '..',
+          '..',
+          'native',
+          'sqlcipher',
+          `${process.platform}-${process.arch}`,
+          'better_sqlite3.node',
+        ),
       });
     }
     this.kernelUpdateRoot = options.kernelUpdateRoot;
@@ -501,6 +518,7 @@ export class ServerManager {
     const env: Record<string, string> = {
       ...process.env,
       OTTO_SERVER_PORT: String(port),
+      OTTO_DEFAULT_WORKSPACE_PATH: os.homedir(),
     };
 
     let spawnArgs: string[];
@@ -509,11 +527,14 @@ export class ServerManager {
     if (nodeExec.endsWith('Electron') || nodeExec.includes('electron')) {
       // 打包形态：Electron 主二进制 + ELECTRON_RUN_AS_NODE
       env.ELECTRON_RUN_AS_NODE = '1';
-      env.OTTO_SQLCIPHER_NATIVE_BINDING = path.join(
+      const packagedBinding = path.join(
         process.resourcesPath,
         'sqlcipher',
         'better_sqlite3.node',
       );
+      if (!env.OTTO_SQLCIPHER_NATIVE_BINDING && fs.existsSync(packagedBinding)) {
+        env.OTTO_SQLCIPHER_NATIVE_BINDING = packagedBinding;
+      }
       spawnArgs = [binPath, 'start'];
       spawnOpts = {
         env,
@@ -843,7 +864,9 @@ export class ServerManager {
     mod: typeof import('otto-server'),
   ): Promise<ServerEndpointRecord> {
     const enableFeishu = feishuCredentialsExist();
-    const store = new mod.PersistentSessionStore(sessionsDir());
+    const store = new mod.PersistentSessionStore(sessionsDir(), {
+      defaultWorkspacePath: os.homedir(),
+    });
     // 确保日志目录存在并设置固定日志路径
     try {
       fs.mkdirSync(logsDir(), { recursive: true });
@@ -854,6 +877,7 @@ export class ServerManager {
       port,
       enableFeishu,
       store,
+      defaultWorkspacePath: os.homedir(),
     }) as TrustedOttoServer;
     try {
       await server.start();

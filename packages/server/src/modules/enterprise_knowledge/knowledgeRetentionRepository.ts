@@ -255,10 +255,16 @@ export function observeEnterpriseKnowledgeInRepository(
     128,
     'knowledge source fingerprint',
   ) ?? digest(atom).slice(0, 32);
-  const observedDate = input.observedAt ? new Date(input.observedAt) : new Date();
-  const observedAt = Number.isFinite(observedDate.getTime())
-    ? observedDate.toISOString()
-    : new Date().toISOString();
+  const now = new Date();
+  const observedDate = input.observedAt ? new Date(input.observedAt) : now;
+  if (!Number.isFinite(observedDate.getTime())) {
+    throw new Error('knowledge observed time is invalid');
+  }
+  // 客户端时间只容许很小的时钟偏差；否则成员可伪造远期证据，永久延长知识有效期。
+  if (observedDate.getTime() > now.getTime() + 10 * 60 * 1_000) {
+    throw new Error('knowledge observed time cannot be in the future');
+  }
+  const observedAt = observedDate.toISOString();
   const verified = input.verified === true;
   const impact = scoreEnterpriseKnowledgeImpact({
     category,

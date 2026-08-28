@@ -48,6 +48,8 @@ interface EnterpriseKnowledgeItem {
   supersedesId?: string | null;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
+  reviewDueAt?: string | null;
+  expiresAt?: string | null;
   createdAt: string;
   updatedAt?: string;
   evidenceCount?: number;
@@ -159,13 +161,13 @@ function enterpriseMemoryFreshness(item: EnterpriseKnowledgeItem): {
     && applicability.reason === '存在尚未裁决的证据冲突') {
     return { level: 'stale', label: '冲突已隔离' };
   }
-  if (item.sourceType !== 'auto_capture') return null;
   if (applicability.state === 'historical') {
     return { level: 'stale', label: '仅作历史' };
   }
   if (applicability.state === 'verify_before_use') {
     return { level: 'aging', label: '回答前需复核' };
   }
+  if (item.sourceType !== 'auto_capture') return null;
   return { level: 'current', label: '近期有印证' };
 }
 
@@ -336,6 +338,12 @@ export function RightPanel({
     string,
     EnterpriseKnowledgeAdjudicationDraft
   >>({});
+  const [knowledgeRevalidation, setKnowledgeRevalidation] = useState<{
+    id: string;
+    title: string;
+    rationale: string;
+    validForDays: number;
+  } | null>(null);
   const profiles = useMemo(
     () => providedProfiles ?? visibleProfiles(mode, enterpriseRole),
     [enterpriseRole, mode, providedProfiles],
@@ -353,6 +361,7 @@ export function RightPanel({
     setKnowledgeRevisions({});
     setKnowledgeEvidence({});
     setKnowledgeAdjudications({});
+    setKnowledgeRevalidation(null);
     if (!enterpriseOrganizationId) return () => { cancelled = true; };
     void getEnterpriseOrganizationFeatures(enterpriseOrganizationId, { force: true })
       .then((features) => {
@@ -615,6 +624,36 @@ export function RightPanel({
       setKnowledgeBusyId('');
     }
   }, [knowledgeEditor, refreshEnterpriseKnowledge]);
+
+  const saveKnowledgeRevalidation = useCallback(async (): Promise<void> => {
+    if (!knowledgeRevalidation) return;
+    const rationale = knowledgeRevalidation.rationale.trim();
+    if (rationale.length < 12) {
+      setKnowledgeError('复核依据至少填写 12 个字。');
+      return;
+    }
+    setKnowledgeBusyId(knowledgeRevalidation.id);
+    setKnowledgeError('');
+    setKnowledgeNotice('');
+    try {
+      await window.otto.enterpriseKnowledgeRevalidate(knowledgeRevalidation.id, {
+        rationale,
+        validForDays: knowledgeRevalidation.validForDays,
+      });
+      setKnowledgeRevisions((current) => {
+        const next = { ...current };
+        delete next[knowledgeRevalidation.id];
+        return next;
+      });
+      setKnowledgeRevalidation(null);
+      setKnowledgeNotice('复核记录已留档，知识有效期已更新。');
+      await refreshEnterpriseKnowledge();
+    } catch (error) {
+      setKnowledgeError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setKnowledgeBusyId('');
+    }
+  }, [knowledgeRevalidation, refreshEnterpriseKnowledge]);
 
   const toggleKnowledgeRevisions = useCallback(async (id: string): Promise<void> => {
     if (knowledgeRevisions[id]) {
@@ -1178,6 +1217,47 @@ export function RightPanel({
                 </div>
               </form>
             ) : null}
+            {knowledgeView === 'knowledge' && knowledgeRevalidation ? (
+              <form
+                className="otto-enterprise-memory-editor otto-enterprise-memory-revalidation"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveKnowledgeRevalidation();
+                }}
+              >
+                <strong>复核：{knowledgeRevalidation.title}</strong>
+                <textarea
+                  aria-label="复核依据"
+                  value={knowledgeRevalidation.rationale}
+                  onChange={(event) => setKnowledgeRevalidation((current) => current
+                    ? { ...current, rationale: event.target.value }
+                    : current)}
+                  placeholder="写明核对过的制度原文、负责人确认或最新验证结果"
+                  rows={4}
+                />
+                <label>
+                  <span>本次确认有效期</span>
+                  <select
+                    aria-label="知识有效期"
+                    value={knowledgeRevalidation.validForDays}
+                    onChange={(event) => setKnowledgeRevalidation((current) => current
+                      ? { ...current, validForDays: Number(event.target.value) }
+                      : current)}
+                  >
+                    <option value={90}>90 天</option>
+                    <option value={180}>180 天</option>
+                    <option value={365}>365 天</option>
+                  </select>
+                </label>
+                <small>到期后服务器会停止向成员和 Otto 返回该条知识，必须再次复核。</small>
+                <div>
+                  <button type="button" onClick={() => setKnowledgeRevalidation(null)}>取消</button>
+                  <button type="submit" disabled={Boolean(knowledgeBusyId)}>
+                    {knowledgeBusyId ? '保存中' : '确认复核'}
+                  </button>
+                </div>
+              </form>
+            ) : null}
             {knowledgeNotice ? (
               <div className="otto-enterprise-memory-notice" role="status">{knowledgeNotice}</div>
             ) : null}
@@ -1297,6 +1377,16 @@ export function RightPanel({
                       {item.contributor ? <span>{item.contributor}</span> : <span>系统沉淀</span>}
                       <span>{formatEnterpriseMemoryDate(item.updatedAt || item.createdAt)}</span>
                     </div>
+                    {item.reviewDueAt || item.expiresAt ? (
+                      <div className="otto-enterprise-memory-card__lifecycle">
+                        {item.reviewDueAt ? (
+                          <span>复核日期 {formatEnterpriseMemoryDate(item.reviewDueAt)}</span>
+                        ) : null}
+                        {item.expiresAt ? (
+                          <span>有效期至 {formatEnterpriseMemoryDate(item.expiresAt)}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {enterpriseRole === 'company_admin' ? (
                       <div className="otto-enterprise-memory-card__actions">
                         {item.sourceType === 'auto_capture' || (item.evidenceCount ?? 0) > 0 ? (
@@ -1341,6 +1431,22 @@ export function RightPanel({
                         >{item.sourceLabel?.includes('证据存在冲突')
                             ? '审查并裁决'
                             : '修订'}</button>
+                        {item.status === 'active'
+                          && !item.sourceLabel?.includes('证据存在冲突') ? (
+                          <button
+                            type="button"
+                            disabled={knowledgeBusyId === item.id}
+                            onClick={() => {
+                              setKnowledgeEditor(null);
+                              setKnowledgeRevalidation({
+                                id: item.id,
+                                title: item.title || item.category,
+                                rationale: '',
+                                validForDays: item.sourceType === 'auto_capture' ? 180 : 365,
+                              });
+                            }}
+                          >复核有效</button>
+                        ) : null}
                         <button
                           type="button"
                           disabled={knowledgeBusyId === item.id}

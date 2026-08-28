@@ -10,12 +10,14 @@ import {
   listEnterpriseKnowledgeRevisionsFromRepository,
   listMemberEnterpriseKnowledgeFromRepository,
   reviewEnterpriseKnowledgeInRepository,
+  revalidateEnterpriseKnowledgeInRepository,
   reviseEnterpriseKnowledgeInRepository,
   saveEnterpriseKnowledgeInRepository,
   searchEnterpriseKnowledgeInRepository,
   type AddEnterpriseKnowledgeInput,
   type EnterpriseKnowledgeStatus,
   type ReviseEnterpriseKnowledgeInput,
+  type RevalidateEnterpriseKnowledgeInput,
   type EnterpriseKnowledgeRepositoryStore,
 } from './knowledgeRepository.js';
 import {
@@ -103,6 +105,9 @@ export function createEnterpriseKnowledgeFacade(
     },
     reviseKnowledge(input: ReviseEnterpriseKnowledgeInput) {
       return reviseEnterpriseKnowledgeInRepository(store, input);
+    },
+    revalidateKnowledge(input: RevalidateEnterpriseKnowledgeInput) {
+      return revalidateEnterpriseKnowledgeInRepository(store, input);
     },
     getKnowledgeRevisions(id: number, organizationId?: string) {
       return listEnterpriseKnowledgeRevisionsFromRepository(store, id, organizationId);

@@ -487,6 +487,8 @@ export interface EnterpriseKnowledgeItem {
   supersedesId?: string | null;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
+  reviewDueAt?: string | null;
+  expiresAt?: string | null;
   createdAt: string;
   updatedAt?: string;
   evidenceCount?: number;
@@ -1160,6 +1162,7 @@ const IPC = {
   enterpriseKnowledgeList: 'otto:enterprise-knowledge-list',
   enterpriseKnowledgeReview: 'otto:enterprise-knowledge-review',
   enterpriseKnowledgeRevise: 'otto:enterprise-knowledge-revise',
+  enterpriseKnowledgeRevalidate: 'otto:enterprise-knowledge-revalidate',
   enterpriseKnowledgeRevisions: 'otto:enterprise-knowledge-revisions',
   enterpriseKnowledgeEvidence: 'otto:enterprise-knowledge-evidence',
   enterpriseOrganizationView: 'otto:enterprise-organization-view',
@@ -1647,6 +1650,10 @@ export interface OttoBridge {
         rationale: string;
       };
     },
+  ): Promise<EnterpriseKnowledgeItem>;
+  enterpriseKnowledgeRevalidate(
+    id: string,
+    input: { rationale: string; validForDays: number },
   ): Promise<EnterpriseKnowledgeItem>;
   enterpriseKnowledgeRevisions(
     id: string,
@@ -2787,6 +2794,12 @@ const bridge: OttoBridge = {
   },
   enterpriseKnowledgeRevise(id, input) {
     return ipcRenderer.invoke(IPC.enterpriseKnowledgeRevise, {
+      id,
+      input,
+    }) as Promise<EnterpriseKnowledgeItem>;
+  },
+  enterpriseKnowledgeRevalidate(id, input) {
+    return ipcRenderer.invoke(IPC.enterpriseKnowledgeRevalidate, {
       id,
       input,
     }) as Promise<EnterpriseKnowledgeItem>;

@@ -81,6 +81,7 @@ function installBridge(
   }));
   const enterpriseKnowledgeReview = vi.fn(async () => ({}));
   const enterpriseKnowledgeRevise = vi.fn(async () => ({}));
+  const enterpriseKnowledgeRevalidate = vi.fn(async () => ({}));
   const enterpriseKnowledgeRevisions = vi.fn(async (): Promise<unknown[]> => []);
   const enterpriseKnowledgeEvidence = vi.fn(async (): Promise<unknown[]> => []);
   const organizationFeatures = {
@@ -118,6 +119,7 @@ function installBridge(
     enterpriseKnowledgeRecord,
     enterpriseKnowledgeReview,
     enterpriseKnowledgeRevise,
+    enterpriseKnowledgeRevalidate,
     enterpriseKnowledgeRevisions,
     enterpriseKnowledgeEvidence,
     enterpriseOrganizationFeaturesGet,
@@ -141,6 +143,7 @@ function installBridge(
     enterpriseKnowledgeRecord,
     enterpriseKnowledgeReview,
     enterpriseKnowledgeRevise,
+    enterpriseKnowledgeRevalidate,
     enterpriseKnowledgeRevisions,
     enterpriseKnowledgeEvidence,
     enterpriseOrganizationFeaturesGet,
@@ -791,6 +794,22 @@ describe('RightPanel fixed Agent catalog', () => {
     await waitFor(() => expect(bridge.enterpriseKnowledgeRevise).toHaveBeenCalledWith(
       '12',
       expect.objectContaining({ content: '新内容' }),
+    ));
+
+    fireEvent.click(await screen.findByRole('button', { name: '复核有效' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '复核依据' }), {
+      target: { value: '已核对现行制度原文及最近审批记录，确认该知识继续有效。' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: '知识有效期' }), {
+      target: { value: '180' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认复核' }));
+    await waitFor(() => expect(bridge.enterpriseKnowledgeRevalidate).toHaveBeenCalledWith(
+      '12',
+      {
+        rationale: '已核对现行制度原文及最近审批记录，确认该知识继续有效。',
+        validForDays: 180,
+      },
     ));
 
     fireEvent.click(await screen.findByRole('button', { name: '版本' }));

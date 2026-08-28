@@ -250,6 +250,8 @@ export interface EnterpriseKnowledgeItem {
   supersedesId: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  reviewDueAt?: string | null;
+  expiresAt?: string | null;
   createdAt: string;
   updatedAt: string;
   evidenceCount?: number;
@@ -374,6 +376,10 @@ interface EnterpriseKnowledgeRow {
   reviewedBy?: string | null;
   reviewed_at?: string | null;
   reviewedAt?: string | null;
+  review_due_at?: string | null;
+  reviewDueAt?: string | null;
+  expires_at?: string | null;
+  expiresAt?: string | null;
   created_at?: string;
   createdAt?: string;
   updated_at?: string;
@@ -443,6 +449,13 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+function normalizeEnterpriseTimestamp(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/u.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
+}
+
 function mapEnterpriseKnowledgeItem(
   item: EnterpriseKnowledgeRow,
 ): EnterpriseKnowledgeItem {
@@ -470,6 +483,12 @@ function mapEnterpriseKnowledgeItem(
         : String(item.supersedes_id),
     reviewedBy: item.reviewedBy ?? item.reviewed_by ?? null,
     reviewedAt: item.reviewedAt ?? item.reviewed_at ?? null,
+    ...((item.reviewDueAt ?? item.review_due_at) !== undefined
+      ? { reviewDueAt: normalizeEnterpriseTimestamp(item.reviewDueAt ?? item.review_due_at) }
+      : {}),
+    ...((item.expiresAt ?? item.expires_at) !== undefined
+      ? { expiresAt: normalizeEnterpriseTimestamp(item.expiresAt ?? item.expires_at) }
+      : {}),
     createdAt: item.createdAt || item.created_at || '',
     updatedAt:
       item.updatedAt ||
@@ -2649,6 +2668,18 @@ export class EnterpriseClient {
         method: 'PATCH',
         body: JSON.stringify({ ...input, ...(adjudication ? { adjudication } : {}) }),
       },
+    );
+    return mapEnterpriseKnowledgeItem(response.knowledge);
+  }
+
+  async revalidateKnowledge(
+    id: string,
+    input: { rationale: string; validForDays: number },
+  ): Promise<EnterpriseKnowledgeItem> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    const response = await this.request<{ knowledge: EnterpriseKnowledgeRow }>(
+      `/enterprise/knowledge/${encodeURIComponent(id)}/revalidate`,
+      { method: 'POST', body: JSON.stringify(input) },
     );
     return mapEnterpriseKnowledgeItem(response.knowledge);
   }

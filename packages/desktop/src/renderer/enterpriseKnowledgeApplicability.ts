@@ -38,11 +38,21 @@ export function evaluateEnterpriseKnowledgeApplicability(
   if (item.status && item.status !== 'active') {
     return { state: 'blocked', usable: false, reason: '记录尚未发布或已经归档' };
   }
+  const expiresAt = Date.parse(item.expiresAt || '');
+  if (Number.isFinite(expiresAt) && expiresAt <= now) {
+    return { state: 'historical', usable: false, reason: '服务器登记的知识有效期已结束' };
+  }
+  const reviewDueAt = Date.parse(item.reviewDueAt || '');
+  if (Number.isFinite(reviewDueAt) && reviewDueAt <= now) {
+    return { state: 'verify_before_use', usable: true, reason: '已到管理员复核日期' };
+  }
   if (item.sourceType !== 'auto_capture') {
     return { state: 'current', usable: true, reason: null };
   }
-  const reference = Date.parse(
-    item.lastObservedAt || item.reviewedAt || item.updatedAt || item.createdAt,
+  const reference = Math.max(
+    ...[item.lastObservedAt, item.reviewedAt, item.updatedAt, item.createdAt]
+      .map((value) => Date.parse(value || ''))
+      .filter(Number.isFinite),
   );
   if (!Number.isFinite(reference)) {
     return { state: 'verify_before_use', usable: true, reason: '缺少可复核的最近验证时间' };

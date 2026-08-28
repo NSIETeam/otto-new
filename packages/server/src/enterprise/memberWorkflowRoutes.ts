@@ -513,6 +513,32 @@ export async function handleMemberWorkflowRoute({
     return true;
   }
 
+  const revalidateMatch = path.match(/^\/enterprise\/knowledge\/(\d+)\/revalidate$/u);
+  if (revalidateMatch && method === 'POST') {
+    if (!db.getOrganizationFeatures(memberAccount!.organizationId).knowledge) {
+      sendJSON(res, 403, { error: '企业知识功能已由管理员关闭' });
+      return true;
+    }
+    if (!memberAccount!.isAdmin) {
+      sendJSON(res, 403, { error: '只有企业管理员可以复核知识' });
+      return true;
+    }
+    const body = await readBody(req);
+    const knowledge = db.revalidateKnowledge({
+      id: Number(revalidateMatch[1]),
+      organizationId: memberAccount!.organizationId,
+      reviewer: memberAccount!.name,
+      rationale: typeof body.rationale === 'string' ? body.rationale : '',
+      validForDays: typeof body.validForDays === 'number' ? body.validForDays : 0,
+    });
+    if (!knowledge) {
+      sendJSON(res, 404, { error: 'knowledge not found' });
+      return true;
+    }
+    sendJSON(res, 200, { knowledge });
+    return true;
+  }
+
   const revisionsMatch = path.match(/^\/enterprise\/knowledge\/(\d+)\/revisions$/u);
   if (revisionsMatch && method === 'GET') {
     if (!db.getOrganizationFeatures(memberAccount!.organizationId).knowledge) {

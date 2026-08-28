@@ -550,6 +550,7 @@ const IPC = {
   enterpriseKnowledgeList: 'otto:enterprise-knowledge-list',
   enterpriseKnowledgeReview: 'otto:enterprise-knowledge-review',
   enterpriseKnowledgeRevise: 'otto:enterprise-knowledge-revise',
+  enterpriseKnowledgeRevalidate: 'otto:enterprise-knowledge-revalidate',
   enterpriseKnowledgeRevisions: 'otto:enterprise-knowledge-revisions',
   enterpriseKnowledgeEvidence: 'otto:enterprise-knowledge-evidence',
   enterpriseOrganizationView: 'otto:enterprise-organization-view',
@@ -2834,6 +2835,29 @@ function registerIpc(): void {
           rationale: adjudication.rationale as string,
         }
         : undefined,
+    });
+  });
+  ipcMain.handle(IPC.enterpriseKnowledgeRevalidate, async (_e, input: unknown) => {
+    loadEnterpriseSession();
+    const body = input && typeof input === 'object'
+      ? input as Record<string, unknown>
+      : {};
+    if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
+      throw new Error('知识复核参数不正确');
+    }
+    const revalidation = body.input && typeof body.input === 'object'
+      ? body.input as Record<string, unknown>
+      : {};
+    if (typeof revalidation.rationale !== 'string'
+      || revalidation.rationale.trim().length < 12
+      || !Number.isSafeInteger(revalidation.validForDays)
+      || Number(revalidation.validForDays) < 30
+      || Number(revalidation.validForDays) > 365) {
+      throw new Error('知识复核字段不完整');
+    }
+    return enterpriseClient.revalidateKnowledge(body.id, {
+      rationale: revalidation.rationale.trim(),
+      validForDays: Number(revalidation.validForDays),
     });
   });
   ipcMain.handle(

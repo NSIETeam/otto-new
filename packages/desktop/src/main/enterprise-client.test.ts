@@ -1390,6 +1390,14 @@ describe('EnterpriseClient', () => {
           stance: 'affirmative',
           contested: false,
         }],
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        knowledge: {
+          ...knowledgeRow,
+          version: 4,
+          review_due_at: '2026-10-20T04:00:00.000Z',
+          expires_at: '2027-01-20T04:00:00.000Z',
+        },
       }));
     const client = new EnterpriseClient(fetchMock as typeof fetch);
     await client.loginWithPassword('https://enterprise.otto.test', 'staff01', 'password');
@@ -1452,6 +1460,23 @@ describe('EnterpriseClient', () => {
     }]);
     expect(fetchMock.mock.calls[4]?.[0])
       .toBe('https://enterprise.otto.test/enterprise/knowledge/12/evidence');
+
+    await expect(client.revalidateKnowledge('12', {
+      rationale: '已核对现行制度和审批记录，确认继续有效。',
+      validForDays: 180,
+    })).resolves.toMatchObject({
+      id: '12',
+      version: 4,
+      reviewDueAt: '2026-10-20T04:00:00.000Z',
+      expiresAt: '2027-01-20T04:00:00.000Z',
+    });
+    expect(fetchMock.mock.calls[5]?.[0])
+      .toBe('https://enterprise.otto.test/enterprise/knowledge/12/revalidate');
+    expect(fetchMock.mock.calls[5]?.[1]).toMatchObject({ method: 'POST' });
+    expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toEqual({
+      rationale: '已核对现行制度和审批记录，确认继续有效。',
+      validForDays: 180,
+    });
   });
 
   it('登录成员通过 main 内的会话令牌读取完整组织架构', async () => {

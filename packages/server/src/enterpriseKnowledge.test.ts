@@ -7,6 +7,7 @@ import {
   createEnterpriseKnowledgeFacade,
   createEnterpriseKnowledgeSchemaContributor,
   ENTERPRISE_KNOWLEDGE_MAX_SOURCE_ID_LENGTH,
+  refreshEnterpriseKnowledgeEvidenceInRepository,
   type EnterpriseKnowledgeRepositoryStore,
 } from './modules/enterprise_knowledge/index.js';
 import {
@@ -216,6 +217,39 @@ describe('enterprise knowledge kernel', () => {
         contradictoryEvidenceCount: 3,
       });
       expect(knowledge.getKnowledgeForAdministration('', undefined, 'org-a')).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('rejects invalid or future evidence time so members cannot extend memory validity', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+    const evidence = {
+      organizationId: 'org-a',
+      department: '交付部',
+      category: 'convention',
+      content: '客户验收前必须完成交付清单核对。',
+      contributor: '张三',
+      contributorAccountId: 'account-1',
+      sourceId: 'observed-time-1',
+      sourceSessionId: 'observed-time-session-1',
+      confidence: 0.9,
+      verified: true,
+    };
+
+    try {
+      expect(() => knowledge.observeKnowledge({
+        ...evidence,
+        observedAt: 'not-a-date',
+      })).toThrow('knowledge observed time is invalid');
+      expect(() => knowledge.observeKnowledge({
+        ...evidence,
+        observedAt: '2099-01-01T00:00:00.000Z',
+      })).toThrow('knowledge observed time cannot be in the future');
+      expect((database.prepare(
+        'SELECT COUNT(*) AS count FROM knowledge_retention_evidence',
+      ).get() as { count: number }).count).toBe(0);
     } finally {
       database.close();
     }
@@ -806,6 +840,146 @@ describe('enterprise knowledge kernel', () => {
         reviewer: '管理员',
       });
       expect(knowledge.searchKnowledge('验收', undefined, 'org-a')).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('fails closed after hard expiry and restores recall only through an audited revalidation', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+
+    try {
+      const saved = knowledge.saveKnowledge({
+        organizationId: 'org-a',
+        title: '客户数据导出制度',
+        category: 'policy',
+        content: '客户数据导出必须由安全负责人审批并保留审计记录。',
+        confidence: 0.98,
+        sourceType: 'manual',
+        status: 'active',
+        reviewedBy: '制度管理员',
+      }).entry;
+      expect(saved.review_due_at).toBeTruthy();
+      expect(saved.expires_at).toBeTruthy();
+
+      database.prepare(
+        `UPDATE knowledge SET review_due_at = datetime('now', '-2 days'),
+         expires_at = datetime('now', '-1 day') WHERE id = ?`,
+      ).run(saved.id);
+      expect(knowledge.getKnowledge(undefined, undefined, 'org-a')).toEqual([]);
+      expect(knowledge.getMemberKnowledge(null, '', 'org-a')).toEqual([]);
+      expect(knowledge.getKnowledgeForAdministration('', undefined, 'org-a', 'active'))
+        .toEqual([expect.objectContaining({
+          id: saved.id,
+          review_due_at: expect.any(String),
+          expires_at: expect.any(String),
+        })]);
+
+      expect(() => knowledge.revalidateKnowledge({
+        id: saved.id,
+        organizationId: 'org-a',
+        reviewer: '制度管理员',
+        rationale: '仍然有效',
+        validForDays: 180,
+      })).toThrow('knowledge revalidation rationale is too short');
+      expect(() => knowledge.revalidateKnowledge({
+        id: saved.id,
+        organizationId: 'org-a',
+        reviewer: '制度管理员',
+        rationale: '已核对现行安全制度和审批记录，确认该规则继续有效。',
+        validForDays: 366,
+      })).toThrow('knowledge validity days must be between 30 and 365');
+      expect(knowledge.revalidateKnowledge({
+        id: saved.id,
+        organizationId: 'org-b',
+        reviewer: '其他企业管理员',
+        rationale: '已核对其他企业制度，确认该规则继续有效。',
+        validForDays: 180,
+      })).toBeNull();
+
+      const revalidated = knowledge.revalidateKnowledge({
+        id: saved.id,
+        organizationId: 'org-a',
+        reviewer: '制度管理员',
+        rationale: '已核对现行安全制度和审批记录，确认该规则继续有效。',
+        validForDays: 180,
+      })!;
+      expect(Date.parse(revalidated.review_due_at!)).toBeGreaterThan(Date.now());
+      expect(Date.parse(revalidated.expires_at!)).toBeGreaterThan(
+        Date.parse(revalidated.review_due_at!),
+      );
+      expect(knowledge.getMemberKnowledge(null, '', 'org-a'))
+        .toEqual([expect.objectContaining({ id: saved.id })]);
+      expect(knowledge.getKnowledgeRevisions(saved.id, 'org-a')[0]).toMatchObject({
+        version: revalidated.version,
+        change_note: '复核确认：已核对现行安全制度和审批记录，确认该规则继续有效。',
+      });
+      expect((database.prepare(
+        'SELECT COUNT(*) AS count FROM knowledge_revalidations WHERE knowledge_id = ?',
+      ).get(saved.id) as { count: number }).count).toBe(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('does not extend lifecycle from today when replaying historical evidence', () => {
+    const database = createDatabase();
+    const store = createStore(database);
+    const knowledge = createEnterpriseKnowledgeFacade(store);
+
+    try {
+      const saved = knowledge.saveKnowledge({
+        organizationId: 'org-a',
+        title: '历史验收规范',
+        category: 'convention',
+        content: '历史项目要求在验收前完成交付清单核对。',
+        confidence: 0.82,
+        sourceType: 'auto_capture',
+        sourceLabel: '历史对话提炼',
+        status: 'active',
+        reviewedBy: '知识管理员',
+      }).entry;
+      const observedAt = '2025-01-01T00:00:00.000Z';
+      database.prepare(
+        `INSERT INTO knowledge_retention_evidence
+          (organization_id, topic_id, evidence_key, source_id, source_session_id,
+           source_fingerprint, department, category, content, contributor_account_id,
+           confidence, verified, impact_score, observed_at, promoted_knowledge_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        'org-a',
+        'historical-acceptance',
+        'historical-evidence-1',
+        'historical-source-1',
+        'historical-session-1',
+        'historical-fingerprint-1',
+        '交付部',
+        'convention',
+        '历史项目要求在验收前完成交付清单核对。',
+        'account-1',
+        0.82,
+        1,
+        0.7,
+        observedAt,
+        saved.id,
+      );
+
+      const refreshed = refreshEnterpriseKnowledgeEvidenceInRepository(store, {
+        id: saved.id,
+        organizationId: 'org-a',
+        confidence: 0.82,
+        sourceLabel: '历史证据重放',
+        changedBy: 'Otto 企业记忆保留策略',
+        changeNote: '导入历史证据，但不得重新起算有效期',
+      })!;
+      const expected = database.prepare(
+        "SELECT datetime(?, '+180 days') AS expires_at",
+      ).get(observedAt) as { expires_at: string };
+      expect(refreshed.expires_at).toBe(expected.expires_at);
+      expect(Date.parse(`${refreshed.expires_at!.replace(' ', 'T')}Z`))
+        .toBeLessThan(Date.now());
+      expect(knowledge.getMemberKnowledge(null, '', 'org-a')).toEqual([]);
     } finally {
       database.close();
     }

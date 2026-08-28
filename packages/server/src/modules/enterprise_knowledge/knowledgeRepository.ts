@@ -43,6 +43,8 @@ export interface EnterpriseKnowledgeEntryView {
   supersedes_id: number | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  review_due_at: string | null;
+  expires_at: string | null;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -141,6 +143,14 @@ export interface RefreshEnterpriseKnowledgeEvidenceInput {
   sourceLabel: string;
   changedBy: string;
   changeNote: string;
+}
+
+export interface RevalidateEnterpriseKnowledgeInput {
+  id: number;
+  organizationId?: string;
+  reviewer: string;
+  rationale: string;
+  validForDays: number;
 }
 
 function requireOrganization(store: EnterpriseKnowledgeRepositoryStore, value?: string): string {
@@ -247,6 +257,55 @@ function runTransaction<T>(database: Database, operation: () => T): T {
     if (ownsTransaction && database.inTransaction) database.exec('ROLLBACK');
     throw error;
   }
+}
+
+function lifecycleDays(sourceType: EnterpriseKnowledgeSourceType): {
+  reviewDays: number;
+  validDays: number;
+} {
+  return sourceType === 'auto_capture'
+    ? { reviewDays: 90, validDays: 180 }
+    : { reviewDays: 180, validDays: 365 };
+}
+
+function refreshKnowledgeLifecycle(
+  database: Database,
+  id: number,
+  organizationId: string,
+  sourceType: EnterpriseKnowledgeSourceType,
+  validForDays?: number,
+  referenceAt?: string | null,
+): void {
+  const defaults = lifecycleDays(sourceType);
+  const validDays = validForDays ?? defaults.validDays;
+  const reviewDays = validForDays === undefined
+    ? defaults.reviewDays
+    : Math.max(15, Math.floor(validDays / 2));
+  database.prepare(
+    `UPDATE knowledge SET
+       review_due_at = CASE WHEN status = 'active' THEN datetime(COALESCE(?, 'now'), ?) ELSE NULL END,
+       expires_at = CASE WHEN status = 'active' THEN datetime(COALESCE(?, 'now'), ?) ELSE NULL END
+     WHERE id = ? AND organization_id = ?`,
+  ).run(
+    referenceAt ?? null,
+    `+${reviewDays} days`,
+    referenceAt ?? null,
+    `+${validDays} days`,
+    id,
+    organizationId,
+  );
+}
+
+function latestKnowledgeEvidenceObservedAt(
+  database: Database,
+  id: number,
+  organizationId: string,
+): string | null {
+  const row = database.prepare(
+    `SELECT MAX(observed_at) AS observed_at FROM knowledge_retention_evidence
+     WHERE promoted_knowledge_id = ? AND organization_id = ?`,
+  ).get(id, organizationId) as { observed_at: string | null };
+  return row.observed_at;
 }
 
 function getEntry(
@@ -387,6 +446,7 @@ export function saveEnterpriseKnowledgeInRepository(
         existing.id,
         organizationId,
       );
+      refreshKnowledgeLifecycle(database, existing.id, organizationId, sourceType);
       const updated = getEntry(database, existing.id, organizationId)!;
       writeRevision(database, updated, reviewedBy ?? contributor, 'knowledge updated');
       return { outcome: 'updated', entry: updated };
@@ -442,6 +502,7 @@ export function saveEnterpriseKnowledgeInRepository(
       status,
     ) as { lastInsertRowid?: number | bigint };
     const id = Number(result.lastInsertRowid);
+    refreshKnowledgeLifecycle(database, id, organizationId, sourceType);
     const entry = getEntry(database, id, organizationId);
     if (!entry) throw new Error('knowledge insert failed');
     writeRevision(database, entry, reviewedBy ?? contributor, 'knowledge created');
@@ -527,12 +588,32 @@ export function refreshEnterpriseKnowledgeEvidenceInRepository(
       throw new Error('archived knowledge evidence cannot be refreshed');
     }
     if (current.confidence === confidence && current.source_label === sourceLabel) {
+      if (current.status === 'active') {
+        refreshKnowledgeLifecycle(
+          database,
+          current.id,
+          organizationId,
+          current.source_type,
+          undefined,
+          latestKnowledgeEvidenceObservedAt(database, current.id, organizationId),
+        );
+      }
       return getEntryWithEvidence(database, current.id, organizationId);
     }
     database.prepare(
       `UPDATE knowledge SET confidence = ?, source_label = ?, version = version + 1,
        updated_at = datetime('now') WHERE id = ? AND organization_id = ?`,
     ).run(confidence, sourceLabel, current.id, organizationId);
+    if (current.status === 'active') {
+      refreshKnowledgeLifecycle(
+        database,
+        current.id,
+        organizationId,
+        current.source_type,
+        undefined,
+        latestKnowledgeEvidenceObservedAt(database, current.id, organizationId),
+      );
+    }
     const updated = getEntry(database, current.id, organizationId)!;
     writeRevision(database, updated, changedBy, changeNote);
     return getEntryWithEvidence(database, current.id, organizationId);
@@ -628,7 +709,8 @@ export function listEnterpriseKnowledgeFromRepository(
     ENTERPRISE_KNOWLEDGE_MAX_CATEGORY_LENGTH,
     'knowledge category',
   );
-  let sql = `${KNOWLEDGE_WITH_EVIDENCE_SELECT} WHERE k.organization_id = ? AND k.status = 'active'`;
+  let sql = `${KNOWLEDGE_WITH_EVIDENCE_SELECT} WHERE k.organization_id = ? AND k.status = 'active'
+    AND (k.expires_at IS NULL OR datetime(k.expires_at) > datetime('now'))`;
   const params: string[] = [normalizedOrganizationId];
   if (normalizedDepartment) {
     sql += ' AND k.department = ?';
@@ -659,7 +741,8 @@ export function searchEnterpriseKnowledgeInRepository(
     ENTERPRISE_KNOWLEDGE_MAX_QUERY_LENGTH,
     'knowledge query',
   ) ?? '';
-  let sql = `${KNOWLEDGE_WITH_EVIDENCE_SELECT} WHERE k.organization_id = ? AND k.status = 'active'`;
+  let sql = `${KNOWLEDGE_WITH_EVIDENCE_SELECT} WHERE k.organization_id = ? AND k.status = 'active'
+    AND (k.expires_at IS NULL OR datetime(k.expires_at) > datetime('now'))`;
   const params: Array<string | number> = [normalizedOrganizationId];
   if (normalizedDepartment) {
     sql += ' AND k.department = ?';
@@ -694,10 +777,13 @@ export function listMemberEnterpriseKnowledgeFromRepository(
   let sql = `${KNOWLEDGE_WITH_EVIDENCE_SELECT} WHERE k.organization_id = ?`;
   const params: Array<string | number> = [normalizedOrganizationId];
   if (options.includeOwnPending && contributorAccountId) {
-    sql += " AND (k.status = 'active' OR (k.status = 'pending_review' AND k.contributor_account_id = ?))";
+    sql += ` AND ((k.status = 'active'
+      AND (k.expires_at IS NULL OR datetime(k.expires_at) > datetime('now')))
+      OR (k.status = 'pending_review' AND k.contributor_account_id = ?))`;
     params.push(contributorAccountId);
   } else {
-    sql += " AND k.status = 'active'";
+    sql += ` AND k.status = 'active'
+      AND (k.expires_at IS NULL OR datetime(k.expires_at) > datetime('now'))`;
   }
   if (department) {
     sql += ' AND (k.department IS NULL OR k.department = ?)';
@@ -824,6 +910,7 @@ export function reviewEnterpriseKnowledgeInRepository(
       entry.id,
       organizationId,
     );
+    refreshKnowledgeLifecycle(database, entry.id, organizationId, entry.source_type);
     const updated = getEntry(database, entry.id, organizationId)!;
     writeRevision(database, updated, reviewer, note ?? input.action);
     return updated;
@@ -940,6 +1027,9 @@ export function reviseEnterpriseKnowledgeInRepository(
       current.id,
       organizationId,
     );
+    if (current.status === 'active') {
+      refreshKnowledgeLifecycle(database, current.id, organizationId, current.source_type);
+    }
     const updated = getEntry(database, current.id, organizationId)!;
     writeRevision(
       database,
@@ -965,6 +1055,72 @@ export function reviseEnterpriseKnowledgeInRepository(
       );
     }
     return updated;
+  });
+}
+
+export function revalidateEnterpriseKnowledgeInRepository(
+  store: EnterpriseKnowledgeRepositoryStore,
+  input: RevalidateEnterpriseKnowledgeInput,
+): EnterpriseKnowledgeEntryView | null {
+  const organizationId = requireOrganization(store, input.organizationId);
+  const reviewer = normalizeRequiredText(
+    input.reviewer,
+    ENTERPRISE_KNOWLEDGE_MAX_CONTRIBUTOR_LENGTH,
+    'knowledge reviewer',
+  );
+  const rationale = normalizeRequiredText(
+    input.rationale,
+    1_000,
+    'knowledge revalidation rationale',
+  );
+  if (rationale.length < 12) {
+    throw new Error('knowledge revalidation rationale is too short');
+  }
+  if (!Number.isSafeInteger(input.validForDays)
+    || input.validForDays < 30
+    || input.validForDays > 365) {
+    throw new Error('knowledge validity days must be between 30 and 365');
+  }
+  const database = store.db();
+  return runTransaction(database, () => {
+    const current = getEntry(database, input.id, organizationId);
+    if (!current) return null;
+    if (current.status !== 'active') {
+      throw new Error('only active knowledge can be revalidated');
+    }
+    if (current.source_label?.includes('证据存在冲突')) {
+      throw new Error('contested knowledge cannot be revalidated');
+    }
+    database.prepare(
+      `UPDATE knowledge SET version = version + 1, reviewed_by = ?,
+       reviewed_at = datetime('now'), updated_at = datetime('now')
+       WHERE id = ? AND organization_id = ?`,
+    ).run(reviewer, current.id, organizationId);
+    refreshKnowledgeLifecycle(
+      database,
+      current.id,
+      organizationId,
+      current.source_type,
+      input.validForDays,
+    );
+    const updated = getEntry(database, current.id, organizationId)!;
+    writeRevision(database, updated, reviewer, `复核确认：${rationale}`);
+    database.prepare(
+      `INSERT INTO knowledge_revalidations
+       (knowledge_id, organization_id, revision_version, rationale,
+        valid_for_days, review_due_at, expires_at, reviewed_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      updated.id,
+      organizationId,
+      updated.version,
+      rationale,
+      input.validForDays,
+      updated.review_due_at,
+      updated.expires_at,
+      reviewer,
+    );
+    return getEntryWithEvidence(database, updated.id, organizationId);
   });
 }
 

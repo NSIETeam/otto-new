@@ -781,7 +781,7 @@ describe('受保护 vs 公开路由边界', () => {
     await expect(backup.json()).resolves.toMatchObject({
       lastError: null,
       backupCount: 1,
-      latestSchemaVersion: 22,
+      latestSchemaVersion: 24,
     });
 
     const telemetry = await fetch(`${base}/enterprise/deployment/telemetry`, {
@@ -6270,6 +6270,46 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       { headers: { authorization: `Bearer ${legalToken}` } },
     );
     expect(memberHistory.status).toBe(403);
+
+    const memberRevalidation = await fetch(
+      `${base}/enterprise/knowledge/${pendingPayload.knowledgeId}/revalidate`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${legalToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          rationale: '已核对现行合同制度，确认该知识仍然有效。',
+          validForDays: 180,
+        }),
+      },
+    );
+    expect(memberRevalidation.status).toBe(403);
+
+    const revalidation = await fetch(
+      `${base}/enterprise/knowledge/${pendingPayload.knowledgeId}/revalidate`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          rationale: '已核对现行合同制度和最近审批记录，确认该知识仍然有效。',
+          validForDays: 180,
+        }),
+      },
+    );
+    expect(revalidation.status).toBe(200);
+    await expect(revalidation.json()).resolves.toMatchObject({
+      knowledge: {
+        version: 4,
+        reviewed_by: '企业管理员',
+        review_due_at: expect.any(String),
+        expires_at: expect.any(String),
+      },
+    });
 
     const memberAfterReview = await fetch(
       `${base}/enterprise/knowledge?q=${encodeURIComponent('合同复核')}`,

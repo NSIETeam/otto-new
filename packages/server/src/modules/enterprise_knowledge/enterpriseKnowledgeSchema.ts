@@ -37,6 +37,8 @@ export function createEnterpriseKnowledgeSchemaContributor(input: {
           supersedes_id INTEGER,
           reviewed_by TEXT,
           reviewed_at TEXT,
+          review_due_at TEXT,
+          expires_at TEXT,
           archived_at TEXT,
           created_at TEXT DEFAULT (datetime('now')),
           updated_at TEXT DEFAULT (datetime('now')),
@@ -107,6 +109,22 @@ export function createEnterpriseKnowledgeSchemaContributor(input: {
           FOREIGN KEY (organization_id) REFERENCES organizations(id),
           UNIQUE(knowledge_id, revision_version)
         );
+
+        CREATE TABLE IF NOT EXISTS knowledge_revalidations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          knowledge_id INTEGER NOT NULL,
+          organization_id TEXT NOT NULL,
+          revision_version INTEGER NOT NULL,
+          rationale TEXT NOT NULL,
+          valid_for_days INTEGER NOT NULL,
+          review_due_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          reviewed_by TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (knowledge_id) REFERENCES knowledge(id) ON DELETE CASCADE,
+          FOREIGN KEY (organization_id) REFERENCES organizations(id),
+          UNIQUE(knowledge_id, revision_version)
+        );
       `);
 
       const columns = database.prepare('PRAGMA table_info(knowledge)').all() as Array<{
@@ -137,6 +155,8 @@ export function createEnterpriseKnowledgeSchemaContributor(input: {
         { name: 'supersedes_id', sql: 'ALTER TABLE knowledge ADD COLUMN supersedes_id INTEGER' },
         { name: 'reviewed_by', sql: 'ALTER TABLE knowledge ADD COLUMN reviewed_by TEXT' },
         { name: 'reviewed_at', sql: 'ALTER TABLE knowledge ADD COLUMN reviewed_at TEXT' },
+        { name: 'review_due_at', sql: 'ALTER TABLE knowledge ADD COLUMN review_due_at TEXT' },
+        { name: 'expires_at', sql: 'ALTER TABLE knowledge ADD COLUMN expires_at TEXT' },
         { name: 'archived_at', sql: 'ALTER TABLE knowledge ADD COLUMN archived_at TEXT' },
         { name: 'created_at', sql: 'ALTER TABLE knowledge ADD COLUMN created_at TEXT' },
         { name: 'updated_at', sql: 'ALTER TABLE knowledge ADD COLUMN updated_at TEXT' },
@@ -157,6 +177,33 @@ export function createEnterpriseKnowledgeSchemaContributor(input: {
             source_type = COALESCE(NULLIF(trim(source_type), ''), 'manual'),
             created_at = COALESCE(created_at, datetime('now')),
             updated_at = COALESCE(updated_at, created_at, datetime('now'));
+
+        UPDATE knowledge
+        SET review_due_at = COALESCE(
+              review_due_at,
+              datetime(
+                COALESCE(
+                  (SELECT MAX(e.observed_at) FROM knowledge_retention_evidence e
+                   WHERE e.organization_id = knowledge.organization_id
+                     AND e.promoted_knowledge_id = knowledge.id),
+                  reviewed_at, updated_at, created_at, datetime('now')
+                ),
+                CASE WHEN source_type = 'auto_capture' THEN '+90 days' ELSE '+180 days' END
+              )
+            ),
+            expires_at = COALESCE(
+              expires_at,
+              datetime(
+                COALESCE(
+                  (SELECT MAX(e.observed_at) FROM knowledge_retention_evidence e
+                   WHERE e.organization_id = knowledge.organization_id
+                     AND e.promoted_knowledge_id = knowledge.id),
+                  reviewed_at, updated_at, created_at, datetime('now')
+                ),
+                CASE WHEN source_type = 'auto_capture' THEN '+180 days' ELSE '+365 days' END
+              )
+            )
+        WHERE status = 'active';
       `);
 
       database.exec(`
@@ -184,6 +231,10 @@ export function createEnterpriseKnowledgeSchemaContributor(input: {
           );
         CREATE INDEX IF NOT EXISTS idx_knowledge_adjudication_entry
           ON knowledge_adjudications(
+            organization_id, knowledge_id, revision_version DESC
+          );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_revalidation_entry
+          ON knowledge_revalidations(
             organization_id, knowledge_id, revision_version DESC
           );
       `);

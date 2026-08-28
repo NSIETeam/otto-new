@@ -869,6 +869,11 @@ describe('RightPanel fixed Agent catalog', () => {
     expect(screen.getAllByText('涉及冲突')).toHaveLength(2);
     expect(screen.getByText('来源：security-policy-1')).toBeTruthy();
     expect(bridge.enterpriseKnowledgeEvidence).toHaveBeenCalledWith('conflict-1');
+    fireEvent.click(screen.getAllByRole('button', { name: '采纳' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: '排除' })[1]!);
+    fireEvent.change(screen.getByRole('textbox', { name: '裁决依据' }), {
+      target: { value: '依据现行安全制度原文，生产环境必须启用双因素认证。' },
+    });
     await waitFor(() => expect((adjudicate as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(adjudicate);
     fireEvent.change(screen.getByRole('textbox', { name: '知识内容' }), {
@@ -881,6 +886,11 @@ describe('RightPanel fixed Agent catalog', () => {
       expect.objectContaining({
         resolveConflict: true,
         changeNote: '管理员核对证据并裁决冲突',
+        adjudication: {
+          acceptedEvidenceIds: ['evidence-1'],
+          rejectedEvidenceIds: ['evidence-2'],
+          rationale: '依据现行安全制度原文，生产环境必须启用双因素认证。',
+        },
       }),
     ));
   });

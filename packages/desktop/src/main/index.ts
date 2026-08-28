@@ -2802,6 +2802,18 @@ function registerIpc(): void {
     ) {
       throw new Error('知识修订字段不完整');
     }
+    const adjudication = revision.adjudication && typeof revision.adjudication === 'object'
+      ? revision.adjudication as Record<string, unknown>
+      : null;
+    if (adjudication && (
+      !Array.isArray(adjudication.acceptedEvidenceIds)
+      || !adjudication.acceptedEvidenceIds.every((id) => typeof id === 'string' && /^\d+$/u.test(id))
+      || !Array.isArray(adjudication.rejectedEvidenceIds)
+      || !adjudication.rejectedEvidenceIds.every((id) => typeof id === 'string' && /^\d+$/u.test(id))
+      || typeof adjudication.rationale !== 'string'
+    )) {
+      throw new Error('知识裁决字段不正确');
+    }
     return enterpriseClient.reviseKnowledge(body.id, {
       title: revision.title,
       category: revision.category,
@@ -2815,6 +2827,13 @@ function registerIpc(): void {
           ? revision.changeNote
           : undefined,
       resolveConflict: revision.resolveConflict === true,
+      adjudication: adjudication
+        ? {
+          acceptedEvidenceIds: adjudication.acceptedEvidenceIds as string[],
+          rejectedEvidenceIds: adjudication.rejectedEvidenceIds as string[],
+          rationale: adjudication.rationale as string,
+        }
+        : undefined,
     });
   });
   ipcMain.handle(

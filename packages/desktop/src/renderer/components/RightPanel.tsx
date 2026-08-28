@@ -69,6 +69,21 @@ interface EnterpriseKnowledgeRevision {
   changedBy: string | null;
   changeNote: string | null;
   createdAt: string;
+  adjudication?: EnterpriseKnowledgeAdjudication;
+}
+
+interface EnterpriseKnowledgeAdjudication {
+  id: string;
+  acceptedEvidenceIds: string[];
+  rejectedEvidenceIds: string[];
+  rationale: string;
+  adjudicatedBy: string;
+}
+
+interface EnterpriseKnowledgeAdjudicationDraft {
+  acceptedEvidenceIds: string[];
+  rejectedEvidenceIds: string[];
+  rationale: string;
 }
 
 interface EnterpriseKnowledgeEvidence {
@@ -307,6 +322,7 @@ export function RightPanel({
     category: string;
     content: string;
     resolveConflict?: boolean;
+    adjudication?: EnterpriseKnowledgeAdjudicationDraft;
   } | null>(null);
   const [knowledgeRevisions, setKnowledgeRevisions] = useState<Record<
     string,
@@ -315,6 +331,10 @@ export function RightPanel({
   const [knowledgeEvidence, setKnowledgeEvidence] = useState<Record<
     string,
     EnterpriseKnowledgeEvidence[]
+  >>({});
+  const [knowledgeAdjudications, setKnowledgeAdjudications] = useState<Record<
+    string,
+    EnterpriseKnowledgeAdjudicationDraft
   >>({});
   const profiles = useMemo(
     () => providedProfiles ?? visibleProfiles(mode, enterpriseRole),
@@ -332,6 +352,7 @@ export function RightPanel({
     setKnowledgeView('knowledge');
     setKnowledgeRevisions({});
     setKnowledgeEvidence({});
+    setKnowledgeAdjudications({});
     if (!enterpriseOrganizationId) return () => { cancelled = true; };
     void getEnterpriseOrganizationFeatures(enterpriseOrganizationId, { force: true })
       .then((features) => {
@@ -551,6 +572,9 @@ export function RightPanel({
             ? '管理员核对证据并裁决冲突'
             : '管理员在企业知识面板中修订',
           resolveConflict: knowledgeEditor.resolveConflict,
+          adjudication: knowledgeEditor.resolveConflict
+            ? knowledgeEditor.adjudication
+            : undefined,
         });
         setKnowledgeRevisions((current) => {
           const next = { ...current };
@@ -558,6 +582,11 @@ export function RightPanel({
           return next;
         });
         setKnowledgeEvidence((current) => {
+          const next = { ...current };
+          delete next[knowledgeEditor.id!];
+          return next;
+        });
+        setKnowledgeAdjudications((current) => {
           const next = { ...current };
           delete next[knowledgeEditor.id!];
           return next;
@@ -629,6 +658,44 @@ export function RightPanel({
     }
   }, [knowledgeEvidence]);
 
+  const setKnowledgeEvidenceDisposition = useCallback((
+    knowledgeId: string,
+    evidenceId: string,
+    disposition: 'accepted' | 'rejected',
+  ): void => {
+    setKnowledgeAdjudications((current) => {
+      const draft = current[knowledgeId] ?? {
+        acceptedEvidenceIds: [],
+        rejectedEvidenceIds: [],
+        rationale: '',
+      };
+      const acceptedEvidenceIds = draft.acceptedEvidenceIds.filter((id) => id !== evidenceId);
+      const rejectedEvidenceIds = draft.rejectedEvidenceIds.filter((id) => id !== evidenceId);
+      const target = disposition === 'accepted' ? acceptedEvidenceIds : rejectedEvidenceIds;
+      const currentlySelected = disposition === 'accepted'
+        ? draft.acceptedEvidenceIds.includes(evidenceId)
+        : draft.rejectedEvidenceIds.includes(evidenceId);
+      if (!currentlySelected) target.push(evidenceId);
+      return {
+        ...current,
+        [knowledgeId]: { acceptedEvidenceIds, rejectedEvidenceIds, rationale: draft.rationale },
+      };
+    });
+  }, []);
+
+  const isKnowledgeAdjudicationReady = useCallback((id: string): boolean => {
+    const contestedEvidence = (knowledgeEvidence[id] ?? []).filter((item) => item.contested);
+    const draft = knowledgeAdjudications[id];
+    if (!draft || contestedEvidence.length === 0 || draft.rationale.trim().length < 12) return false;
+    const classified = new Set([
+      ...draft.acceptedEvidenceIds,
+      ...draft.rejectedEvidenceIds,
+    ]);
+    return draft.acceptedEvidenceIds.length > 0
+      && draft.rejectedEvidenceIds.length > 0
+      && contestedEvidence.every((item) => classified.has(item.id));
+  }, [knowledgeAdjudications, knowledgeEvidence]);
+
   useEffect(() => {
     if (activeTab === 'worklog') void refreshWorkLog();
   }, [activeTab, refreshWorkLog]);
@@ -672,6 +739,7 @@ export function RightPanel({
           changeNote: revision.changeNote || revision.status,
           createdAt: revision.createdAt,
           department: item.department,
+          adjudication: revision.adjudication,
         }));
       }
       return [{
@@ -685,6 +753,7 @@ export function RightPanel({
         changeNote: item.version && item.version > 1 ? '当前版本' : '形成知识',
         createdAt: item.updatedAt || item.createdAt,
         department: item.department,
+        adjudication: undefined,
       }];
     })
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt)), [
@@ -1159,6 +1228,13 @@ export function RightPanel({
                       <strong>{event.title}</strong>
                       <p>{event.content}</p>
                       <small>{event.changedBy} · {event.changeNote}</small>
+                      {event.adjudication ? (
+                        <small>
+                          裁决依据：{event.adjudication.rationale}
+                          {' · '}采纳 {event.adjudication.acceptedEvidenceIds.length} 条
+                          {' · '}排除 {event.adjudication.rejectedEvidenceIds.length} 条
+                        </small>
+                      ) : null}
                     </div>
                   </article>
                 ))}
@@ -1247,10 +1323,10 @@ export function RightPanel({
                           type="button"
                           disabled={knowledgeBusyId === item.id
                             || (Boolean(item.sourceLabel?.includes('证据存在冲突'))
-                              && (knowledgeEvidence[item.id]?.length ?? 0) === 0)}
+                              && !isKnowledgeAdjudicationReady(item.id))}
                           title={item.sourceLabel?.includes('证据存在冲突')
-                            && (knowledgeEvidence[item.id]?.length ?? 0) === 0
-                            ? '请先打开证据并核对冲突来源'
+                            && !isKnowledgeAdjudicationReady(item.id)
+                            ? '请先处理全部冲突证据，并填写至少 12 个字的裁决依据'
                             : undefined}
                           onClick={() => setKnowledgeEditor({
                             id: item.id,
@@ -1258,6 +1334,9 @@ export function RightPanel({
                             category: item.category,
                             content: item.content,
                             resolveConflict: item.sourceLabel?.includes('证据存在冲突'),
+                            adjudication: item.sourceLabel?.includes('证据存在冲突')
+                              ? knowledgeAdjudications[item.id]
+                              : undefined,
                           })}
                         >{item.sourceLabel?.includes('证据存在冲突')
                             ? '审查并裁决'
@@ -1280,29 +1359,83 @@ export function RightPanel({
                           <div className="otto-enterprise-memory-evidence__empty">
                             此条知识没有可展示的自动提炼证据。
                           </div>
-                        ) : knowledgeEvidence[item.id].map((evidence) => (
-                          <article key={evidence.id}>
-                            <div className="otto-enterprise-memory-evidence__badges">
-                              <span>{evidence.stance === 'affirmative'
-                                ? '肯定 / 要求'
-                                : evidence.stance === 'negative'
-                                  ? '否定 / 禁止'
-                                  : '中性描述'}</span>
-                              {evidence.contested ? <strong>涉及冲突</strong> : null}
-                              <span>{evidence.verified ? '已验证' : '未验证'}</span>
-                            </div>
-                            <p>{evidence.content}</p>
-                            <small>
-                              {evidence.contributor || '系统观察'} · {formatEnterpriseMemoryDate(evidence.observedAt)}
-                              {' · '}置信度 {Math.round(evidence.confidence * 100)}%
-                              {' · '}影响 {Math.round(evidence.impactScore * 100)}%
-                            </small>
-                            <small>来源：{evidence.sourceId || '来源编号不可用'}</small>
-                            {evidence.tags.length > 0 || evidence.impactReasons.length > 0 ? (
-                              <small>{[...evidence.tags, ...evidence.impactReasons].join(' · ')}</small>
+                        ) : (
+                          <>
+                            {knowledgeEvidence[item.id].map((evidence) => (
+                              <article key={evidence.id}>
+                                <div className="otto-enterprise-memory-evidence__badges">
+                                  <span>{evidence.stance === 'affirmative'
+                                    ? '肯定 / 要求'
+                                    : evidence.stance === 'negative'
+                                      ? '否定 / 禁止'
+                                      : '中性描述'}</span>
+                                  {evidence.contested ? <strong>涉及冲突</strong> : null}
+                                  <span>{evidence.verified ? '已验证' : '未验证'}</span>
+                                </div>
+                                <p>{evidence.content}</p>
+                                <small>
+                                  {evidence.contributor || '系统观察'} · {formatEnterpriseMemoryDate(evidence.observedAt)}
+                                  {' · '}置信度 {Math.round(evidence.confidence * 100)}%
+                                  {' · '}影响 {Math.round(evidence.impactScore * 100)}%
+                                </small>
+                                <small>来源：{evidence.sourceId || '来源编号不可用'}</small>
+                                {evidence.tags.length > 0 || evidence.impactReasons.length > 0 ? (
+                                  <small>{[...evidence.tags, ...evidence.impactReasons].join(' · ')}</small>
+                                ) : null}
+                                {item.sourceLabel?.includes('证据存在冲突') && evidence.contested ? (
+                                  <div className="otto-enterprise-memory-evidence__decision">
+                                    <button
+                                      type="button"
+                                      aria-pressed={knowledgeAdjudications[item.id]
+                                        ?.acceptedEvidenceIds.includes(evidence.id) ?? false}
+                                      onClick={() => setKnowledgeEvidenceDisposition(
+                                        item.id,
+                                        evidence.id,
+                                        'accepted',
+                                      )}
+                                    >采纳</button>
+                                    <button
+                                      type="button"
+                                      aria-pressed={knowledgeAdjudications[item.id]
+                                        ?.rejectedEvidenceIds.includes(evidence.id) ?? false}
+                                      onClick={() => setKnowledgeEvidenceDisposition(
+                                        item.id,
+                                        evidence.id,
+                                        'rejected',
+                                      )}
+                                    >排除</button>
+                                  </div>
+                                ) : null}
+                              </article>
+                            ))}
+                            {item.sourceLabel?.includes('证据存在冲突') ? (
+                              <label className="otto-enterprise-memory-evidence__rationale">
+                                <span>裁决依据</span>
+                                <textarea
+                                  aria-label="裁决依据"
+                                  rows={3}
+                                  value={knowledgeAdjudications[item.id]?.rationale ?? ''}
+                                  onChange={(event) => setKnowledgeAdjudications((current) => ({
+                                    ...current,
+                                    [item.id]: {
+                                      acceptedEvidenceIds: current[item.id]?.acceptedEvidenceIds ?? [],
+                                      rejectedEvidenceIds: current[item.id]?.rejectedEvidenceIds ?? [],
+                                      rationale: event.target.value,
+                                    },
+                                  }))}
+                                  placeholder="说明采用哪些正式制度、验证结果或责任人确认作为裁决依据"
+                                />
+                                <small>
+                                  已处理 {new Set([
+                                    ...(knowledgeAdjudications[item.id]?.acceptedEvidenceIds ?? []),
+                                    ...(knowledgeAdjudications[item.id]?.rejectedEvidenceIds ?? []),
+                                  ]).size} / {knowledgeEvidence[item.id].filter((evidence) => evidence.contested).length}
+                                  {' · '}必须同时包含采纳和排除结论
+                                </small>
+                              </label>
                             ) : null}
-                          </article>
-                        ))}
+                          </>
+                        )}
                       </div>
                     ) : null}
                     {knowledgeRevisions[item.id] ? (
@@ -1312,6 +1445,17 @@ export function RightPanel({
                             <span>v{revision.version} · {revision.changedBy || '系统'} · {formatEnterpriseMemoryDate(revision.createdAt)}</span>
                             <strong>{revision.changeNote || revision.status}</strong>
                             <p>{revision.content}</p>
+                            {revision.adjudication ? (
+                              <div className="otto-enterprise-memory-revisions__adjudication">
+                                <strong>冲突裁决</strong>
+                                <p>{revision.adjudication.rationale}</p>
+                                <small>
+                                  采纳证据 #{revision.adjudication.acceptedEvidenceIds.join('、#')}
+                                  {' · '}排除证据 #{revision.adjudication.rejectedEvidenceIds.join('、#')}
+                                  {' · '}{revision.adjudication.adjudicatedBy}
+                                </small>
+                              </div>
+                            ) : null}
                           </div>
                         ))}
                       </div>

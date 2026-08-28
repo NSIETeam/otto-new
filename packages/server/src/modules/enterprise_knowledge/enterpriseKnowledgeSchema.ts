@@ -92,6 +92,21 @@ export function createEnterpriseKnowledgeSchemaContributor(input: {
           FOREIGN KEY (promoted_knowledge_id) REFERENCES knowledge(id) ON DELETE SET NULL,
           UNIQUE(organization_id, evidence_key)
         );
+
+        CREATE TABLE IF NOT EXISTS knowledge_adjudications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          knowledge_id INTEGER NOT NULL,
+          organization_id TEXT NOT NULL,
+          revision_version INTEGER NOT NULL,
+          accepted_evidence_ids_json TEXT NOT NULL,
+          rejected_evidence_ids_json TEXT NOT NULL,
+          rationale TEXT NOT NULL,
+          adjudicated_by TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (knowledge_id) REFERENCES knowledge(id) ON DELETE CASCADE,
+          FOREIGN KEY (organization_id) REFERENCES organizations(id),
+          UNIQUE(knowledge_id, revision_version)
+        );
       `);
 
       const columns = database.prepare('PRAGMA table_info(knowledge)').all() as Array<{
@@ -166,6 +181,10 @@ export function createEnterpriseKnowledgeSchemaContributor(input: {
         CREATE INDEX IF NOT EXISTS idx_knowledge_retention_contributor
           ON knowledge_retention_evidence(
             organization_id, contributor_account_id, observed_at DESC
+          );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_adjudication_entry
+          ON knowledge_adjudications(
+            organization_id, knowledge_id, revision_version DESC
           );
       `);
     },

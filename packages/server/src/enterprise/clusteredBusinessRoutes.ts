@@ -482,6 +482,12 @@ async function handleKnowledge(
     }
     const resourceId = decodeURIComponent(entry[1]!);
     const body = await input.readBody(input.req);
+    if (body.resolveConflict === true || body.adjudication !== undefined) {
+      input.sendJson(input.res, 409, {
+        error: 'clustered knowledge adjudication is not available',
+      });
+      return true;
+    }
     const before = await input.repository.getBusinessRecord<KnowledgePayload>({
       organizationId,
       domain: 'knowledge',

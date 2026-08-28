@@ -487,6 +487,23 @@ export async function handleMemberWorkflowRoute({
       changedBy: memberAccount!.name,
       changeNote: typeof body.changeNote === 'string' ? body.changeNote : undefined,
       resolveConflict: body.resolveConflict === true,
+      adjudication: body.adjudication && typeof body.adjudication === 'object'
+        ? {
+          acceptedEvidenceIds: Array.isArray(
+            (body.adjudication as Record<string, unknown>).acceptedEvidenceIds,
+          )
+            ? (body.adjudication as Record<string, unknown>).acceptedEvidenceIds as number[]
+            : [],
+          rejectedEvidenceIds: Array.isArray(
+            (body.adjudication as Record<string, unknown>).rejectedEvidenceIds,
+          )
+            ? (body.adjudication as Record<string, unknown>).rejectedEvidenceIds as number[]
+            : [],
+          rationale: typeof (body.adjudication as Record<string, unknown>).rationale === 'string'
+            ? (body.adjudication as Record<string, unknown>).rationale as string
+            : '',
+        }
+        : undefined,
     });
     if (!knowledge) {
       sendJSON(res, 404, { error: 'knowledge not found' });

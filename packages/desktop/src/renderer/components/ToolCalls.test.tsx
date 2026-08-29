@@ -177,11 +177,12 @@ describe('ToolCalls · 空正文的确定性总结', () => {
 
   it('Bash 结果提供可用的复制按钮并写入系统剪贴板', async () => {
     const writeClipboard = vi.fn(async () => true);
+    const clearTimeout = vi.spyOn(window, 'clearTimeout');
     Object.defineProperty(window, 'otto', {
       configurable: true,
       value: { writeClipboard },
     });
-    render(
+    const { unmount } = render(
       <ToolCallsCard
         toolCalls={[{
           id: 'bash-copy-1',
@@ -201,6 +202,9 @@ describe('ToolCalls · 空正文的确定性总结', () => {
     fireEvent.click(screen.getByRole('button', { name: '复制结果' }));
     await vi.waitFor(() => expect(writeClipboard).toHaveBeenCalledWith('测试输出\n全部通过'));
     expect(await screen.findByRole('button', { name: '已复制' })).toBeTruthy();
+    unmount();
+    expect(clearTimeout).toHaveBeenCalled();
+    clearTimeout.mockRestore();
   });
 });
 

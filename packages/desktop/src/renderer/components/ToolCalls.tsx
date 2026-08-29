@@ -14,7 +14,7 @@
  * toolName / confirmationDetails 启发式判断，覆盖 spec 的两类卡，其余归通用卡。
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type {
   ToolCallStatus,
   ToolCall,
@@ -919,6 +919,11 @@ function ToolItem({ tool }: { tool: ToolCall }): React.JSX.Element {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>(
     'idle',
   );
+  useEffect(() => {
+    if (copyState !== 'copied') return undefined;
+    const timeout = window.setTimeout(() => setCopyState('idle'), 1600);
+    return () => window.clearTimeout(timeout);
+  }, [copyState]);
 
   const Icon = resolved.kind === 'exec' ? IconTerminal : IconFile;
   const hasBody =
@@ -992,8 +997,6 @@ function ToolItem({ tool }: { tool: ToolCall }): React.JSX.Element {
                     onClick={async () => {
                       const copied = await copyToolOutput(resolved.output!);
                       setCopyState(copied ? 'copied' : 'failed');
-                      if (copied)
-                        window.setTimeout(() => setCopyState('idle'), 1600);
                     }}
                   >
                     {copyState === 'copied'

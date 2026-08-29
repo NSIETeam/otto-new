@@ -223,7 +223,6 @@ export function EnterpriseLoginPage({
   const [submitting, setSubmitting] = useState(false);
   const [preparingServer, setPreparingServer] = useState(false);
   const requestEpochRef = useRef(0);
-  const preparationAttemptRef = useRef('');
   const submitLockedRef = useRef(false);
   const formPending = busy || submitting;
   const legalUrl = enterpriseLegalUrl(serverUrl);
@@ -236,28 +235,6 @@ export function EnterpriseLoginPage({
     preparationMatches
       && (preparation?.legacy || preparation?.readiness?.canAuthenticate),
   );
-
-  useEffect(() => {
-    if (
-      !onPrepareServer
-      || !normalizedServerUrl
-      || preparationMatches
-      || preparationAttemptRef.current === normalizedServerUrl
-    ) return undefined;
-    let cancelled = false;
-    preparationAttemptRef.current = normalizedServerUrl;
-    setPreparingServer(true);
-    void onPrepareServer({ serverUrl: normalizedServerUrl })
-      .catch(() => {
-        // useEnterpriseAuth owns the user-facing error.
-      })
-      .finally(() => {
-        if (!cancelled) setPreparingServer(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [normalizedServerUrl, onPrepareServer, preparationMatches]);
 
   useEffect(() => {
     if (!initialInviteCode) return;
@@ -501,7 +478,6 @@ export function EnterpriseLoginPage({
                 <button
                   type="button"
                   onClick={() => {
-                    preparationAttemptRef.current = '';
                     setPreparingServer(true);
                     void onPrepareServer({ serverUrl: normalizedServerUrl })
                       .catch(() => {})

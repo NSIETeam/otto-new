@@ -452,7 +452,7 @@ describe('专业登录入口', () => {
     expect((screen.getByLabelText('短信验证码') as HTMLInputElement).value).toBe('');
   });
 
-  it('packaged Desktop prepares the configured server without exposing its address', async () => {
+  it('requires an explicit reconnect before preparing a configured server and then allows login', async () => {
     const preparation = {
       serverUrl: 'https://enterprise.otto.test',
       legacy: false,
@@ -470,12 +470,13 @@ describe('专业登录入口', () => {
       },
     };
     const onPrepareServer = vi.fn(async () => preparation);
+    const onPasswordLogin = vi.fn(async () => undefined);
     const common = {
       initialServerUrl: 'https://enterprise.otto.test',
       busy: false,
       error: null,
       onPrepareServer,
-      onPasswordLogin: async () => undefined,
+      onPasswordLogin,
       onRequestRegistrationCode: async () => ({
         challengeId: 'unused',
         message: 'unused',
@@ -488,12 +489,38 @@ describe('专业登录入口', () => {
     };
     const view = render(<EnterpriseLoginPage {...common} preparation={null} />);
 
+    expect(onPrepareServer).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('企业服务器地址')).toBeNull();
+
+    view.rerender(
+      <EnterpriseLoginPage
+        {...common}
+        initialServerUrl="https://other.enterprise.otto.test"
+        preparation={null}
+      />,
+    );
+    expect(onPrepareServer).not.toHaveBeenCalled();
+
+    view.rerender(<EnterpriseLoginPage {...common} preparation={null} />);
+    fireEvent.click(screen.getByRole('button', { name: '重新连接' }));
     await waitFor(() => expect(onPrepareServer).toHaveBeenCalledWith({
       serverUrl: 'https://enterprise.otto.test',
     }));
-    expect(screen.queryByLabelText('企业服务器地址')).toBeNull();
 
     view.rerender(<EnterpriseLoginPage {...common} preparation={preparation} />);
     expect(await screen.findByText('企业服务已就绪')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '密码登录' }));
+    fireEvent.change(screen.getByLabelText('账号或手机号'), {
+      target: { value: 'remote-admin' },
+    });
+    fireEvent.change(screen.getByLabelText('密码'), {
+      target: { value: 'remote-password' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '进入 Otto' }));
+    await waitFor(() => expect(onPasswordLogin).toHaveBeenCalledWith({
+      serverUrl: 'https://enterprise.otto.test',
+      identifier: 'remote-admin',
+      password: 'remote-password',
+    }));
   });
 });

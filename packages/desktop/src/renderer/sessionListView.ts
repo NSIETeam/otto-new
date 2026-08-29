@@ -1,6 +1,6 @@
 import type { SessionSummary } from 'otto-server';
 
-import type { UiModePreferenceScope } from './uiModePreference.js';
+import type { WorkspacePreferenceScope } from './workspacePreferenceScope.js';
 
 export type SessionListMode = 'kind' | 'time' | 'workspace';
 export type SessionListSection = 'projects' | 'conversations';
@@ -37,7 +37,7 @@ function normalizeServerUrl(value: string | null | undefined): string {
   return normalized || 'local';
 }
 
-export function sessionListPreferenceStorageKey(scope: UiModePreferenceScope): string {
+export function sessionListPreferenceStorageKey(scope: WorkspacePreferenceScope): string {
   return [
     STORAGE_PREFIX,
     normalizeServerUrl(scope.serverUrl),
@@ -69,7 +69,7 @@ function normalizePreference(value: unknown): SessionListPreference {
 }
 
 export function readSessionListPreference(
-  scope: UiModePreferenceScope,
+  scope: WorkspacePreferenceScope,
   storage: Pick<Storage, 'getItem'> = window.localStorage,
 ): SessionListPreference {
   try {
@@ -82,7 +82,7 @@ export function readSessionListPreference(
 }
 
 export function writeSessionListPreference(
-  scope: UiModePreferenceScope,
+  scope: WorkspacePreferenceScope,
   preference: SessionListPreference,
   storage: Pick<Storage, 'setItem'> = window.localStorage,
 ): boolean {

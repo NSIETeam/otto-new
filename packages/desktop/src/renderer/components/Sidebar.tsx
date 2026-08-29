@@ -40,7 +40,7 @@ import { LogoutConfirmDialog } from './LogoutConfirmDialog.js';
 import { JoinEnterpriseDialog } from './JoinEnterpriseDialog.js';
 import type { EnterpriseAccount } from '../../preload/index.js';
 import type { EnterpriseUnreadCounts } from '../enterpriseUnreadNotifications.js';
-import type { UiModePreferenceScope } from '../uiModePreference.js';
+import type { WorkspacePreferenceScope } from '../workspacePreferenceScope.js';
 import {
   groupSessionsForSidebar,
   readSessionListPreference,
@@ -76,7 +76,7 @@ function formatTime(ts: number): string {
 
 interface SidebarProps {
   sessions: SessionSummary[];
-  preferenceScope: UiModePreferenceScope;
+  preferenceScope: WorkspacePreferenceScope;
   activeSessionId: string | null;
   /** 当前是否停在「设置」页（高亮该入口）。 */
   hubActive?: boolean;

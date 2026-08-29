@@ -873,6 +873,7 @@ export function useOttoStore(
   useEffect(() => {
     let cancelled = false;
     const pendingProfileLaunches = profileLaunchRef.current;
+    const pendingSessionWorkspaces = pendingSessionWorkspacesRef.current;
 
     const unsubFrame = transport.onFrame((frame) => {
       maybeShowChatNotification(frame, activeRef.current, sessionsRef.current);
@@ -912,11 +913,11 @@ export function useOttoStore(
         }
       }
       if (frame.type === 'session_created') {
-        const pendingWorkspace = pendingSessionWorkspacesRef.current.get(
+        const pendingWorkspace = pendingSessionWorkspaces.get(
           frame.payload.clientRequestId,
         );
         if (pendingWorkspace) {
-          pendingSessionWorkspacesRef.current.delete(frame.payload.clientRequestId);
+          pendingSessionWorkspaces.delete(frame.payload.clientRequestId);
           clearTimeout(pendingWorkspace.timeout);
           transport.send({
             type: 'set_session_workspace',
@@ -1032,10 +1033,10 @@ export function useOttoStore(
           dispatch({ kind: 'local_error', message: '连接已断开，Agent 任务未发送；请重连后重试。' });
         }
         profileLaunchRef.current.clear();
-        for (const pending of pendingSessionWorkspacesRef.current.values()) {
+        for (const pending of pendingSessionWorkspaces.values()) {
           clearTimeout(pending.timeout);
         }
-        pendingSessionWorkspacesRef.current.clear();
+        pendingSessionWorkspaces.clear();
       }
       dispatch({
         kind: 'connection',
@@ -1058,10 +1059,10 @@ export function useOttoStore(
       cancelled = true;
       for (const pending of pendingProfileLaunches.values()) clearTimeout(pending.timeout);
       pendingProfileLaunches.clear();
-      for (const pending of pendingSessionWorkspacesRef.current.values()) {
+      for (const pending of pendingSessionWorkspaces.values()) {
         clearTimeout(pending.timeout);
       }
-      pendingSessionWorkspacesRef.current.clear();
+      pendingSessionWorkspaces.clear();
       unsubFrame();
       unsubConn();
     };

@@ -1,4 +1,4 @@
-import type { UiModePreferenceScope } from './uiModePreference.js';
+import type { WorkspacePreferenceScope } from './workspacePreferenceScope.js';
 
 const STORAGE_PREFIX = 'otto.right-panel.v1';
 
@@ -7,7 +7,7 @@ function normalizeServerUrl(value: string | null | undefined): string {
   return normalized || 'local';
 }
 
-export function rightPanelStorageKey(scope: UiModePreferenceScope): string {
+export function rightPanelStorageKey(scope: WorkspacePreferenceScope): string {
   return [
     STORAGE_PREFIX,
     normalizeServerUrl(scope.serverUrl),
@@ -17,7 +17,7 @@ export function rightPanelStorageKey(scope: UiModePreferenceScope): string {
 }
 
 export function readRightPanelCollapsed(
-  scope: UiModePreferenceScope,
+  scope: WorkspacePreferenceScope,
   storage: Pick<Storage, 'getItem'> = window.localStorage,
 ): boolean {
   try {
@@ -28,7 +28,7 @@ export function readRightPanelCollapsed(
 }
 
 export function writeRightPanelCollapsed(
-  scope: UiModePreferenceScope,
+  scope: WorkspacePreferenceScope,
   collapsed: boolean,
   storage: Pick<Storage, 'setItem'> = window.localStorage,
 ): boolean {

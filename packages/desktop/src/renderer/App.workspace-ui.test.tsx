@@ -6,7 +6,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.js';
 import type { EnterpriseAccount } from '../preload/index.js';
-import { uiModeStorageKey } from './uiModePreference.js';
 import { openParkServices } from './components/ParkServicesPlugin.js';
 
 const harness = vi.hoisted(() => ({
@@ -113,7 +112,7 @@ vi.mock('./state/useProductWorkspace.js', () => ({
 
 vi.mock('./state/useModuleWorkspaceCapabilities.js', () => ({
   useModuleWorkspaceCapabilities: () => ({
-    status: 'ready', ready: true, modules: [], retry: vi.fn(),
+    status: 'ready', ready: true, modules: [], parkIdentity: null, retry: vi.fn(),
   }),
 }));
 
@@ -260,15 +259,6 @@ vi.mock('./components/ParkServicesPlugin.js', () => ({
   hideParkServices: vi.fn(),
 }));
 
-vi.mock('./components/UiModeGuide.js', () => ({
-  UiModeGuide: ({ onSelect }: { onSelect: (mode: 'conversational' | 'work') => void }) => (
-    <div data-testid="ui-mode-guide">
-      <button type="button" onClick={() => onSelect('conversational')}>choose-conversational</button>
-      <button type="button" onClick={() => onSelect('work')}>choose-work</button>
-    </div>
-  ),
-}));
-
 vi.mock('./components/SettingsHubPage.js', () => ({
   SettingsHubPage: () => <section data-testid="settings-hub">settings-content</section>,
 }));
@@ -324,14 +314,6 @@ function authFor(account: EnterpriseAccount | null, status: 'loading' | 'signed-
   };
 }
 
-function preferenceKey(account: EnterpriseAccount): string {
-  return uiModeStorageKey({
-    serverUrl: 'https://enterprise.example.com/',
-    organizationId: account.organizationId,
-    accountId: account.id,
-  });
-}
-
 function rightPanelPreferenceKey(account: EnterpriseAccount): string {
   return [
     'otto.right-panel.v1',
@@ -370,7 +352,7 @@ afterEach(() => {
   harness.frameHandlers.clear();
 });
 
-describe('App UI mode integration', () => {
+describe('App workspace UI integration', () => {
   it('shows boot and login states without entering the workspace', () => {
     harness.auth.current = authFor(null, 'loading');
     const view = render(<App />);
@@ -381,39 +363,26 @@ describe('App UI mode integration', () => {
     expect(screen.getByTestId('login-page')).toBeTruthy();
   });
 
-  it('starts first-time users in conversational mode and persists their work UI choice', () => {
+  it('always starts in the unified workspace UI without a legacy mode selector', () => {
     render(<App />);
 
-    const app = document.querySelector<HTMLElement>('.otto-app');
-    expect(app?.dataset.uiMode).toBe('conversational');
-    expect(screen.getByTestId('ui-mode-guide')).toBeTruthy();
-    expect(screen.queryByTestId('work-panel')).toBeNull();
-    expect(screen.queryByTestId('whats-new')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'choose-work' }));
-
-    expect(app?.dataset.uiMode).toBe('work');
+    expect(document.querySelector('.otto-app')).toBeTruthy();
     expect(screen.getByTestId('work-panel')).toBeTruthy();
-    expect(screen.queryByTestId('ui-mode-guide')).toBeNull();
     expect(screen.getByTestId('whats-new')).toBeTruthy();
-    expect(localStorage.getItem(preferenceKey(accountA))).toBe('work');
+    expect(screen.getByRole('button', { name: '折叠右侧栏' })).toBeTruthy();
   });
 
-  it('restores work UI and keeps the selected layout while settings are open', () => {
-    localStorage.setItem(preferenceKey(accountA), 'work');
+  it('keeps the workspace panel mounted while settings are open', () => {
     render(<App />);
 
     expect(screen.getByTestId('work-panel')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'open-preferences' }));
     expect(screen.getByTestId('settings-hub')).toBeTruthy();
     expect(screen.getByTestId('work-panel').dataset.collapsed).toBe('false');
-    expect(screen.queryByRole('button', { name: 'settings-conversational' })).toBeNull();
     expect(screen.getByTestId('work-panel')).toBeTruthy();
-    expect(localStorage.getItem(preferenceKey(accountA))).toBe('work');
   });
 
   it('toggles the right panel from the chat header and persists the account preference', () => {
-    localStorage.setItem(preferenceKey(accountA), 'work');
     const first = render(<App />);
 
     expect(screen.getByTestId('work-panel').dataset.collapsed).toBe('false');
@@ -430,7 +399,6 @@ describe('App UI mode integration', () => {
   });
 
   it('keeps a collapsed right panel mounted while the settings hub is open', () => {
-    localStorage.setItem(preferenceKey(accountA), 'work');
     localStorage.setItem(rightPanelPreferenceKey(accountA), 'collapsed');
     render(<App />);
 
@@ -443,7 +411,6 @@ describe('App UI mode integration', () => {
 
   it('routes workspace modules through the existing App-level activation chains', () => {
     harness.centralIdentity.current = { edition: 'enterprise', role: 'member', profiles: [] };
-    localStorage.setItem(preferenceKey(accountA), 'work');
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: 'activate-park' }));
@@ -467,8 +434,6 @@ describe('App UI mode integration', () => {
       username: 'account-b',
       name: 'Bob',
     };
-    localStorage.setItem(preferenceKey(accountA), 'work');
-    localStorage.setItem(preferenceKey(accountB), 'work');
     localStorage.setItem(rightPanelPreferenceKey(accountA), 'collapsed');
     const view = render(<App />);
     expect(screen.getByTestId('work-panel').dataset.collapsed).toBe('true');
@@ -480,10 +445,9 @@ describe('App UI mode integration', () => {
     expect(screen.getByRole('button', { name: '折叠右侧栏' })).toBeTruthy();
   });
 
-  it('does not reuse one account UI preference for another account', () => {
-    localStorage.setItem(preferenceKey(accountA), 'work');
+  it('keeps the unified workspace UI when the account changes', () => {
     const view = render(<App />);
-    expect(document.querySelector<HTMLElement>('.otto-app')?.dataset.uiMode).toBe('work');
+    expect(screen.getByTestId('work-panel')).toBeTruthy();
 
     const accountB = {
       ...accountA,
@@ -495,9 +459,7 @@ describe('App UI mode integration', () => {
     harness.auth.current = authFor(accountB, 'signed-in');
     view.rerender(<App />);
 
-    expect(document.querySelector<HTMLElement>('.otto-app')?.dataset.uiMode).toBe('conversational');
-    expect(screen.getByTestId('ui-mode-guide')).toBeTruthy();
-    expect(localStorage.getItem(preferenceKey(accountB))).toBeNull();
+    expect(screen.getByTestId('work-panel')).toBeTruthy();
   });
 
   it('refreshes the model list whenever personal API settings are opened', async () => {

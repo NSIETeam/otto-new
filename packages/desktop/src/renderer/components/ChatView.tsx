@@ -101,7 +101,7 @@ interface ChatViewProps {
   onShowHelp?: () => void;
   /** 斜杠专家入口：创建绑定服务端 profile 的新会话。 */
   onLaunchAgentProfile?: (profileId: string, title: string) => void;
-  /** 工作式 UI 的右侧栏状态；仅传入切换动作时显示顶栏入口。 */
+  /** 统一工作区的右侧栏状态；仅传入切换动作时显示顶栏入口。 */
   rightPanelCollapsed?: boolean;
   onToggleRightPanel?: () => void;
   pendingAgent?: PendingAgentSelection | null;

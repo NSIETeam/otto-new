@@ -26,6 +26,7 @@ import type { NativeRequest } from './customModelGeminiNative.js';
 
 /**
  * Gemini native single-shot call (GenAI generateContent).
+ * Retries only when the transport explicitly confirms the request was not sent.
  */
 export async function callGeminiNativeModel(
   modelConfig: CustomModelConfig,
@@ -74,6 +75,7 @@ export async function callGeminiNativeModel(
 
 /**
  * Gemini native streaming call (GenAI streamGenerateContent + alt=sse).
+ * Initial connection retries require the same confirmed-not-sent proof.
  *
  * EasyRouter follows Google's wire format: lines look like
  *   data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"…"}]}}]}

@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve as resolvePath } from 'node:path';
 import type { CustomModelConfig } from '../types/customModel.js';
-import { getErrorStatus } from '../utils/retry.js';
+import {
+  canAutomaticallyRetryModelRequest,
+  ModelRequestSafetyError,
+} from './modelRequestSafety.js';
 import {
   CODEX_OAUTH_SENTINEL,
   CUSTOM_MODEL_DEFAULT_MAX_OUTPUT_TOKENS,
@@ -215,33 +218,8 @@ export function createHttpError(
   return error;
 }
 
-/**
- * 判断是否应该重试自定义模型请求
- * 重试条件：429 限流 或 5xx 服务器错误
- */
+/** Retry only when the transport explicitly proves the request was not sent. */
 export function shouldRetryCustomModel(error: Error): boolean {
-  const status = getErrorStatus(error);
-
-  // ✅ 429 限流 - 重试
-  if (status === 429) {
-    console.warn(
-      `[CustomModel] Rate limited (429), will retry with backoff...`,
-    );
-    return true;
-  }
-
-  // ✅ 5xx 服务器错误 - 重试
-  if (status && status >= 500 && status < 600) {
-    console.warn(`[CustomModel] Server error (${status}), will retry...`);
-    return true;
-  }
-
-  // ✅ 检查错误消息中的 429
-  if (error.message.includes('429')) {
-    console.warn(`[CustomModel] Rate limit detected in message, will retry...`);
-    return true;
-  }
-
-  // ❌ 其他错误（如 4xx 客户端错误）不重试
-  return false;
+  return error instanceof ModelRequestSafetyError
+    && canAutomaticallyRetryModelRequest(error);
 }

@@ -31,7 +31,7 @@ type AnthropicRequest = {
 
 /**
  * Anthropic 模型单次调用
- * 使用指数退避重试策略处理 429 和 5xx 错误
+ * 仅在上游明确确认请求未发送时重试
  * 支持 extended thinking 配置
  */
 export async function callAnthropicModel(
@@ -85,7 +85,7 @@ export async function callAnthropicModel(
 
 /**
  * Anthropic 模型流式调用
- * 使用指数退避重试策略处理初始连接的 429 和 5xx 错误
+ * 仅在上游明确确认请求未发送时重试初始连接
  * 支持 extended thinking 配置
  */
 export async function* callAnthropicModelStream(

@@ -44,9 +44,10 @@ afterEach(() => {
 describe('renderer internal-test build switch', () => {
   it('pins every renderer dependency to the desktop React 18 singleton', () => {
     const config = createRendererConfig({}, { mode: 'production' });
-    expect(config.resolve.alias['react$']).toContain('/packages/desktop/node_modules/react/');
-    expect(config.resolve.alias['react-dom$']).toContain('/packages/desktop/node_modules/react-dom/');
-    expect(config.resolve.alias['react/jsx-runtime$']).toContain('/packages/desktop/node_modules/react/');
+    const normalize = (value) => value.replaceAll('\\', '/');
+    expect(normalize(config.resolve.alias['react$'])).toContain('/packages/desktop/node_modules/react/');
+    expect(normalize(config.resolve.alias['react-dom$'])).toContain('/packages/desktop/node_modules/react-dom/');
+    expect(normalize(config.resolve.alias['react/jsx-runtime$'])).toContain('/packages/desktop/node_modules/react/');
   });
 
   it('is compiled off unless the build explicitly opts in', () => {

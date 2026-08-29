@@ -1173,6 +1173,11 @@ function OttoWorkspaceApp({
     persistCustomAgents([agent, ...customAgents]);
   };
 
+  const handleGenerateCustomAgent = async (requirement: string): Promise<void> => {
+    const draft = await window.otto.generateCustomAgent(requirement);
+    handleCreateCustomAgent(draft);
+  };
+
   const handleDeleteCustomAgent = (agentId: string): void => {
     persistCustomAgents(customAgents.filter((agent) => agent.id !== agentId));
     const moduleId = `agent-${agentId}`;
@@ -1563,6 +1568,7 @@ function OttoWorkspaceApp({
         key={`${moduleWorkspaceScopeKey}:custom-expert`}
         open={moduleModal?.kind === 'custom-expert'}
         agents={customAgents}
+        onGenerate={handleGenerateCustomAgent}
         onCreate={handleCreateCustomAgent}
         onDelete={handleDeleteCustomAgent}
         onUpdateIcon={handleUpdateCustomAgentIcon}

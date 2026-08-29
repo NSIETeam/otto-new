@@ -12703,6 +12703,20 @@ h6.otto-prose__h {
   color: var(--otto-text-secondary);
   font-size: 12px;
 }
+.otto-custom-agent-generator {
+  border-color: color-mix(in srgb, var(--otto-accent) 38%, var(--otto-border));
+  background: color-mix(in srgb, var(--otto-accent) 7%, var(--otto-bg));
+}
+.otto-custom-agent-generator__heading,
+.otto-custom-agent-generator__heading > div {
+  display: block !important;
+}
+.otto-custom-agent-generator__heading h3 { margin: 0 0 4px; }
+.otto-custom-agent-generator__heading p { margin: 0; color: var(--otto-text-secondary); font-size: 12px; line-height: 1.55; }
+.otto-custom-agent-generator button[type='submit'] { justify-self: end; border-color: var(--otto-accent); background: var(--otto-accent); color: #fff; }
+.otto-custom-agent-generator button[type='submit']:disabled { cursor: not-allowed; opacity: 0.55; }
+.otto-custom-agent-divider { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; color: var(--otto-text-tertiary); font-size: 11px; }
+.otto-custom-agent-divider::before, .otto-custom-agent-divider::after { height: 1px; flex: 1; background: var(--otto-border); content: ''; }
 .otto-custom-agent-icon-picker {
   position: relative;
   min-width: 0;

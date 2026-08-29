@@ -1293,6 +1293,7 @@ const IPC = {
   customerModuleExportData: 'otto:customer-module-export-data',
   customerModuleRun: 'otto:customer-module-run',
   customerModuleCancel: 'otto:customer-module-cancel',
+  generateCustomAgent: 'otto:generate-custom-agent',
   parkNativeNotify: 'otto:park-native-notify',
   writeClipboard: 'otto:write-clipboard',
 } as const;
@@ -1530,6 +1531,11 @@ export interface OttoBridge {
     result: { status: string; exitCode: number | null; output: string; error?: string };
     audit: Array<Record<string, unknown>>;
     hostAudit: Array<Record<string, unknown>>;
+  }>;
+  /** 根据一句需求生成受约束的可执行专家定义。 */
+  generateCustomAgent(requirement: string): Promise<{
+    name: string;
+    instructions: string;
   }>;
   customerModuleInstalledList(): Promise<InstalledCustomerModuleRecord[]>;
   customerModuleInstall(input: {
@@ -2550,6 +2556,9 @@ const bridge: OttoBridge = {
   },
   customerModuleTest(input) {
     return ipcRenderer.invoke(IPC.customerModuleTest, input) as ReturnType<OttoBridge['customerModuleTest']>;
+  },
+  generateCustomAgent(requirement) {
+    return ipcRenderer.invoke(IPC.generateCustomAgent, requirement) as ReturnType<OttoBridge['generateCustomAgent']>;
   },
   customerModuleInstalledList() {
     return ipcRenderer.invoke(IPC.customerModuleInstalledList) as Promise<InstalledCustomerModuleRecord[]>;

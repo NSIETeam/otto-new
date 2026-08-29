@@ -139,7 +139,7 @@ describe('WorkspaceDialogs', () => {
 
   it('自定义专家草稿在关闭后清空', async () => {
     const props = {
-      agents: [], onCreate: vi.fn(), onDelete: vi.fn(), onUpdateIcon: vi.fn(), onClose: vi.fn(),
+      agents: [], onGenerate: vi.fn(), onCreate: vi.fn(), onDelete: vi.fn(), onUpdateIcon: vi.fn(), onClose: vi.fn(),
     };
     const view = render(<CustomAgentManagerDialog open {...props} />);
     fireEvent.change(screen.getByRole('textbox', { name: '专家名称' }), { target: { value: '未保存草稿' } });
@@ -148,11 +148,54 @@ describe('WorkspaceDialogs', () => {
     await waitFor(() => expect((screen.getByRole('textbox', { name: '专家名称' }) as HTMLInputElement).value).toBe(''));
   });
 
+  it('输入一句需求后生成专家并直接加入我的专家', async () => {
+    const onGenerate = vi.fn().mockResolvedValue(undefined);
+    render(<CustomAgentManagerDialog
+      open
+      agents={[]}
+      onGenerate={onGenerate}
+      onCreate={vi.fn()}
+      onDelete={vi.fn()}
+      onUpdateIcon={vi.fn()}
+      onClose={vi.fn()}
+    />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: '一句话专家需求' }), {
+      target: { value: '帮我审查合同风险并给出修改建议' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '生成并加入我的专家' }));
+
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith('帮我审查合同风险并给出修改建议'));
+    expect((await screen.findByRole('status')).textContent).toContain('已生成并加入“我的专家”');
+    expect((screen.getByRole('textbox', { name: '一句话专家需求' }) as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('自动生成失败时保留需求并显示真实错误', async () => {
+    const onGenerate = vi.fn().mockRejectedValue(new Error('当前没有可用模型'));
+    render(<CustomAgentManagerDialog
+      open
+      agents={[]}
+      onGenerate={onGenerate}
+      onCreate={vi.fn()}
+      onDelete={vi.fn()}
+      onUpdateIcon={vi.fn()}
+      onClose={vi.fn()}
+    />);
+
+    const input = screen.getByRole('textbox', { name: '一句话专家需求' });
+    fireEvent.change(input, { target: { value: '生成周报专家' } });
+    fireEvent.click(screen.getByRole('button', { name: '生成并加入我的专家' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('当前没有可用模型');
+    expect((input as HTMLTextAreaElement).value).toBe('生成周报专家');
+  });
+
   it('创建专家时可以从 30 个预置图标中选择模块头像', async () => {
     const onCreate = vi.fn();
     render(<CustomAgentManagerDialog
       open
       agents={[]}
+      onGenerate={vi.fn()}
       onCreate={onCreate}
       onDelete={vi.fn()}
       onUpdateIcon={vi.fn()}
@@ -190,6 +233,7 @@ describe('WorkspaceDialogs', () => {
         instructions: '整理投标材料。',
         createdAt: '2026-08-27T00:00:00.000Z',
       }]}
+      onGenerate={vi.fn()}
       onCreate={vi.fn()}
       onDelete={vi.fn()}
       onUpdateIcon={onUpdateIcon}
@@ -221,6 +265,7 @@ describe('WorkspaceDialogs', () => {
         instructions: '整理投标材料。',
         createdAt: '2026-08-27T00:00:00.000Z',
       }]}
+      onGenerate={vi.fn()}
       onCreate={vi.fn()}
       onDelete={vi.fn()}
       onUpdateIcon={onUpdateIcon}
@@ -243,6 +288,7 @@ describe('WorkspaceDialogs', () => {
         instructions: '识别风险。',
         createdAt: '2026-08-27T00:00:00.000Z',
       }]}
+      onGenerate={vi.fn()}
       onCreate={vi.fn()}
       onDelete={vi.fn()}
       onUpdateIcon={() => { throw new Error('本机存储不可用，专家未保存'); }}

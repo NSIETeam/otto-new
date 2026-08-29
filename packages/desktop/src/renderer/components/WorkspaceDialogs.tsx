@@ -248,6 +248,7 @@ export function AutoSkillDialog({ open, candidates, lastAction, onRefresh, onCon
 export function CustomAgentManagerDialog({
   open,
   agents,
+  onGenerate,
   onCreate,
   onDelete,
   onUpdateIcon,
@@ -255,17 +256,26 @@ export function CustomAgentManagerDialog({
 }: {
   open: boolean;
   agents: readonly CustomAgentDefinition[];
+  onGenerate(requirement: string): void | Promise<void>;
   onCreate(draft: CustomAgentDraft): void | Promise<void>;
   onDelete(id: string): void;
   onUpdateIcon(id: string, icon: CustomAgentIcon): void;
   onClose(): void;
 }): React.JSX.Element | null {
+  const [requirement, setRequirement] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [generationStatus, setGenerationStatus] = useState('');
+  const [generationError, setGenerationError] = useState('');
   const [name, setName] = useState('');
   const [instructions, setInstructions] = useState('');
   const [icon, setIcon] = useState<CustomAgentIcon | undefined>();
   const [error, setError] = useState('');
   useEffect(() => {
     if (!open) {
+      setRequirement('');
+      setGenerating(false);
+      setGenerationStatus('');
+      setGenerationError('');
       setName('');
       setInstructions('');
       setIcon(undefined);
@@ -275,6 +285,46 @@ export function CustomAgentManagerDialog({
   if (!open) return null;
   return (
     <DialogFrame title="我的专家" onClose={onClose}>
+      <form
+        className="otto-workspace-dialog__editor otto-custom-agent-generator"
+        aria-label="一句话生成专家"
+        aria-busy={generating}
+        onSubmit={(event) => {
+          event.preventDefault();
+          const requested = requirement.trim();
+          if (!requested || generating) return;
+          setGenerationError('');
+          setGenerationStatus('');
+          setGenerating(true);
+          void Promise.resolve()
+            .then(() => onGenerate(requested))
+            .then(() => {
+              setRequirement('');
+              setGenerationStatus('专家已生成并加入“我的专家”，现在可以直接运行。');
+            })
+            .catch((cause) => setGenerationError(cause instanceof Error ? cause.message : String(cause)))
+            .finally(() => setGenerating(false));
+        }}
+      >
+        <div className="otto-custom-agent-generator__heading">
+          <div><h3>一句话生成专家</h3><p>Otto 会生成名称、职责、工作步骤和输出规范，并立即保存到下方列表。</p></div>
+        </div>
+        <textarea
+          aria-label="一句话专家需求"
+          maxLength={1000}
+          rows={3}
+          value={requirement}
+          disabled={generating}
+          onChange={(event) => setRequirement(event.target.value)}
+          placeholder="例如：帮我审查合同风险，标出条款位置并给出修改建议"
+        />
+        <button type="submit" disabled={generating || !requirement.trim()}>
+          {generating ? '正在生成…' : '生成并加入我的专家'}
+        </button>
+        {generationError ? <p role="alert" className="otto-workspace-dialog__error">{generationError}</p> : null}
+        {generationStatus ? <p role="status">{generationStatus}</p> : null}
+      </form>
+      <div className="otto-custom-agent-divider" role="separator"><span>或者手动创建</span></div>
       <form
         className="otto-workspace-dialog__editor otto-custom-agent-editor"
         onSubmit={(event) => {

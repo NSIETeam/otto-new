@@ -182,6 +182,7 @@ import {
 } from './customerModuleInstaller.js';
 import { createDesktopCustomerModuleHost } from './customerModuleHostAdapter.js';
 import { createCustomerModuleModelInvoke } from './customerModuleModelAdapter.js';
+import { createCustomAgentGenerator } from './customAgentGenerator.js';
 import {
   EnterpriseE2eeCrypto,
   EnterpriseE2eeKeyVault,
@@ -565,6 +566,7 @@ const IPC = {
   customerModuleExportData: 'otto:customer-module-export-data',
   customerModuleRun: 'otto:customer-module-run',
   customerModuleCancel: 'otto:customer-module-cancel',
+  generateCustomAgent: 'otto:generate-custom-agent',
   setLocalTestUrl: 'otto:set-local-test-url',
   appVersion: 'otto:app-version',
   updateCheck: 'otto:update-check',
@@ -694,6 +696,7 @@ const IPC = {
 
 const customerModuleRunControllers = new Map<string, AbortController>();
 const customerModuleModelInvoke = createCustomerModuleModelInvoke();
+const generateCustomAgent = createCustomAgentGenerator();
 
 const enterpriseFetch = createEnterpriseNetworkFetch(
   fetch,
@@ -4298,6 +4301,11 @@ function registerIpc(): void {
     if (!controller) return false;
     controller.abort();
     return true;
+  });
+
+  ipcMain.handle(IPC.generateCustomAgent, async (_event, requirement: unknown) => {
+    if (typeof requirement !== 'string') throw new Error('专家需求格式不正确');
+    return generateCustomAgent(requirement);
   });
 
   ipcMain.handle(IPC.enterpriseSkillReview, async (_event, input: unknown) => {

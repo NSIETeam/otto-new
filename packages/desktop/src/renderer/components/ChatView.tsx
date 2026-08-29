@@ -29,7 +29,8 @@ import {
   type PendingAgentSelection,
 } from './Composer.js';
 import type { SlashCommand } from './SlashCommands.js';
-import { IconArrowDown, IconPanelRight, OttoAvatar } from './icons.js';
+import { IconArrowDown, IconFolderOpen, IconMessageCircle, IconPanelRight, OttoAvatar } from './icons.js';
+import { isProjectSession, workspaceDisplayName } from '../sessionListView.js';
 
 
 /** 视口距底多近算「贴底」（px），贴底才自动跟随流式增量。 */
@@ -41,11 +42,19 @@ const EXAMPLE_PROMPTS = [
   '给这个函数补一组单元测试',
 ];
 
+const PROJECT_EXAMPLE_PROMPTS = [
+  '梳理这个项目的结构和主要入口',
+  '检查当前项目最需要修复的问题',
+  '为这个项目补充测试和使用说明',
+];
+
 interface ChatViewProps {
   session: SessionSummary | null;
   messages: OttoMessage[];
   models: ModelInfo[];
   currentModel: string | null;
+  /** 用于区分默认目录中的普通会话与绑定真实目录的项目会话。 */
+  defaultWorkspacePath?: string;
   busy: boolean;
   onSend: (
     text: string,
@@ -104,6 +113,7 @@ export function ChatView({
   messages,
   models,
   currentModel,
+  defaultWorkspacePath,
   busy,
   onSend,
   onCancel,
@@ -144,6 +154,12 @@ export function ChatView({
     text: '',
     n: 0,
   });
+  const projectSession = Boolean(
+    session && isProjectSession(session, defaultWorkspacePath),
+  );
+  const projectName = projectSession
+    ? workspaceDisplayName(session?.workspacePath)
+    : undefined;
   const isNearBottom = (el: HTMLDivElement): boolean =>
     el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM;
 
@@ -250,6 +266,16 @@ export function ChatView({
           {session?.title ?? 'Otto'}
         </span>
 
+        {session ? (
+          <span
+            className={`otto-main__context${projectSession ? ' is-project' : ''}`}
+            title={projectSession ? session.workspacePath : '不绑定项目目录的普通会话'}
+          >
+            {projectSession ? <IconFolderOpen size={13} /> : <IconMessageCircle size={13} />}
+            <span>{projectSession ? `项目 · ${projectName}` : '普通会话'}</span>
+          </span>
+        ) : null}
+
         {session?.source === 'feishu' ? (
           <span className="otto-main__sync">飞书 · 实时同步</span>
         ) : null}
@@ -273,7 +299,11 @@ export function ChatView({
           {!session ? (
             <EmptyState />
           ) : messages.length === 0 ? (
-            <EmptyConversation onPick={fillDraft} />
+            <EmptyConversation
+              onPick={fillDraft}
+              projectName={projectName}
+              projectPath={projectSession ? session.workspacePath : undefined}
+            />
           ) : (
             messages.map((m) => (
               <Message
@@ -357,16 +387,28 @@ function EmptyState(): React.JSX.Element {
 
 function EmptyConversation({
   onPick,
+  projectName,
+  projectPath,
 }: {
   onPick: (text: string) => void;
+  projectName?: string;
+  projectPath?: string;
 }): React.JSX.Element {
+  const prompts = projectName ? PROJECT_EXAMPLE_PROMPTS : EXAMPLE_PROMPTS;
   return (
     <div className="otto-empty">
       <OttoAvatar size={48} />
-      <div className="otto-empty__title">给 Otto 发送第一条消息</div>
-      <div>试试这些开头，或直接输入你的问题</div>
+      <div className="otto-empty__title">
+        {projectName ? `开始处理 ${projectName} 项目` : '给 Otto 发送第一条消息'}
+      </div>
+      <div>
+        {projectName
+          ? '本会话会使用项目文件、命令上下文和项目记忆'
+          : '普通会话不绑定项目，适合快速提问和临时任务'}
+      </div>
+      {projectPath ? <div className="otto-empty__project-path" title={projectPath}>{projectPath}</div> : null}
       <div className="otto-empty__prompts">
-        {EXAMPLE_PROMPTS.map((p) => (
+        {prompts.map((p) => (
           <button
             key={p}
             type="button"

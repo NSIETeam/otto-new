@@ -10897,6 +10897,138 @@ body[data-otto-surface='desktop-pet'] #root {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--otto-text) 24%, transparent);
 }
 
+/* ══════════════ 项目与普通会话 ══════════════ */
+
+.otto-sidebar__navitem--project {
+  color: color-mix(in srgb, var(--otto-accent) 72%, var(--otto-text-secondary));
+}
+
+.otto-session-section__header {
+  min-height: 28px;
+  padding: 9px 8px 3px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--otto-task-muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .04em;
+}
+
+.otto-session-section__header > span:first-child {
+  flex: 1 1 auto;
+}
+
+.otto-session-section__add {
+  min-height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--otto-text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.otto-session-section__add:hover,
+.otto-session-section__add:focus-visible {
+  outline: none;
+  background: var(--otto-task-row-hover);
+  color: var(--otto-text);
+}
+
+.otto-session-section__empty {
+  padding: 3px 8px 7px;
+  color: color-mix(in srgb, var(--otto-text) 40%, transparent);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.otto-workspace-group__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.otto-workspace-group__row .otto-workspace-group__toggle {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.otto-workspace-group__add {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--otto-text-tertiary);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  opacity: .55;
+  transition: opacity var(--otto-dur-fast) var(--otto-ease),
+    background var(--otto-dur-fast) var(--otto-ease);
+}
+
+.otto-workspace-group__row:hover .otto-workspace-group__add,
+.otto-workspace-group__add:focus-visible {
+  opacity: 1;
+}
+
+.otto-workspace-group__add:hover,
+.otto-workspace-group__add:focus-visible {
+  outline: none;
+  background: var(--otto-task-row-hover);
+  color: var(--otto-text);
+}
+
+.otto-main__context {
+  max-width: 240px;
+  margin-left: 10px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--otto-text) 4%, transparent);
+  color: var(--otto-text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.otto-main__context > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.otto-main__context.is-project {
+  background: color-mix(in srgb, var(--otto-accent) 9%, transparent);
+  color: color-mix(in srgb, var(--otto-accent) 78%, var(--otto-text));
+}
+
+.otto-empty__project-path {
+  box-sizing: border-box;
+  max-width: min(520px, 80vw);
+  margin-top: 2px;
+  padding: 4px 9px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--otto-text) 4%, transparent);
+  color: var(--otto-text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── 统一未读角标 ── */
 .otto-attention-badge {
   min-width: 18px;

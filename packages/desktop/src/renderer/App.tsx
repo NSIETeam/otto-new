@@ -91,6 +91,7 @@ import { InboxPage } from './components/InboxPage.js';
 import { WorkPage } from './components/WorkPage.js';
 import { useEnterpriseAuth } from './state/useEnterpriseAuth.js';
 import { localDateKey } from './localDateKey.js';
+import { isProjectSession, sameWorkspacePath } from './sessionListView.js';
 import type {
   EnterpriseAccount,
   EnterpriseAtoaInboxMessage,
@@ -866,6 +867,21 @@ function OttoWorkspaceApp({
     () => readUiModePreference(uiModeScope),
   );
   const uiMode = savedUiMode ?? DEFAULT_UI_MODE;
+  const [workspaceDirectories, setWorkspaceDirectories] = useState<{
+    defaultPath: string;
+    recentPaths: string[];
+  }>({ defaultPath: '', recentPaths: [] });
+  const refreshWorkspaceDirectories = useCallback(async (): Promise<void> => {
+    try {
+      const directories = await window.otto.getWorkspaceDirectories();
+      setWorkspaceDirectories(directories);
+    } catch {
+      // 工作目录桥暂时不可用时保持会话主链路可用；目录选择仍可稍后重试。
+    }
+  }, []);
+  useEffect(() => {
+    void refreshWorkspaceDirectories();
+  }, [refreshWorkspaceDirectories]);
   const selectUiMode = useCallback((nextMode: UiMode): void => {
     writeUiModePreference(uiModeScope, nextMode);
     setSavedUiMode(nextMode);
@@ -1079,6 +1095,12 @@ function OttoWorkspaceApp({
     ? state.messages[state.activeSessionId] ?? []
     : [];
 
+  // Composer 也可把当前会话切换到新目录；会话路径变化后同步最近项目，
+  // 这样即使随后删掉该项目最后一个会话，项目入口仍会保留在侧栏。
+  useEffect(() => {
+    void refreshWorkspaceDirectories();
+  }, [activeSession?.workspacePath, refreshWorkspaceDirectories]);
+
   const busy = activeSession?.status === 'thinking' || activeSession?.status === 'streaming';
 
   const handleRegenerate = (messageId?: string): void => {
@@ -1161,6 +1183,9 @@ function OttoWorkspaceApp({
       .find(
         (s) =>
           Boolean(s) &&
+          (!workspaceDirectories.defaultPath
+            ? !s.workspacePath?.trim()
+            : !isProjectSession(s, workspaceDirectories.defaultPath)) &&
           s.messageCount === 0 &&
           (state.messages[s.sessionId]?.length ?? 0) === 0,
       );
@@ -1171,9 +1196,38 @@ function OttoWorkspaceApp({
     actions.createSession();
   };
 
+  const handleNewProjectChat = async (workspacePath?: string): Promise<void> => {
+    let selectedPath = workspacePath?.trim() || '';
+    if (!selectedPath) {
+      try {
+        selectedPath = (await window.otto.selectWorkspaceDirectory())?.trim() || '';
+      } catch {
+        selectedPath = '';
+      }
+    }
+    if (!selectedPath) return;
+    setMainView('chat');
+    const empty = state.sessionIds
+      .map((id) => state.sessions[id])
+      .find((session) => (
+        Boolean(session)
+        && sameWorkspacePath(session.workspacePath, selectedPath)
+        && session.messageCount === 0
+        && (state.messages[session.sessionId]?.length ?? 0) === 0
+      ));
+    if (empty) actions.selectSession(empty.sessionId);
+    else actions.createSession(undefined, selectedPath);
+    void refreshWorkspaceDirectories();
+  };
+
   const handleClearContext = (): void => {
     setMainView('chat');
-    actions.createSession();
+    actions.createSession(
+      undefined,
+      activeSession && isProjectSession(activeSession, workspaceDirectories.defaultPath)
+        ? activeSession.workspacePath
+        : undefined,
+    );
   };
 
   const handleLaunchProfile = (profile: AgentProfile): void => {
@@ -1351,6 +1405,9 @@ function OttoWorkspaceApp({
           actions.selectSession(id);
         }}
         onNewChat={handleNewChat}
+        onNewProjectChat={(workspacePath) => { void handleNewProjectChat(workspacePath); }}
+        defaultWorkspacePath={workspaceDirectories.defaultPath}
+        recentWorkspacePaths={workspaceDirectories.recentPaths}
         onOpenHub={() => openHub('prefs')}
         onOpenAccounts={() => setMainView('accounts')}
         onNavigate={(view) => {
@@ -1485,6 +1542,7 @@ function OttoWorkspaceApp({
               onRespondQuestion={handleToolConfirmation}
               onOpenSetup={openModelSettings}
               onNewChat={handleNewChat}
+              defaultWorkspacePath={workspaceDirectories.defaultPath}
               onClearContext={handleClearContext}
               onExport={
                 activeSession

@@ -44,7 +44,9 @@ import type { UiModePreferenceScope } from '../uiModePreference.js';
 import {
   groupSessionsForSidebar,
   readSessionListPreference,
+  sameWorkspacePath,
   sessionListPreferenceStorageKey,
+  workspaceDisplayName,
   writeSessionListPreference,
   type SessionListPreference,
 } from '../sessionListView.js';
@@ -88,6 +90,10 @@ interface SidebarProps {
   parkTicketUnreadCount?: number;
   onSelect: (id: string) => void;
   onNewChat: () => void;
+  /** 选择目录创建项目，或直接在指定项目目录中新建会话。 */
+  onNewProjectChat?: (workspacePath?: string) => void;
+  defaultWorkspacePath?: string;
+  recentWorkspacePaths?: string[];
   onOpenHub: () => void;
   onOpenAccounts?: () => void;
   onNavigate?: (view: 'chat' | 'organization' | 'inbox' | 'work' | 'hub') => void;
@@ -113,6 +119,9 @@ export function Sidebar({
   parkTicketUnreadCount = 0,
   onSelect,
   onNewChat,
+  onNewProjectChat = () => {},
+  defaultWorkspacePath,
+  recentWorkspacePaths = [],
   onOpenHub,
   onOpenAccounts,
   onNavigate,
@@ -149,16 +158,38 @@ export function Sidebar({
   const preference = preferenceState.key === preferenceKey
     ? preferenceState.preference
     : readSessionListPreference(preferenceScope);
-  const sessionGroups = useMemo(
-    () => groupSessionsForSidebar(sessions, preference.mode),
-    [preference.mode, sessions],
-  );
+  const sessionGroups = useMemo(() => {
+    const grouped = groupSessionsForSidebar(
+      sessions,
+      preference.mode,
+      Date.now(),
+      defaultWorkspacePath,
+    );
+    if (preference.mode !== 'kind') return grouped;
+    const projectGroups = grouped.filter((group) => group.section === 'projects');
+    const conversationGroups = grouped.filter((group) => group.section === 'conversations');
+    const emptyProjectGroups = recentWorkspacePaths
+      .filter((workspacePath) => (
+        workspacePath.trim()
+        && !sameWorkspacePath(workspacePath, defaultWorkspacePath)
+        && !projectGroups.some((group) => sameWorkspacePath(group.fullPath, workspacePath))
+      ))
+      .map((workspacePath) => ({
+        key: `workspace:${workspacePath.trim()}`,
+        label: workspaceDisplayName(workspacePath),
+        fullPath: workspacePath.trim(),
+        section: 'projects' as const,
+        collapsible: true,
+        sessions: [],
+      }));
+    return [...projectGroups, ...emptyProjectGroups, ...conversationGroups];
+  }, [defaultWorkspacePath, preference.mode, recentWorkspacePaths, sessions]);
   const sessionCount = sessions.length;
   const collapsedWorkspaceKeys = useMemo(
     () => new Set(preference.collapsedWorkspaceKeys),
     [preference.collapsedWorkspaceKeys],
   );
-  const activeWorkspaceGroupKey = preference.mode === 'workspace'
+  const activeWorkspaceGroupKey = preference.mode === 'workspace' || preference.mode === 'kind'
     ? sessionGroups.find((group) => group.sessions.some(
       (session) => session.sessionId === activeSessionId,
     ))?.key
@@ -312,6 +343,7 @@ export function Sidebar({
         parkTicketUnreadCount={parkTicketUnreadCount}
         unreadSessions={unreadSessions}
         onNewChat={onNewChat}
+        onNewProjectChat={onNewProjectChat}
         onNavigate={onNavigate}
         onOpenAccounts={
           enterpriseAccount?.accountType !== 'personal' && enterpriseAccount?.isAdmin
@@ -371,6 +403,7 @@ export function Sidebar({
                     分组方式
                   </div>
                   {([
+                    ['kind', '项目与会话'],
                     ['time', '按时间'],
                     ['workspace', '按工作目录'],
                   ] as const).map(([mode, label]) => (
@@ -399,55 +432,106 @@ export function Sidebar({
 
           {sessionsOpen ? (
             <div className="otto-sessions">
-              {sessionGroups.length === 0 ? (
+              {preference.mode === 'kind'
+                && !sessionGroups.some((group) => group.section === 'projects') ? (
+                  <>
+                    <div className="otto-session-section__header">
+                      <span>项目</span>
+                      <button
+                        type="button"
+                        className="otto-session-section__add"
+                        aria-label="打开新项目"
+                        title="打开新项目"
+                        onClick={() => onNewProjectChat()}
+                      >
+                        <IconFolderOpen size={14} />
+                        <span>打开</span>
+                      </button>
+                    </div>
+                    <div className="otto-session-section__empty">打开一个文件夹作为项目</div>
+                  </>
+                ) : null}
+              {preference.mode !== 'kind' && sessionGroups.length === 0 ? (
                 <div className="otto-group__label">暂无对话</div>
               ) : (
-                sessionGroups.map((group) => {
+                sessionGroups.map((group, groupIndex) => {
                   const collapsed = group.collapsible && collapsedWorkspaceKeys.has(group.key);
                   const groupUnreadCount = group.sessions.filter(
                     (session) => unreadSessions?.includes(session.sessionId),
                   ).length;
                   return (
-                    <div
-                      key={group.key}
-                      className={`otto-session-group${group.collapsible ? ' otto-session-group--workspace' : ''}`}
-                    >
+                    <React.Fragment key={group.key}>
+                      {preference.mode === 'kind'
+                        && (groupIndex === 0
+                          || sessionGroups[groupIndex - 1]?.section !== group.section) ? (
+                          <div className="otto-session-section__header">
+                            <span>{group.section === 'projects' ? '项目' : '普通会话'}</span>
+                            {group.section === 'projects' ? (
+                              <button
+                                type="button"
+                                className="otto-session-section__add"
+                                aria-label="打开新项目"
+                                title="打开新项目"
+                                onClick={() => onNewProjectChat()}
+                              >
+                                <IconFolderOpen size={14} />
+                                <span>打开</span>
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      <div
+                        className={`otto-session-group${group.collapsible ? ' otto-session-group--workspace' : ''}`}
+                      >
                       {group.collapsible ? (
-                        <button
-                          type="button"
-                          className="otto-workspace-group__toggle"
-                          aria-expanded={!collapsed}
-                          aria-label={
-                            `${group.label}，${group.sessions.length} 个任务`
-                            + (groupUnreadCount > 0 ? `，${groupUnreadCount} 个未读任务` : '')
-                          }
-                          title={group.fullPath}
-                          onClick={() => {
-                            const nextCollapsed = collapsed
-                              ? preference.collapsedWorkspaceKeys.filter((key) => key !== group.key)
-                              : [...preference.collapsedWorkspaceKeys, group.key];
-                            commitPreference({
-                              ...preference,
-                              collapsedWorkspaceKeys: nextCollapsed,
-                            });
-                          }}
-                        >
-                          <IconChevronDown
-                            size={12}
-                            className={'otto-conversations__chevron' + (collapsed ? ' is-collapsed' : '')}
-                          />
-                          <IconFolderOpen size={16} className="otto-workspace-group__icon" />
-                          <span className="otto-workspace-group__label">{group.label}</span>
-                          <span className="otto-workspace-group__count">{group.sessions.length}</span>
-                          {groupUnreadCount > 0 ? (
-                            <span
-                              className="otto-workspace-group__unread"
-                              aria-hidden="true"
+                        <div className="otto-workspace-group__row">
+                          <button
+                            type="button"
+                            className="otto-workspace-group__toggle"
+                            aria-expanded={!collapsed}
+                            aria-label={
+                              `${group.label}，${group.sessions.length} 个会话`
+                              + (groupUnreadCount > 0 ? `，${groupUnreadCount} 个未读会话` : '')
+                            }
+                            title={group.fullPath}
+                            onClick={() => {
+                              const nextCollapsed = collapsed
+                                ? preference.collapsedWorkspaceKeys.filter((key) => key !== group.key)
+                                : [...preference.collapsedWorkspaceKeys, group.key];
+                              commitPreference({
+                                ...preference,
+                                collapsedWorkspaceKeys: nextCollapsed,
+                              });
+                            }}
+                          >
+                            <IconChevronDown
+                              size={12}
+                              className={'otto-conversations__chevron' + (collapsed ? ' is-collapsed' : '')}
+                            />
+                            <IconFolderOpen size={16} className="otto-workspace-group__icon" />
+                            <span className="otto-workspace-group__label">{group.label}</span>
+                            <span className="otto-workspace-group__count">{group.sessions.length}</span>
+                            {groupUnreadCount > 0 ? (
+                              <span
+                                className="otto-workspace-group__unread"
+                                aria-hidden="true"
+                              >
+                                {groupUnreadCount > 99 ? '99+' : groupUnreadCount}
+                              </span>
+                            ) : null}
+                          </button>
+                          {preference.mode === 'kind' && group.section === 'projects' ? (
+                            <button
+                              type="button"
+                              className="otto-workspace-group__add"
+                              aria-label={`在 ${group.label} 项目中新建会话`}
+                              title="在项目中新建会话"
+                              onClick={() => onNewProjectChat(group.fullPath)}
                             >
-                              {groupUnreadCount > 99 ? '99+' : groupUnreadCount}
-                            </span>
+                              <IconSquarePen size={14} />
+                            </button>
                           ) : null}
-                        </button>
+                        </div>
                       ) : (
                         <div className="otto-group__label">{group.label}</div>
                       )}
@@ -462,10 +546,20 @@ export function Sidebar({
                           onDelete={onDelete}
                         />
                       )) : null}
-                    </div>
+                      </div>
+                    </React.Fragment>
                   );
                 })
               )}
+              {preference.mode === 'kind'
+                && !sessionGroups.some((group) => group.section === 'conversations') ? (
+                  <>
+                    <div className="otto-session-section__header">
+                      <span>普通会话</span>
+                    </div>
+                    <div className="otto-session-section__empty">新建会话即可快速开始</div>
+                  </>
+                ) : null}
             </div>
           ) : null}
         </section>
@@ -578,6 +672,7 @@ function NavItems({
   parkTicketUnreadCount,
   unreadSessions,
   onNewChat,
+  onNewProjectChat,
   onNavigate,
   onOpenAccounts,
 }: {
@@ -587,6 +682,7 @@ function NavItems({
   parkTicketUnreadCount: number;
   unreadSessions?: string[];
   onNewChat: () => void;
+  onNewProjectChat: (workspacePath?: string) => void;
   onNavigate?: (view: 'chat' | 'organization' | 'inbox' | 'work' | 'hub') => void;
   onOpenAccounts?: () => void;
 }): React.JSX.Element {
@@ -625,7 +721,15 @@ function NavItems({
     <nav className="otto-sidebar__nav" aria-label="主导航">
       <button type="button" className="otto-sidebar__navitem" onClick={onNewChat}>
         <IconSquarePen size={18} className="otto-sidebar__navicon" />
-        <span>新建对话</span>
+        <span>新建会话</span>
+      </button>
+      <button
+        type="button"
+        className="otto-sidebar__navitem otto-sidebar__navitem--project"
+        onClick={() => onNewProjectChat()}
+      >
+        <IconFolderOpen size={18} className="otto-sidebar__navicon" />
+        <span>打开项目</span>
       </button>
       {onNavigate ? navItems.map((item) => {
         const isActive = activeView === item.view;

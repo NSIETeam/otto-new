@@ -354,6 +354,7 @@ if (!previewWindow.otto) {
       defaultPath: '/Users/demo',
       recentPaths: ['/Users/demo'],
     }),
+    selectWorkspaceDirectory: () => Promise.resolve(null),
     openExternal: () => Promise.resolve(),
     openPath: () => Promise.resolve(),
     inspectLocalPath: () =>

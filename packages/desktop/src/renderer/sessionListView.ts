@@ -2,12 +2,14 @@ import type { SessionSummary } from 'otto-server';
 
 import type { UiModePreferenceScope } from './uiModePreference.js';
 
-export type SessionListMode = 'time' | 'workspace';
+export type SessionListMode = 'kind' | 'time' | 'workspace';
+export type SessionListSection = 'projects' | 'conversations';
 
 export interface SidebarSessionGroup {
   key: string;
   label: string;
   fullPath?: string;
+  section?: SessionListSection;
   collapsible: boolean;
   sessions: SessionSummary[];
 }
@@ -20,7 +22,7 @@ export interface SessionListPreference {
 
 export const DEFAULT_SESSION_LIST_PREFERENCE: SessionListPreference = {
   version: 1,
-  mode: 'time',
+  mode: 'kind',
   collapsedWorkspaceKeys: [],
 };
 
@@ -44,7 +46,8 @@ export function sessionListPreferenceStorageKey(scope: UiModePreferenceScope): s
 function normalizePreference(value: unknown): SessionListPreference {
   if (!value || typeof value !== 'object') return DEFAULT_SESSION_LIST_PREFERENCE;
   const candidate = value as Partial<SessionListPreference>;
-  if (candidate.version !== 1 || (candidate.mode !== 'time' && candidate.mode !== 'workspace')) {
+  if (candidate.version !== 1
+    || (candidate.mode !== 'kind' && candidate.mode !== 'time' && candidate.mode !== 'workspace')) {
     return DEFAULT_SESSION_LIST_PREFERENCE;
   }
   const collapsedWorkspaceKeys = Array.isArray(candidate.collapsedWorkspaceKeys)
@@ -105,7 +108,7 @@ function pathParts(workspacePath: string): string[] {
   return workspacePath.split(/[\\/]+/).filter(Boolean);
 }
 
-function workspaceBaseLabel(workspacePath: string | undefined): string {
+export function workspaceDisplayName(workspacePath: string | undefined): string {
   const value = workspacePath?.trim();
   if (!value) return '默认工作目录';
   if (/^[\\/]+$/.test(value) || /^[A-Za-z]:[\\/]?$/.test(value)) return value;
@@ -150,7 +153,7 @@ function groupByWorkspace(sessions: readonly SessionSummary[]): SidebarSessionGr
     else {
       byKey.set(key, {
         key,
-        label: workspaceBaseLabel(session.workspacePath),
+        label: workspaceDisplayName(session.workspacePath),
         fullPath: session.workspacePath?.trim() || undefined,
         collapsible: true,
         sessions: [session],
@@ -186,10 +189,62 @@ function groupByWorkspace(sessions: readonly SessionSummary[]): SidebarSessionGr
   return groups;
 }
 
+function normalizeWorkspacePath(workspacePath: string | null | undefined): string {
+  const value = workspacePath?.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!value) return '';
+  return /^[A-Za-z]:\//.test(value) ? value.toLowerCase() : value;
+}
+
+export function sameWorkspacePath(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const normalizedLeft = normalizeWorkspacePath(left);
+  const normalizedRight = normalizeWorkspacePath(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
+/**
+ * Otto 项目沿用真实工作目录作为稳定身份。默认目录中的会话属于普通会话；
+ * 绑定其他目录的会话属于项目，因此旧会话无需迁移数据库即可自动归档。
+ */
+export function isProjectSession(
+  session: Pick<SessionSummary, 'workspacePath'>,
+  defaultWorkspacePath: string | null | undefined,
+): boolean {
+  if (!session.workspacePath?.trim() || !defaultWorkspacePath?.trim()) return false;
+  return !sameWorkspacePath(session.workspacePath, defaultWorkspacePath);
+}
+
+function groupByKind(
+  sessions: readonly SessionSummary[],
+  defaultWorkspacePath: string | null | undefined,
+  now: number,
+): SidebarSessionGroup[] {
+  const projectSessions = sessions.filter((session) => (
+    isProjectSession(session, defaultWorkspacePath)
+  ));
+  const conversationSessions = sessions.filter((session) => (
+    !isProjectSession(session, defaultWorkspacePath)
+  ));
+  return [
+    ...groupByWorkspace(projectSessions).map((group) => ({
+      ...group,
+      section: 'projects' as const,
+    })),
+    ...groupByTime(conversationSessions, now).map((group) => ({
+      ...group,
+      section: 'conversations' as const,
+    })),
+  ];
+}
+
 export function groupSessionsForSidebar(
   sessions: readonly SessionSummary[],
   mode: SessionListMode,
   now = Date.now(),
+  defaultWorkspacePath?: string,
 ): SidebarSessionGroup[] {
+  if (mode === 'kind') return groupByKind(sessions, defaultWorkspacePath, now);
   return mode === 'workspace' ? groupByWorkspace(sessions) : groupByTime(sessions, now);
 }

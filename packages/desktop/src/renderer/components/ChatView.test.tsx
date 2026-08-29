@@ -82,16 +82,46 @@ function renderChat(
 }
 
 describe('ChatView 重新生成携带消息 id', () => {
-  it('顶栏只显示会话标题，不显示身份说明和旧版快捷操作', () => {
+  it('顶栏显示会话标题与普通会话语境，不显示旧版快捷操作', () => {
     renderChat();
 
     expect(screen.getByText('测试会话')).toBeTruthy();
+    expect(screen.getByText('普通会话')).toBeTruthy();
     expect(document.querySelector('.otto-main__identity')).toBeNull();
     expect(screen.queryByRole('button', { name: '切换到深色' })).toBeNull();
     expect(screen.queryByRole('button', { name: '切换到浅色' })).toBeNull();
     expect(screen.queryByRole('button', { name: '导出会话为 Markdown' })).toBeNull();
     expect(screen.queryByRole('button', { name: '模型与个人 API 设置' })).toBeNull();
     expect(screen.queryByRole('button', { name: '专家面板' })).toBeNull();
+  });
+
+  it('项目会话显示项目身份、目录说明和项目型建议', () => {
+    render(
+      <ChatView
+        session={{
+          ...SESSION,
+          messageCount: 0,
+          workspacePath: 'D:\\otto\\project-a',
+        }}
+        messages={[]}
+        models={MODELS}
+        currentModel="m1"
+        defaultWorkspacePath="C:\\Users\\yang"
+        busy={false}
+        onSend={vi.fn()}
+        onCancel={vi.fn()}
+        onSetModel={vi.fn()}
+        onRegenerate={vi.fn()}
+        onOpenSetup={vi.fn()}
+        onNewChat={vi.fn()}
+        onClearContext={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('项目 · project-a')).toBeTruthy();
+    expect(screen.getByText('开始处理 project-a 项目')).toBeTruthy();
+    expect(screen.getByText('D:\\otto\\project-a')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '梳理这个项目的结构和主要入口' })).toBeTruthy();
   });
 
   it('空会话与未选择会话时恢复 v1.6 的 Otto 形象', () => {

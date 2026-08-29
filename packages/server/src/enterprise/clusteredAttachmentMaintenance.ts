@@ -3,6 +3,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { RecurringTaskRegistry } from 'otto-core';
 
 import type {
   AttachmentObjectStore,
@@ -30,6 +31,7 @@ export function createClusteredAttachmentMaintenance(input: {
   intervalMs?: number;
   owner?: string;
   onError?: (error: unknown) => void;
+  taskRegistry?: RecurringTaskRegistry;
 }) {
   const intervalMs = input.intervalMs ?? 15 * 60 * 1_000;
   if (
@@ -45,7 +47,11 @@ export function createClusteredAttachmentMaintenance(input: {
       'unbound attachment cleanup requires both authority and object store',
     );
   }
-  let timer: NodeJS.Timeout | null = null;
+  const taskRegistry = input.taskRegistry ?? new RecurringTaskRegistry({
+    allowPaidBackground: true,
+    onError: (_taskName, error) => input.onError?.(error),
+  });
+  let stopTask: (() => void) | undefined;
   let running = false;
   let closed = false;
 
@@ -102,17 +108,24 @@ export function createClusteredAttachmentMaintenance(input: {
   }
 
   function start(): void {
-    if (closed || timer) return;
-    timer = setInterval(() => {
-      void runOnce().catch((error: unknown) => input.onError?.(error));
-    }, intervalMs);
-    timer.unref();
+    if (closed || stopTask) return;
+    stopTask = taskRegistry.register({
+      name: `enterprise.attachment-maintenance.${owner}`,
+      source: 'packages/server/src/enterprise/clusteredAttachmentMaintenance.ts',
+      intervalMs,
+      // Conservative ceiling for S3 list/delete requests in one bounded sweep.
+      estimatedCostUsdPerRun: 0.001,
+      getInputVersion: () => String(Math.floor(Date.now() / intervalMs)),
+      run: async () => {
+        await runOnce();
+      },
+    });
   }
 
   function close(): void {
     closed = true;
-    if (timer) clearInterval(timer);
-    timer = null;
+    stopTask?.();
+    stopTask = undefined;
   }
 
   return { runOnce, start, close };

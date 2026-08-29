@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { RecurringTaskRegistry } from 'otto-core';
 
 import type {
   EnterpriseSharedCache,
@@ -162,5 +163,24 @@ describe('clustered attachment maintenance', () => {
     }).runOnce();
 
     expect(storage.purgeMigratedLegacy).not.toHaveBeenCalled();
+  });
+
+  it('registers the bounded S3 sweep with an explicit cost estimate', () => {
+    const registry = new RecurringTaskRegistry({ allowPaidBackground: true });
+    const maintenance = createClusteredAttachmentMaintenance({
+      storage: {} as AttachmentStorageService,
+      cache: {} as EnterpriseSharedCache,
+      owner: 'replica-registered',
+      taskRegistry: registry,
+    });
+
+    maintenance.start();
+    expect(registry.list()).toMatchObject([{
+      name: 'enterprise.attachment-maintenance.replica-registered',
+      estimatedCostUsdPerRun: 0.001,
+      paid: true,
+    }]);
+    maintenance.close();
+    expect(registry.list()).toEqual([]);
   });
 });

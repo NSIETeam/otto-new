@@ -6,28 +6,33 @@
  */
 
 import type { ServerEndpointRecord } from './endpoint.js';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import type {
   ChannelHealth,
   ChannelInstallation,
   ChannelProvider,
+  PairingSession,
 } from './modules/integration_adapters/channelConnector.js';
+import { channelInstallationProofPayload } from './modules/integration_adapters/channelConnector.js';
 
 export interface ChannelCliDependencies {
   readEndpointRecord(): ServerEndpointRecord | undefined;
   fetchImpl?: typeof fetch;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
+  now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
 }
 
-type ChannelCliAction = 'list' | 'status' | 'start' | 'stop' | 'logout';
+type ChannelCliAction = 'login' | 'list' | 'status' | 'start' | 'stop' | 'logout';
 
 function parseArguments(args: readonly string[]): {
   action: ChannelCliAction;
   installationId?: string;
 } {
   const action = (args[0] ?? 'status') as ChannelCliAction;
-  if (!['list', 'status', 'start', 'stop', 'logout'].includes(action)) {
-    throw new Error('用法: otto <feishu|lark|wecom> <list|status|start|stop|logout> [installation-id]');
+  if (!['login', 'list', 'status', 'start', 'stop', 'logout'].includes(action)) {
+    throw new Error('用法: otto <feishu|lark|wecom> <login|list|status|start|stop|logout> [installation-id]');
   }
   const installationId = args[1];
   if (installationId && !/^channel_(feishu|lark|wecom)_[a-f0-9]{24}$/.test(installationId)) {
@@ -50,18 +55,27 @@ export async function runChannelCli(
     if (endpoint.host !== '127.0.0.1' && endpoint.host !== 'localhost' && endpoint.host !== '::1') {
       throw new Error('拒绝通过非回环端点执行渠道控制');
     }
-    const request = async (requestPath: string, method = 'GET'): Promise<unknown> => {
+    const request = async (
+      requestPath: string,
+      method = 'GET',
+      body?: unknown,
+    ): Promise<unknown> => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 10_000);
       timer.unref?.();
       try {
+        const payload = body === undefined ? undefined : JSON.stringify(body);
         const response = await (dependencies.fetchImpl ?? fetch)(
           `http://${endpoint.host}:${endpoint.port}${requestPath}`,
           {
             method,
             redirect: 'error',
             signal: controller.signal,
-            headers: { authorization: `Bearer ${endpoint.controlToken}` },
+            headers: {
+              authorization: `Bearer ${endpoint.controlToken}`,
+              ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+            },
+            body: payload,
           },
         );
         const bytes = Buffer.from(await response.arrayBuffer());
@@ -82,6 +96,59 @@ export async function runChannelCli(
         clearTimeout(timer);
       }
     };
+    if (input.action === 'login') {
+      const keys = generateKeyPairSync('ed25519');
+      const installationPublicKey = keys.publicKey
+        .export({ type: 'spki', format: 'pem' })
+        .toString();
+      const scopes: Record<ChannelProvider, string[]> = {
+        feishu: ['im:message', 'contact:user.base:readonly'],
+        lark: ['im:message', 'contact:user.base:readonly'],
+        wecom: ['message.send', 'contacts.read.basic'],
+      };
+      let pairing = (await request('/channels/pairings', 'POST', {
+        provider,
+        installationPublicKey,
+        requestedScopes: scopes[provider],
+      })) as PairingSession;
+      stdout(`${provider}: 请扫码授权 ${pairing.qrPayload}`);
+      let announcedAdminWait = false;
+      const now = dependencies.now ?? Date.now;
+      const sleep = dependencies.sleep ?? ((milliseconds: number) =>
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, milliseconds);
+        }));
+      while (now() < pairing.expiresAtMs) {
+        if (pairing.status === 'user_authorized') {
+          const installed = (await request(
+            `/channels/pairings/${pairing.pairingId}/install`,
+            'POST',
+            {
+              installationPublicKey,
+              signature: sign(
+                null,
+                channelInstallationProofPayload(pairing.pairingId),
+                keys.privateKey,
+              ).toString('base64url'),
+            },
+          )) as ChannelInstallation;
+          stdout(`${provider}: 已安装 ${installed.tenantName} / ${installed.botName}`);
+          return 0;
+        }
+        if (['expired', 'denied', 'failed', 'revoked'].includes(pairing.status)) {
+          throw new Error(`${provider}: 配对终止 (${pairing.status})`);
+        }
+        if (pairing.status === 'waiting_admin' && !announcedAdminWait) {
+          stdout(`${provider}: 等待企业管理员在供应商平台批准`);
+          announcedAdminWait = true;
+        }
+        await sleep(2_000);
+        pairing = (await request(
+          `/channels/pairings/${pairing.pairingId}`,
+        )) as PairingSession;
+      }
+      throw new Error(`${provider}: 二维码已过期`);
+    }
     const installations = (await request('/channels/installations')) as ChannelInstallation[];
     const matching = installations.filter((installation) => installation.provider === provider);
     if (input.action === 'list') {

@@ -30,6 +30,52 @@ function json(data: unknown): Response {
 }
 
 describe('runChannelCli', () => {
+  it('logs in through QR polling and proves device possession before installation', async () => {
+    const output: string[] = [];
+    const pairingId = 'pair_0123456789abcdef01234567';
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json({
+        pairingId,
+        provider: 'wecom',
+        status: 'waiting_scan',
+        qrPayload: 'https://connect.otto.example/channel/pair?opaque',
+        expiresAtMs: 10_000,
+        requestedScopes: ['message.send'],
+      }))
+      .mockResolvedValueOnce(json({
+        pairingId,
+        provider: 'wecom',
+        status: 'user_authorized',
+        qrPayload: '',
+        expiresAtMs: 10_000,
+        requestedScopes: ['message.send'],
+        tenantName: 'Acme',
+      }))
+      .mockResolvedValueOnce(json({
+        ...installation,
+        installationId: 'channel_wecom_0123456789abcdef01234567',
+        provider: 'wecom',
+      }));
+
+    expect(await runChannelCli('wecom', ['login'], {
+      readEndpointRecord: () => endpoint,
+      fetchImpl,
+      now: () => 1,
+      sleep: async () => undefined,
+      stdout: (text) => output.push(text),
+    })).toBe(0);
+    expect(output[0]).toContain('请扫码授权 https://connect.otto.example');
+    expect(output[1]).toBe('wecom: 已安装 Acme / Otto');
+    const installCall = fetchImpl.mock.calls[2];
+    expect(installCall[0]).toContain(`/channels/pairings/${pairingId}/install`);
+    const body = JSON.parse(String(installCall[1]?.body)) as {
+      installationPublicKey: string;
+      signature: string;
+    };
+    expect(body.installationPublicKey).toContain('BEGIN PUBLIC KEY');
+    expect(Buffer.from(body.signature, 'base64url')).toHaveLength(64);
+  });
+
   it('uses the authenticated shared supervisor for status and stop', async () => {
     const output: string[] = [];
     const fetchImpl = vi.fn()

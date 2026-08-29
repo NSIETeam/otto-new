@@ -345,6 +345,13 @@ describe('desktop packaging contract', () => {
     expect(workflow).not.toContain("const crypto = require('node:crypto');");
     expect(workflow).toContain('sha256sum -c SHA256SUMS');
     expect(workflow).toContain('latest.json.next');
+    expect(workflow).toContain('previous-latest.json');
+    expect(workflow).toContain('previous-latest.absent');
+    expect(workflow).toContain('rollback-update-mirror:');
+    expect(workflow).toContain('name: Roll back Desktop Update Mirror');
+    expect(workflow).toContain(
+      'mirror transaction did not reach the manifest backup; no public manifest was changed',
+    );
     expect(workflow).toContain('Windows no-proxy download');
     expect(workflow).toContain(
       'git merge-base --is-ancestor "$INTERNAL_COMMIT" "$SOURCE_COMMIT"',
@@ -367,6 +374,31 @@ describe('desktop packaging contract', () => {
     );
     expect(workflow).toContain('name: Publish legacy compatibility release');
     expect(workflow).toContain('name: Publish canonical release');
+    expect(workflow).toContain(
+      'source_commit: ${{ steps.source.outputs.commit }}',
+    );
+    expect(workflow).toContain(
+      'target_commitish: ${{ steps.source.outputs.commit }}',
+    );
+    expect(workflow).toContain(
+      'SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"',
+    );
+    expect(workflow).toContain(
+      'canonical release tag does not resolve to the locked RC commit',
+    );
+
+    const enterpriseJobStart = workflow.indexOf('  deploy-enterprise:');
+    const mirrorJobStart = workflow.indexOf('  deploy-update-mirror:');
+    const publishJobStart = workflow.indexOf('  publish-release:');
+    const rollbackJobStart = workflow.indexOf('  rollback-update-mirror:');
+    const enterpriseJob = workflow.slice(enterpriseJobStart, mirrorJobStart);
+    const mirrorJob = workflow.slice(mirrorJobStart, publishJobStart);
+    const publishJob = workflow.slice(publishJobStart, rollbackJobStart);
+    expect(enterpriseJob).toContain('      - verify-windows-signature');
+    expect(mirrorJob).toContain('      - deploy-enterprise');
+    expect(publishJob.indexOf('name: Publish legacy compatibility release')).toBeLessThan(
+      publishJob.indexOf('name: Publish canonical release'),
+    );
     expect(workflow).not.toContain(
       'secrets.OTTO_RELEASES_TOKEN || secrets.GITHUB_TOKEN',
     );

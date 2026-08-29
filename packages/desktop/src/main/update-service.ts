@@ -52,10 +52,9 @@ import { downloadToFile } from './update-download.js';
 import { parseVerifiedManifestJson } from './update-manifest-integrity.js';
 import {
   FALLBACK_RELEASE_API_URL,
-  GITHUB_MANIFEST_URL,
-  LEGACY_GITHUB_MANIFEST_URL,
   PRIMARY_MANIFEST_URL,
   RELEASE_PAGE_URL,
+  resolveManifestAssetOrigins,
   resolveManifestUrls,
 } from './update-sources.js';
 
@@ -221,12 +220,9 @@ export class UpdateService {
         manifestErrors.push(`${sourceName}：${result.error}`);
         continue;
       }
-      const sourceAllowedOrigins = !source && (
-        manifestUrl === GITHUB_MANIFEST_URL ||
-        manifestUrl === LEGACY_GITHUB_MANIFEST_URL
-      )
-        ? []
-        : [new URL(manifestUrl).origin];
+      const sourceAllowedOrigins = source
+        ? [new URL(manifestUrl).origin]
+        : resolveManifestAssetOrigins(manifestUrl);
       const parsed = parseManifest(result.json, sourceAllowedOrigins);
       if (!parsed.ok) {
         manifestErrors.push(`${sourceName}：${parsed.error}`);

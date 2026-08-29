@@ -66,6 +66,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      source_commit: ${{ steps.source.outputs.commit }}
 
     steps:
       - name: Checkout source
@@ -150,6 +151,7 @@ jobs:
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Require a release source based on the latest internal commit
+        id: source
         shell: bash
         run: |
           set -euo pipefail
@@ -168,6 +170,7 @@ jobs:
             echo "ref=$GITHUB_REF source=$SOURCE_COMMIT internal=$INTERNAL_COMMIT" >&2
             exit 1
           fi
+          echo "commit=$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
 
       - name: Validate enterprise license trust anchor
         if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
@@ -335,7 +338,7 @@ jobs:
           {
             echo "## Otto v${VERSION}"
             echo
-            echo "Source commit: \`${GITHUB_SHA}\`"
+            echo "Source commit: \`${{ steps.source.outputs.commit }}\`"
             echo
             echo "### Windows no-proxy download"
             echo
@@ -368,6 +371,7 @@ jobs:
           repository: ${{ env.RELEASES_REPO }}
           token: ${{ github.token }}
           tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ steps.source.outputs.commit }}
           name: Otto v${{ steps.version.outputs.version }}
           draft: true
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
@@ -381,6 +385,10 @@ jobs:
           repository: ${{ env.LEGACY_RELEASES_REPO }}
           token: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
           tag_name: ${{ steps.version.outputs.tag }}
+          # This public repository intentionally contains assets only. Bind its
+          # compatibility tag explicitly instead of leaking the private source
+          # object graph; the release body records the locked canonical RC SHA.
+          target_commitish: main
           name: Otto v${{ steps.version.outputs.version }}
           draft: true
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
@@ -450,7 +458,9 @@ jobs:
 
   deploy-enterprise:
     name: Deploy Enterprise Server
-    needs: build
+    needs:
+      - build
+      - verify-windows-signature
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
@@ -553,6 +563,7 @@ jobs:
     needs:
       - build
       - verify-windows-signature
+      - deploy-enterprise
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
@@ -639,6 +650,13 @@ jobs:
              cd '$REMOTE_DIR'
              sha256sum -c SHA256SUMS
              sudo -S install -d -m 0755 '${UPDATE_MIRROR_ROOT}/downloads' '${UPDATE_MIRROR_ROOT}/otto-releases'
+             if [ ! -f previous-latest.json ] && [ ! -f previous-latest.absent ]; then
+               if sudo -S test -f '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json'; then
+                 sudo -S install -m 0644 '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json' '$REMOTE_DIR/previous-latest.json'
+               else
+                 touch previous-latest.absent
+               fi
+             fi
              for file in Otto-*; do
                sudo -S install -m 0644 \"\$file\" '${UPDATE_MIRROR_ROOT}/downloads/'\"\$file\"
              done
@@ -680,6 +698,34 @@ jobs:
         )
       }}
     steps:
+      - name: Verify locked release draft provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
+          TAG="${{ needs.build.outputs.tag }}"
+          TARGET_COMMITISH="$(gh api "repos/${RELEASES_REPO}/releases/tags/${TAG}" --jq '.target_commitish')"
+          if [ "$TARGET_COMMITISH" != "$SOURCE_COMMIT" ]; then
+            echo "canonical release draft target $TARGET_COMMITISH does not match locked RC $SOURCE_COMMIT" >&2
+            exit 1
+          fi
+
+      - name: Verify legacy compatibility provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
+        run: |
+          set -euo pipefail
+          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
+          TAG="${{ needs.build.outputs.tag }}"
+          RELEASE_JSON="$(gh api "repos/${LEGACY_RELEASES_REPO}/releases/tags/${TAG}")"
+          TARGET_COMMITISH="$(printf '%s' "$RELEASE_JSON" | jq -r '.target_commitish')"
+          BODY="$(printf '%s' "$RELEASE_JSON" | jq -r '.body // ""')"
+          test "$TARGET_COMMITISH" = "main"
+          printf '%s' "$BODY" | grep -F "$SOURCE_COMMIT" >/dev/null
+
       - name: Publish legacy compatibility release
         shell: bash
         env:
@@ -711,3 +757,96 @@ jobs:
           gh release edit "${{ needs.build.outputs.tag }}" \
             --repo "${RELEASES_REPO}" \
             "${EXTRA_ARGS[@]}"
+
+      - name: Verify canonical release tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
+          TAG="${{ needs.build.outputs.tag }}"
+          RESOLVED_COMMIT="$(gh api "repos/${RELEASES_REPO}/commits/${TAG}" --jq '.sha')"
+          if [ "$RESOLVED_COMMIT" != "$SOURCE_COMMIT" ]; then
+            echo "canonical release tag does not resolve to the locked RC commit: tag=$RESOLVED_COMMIT rc=$SOURCE_COMMIT" >&2
+            exit 1
+          fi
+
+  rollback-update-mirror:
+    name: Roll back Desktop Update Mirror
+    needs:
+      - build
+      - deploy-update-mirror
+      - publish-release
+    runs-on: ubuntu-latest
+    if: >-
+      ${{
+        always()
+        && (
+          needs.deploy-update-mirror.result == 'failure'
+          || needs.deploy-update-mirror.result == 'cancelled'
+          || (
+            needs.deploy-update-mirror.result == 'success'
+            && needs.publish-release.result != 'success'
+          )
+        )
+        && (
+          github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && !inputs.draft)
+        )
+      }}
+    env:
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${{ secrets.DEPLOY_HOST }}"
+          test -n "${{ secrets.DEPLOY_USER }}"
+          test -n "${{ secrets.DEPLOY_SSH_KEY }}"
+          test -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}"
+          test -n "${{ secrets.DEPLOY_SUDO_PASSWORD }}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Restore previous mirror manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          REMOTE_DIR="/var/tmp/otto-update-mirror/${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}"
+          printf '%s\n' "${{ secrets.DEPLOY_SUDO_PASSWORD }}" | ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "set -euo pipefail
+             if [ ! -d '$REMOTE_DIR' ]; then
+               echo 'mirror staging directory was never created; no public manifest was changed'
+               exit 0
+             fi
+             cd '$REMOTE_DIR'
+             if [ -f previous-latest.json ]; then
+               sudo -S install -m 0644 previous-latest.json '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json.rollback-next'
+               sudo -S mv '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json.rollback-next' '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json'
+             elif [ -f previous-latest.absent ]; then
+               sudo -S rm -f '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json'
+             else
+               echo 'mirror transaction did not reach the manifest backup; no public manifest was changed'
+             fi"
+
+      - name: Return failed releases to draft state
+        if: always()
+        shell: bash
+        env:
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.build.outputs.tag }}"
+          GH_TOKEN="$CANONICAL_TOKEN" gh release edit "$TAG" \
+            --repo "$RELEASES_REPO" --draft=true || true
+          GH_TOKEN="$LEGACY_TOKEN" gh release edit "$TAG" \
+            --repo "$LEGACY_RELEASES_REPO" --draft=true || true

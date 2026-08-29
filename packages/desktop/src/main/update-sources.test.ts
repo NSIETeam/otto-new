@@ -7,10 +7,13 @@ import {
   FALLBACK_RELEASE_API_URL,
   GITHUB_MANIFEST_URL,
   LEGACY_GITHUB_MANIFEST_URL,
+  OFFICIAL_UPDATE_MIRROR_ORIGIN,
   PRIMARY_MANIFEST_URL,
   RELEASE_PAGE_URL,
+  resolveManifestAssetOrigins,
   resolveManifestUrls,
 } from './update-sources.js';
+import { parseManifest } from './update-core.js';
 
 describe('桌面应用更新源', () => {
   it('主源使用企业 HTTPS 镜像，避开 GitHub release 资产直链不稳定', () => {
@@ -36,6 +39,56 @@ describe('桌面应用更新源', () => {
     expect(LEGACY_GITHUB_MANIFEST_URL).toBe(
       'https://github.com/Felix201209/otto-releases/releases/latest/download/latest.json',
     );
+  });
+
+  it.each([GITHUB_MANIFEST_URL, LEGACY_GITHUB_MANIFEST_URL])(
+    '允许官方 GitHub 清单继续引用固定更新镜像资产：%s',
+    (manifestUrl) => {
+      const allowedOrigins = resolveManifestAssetOrigins(manifestUrl);
+      expect(allowedOrigins).toEqual([OFFICIAL_UPDATE_MIRROR_ORIGIN]);
+
+      const parsed = parseManifest(
+        {
+          version: '1.9.14',
+          assets: {
+            'win-x64': {
+              name: 'Otto-Setup-1.9.14-win-x64.exe',
+              url: `${OFFICIAL_UPDATE_MIRROR_ORIGIN}/downloads/Otto-Setup-1.9.14-win-x64.exe`,
+              size: 128,
+              sha256: 'a'.repeat(64),
+            },
+          },
+        },
+        allowedOrigins,
+      );
+
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.manifest.assets['win-x64']?.name).toBe(
+        'Otto-Setup-1.9.14-win-x64.exe',
+      );
+    },
+  );
+
+  it('不会让 GitHub 清单借官方镜像授权任意第三方资产', () => {
+    const parsed = parseManifest(
+      {
+        version: '1.9.14',
+        assets: {
+          'win-x64': {
+            name: 'Otto-Setup-1.9.14-win-x64.exe',
+            url: 'https://updates.example.com/Otto-Setup-1.9.14-win-x64.exe',
+            size: 128,
+            sha256: 'b'.repeat(64),
+          },
+        },
+      },
+      resolveManifestAssetOrigins(GITHUB_MANIFEST_URL),
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.assets).toEqual({});
   });
 
   it('允许把显式 HTTPS 企业镜像放在 GitHub 前面，并自动去重', () => {

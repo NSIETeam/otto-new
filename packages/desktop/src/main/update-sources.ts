@@ -25,6 +25,30 @@ export const RELEASE_PAGE_URL =
   'https://github.com/NSIETeam/otto-new/releases/latest';
 
 /**
+ * The two GitHub releases intentionally carry the same manifest as the
+ * no-proxy mirror. Their assets therefore continue to point at this fixed
+ * origin. Keep this allow-list entry derived from the primary manifest URL so
+ * moving the official mirror remains an atomic configuration change.
+ */
+export const OFFICIAL_UPDATE_MIRROR_ORIGIN = new URL(
+  PRIMARY_MANIFEST_URL,
+).origin;
+
+/**
+ * Resolve the only non-GitHub origin that assets from a built-in manifest may
+ * use. A custom enterprise manifest remains confined to its own exact origin.
+ */
+export function resolveManifestAssetOrigins(manifestUrl: string): string[] {
+  if (
+    manifestUrl === GITHUB_MANIFEST_URL ||
+    manifestUrl === LEGACY_GITHUB_MANIFEST_URL
+  ) {
+    return [OFFICIAL_UPDATE_MIRROR_ORIGIN];
+  }
+  return [new URL(manifestUrl).origin];
+}
+
+/**
  * 企业可通过 OTTO_UPDATE_MANIFEST_URL 提供就近 HTTPS 镜像。地址无效、非 HTTPS、
  * 或含 URL 凭证时直接忽略；GitHub 官方清单始终保留为下一跳。
  */

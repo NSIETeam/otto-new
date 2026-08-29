@@ -5,7 +5,13 @@
  */
 
 import { Type } from '@google/genai';
-import { BaseTool, Icon, type ToolResult } from './tools.js';
+import {
+  BaseTool,
+  Icon,
+  type ToolCallConfirmationDetails,
+  type ToolLocation,
+  type ToolResult,
+} from './tools.js';
 import { type Config } from '../config/config.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import { runDelegatedTask } from '../acp-client/acpAgentClient.js';
@@ -190,6 +196,28 @@ export class DelegateToAgentTool extends BaseTool<
     const modeSuffix = mode === 'stream' ? ' (live)' : ' (background)';
     const preview = params.task.replace(/\s+/g, ' ').slice(0, 80);
     return `Delegating to ${label}${modeSuffix}: "${preview}${params.task.length > 80 ? '…' : ''}"`;
+  }
+
+  toolLocations(params: DelegateToAgentParams): ToolLocation[] {
+    return [{ path: params.cwd ?? this.config.getTargetDir() }];
+  }
+
+  async shouldConfirmExecute(
+    params: DelegateToAgentParams,
+    _abortSignal: AbortSignal,
+  ): Promise<ToolCallConfirmationDetails | false> {
+    if (this.validateToolParams(params)) return false;
+    const agent = params.agent ?? DEFAULT_AGENT;
+    const cwd = params.cwd ?? this.config.getTargetDir();
+    const label = resolveExternalAgentSpec(agent).label;
+    return {
+      type: 'exec',
+      title: `允许 ${label} 在此项目中执行任务？`,
+      command: `delegate_to_agent --agent ${agent} --cwd ${cwd}`,
+      rootCommand: 'delegate_to_agent',
+      warning: '外部代理可能读取和修改该目录中的文件，并运行开发命令。批准后，其会话内权限请求将自动放行。',
+      onConfirm: async () => {},
+    };
   }
 
   async execute(

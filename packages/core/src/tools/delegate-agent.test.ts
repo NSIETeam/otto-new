@@ -43,6 +43,32 @@ describe('DelegateToAgentTool', () => {
     expect(runDelegatedTask).not.toHaveBeenCalled();
   });
 
+  it('requires explicit approval and declares the affected working directory', async () => {
+    const tool = makeTool('/my/project');
+    const confirmation = await tool.shouldConfirmExecute(
+      { task: 'update the implementation', agent: 'codex' },
+      new AbortController().signal,
+    );
+
+    expect(confirmation).toMatchObject({
+      type: 'exec',
+      rootCommand: 'delegate_to_agent',
+      command: 'delegate_to_agent --agent codex --cwd /my/project',
+      warning: expect.stringContaining('读取和修改'),
+    });
+    expect(tool.toolLocations({ task: 'update the implementation' })).toEqual([
+      { path: '/my/project' },
+    ]);
+  });
+
+  it('does not ask for approval when parameters are invalid', async () => {
+    const tool = makeTool('/my/project');
+    await expect(tool.shouldConfirmExecute(
+      { task: ' ' },
+      new AbortController().signal,
+    )).resolves.toBe(false);
+  });
+
   it('returns immediately with a Task ID (async mode)', async () => {
     // Make runDelegatedTask hang forever so we can observe the early return.
     runDelegatedTask.mockReturnValue(new Promise(() => {}));

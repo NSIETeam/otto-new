@@ -344,6 +344,7 @@ means no source-level substitute is accepted.
 | Natural-language request becomes durable approval-gated work | `workflowTaskControlPort.ts`, `durableWorkflowChannelBackend.test.ts` | Automated |
 | Non-overlapping workflow worker skips unchanged persisted revisions | `recurringTaskRegistry.ts`, `server.residentTasks.test.ts` | Automated |
 | ACP delegate session handle is persisted before work and restart becomes visible `interrupted`, never silent replay | `acpAgentClient.ts`, `backgroundTaskManager.ts`, delegate status and restart tests | Automated migration guard; Workflow is not yet the sole task store |
+| Starting a local external coding agent requires explicit approval and declares its affected working directory | `delegate-agent.ts`, focused confirmation tests | Automated |
 | Real managed Feishu/Lark installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | Real managed WeCom installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | macOS Accessibility RPA control and recovery | Signed local build and isolated macOS account | Pending smoke |
@@ -391,3 +392,7 @@ means no source-level substitute is accepted.
   persist their native resume handle immediately. A daemon restart records an
   explicit `interrupted` state and never automatically resubmits the prompt;
   full migration from `BackgroundTaskManager` to Workflow remains pending.
+- `delegate_to_agent` now exposes the target working directory and requires an
+  explicit outer confirmation before its internally auto-approved ACP session
+  can read, modify or execute within that project. This closes the previous
+  path where a model or remote channel could start a writing agent silently.

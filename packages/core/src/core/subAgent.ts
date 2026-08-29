@@ -24,6 +24,7 @@ import { SceneManager, SceneType } from './sceneManager.js';
 import { t } from '../utils/simpleI18n.js';
 import { AgentDefinition, resolveAgentTools } from '../agents/agentDefinition.js';
 import { getAgentResourceBudget } from './agentResourceBudget.js';
+import { startProcessWatchdog } from '../utils/processWatchdog.js';
 import {
   AgentMemorySnapshot,
   AgentMemoryReport,
@@ -658,10 +659,13 @@ export class SubAgent {
     let turnTimedOut = false;
 
     // 心跳定时器：每30秒打印一次，区分"AI慢慢推理"和"真的卡住"
-    const heartbeatId = setInterval(() => {
+    const stopHeartbeat = startProcessWatchdog({
+      name: `subagent-${this.context.agentId}-stream-progress`, source: 'subAgent',
+      intervalMs: 30_000, cost: 'none',
+    }, () => {
       const elapsed = Math.round((Date.now() - streamRequestStart) / 1000);
       this.log(`[turn ${this.context.currentTurn}] Still receiving stream... ${elapsed}s elapsed, ${chunkCount} chunks so far`);
-    }, 30000);
+    });
 
     try {
       for await (const chunk of streamGenerator) {
@@ -697,7 +701,7 @@ export class SubAgent {
         }
       }
     } finally {
-      clearInterval(heartbeatId);
+      stopHeartbeat();
       clearTimeout(turnTimeoutId);
       const totalMs = Date.now() - streamRequestStart;
       this.log(`[turn ${this.context.currentTurn}] Stream done: ${chunkCount} chunks, first=${firstChunkMs ?? 'n/a'}ms, total=${totalMs}ms${turnTimedOut ? ' (TIMED OUT)' : ''}`);

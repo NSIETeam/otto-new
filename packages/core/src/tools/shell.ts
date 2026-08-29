@@ -32,6 +32,7 @@ import { t } from '../utils/simpleI18n.js';
 import {
   getDangerousCommandInfo,
 } from '../utils/dangerous-command-detector.js';
+import { startProcessWatchdog } from '../utils/processWatchdog.js';
 
 /**
  * 识别是否为长期运行的服务器/服务类命令行
@@ -904,7 +905,10 @@ Reserve this tool for system commands and terminal operations that have no dedic
 
         // Background mode handler - check periodically
         let ticks = 0;
-        const checkInterval = setInterval(() => {
+        const stopBackgroundDetection = startProcessWatchdog({
+          name: 'shell-background-mode-detection', source: 'shell',
+          intervalMs: 100, cost: 'none',
+        }, () => {
           ticks++;
           const isPersistent = isServerOrPersistentCommand(strippedCommand);
           // ⏳ 等待 10 秒（100 个 tick * 100ms），给持久化服务充足的启动时间，以便在发生端口冲突或启动即崩溃（exit 1）时能直接被前台捕获
@@ -917,7 +921,7 @@ Reserve this tool for system commands and terminal operations that have no dedic
                 : '[ShellTool] 🔥 Background mode detected! Moving to background...'
             );
             backgroundModeTriggered = true;
-            clearInterval(checkInterval);
+            stopBackgroundDetection();
 
             // Create a background task to track this process
             const taskManager = getBackgroundTaskManager();
@@ -962,10 +966,10 @@ Reserve this tool for system commands and terminal operations that have no dedic
             // Resolve immediately to return control to user
             resolve();
           }
-        }, 100);
+        });
 
         // Clean up interval when process exits normally
-        shell.on('exit', () => clearInterval(checkInterval));
+        shell.on('exit', stopBackgroundDetection);
       });
     } finally {
       clearTimeout(timeoutId);

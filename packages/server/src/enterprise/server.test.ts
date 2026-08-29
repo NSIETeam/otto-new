@@ -1857,6 +1857,8 @@ describe('report/dashboard 路由基本可达', () => {
     expect(html).toContain('sessionStorage.getItem(KEY)');
     expect(html).toContain('id="dashboardToken"');
     expect(html).toContain("authorization:'Bearer '+TOKEN");
+    expect(html).not.toContain('setInterval(');
+    expect(html).toContain('setTimeout(async function refresh()');
     expect(html).not.toContain(ADMIN_TOKEN);
 
     const queryToken = await fetch(

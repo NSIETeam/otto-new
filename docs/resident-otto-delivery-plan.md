@@ -331,7 +331,7 @@ means no source-level substitute is accepted.
 | --- | --- | --- |
 | Tracked right-rail assets are classified and compact surfaces reject unregistered SVG/raster drift | `visual-asset-inventory.mjs`, inventory contract test, `visual-style-contract.test.mjs` | Automated |
 | Shared theme-aware module, customer-module, navigation and channel-status icons | `ModuleIcon.tsx`, `icons.tsx`, catalog and focused component tests | Automated |
-| Renderer network polling never overlaps and renderer feature code has no raw interval | `nonOverlappingPoll.ts`, focused page/timer tests, production source scan | Automated |
+| Production feature code has no raw interval; process watchdogs are named, observable, cost-free and stoppable | `nonOverlappingPoll.ts`, `processWatchdog.ts`, focused page/watchdog tests, production source scan | Automated |
 | Shared QR connector and device-bound installation | `channelConnector.ts`, `managedChannelConnector.ts`, focused connector tests | Automated |
 | Protected credential custody and idempotent outbound writes | `channelCredentialVault.ts`, `channelOutboundLedger.ts`, focused persistence tests | Automated |
 | Broker outbound runtime, tenant checking, timeout and reconnect | `brokerChannelRuntime.ts`, `brokerChannelRuntime.test.ts` | Automated |
@@ -363,8 +363,9 @@ means no source-level substitute is accepted.
   the shared registry; functional QR SVG remains separately classified.
 - Replaced renderer feature `setInterval` calls with either non-overlapping
   async polling or deadline-based one-shot timers. Core protocol watchdogs and
-  Server generated admin pages remain separately auditable and are not claimed
-  complete by the renderer migration.
+  Server generated admin pages now use named process watchdogs or non-overlap
+  one-shot deadlines. MCP temporary-file expiry is reclaimed on real use and no
+  longer wakes an otherwise idle process every five minutes.
 - Removed the legacy Core `MultiChannelGateway` and `multi_channel` tool. They
   formed a second provider-specific gateway, wrote provider secrets outside the
   credential vault, and let meeting reminders bypass durable workflow,

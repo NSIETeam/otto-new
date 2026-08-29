@@ -19,5 +19,7 @@ describe('enterprise admin operations security page', () => {
     const script = html.match(/<script>([\s\S]*)<\/script>/u)?.[1];
     expect(script).toBeTruthy();
     expect(() => new Function(script ?? '')).not.toThrow();
+    expect(script).not.toContain('setInterval(');
+    expect(script).toContain('inviteTimer=setTimeout(tick,1000)');
   });
 });

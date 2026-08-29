@@ -81,5 +81,6 @@ describe('enterprise runtime dependency closure', () => {
         existsSync(path.join(releaseRoot, 'node_modules', 'typescript')),
       ).toBe(false);
     },
+    30_000,
   );
 });

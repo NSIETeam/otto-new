@@ -4,6 +4,20 @@
 
 export const MODULE_WORKSPACE_SCHEMA_VERSION = 1 as const;
 export const MODULE_GROUP_NAME_MAX_LENGTH = 40;
+export const PARK_SERVICES_GROUP_ID = 'park-services';
+export const PARK_SERVICES_GROUP_NAME = '园区服务';
+export const PARK_SERVICES_GROUP_MODULE_IDS = [
+  'park-announcement',
+  'park-satisfaction',
+  'park-renovation',
+  'park-parking',
+  'park-network-phone',
+  'park-meeting-room',
+  'park-electric-card',
+  'park-repair',
+  'park-vehicle-visit',
+  'park-my-applications',
+] as const;
 
 export type ModuleWorkspaceEdition = 'personal' | 'enterprise';
 
@@ -40,17 +54,10 @@ export function resolveModuleGridColumns(
 
 const ENTERPRISE_DEFAULT_GROUPS: readonly ModuleGroupLayout[] = [
   {
-    id: 'park-services',
-    name: '园区服务',
+    id: PARK_SERVICES_GROUP_ID,
+    name: PARK_SERVICES_GROUP_NAME,
     rows: 2,
-    moduleIds: [
-      'park-announcement',
-      'park-satisfaction',
-      'park-renovation',
-      'park-parking',
-      'park-network-phone',
-      'park-meeting-room',
-    ],
+    moduleIds: [...PARK_SERVICES_GROUP_MODULE_IDS],
   },
   {
     id: 'daily-office',
@@ -165,6 +172,37 @@ export function normalizeModuleWorkspace(value: unknown): ModuleWorkspaceLayout 
   return { version: MODULE_WORKSPACE_SCHEMA_VERSION, groups };
 }
 
+function reconcileParkServicesGroup(
+  layout: ModuleWorkspaceLayout,
+  capabilities: ModuleWorkspaceCapabilities,
+): ModuleWorkspaceLayout {
+  const parkGroup = layout.groups.find((group) => group.id === PARK_SERVICES_GROUP_ID);
+  if (!parkGroup) return layout;
+
+  const available = new Set(capabilities.availableModuleIds);
+  const existing = new Set(layout.groups.flatMap((group) => group.moduleIds));
+  const packagedModuleIds = PARK_SERVICES_GROUP_MODULE_IDS.filter(
+    (moduleId) => available.has(moduleId) || existing.has(moduleId),
+  );
+  const packagedSet = new Set<string>(PARK_SERVICES_GROUP_MODULE_IDS);
+  const groups = layout.groups.map((group) => {
+    if (group.id === PARK_SERVICES_GROUP_ID) {
+      return {
+        ...group,
+        moduleIds: [
+          ...packagedModuleIds,
+          ...group.moduleIds.filter((moduleId) => !packagedSet.has(moduleId)),
+        ],
+      };
+    }
+    return {
+      ...group,
+      moduleIds: group.moduleIds.filter((moduleId) => !packagedSet.has(moduleId)),
+    };
+  });
+  return normalizeModuleWorkspace({ ...layout, groups });
+}
+
 export function parseModuleWorkspace(
   serialized: string | null | undefined,
   capabilities: ModuleWorkspaceCapabilities,
@@ -175,7 +213,7 @@ export function parseModuleWorkspace(
     if (parsed?.version !== MODULE_WORKSPACE_SCHEMA_VERSION || !Array.isArray(parsed.groups)) {
       return createDefaultModuleWorkspace(capabilities);
     }
-    const normalized = normalizeModuleWorkspace(parsed);
+    const normalized = reconcileParkServicesGroup(normalizeModuleWorkspace(parsed), capabilities);
     return normalized.groups.length > 0
       ? normalized
       : createDefaultModuleWorkspace(capabilities);
@@ -259,6 +297,32 @@ export function createModuleGroup(layout: ModuleWorkspaceLayout): ModuleWorkspac
   return {
     ...layout,
     groups: [...layout.groups.map(cloneGroup), { id, name, rows: 2, moduleIds: [] }],
+  };
+}
+
+export function createParkServicesModuleGroup(
+  layout: ModuleWorkspaceLayout,
+  availableModuleIds: readonly string[],
+): ModuleWorkspaceLayout {
+  if (layout.groups.some((group) => group.id === PARK_SERVICES_GROUP_ID)) return layout;
+  const available = new Set(availableModuleIds);
+  const moduleIds = PARK_SERVICES_GROUP_MODULE_IDS.filter((moduleId) => available.has(moduleId));
+  if (moduleIds.length === 0) return layout;
+  const packagedSet = new Set<string>(PARK_SERVICES_GROUP_MODULE_IDS);
+  return {
+    ...layout,
+    groups: [
+      ...layout.groups.map((group) => ({
+        ...group,
+        moduleIds: group.moduleIds.filter((moduleId) => !packagedSet.has(moduleId)),
+      })),
+      {
+        id: PARK_SERVICES_GROUP_ID,
+        name: PARK_SERVICES_GROUP_NAME,
+        rows: 2,
+        moduleIds,
+      },
+    ],
   };
 }
 

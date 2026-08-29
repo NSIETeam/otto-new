@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { act } from 'react';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -80,8 +80,14 @@ function renderWorkspace(
   return { ...view, onActivate, onOpenMarketplace, onLayoutChange };
 }
 
-function ControlledWorkspace({ scopeKey = 'scope-a' }: { scopeKey?: string }) {
-  const [layout, setLayout] = React.useState(enterpriseLayout);
+function ControlledWorkspace({
+  scopeKey = 'scope-a',
+  initialLayout = enterpriseLayout,
+}: {
+  scopeKey?: string;
+  initialLayout?: ModuleWorkspaceLayout;
+}) {
+  const [layout, setLayout] = React.useState(initialLayout);
   return (
     <ModuleWorkspace
       presentation="panel"
@@ -279,6 +285,7 @@ describe('ModuleWorkspace', () => {
   it('creates a group and supports rename validation', () => {
     renderControlledWorkspace();
     fireEvent.click(screen.getByRole('button', { name: '添加功能组' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '空白功能组' }));
     const input = screen.getByRole('textbox', { name: '功能组名称' });
     expect(document.activeElement).toBe(input);
     expect((input as HTMLInputElement).value).toBe('新功能组');
@@ -291,6 +298,27 @@ describe('ModuleWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：项目协作' }));
     expect(screen.queryByRole('menuitem', { name: /显示[两三]行/ })).toBeNull();
+  });
+
+  it('adds all park entries as one complete function group instead of one module at a time', () => {
+    render(<ControlledWorkspace initialLayout={{
+      version: 1,
+      groups: [{
+        id: 'daily-office', name: '日常办公', rows: 2,
+        moduleIds: ['agent-ppt', 'park-announcement'],
+      }],
+    }} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '添加功能组' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '园区服务整合包' }));
+
+    const parkGroup = document.querySelector<HTMLElement>('[data-group-id="park-services"]');
+    const dailyGroup = document.querySelector<HTMLElement>('[data-group-id="daily-office"]');
+    expect(parkGroup).toBeTruthy();
+    expect(within(parkGroup!).getByRole('heading', { name: '园区服务' })).toBeTruthy();
+    expect(within(parkGroup!).getByRole('button', { name: '打开 园区公告' })).toBeTruthy();
+    expect(within(parkGroup!).getByRole('button', { name: '打开 满意度调查' })).toBeTruthy();
+    expect(within(dailyGroup!).queryByRole('button', { name: '打开 园区公告' })).toBeNull();
   });
 
   it('adjusts panel density from group count and collapses inactive groups in condensed mode', () => {

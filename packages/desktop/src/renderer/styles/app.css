@@ -12582,6 +12582,10 @@ h6.otto-prose__h {
   padding: 0 14px 14px;
 }
 
+.otto-module-workspace__add-group-wrap {
+  position: relative;
+}
+
 .otto-module-workspace-shell--panel .otto-module-workspace__footer {
   padding: 0 12px 12px;
 }
@@ -12606,6 +12610,54 @@ h6.otto-prose__h {
   border-color: var(--otto-accent);
   background: var(--otto-accent-soft);
   color: var(--otto-accent);
+}
+
+.otto-module-workspace__add-group-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 7px);
+  left: 0;
+  z-index: 18;
+  display: grid;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid var(--otto-border);
+  border-radius: 12px;
+  background: var(--otto-surface);
+  box-shadow: var(--otto-shadow-pop);
+}
+
+.otto-module-workspace__add-group-menu button {
+  display: grid;
+  gap: 3px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--otto-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.otto-module-workspace__add-group-menu button:hover:not(:disabled),
+.otto-module-workspace__add-group-menu button:focus-visible {
+  background: var(--otto-accent-soft);
+  outline: none;
+}
+
+.otto-module-workspace__add-group-menu button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.otto-module-workspace__add-group-menu strong {
+  font-size: 13px;
+}
+
+.otto-module-workspace__add-group-menu small {
+  color: var(--otto-text-tertiary);
+  font-size: 11px;
 }
 
 .otto-module-workspace__undo {

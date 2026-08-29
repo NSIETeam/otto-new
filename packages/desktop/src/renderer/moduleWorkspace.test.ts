@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addOrMoveModules,
   createModuleGroup,
+  createParkServicesModuleGroup,
   createDefaultModuleWorkspace,
   deleteModuleGroup,
   getModuleWorkspaceStorageKey,
@@ -123,6 +124,29 @@ describe('module workspace parsing and normalization', () => {
     expect(parseModuleWorkspace(JSON.stringify({ version: 99 }), enterpriseCapabilities)).toEqual(defaults);
   });
 
+  it('restores available park entries into the complete park-services group', () => {
+    const parsed = parseModuleWorkspace(JSON.stringify({
+      version: 1,
+      groups: [
+        {
+          id: 'park-services', name: '园区服务', rows: 2,
+          moduleIds: ['park-announcement', 'park-repair', 'park-meeting-room'],
+        },
+        { id: 'daily-office', name: '日常办公', rows: 2, moduleIds: ['agent-ppt'] },
+      ],
+    }), enterpriseCapabilities);
+
+    expect(parsed.groups[0].moduleIds).toEqual([
+      'park-announcement',
+      'park-satisfaction',
+      'park-renovation',
+      'park-parking',
+      'park-network-phone',
+      'park-meeting-room',
+      'park-repair',
+    ]);
+  });
+
   it('deduplicates module IDs globally, repairs group IDs, clamps rows, and keeps unknown modules', () => {
     const normalized = normalizeModuleWorkspace({
       version: 1,
@@ -188,6 +212,28 @@ describe('module workspace layout operations', () => {
     expect(second.groups.at(-1)).toEqual({
       id: 'custom-group-2', name: '新功能组 2', rows: 2, moduleIds: [],
     });
+  });
+
+  it('adds park services as one complete function group and removes duplicate park entries', () => {
+    const withoutParkGroup: ModuleWorkspaceLayout = {
+      version: 1,
+      groups: [{
+        id: 'daily-office', name: '日常办公', rows: 2,
+        moduleIds: ['agent-ppt', 'park-announcement'],
+      }],
+    };
+    const next = createParkServicesModuleGroup(withoutParkGroup, [
+      'park-announcement', 'park-repair', 'park-parking',
+    ]);
+
+    expect(next.groups[0].moduleIds).toEqual(['agent-ppt']);
+    expect(next.groups[1]).toEqual({
+      id: 'park-services',
+      name: '园区服务',
+      rows: 2,
+      moduleIds: ['park-announcement', 'park-parking', 'park-repair'],
+    });
+    expect(createParkServicesModuleGroup(next, ['park-announcement'])).toBe(next);
   });
 
   it('rejects blank and duplicate group names without mutating layout', () => {

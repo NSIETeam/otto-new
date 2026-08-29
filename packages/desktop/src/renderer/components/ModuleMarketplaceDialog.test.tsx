@@ -15,6 +15,10 @@ const modules: readonly ModuleDefinition[] = [
     activation: { kind: 'agent', profileId: 'ppt' }, availability: 'available',
   },
   {
+    id: 'agent-word', label: 'Word 文档专家', category: 'common', icon: 'agent',
+    activation: { kind: 'agent', profileId: 'doc' }, availability: 'available',
+  },
+  {
     id: 'enterprise-memory', label: '企业记忆', category: 'capability', icon: 'enterprise-memory',
     activation: { kind: 'dialog', dialog: 'enterprise-memory' }, availability: 'disabled',
     disabledReason: '需要企业知识库权限',
@@ -29,8 +33,8 @@ const modules: readonly ModuleDefinition[] = [
 const layout: ModuleWorkspaceLayout = {
   version: 1,
   groups: [
-    { id: 'park-services', name: '园区服务', rows: 2, moduleIds: ['park-announcement'] },
-    { id: 'daily-office', name: '日常办公', rows: 2, moduleIds: ['agent-ppt'] },
+    { id: 'park-services', name: '园区服务', rows: 2, moduleIds: ['park-announcement', 'agent-ppt'] },
+    { id: 'daily-office', name: '日常办公', rows: 2, moduleIds: ['agent-word'] },
   ],
 };
 
@@ -59,20 +63,21 @@ describe('ModuleMarketplaceDialog', () => {
   it('adds and removes modules in one draft, applying it only on confirmation', () => {
     const { onConfirm } = renderDialog();
     expect(screen.getByRole('heading', { name: '常用' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: '园区服务' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '园区服务' })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: '园区公告' })).toBeNull();
 
-    const current = screen.getByRole('checkbox', { name: '园区公告' }) as HTMLInputElement;
+    const current = screen.getByRole('checkbox', { name: 'PPT 创作专家' }) as HTMLInputElement;
     expect(current.checked).toBe(true);
     expect(current.disabled).toBe(false);
     expect(current.closest('label')?.textContent).toContain('取消勾选可移除');
     fireEvent.click(current);
 
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索模块' }), {
-      target: { value: 'PPT' },
+      target: { value: 'Word' },
     });
-    const ppt = screen.getByRole('checkbox', { name: 'PPT 创作专家' });
-    expect(screen.queryByRole('checkbox', { name: '园区公告' })).toBeNull();
-    fireEvent.click(ppt);
+    const word = screen.getByRole('checkbox', { name: 'Word 文档专家' });
+    expect(screen.queryByRole('checkbox', { name: 'PPT 创作专家' })).toBeNull();
+    fireEvent.click(word);
     expect(onConfirm).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /保存更改/ }));
 
@@ -80,7 +85,7 @@ describe('ModuleMarketplaceDialog', () => {
       groups: [
         expect.objectContaining({
           id: 'park-services',
-          moduleIds: ['agent-ppt'],
+          moduleIds: ['park-announcement', 'agent-word'],
         }),
         expect.objectContaining({ id: 'daily-office', moduleIds: [] }),
       ],
@@ -89,8 +94,8 @@ describe('ModuleMarketplaceDialog', () => {
 
   it('explains moves and unavailable modules, and exposes expert management', () => {
     const { onManageExperts } = renderDialog();
-    const pptRow = screen.getByRole('checkbox', { name: 'PPT 创作专家' }).closest('label');
-    expect(pptRow?.textContent).toContain('将从“日常办公”移动');
+    const wordRow = screen.getByRole('checkbox', { name: 'Word 文档专家' }).closest('label');
+    expect(wordRow?.textContent).toContain('将从“日常办公”移动');
 
     const memory = screen.getByRole('checkbox', { name: '企业记忆' }) as HTMLInputElement;
     expect(memory.disabled).toBe(true);

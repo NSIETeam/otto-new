@@ -17,7 +17,10 @@ import { Reorder, useDragControls, useReducedMotion } from 'motion/react';
 import type { ModuleDefinition } from '../moduleCatalog.js';
 import {
   createModuleGroup,
+  createParkServicesModuleGroup,
   deleteModuleGroup,
+  PARK_SERVICES_GROUP_ID,
+  PARK_SERVICES_GROUP_MODULE_IDS,
   removeModuleFromGroup,
   renameModuleGroup,
   reorderModuleGroups,
@@ -134,7 +137,7 @@ export interface ModuleWorkspaceProps {
   onLayoutChange(next: ModuleWorkspaceLayout): void;
 }
 
-type WorkspacePopover = { kind: 'group'; id: string } | null;
+type WorkspacePopover = { kind: 'group'; id: string } | { kind: 'add-group' } | null;
 
 export function ModuleWorkspace({
   presentation,
@@ -182,6 +185,13 @@ export function ModuleWorkspace({
   const modulesById = useMemo(
     () => new Map(modules.map((module) => [module.id, module])),
     [modules],
+  );
+  const availableParkServicesModuleIds = useMemo(
+    () => PARK_SERVICES_GROUP_MODULE_IDS.filter((moduleId) => {
+      const module = modulesById.get(moduleId);
+      return module !== undefined && module.availability !== 'hidden';
+    }),
+    [modulesById],
   );
   const density = presentation !== 'panel' || transientLayout.groups.length <= 2
     ? 'comfortable'
@@ -690,24 +700,82 @@ export function ModuleWorkspace({
         })}
       </Reorder.Group>
       <div className="otto-module-workspace__footer">
-        <button
-          type="button"
-          className="otto-module-workspace__add-group"
-          aria-label="添加功能组"
-          onClick={() => {
-            const next = createModuleGroup(layout);
-            const created = next.groups.at(-1);
-            if (created) {
-              pendingGroupRevealRef.current = created.id;
-              setActiveCondensedGroupId(created.id);
-              setRenameDraft({ groupId: created.id, value: created.name, error: null });
-            }
-            commitLayout(next);
-          }}
+        <div
+          className="otto-module-workspace__add-group-wrap"
+          ref={openPopover?.kind === 'add-group' ? menuRef : undefined}
         >
-          <span aria-hidden>＋</span>
-          添加功能组
-        </button>
+          <button
+            type="button"
+            className="otto-module-workspace__add-group"
+            aria-label="添加功能组"
+            aria-haspopup="menu"
+            aria-expanded={openPopover?.kind === 'add-group'}
+            onClick={(event) => {
+              popoverTriggerRef.current = event.currentTarget;
+              setOpenPopover((current) => current?.kind === 'add-group'
+                ? null
+                : { kind: 'add-group' });
+            }}
+          >
+            <span aria-hidden>＋</span>
+            添加功能组
+          </button>
+          {openPopover?.kind === 'add-group' ? (
+            <div
+              className="otto-module-workspace__add-group-menu"
+              role="menu"
+              aria-label="选择功能组类型"
+            >
+              {availableParkServicesModuleIds.length > 0 ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  aria-label="园区服务整合包"
+                  disabled={layout.groups.some((group) => group.id === PARK_SERVICES_GROUP_ID)}
+                  onClick={() => {
+                    const next = createParkServicesModuleGroup(
+                      layout,
+                      availableParkServicesModuleIds,
+                    );
+                    const created = next.groups.find((group) => group.id === PARK_SERVICES_GROUP_ID);
+                    if (created) {
+                      pendingGroupRevealRef.current = created.id;
+                      setActiveCondensedGroupId(created.id);
+                    }
+                    setOpenPopover(null);
+                    commitLayout(next);
+                  }}
+                >
+                  <strong>园区服务</strong>
+                  <small>
+                    {layout.groups.some((group) => group.id === PARK_SERVICES_GROUP_ID)
+                      ? '已添加完整功能组'
+                      : `一次添加 ${availableParkServicesModuleIds.length} 个园区服务入口`}
+                  </small>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                aria-label="空白功能组"
+                onClick={() => {
+                  const next = createModuleGroup(layout);
+                  const created = next.groups.at(-1);
+                  if (created) {
+                    pendingGroupRevealRef.current = created.id;
+                    setActiveCondensedGroupId(created.id);
+                    setRenameDraft({ groupId: created.id, value: created.name, error: null });
+                  }
+                  setOpenPopover(null);
+                  commitLayout(next);
+                }}
+              >
+                <strong>空白功能组</strong>
+                <small>创建后自行命名并添加常用模块</small>
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
       {undoState ? (
         <div className="otto-module-workspace__undo" role="status">

@@ -6274,6 +6274,15 @@ h6.otto-prose__h {
 }
 
 /* 飞书接入面板 */
+.otto-hub__section-title {
+  margin: 4px 2px -2px;
+  color: var(--otto-text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .otto-hub__feishu-status {
   display: flex;
   align-items: center;
@@ -6297,6 +6306,46 @@ h6.otto-prose__h {
   color: var(--otto-accent-hover);
   font-size: 12.5px;
   white-space: pre-wrap;
+}
+
+.otto-channel-pairing {
+  display: grid;
+  gap: 14px;
+}
+
+.otto-channel-pairing__header,
+.otto-channel-pairing__body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.otto-channel-pairing__header p {
+  margin: 5px 0 0;
+}
+
+.otto-channel-pairing__qr {
+  width: 168px;
+  height: 168px;
+  flex: 0 0 168px;
+  padding: 8px;
+  border: 1px solid var(--otto-border-subtle);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.otto-channel-pairing__details {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .otto-channel-pairing__body {
+    flex-direction: column;
+  }
 }
 .otto-hub__btn--danger {
   border-color: #ef4444;

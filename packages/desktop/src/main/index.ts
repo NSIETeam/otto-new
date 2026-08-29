@@ -48,9 +48,15 @@ import {
 import { fileURLToPath } from 'node:url';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
+import { generateKeyPairSync } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { HealthInfo, ServerEndpoint } from 'otto-server';
+import type {
+  ChannelPairingPublic,
+  ChannelProvider,
+  HealthInfo,
+  ServerEndpoint,
+} from 'otto-server';
 import {
   CustomerModuleHostBroker,
   CustomerModuleRunner,
@@ -87,6 +93,12 @@ interface FeishuConfigSaveRequest {
   appSecret: string;
   verificationToken?: string | null;
   encryptKey?: string | null;
+}
+
+interface ChannelPairingResult {
+  ok: boolean;
+  pairing: ChannelPairingPublic | null;
+  error: string | null;
 }
 
 /** 根据文件扩展名返回 MIME 类型（用于 readFilePath IPC）。 */
@@ -481,7 +493,7 @@ const enterpriseNotificationIdentityBoundary =
     () => fileAccessGrants.clear(),
   );
 /** 当前 server 端点（发现的或拉起的）。renderer 经 IPC 取它建 WS。 */
-let endpoint: ServerEndpoint | undefined;
+let endpoint: (ServerEndpoint & { controlToken?: string }) | undefined;
 let endpointEnsurePromise: Promise<void> | undefined;
 let endpointRetryTimer: ReturnType<typeof setTimeout> | undefined;
 let endpointRetryAttempt = 0;
@@ -505,6 +517,8 @@ let enterpriseTrayPopoverWindow: BrowserWindow | undefined;
 let enterpriseTrayContacts: EnterpriseTrayContact[] = [];
 /** 用户主动退出标记；关闭窗口时不退出，只有菜单/托盘退出才真正结束进程。 */
 let isQuitting = false;
+/** Ephemeral private keys for in-progress provider pairings; never exposed to renderer. */
+const channelPairingPrivateKeys = new Map<string, string>();
 /** 视频编辑器窗口（OpenReel）。 */
 let videoEditorWindow: BrowserWindow | undefined;
 
@@ -536,6 +550,11 @@ const IPC = {
   feishuGetConfig: 'otto:feishu-get-config',
   feishuSaveConfig: 'otto:feishu-save-config',
   feishuClearConfig: 'otto:feishu-clear-config',
+  channelPairingBegin: 'otto:channel-pairing-begin',
+  channelPairingStatus: 'otto:channel-pairing-status',
+  channelPairingApprove: 'otto:channel-pairing-approve',
+  channelPairingInstall: 'otto:channel-pairing-install',
+  channelPairingCancel: 'otto:channel-pairing-cancel',
   parkConfig: 'otto:park-config',
   themeGet: 'otto:theme-get',
   themeSet: 'otto:theme-set',
@@ -1391,6 +1410,55 @@ function requestFeishuConfig(
                 error: string | null;
               },
             );
+          } catch {
+            resolve(null);
+          }
+        });
+        res.on('error', () => resolve(null));
+      },
+    );
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.on('error', () => resolve(null));
+    req.end(payload);
+  });
+}
+
+function requestChannelPairing(
+  method: 'GET' | 'POST' | 'DELETE',
+  requestPath: string,
+  body?: unknown,
+): Promise<{ ok: boolean; data: unknown; error: string | null } | null> {
+  const ep = endpoint;
+  if (!ep?.controlToken) return Promise.resolve(null);
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  return new Promise((resolve) => {
+    const req = http.request(
+      {
+        host: ep.host,
+        port: ep.port,
+        path: requestPath,
+        method,
+        timeout: FEISHU_OP_TIMEOUT_MS,
+        headers: {
+          authorization: `Bearer ${ep.controlToken}`,
+          ...(payload === undefined
+            ? {}
+            : {
+                'content-type': 'application/json',
+                'content-length': Buffer.byteLength(payload),
+              }),
+        },
+      },
+      (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => { text += chunk; });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(text) as { ok: boolean; data: unknown; error: string | null });
           } catch {
             resolve(null);
           }
@@ -3959,6 +4027,64 @@ function registerIpc(): void {
     if (!r) return { ok: false, config: null, error: '本地 server 未就绪。' };
     return { ok: r.ok, config: r.data, error: r.error };
   });
+  const channelScopes: Record<ChannelProvider, readonly string[]> = {
+    feishu: ['im:message', 'contact:user.base:readonly'],
+    lark: ['im:message', 'contact:user.base:readonly'],
+    wecom: ['message.send', 'contacts.read.basic'],
+  };
+  ipcMain.handle(IPC.channelPairingBegin, async (_event, provider: unknown): Promise<ChannelPairingResult> => {
+    if (provider !== 'feishu' && provider !== 'lark' && provider !== 'wecom') {
+      return { ok: false, pairing: null, error: '不支持的连接类型。' };
+    }
+    const keys = generateKeyPairSync('x25519');
+    const installationPublicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const privateKey = keys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const response = await requestChannelPairing('POST', '/channels/pairings', {
+      provider,
+      installationPublicKey,
+      requestedScopes: channelScopes[provider],
+    });
+    const pairing = response?.ok ? response.data as ChannelPairingPublic : null;
+    if (pairing) channelPairingPrivateKeys.set(pairing.pairingId, privateKey);
+    return {
+      ok: response?.ok === true,
+      pairing,
+      error: response?.error ?? (response ? null : '本地 server 未就绪。'),
+    };
+  });
+  const pairingAction = async (
+    pairingId: unknown,
+    method: 'GET' | 'POST' | 'DELETE',
+    suffix = '',
+  ): Promise<{ ok: boolean; data: unknown; error: string | null }> => {
+    if (typeof pairingId !== 'string' || !/^pair_[a-f0-9]{24}$/.test(pairingId)) {
+      return { ok: false, data: null, error: '配对编号不合法。' };
+    }
+    const response = await requestChannelPairing(
+      method,
+      `/channels/pairings/${pairingId}${suffix}`,
+    );
+    const status = response?.ok && response.data && typeof response.data === 'object'
+      && 'status' in response.data
+      ? String((response.data as { status: unknown }).status)
+      : undefined;
+    if (
+      method === 'DELETE'
+      || suffix === '/install'
+      || (status !== undefined && ['connected', 'expired', 'denied', 'failed', 'revoked'].includes(status))
+    ) {
+      channelPairingPrivateKeys.delete(pairingId);
+    }
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  };
+  ipcMain.handle(IPC.channelPairingStatus, (_event, pairingId: unknown) =>
+    pairingAction(pairingId, 'GET'));
+  ipcMain.handle(IPC.channelPairingApprove, (_event, pairingId: unknown) =>
+    pairingAction(pairingId, 'POST', '/approve'));
+  ipcMain.handle(IPC.channelPairingInstall, (_event, pairingId: unknown) =>
+    pairingAction(pairingId, 'POST', '/install'));
+  ipcMain.handle(IPC.channelPairingCancel, (_event, pairingId: unknown) =>
+    pairingAction(pairingId, 'DELETE'));
   // ── 内置视频编辑器 ──────────────────────────────────────────
   ipcMain.handle(IPC.openVideoEditor, () =>
     Promise.resolve(createVideoEditorWindow()),

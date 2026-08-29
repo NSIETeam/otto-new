@@ -61,6 +61,8 @@ export interface ChannelHealth {
 export interface ChannelConnectorV1 {
   beginPairing(input: BeginPairingInput): Promise<PairingSession>;
   getPairingStatus(pairingId: string): Promise<PairingSession>;
+  approveAdmin(pairingId: string): Promise<PairingSession>;
+  denyPairing(pairingId: string, reason?: string): Promise<PairingSession>;
   completeInstallation(pairingId: string): Promise<ChannelInstallation>;
   start(installationId: string): Promise<ChannelHealth>;
   stop(installationId: string): Promise<ChannelHealth>;

@@ -61,6 +61,7 @@ import {
   type ExtensionSummary,
   type AutoSkillCandidateInfo,
   type LocalAgentPingResponse,
+  type ChannelPairingBeginRequest,
 } from './protocol.js';
 import {
   TRUSTED_ORIGINS,
@@ -108,6 +109,10 @@ import {
   savePreferredModel,
 } from './customModels.js';
 import { externalInboundNotificationFromFrame } from './externalInboundNotification.js';
+import type {
+  ChannelConnectorV1,
+  ChannelProvider,
+} from './modules/integration_adapters/channelConnector.js';
 import {
   loadUserSettingsSubset,
   patchUserSettings,
@@ -371,6 +376,8 @@ export interface OttoServerOptions {
   sessionTitleTimeoutMs?: number;
   /** Durable scheduler state; tests inject memory storage to avoid user files. */
   recurringTaskStateStore?: RecurringTaskStateStore;
+  /** Real provider adapters. Missing providers stay visibly unavailable. */
+  channelConnectors?: Partial<Record<ChannelProvider, ChannelConnectorV1>>;
 }
 
 /** 飞书凭证存取接口（可注入；默认实现走 feishu/vendor/credentials.ts）。 */
@@ -478,6 +485,8 @@ export class OttoServer {
   private readonly recurringTaskRegistry: RecurringTaskRegistry;
   private stopMemoryMaintenance?: () => void;
   private stopAutoCompression?: () => void;
+  private readonly channelConnectors: Partial<Record<ChannelProvider, ChannelConnectorV1>>;
+  private readonly channelPairingProviders = new Map<string, ChannelProvider>();
 
   constructor(opts: OttoServerOptions = {}) {
     this.host = opts.host ?? DEFAULT_HOST;
@@ -511,6 +520,7 @@ export class OttoServer {
         console.warn(`[ResidentTask] ${taskName} failed:`, error);
       },
     });
+    this.channelConnectors = { ...opts.channelConnectors };
     getHabitAnalyzer().setTaskRegistry(this.recurringTaskRegistry);
     this.globalAuthorizationMode =
       loadUserSettingsSubset().authorizationMode ?? 'manual';
@@ -2509,6 +2519,58 @@ export class OttoServer {
         instanceId: this.instanceId,
       };
       return sendJsonWithCors(res, 200, ok(pingResponse), req.headers.origin);
+    }
+    if (path === HTTP_ROUTES.channelPairings && req.method === 'POST') {
+      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+        return sendJson(res, 401, err('unauthorized'));
+      }
+      void readJsonBody(req)
+        .then((body) => parseChannelPairingBeginRequest(body))
+        .then(async (input) => {
+          const connector = this.channelConnectors[input.provider];
+          if (!connector) {
+            sendJson(res, 503, err(`channel_connector_unavailable:${input.provider}`));
+            return;
+          }
+          const pairing = await connector.beginPairing(input);
+          this.channelPairingProviders.set(pairing.pairingId, input.provider);
+          sendJson(res, 201, ok(pairing));
+        })
+        .catch((error) => {
+          sendJson(res, 400, err(error instanceof Error ? error.message : String(error)));
+        });
+      return;
+    }
+    const channelPairingMatch = path.match(
+      /^\/channels\/pairings\/(pair_[a-f0-9]{24})(?:\/(approve|install))?$/,
+    );
+    if (channelPairingMatch) {
+      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+        return sendJson(res, 401, err('unauthorized'));
+      }
+      const pairingId = channelPairingMatch[1];
+      const action = channelPairingMatch[2];
+      const provider = this.channelPairingProviders.get(pairingId);
+      const connector = provider ? this.channelConnectors[provider] : undefined;
+      if (!connector) return sendJson(res, 404, err('channel_pairing_not_found'));
+      let operation: Promise<unknown>;
+      if (req.method === 'GET' && !action) {
+        operation = connector.getPairingStatus(pairingId);
+      } else if (req.method === 'POST' && action === 'approve') {
+        operation = connector.approveAdmin(pairingId);
+      } else if (req.method === 'POST' && action === 'install') {
+        operation = connector.completeInstallation(pairingId);
+      } else if (req.method === 'DELETE' && !action) {
+        operation = connector.denyPairing(pairingId, 'cancelled by local user');
+      } else {
+        return sendJson(res, 405, err('method_not_allowed'));
+      }
+      void operation
+        .then((result) => sendJson(res, 200, ok(result)))
+        .catch((error) => {
+          sendJson(res, 409, err(error instanceof Error ? error.message : String(error)));
+        });
+      return;
     }
     if (path === HTTP_ROUTES.sessions && req.method === 'GET') {
       return sendJson(res, 200, ok(this.visibleSessions()));
@@ -4952,6 +5014,37 @@ function parseFeishuConfigSaveRequest(
     ...(appSecret ? { appSecret } : {}),
     ...(ownerOpenId ? { ownerOpenId } : {}),
   };
+}
+
+function parseChannelPairingBeginRequest(body: unknown): ChannelPairingBeginRequest {
+  if (typeof body !== 'object' || body === null) {
+    throw new Error('channel pairing body must be a JSON object');
+  }
+  const input = body as Record<string, unknown>;
+  const provider = input.provider;
+  if (provider !== 'feishu' && provider !== 'lark' && provider !== 'wecom') {
+    throw new Error('unsupported channel provider');
+  }
+  const installationPublicKey =
+    typeof input.installationPublicKey === 'string'
+      ? input.installationPublicKey.trim()
+      : '';
+  if (!installationPublicKey || installationPublicKey.length > 16_384) {
+    throw new Error('installation public key is required');
+  }
+  if (!Array.isArray(input.requestedScopes)) {
+    throw new Error('requestedScopes must be an array');
+  }
+  const requestedScopes = input.requestedScopes.map((scope) => {
+    if (typeof scope !== 'string' || !scope.trim() || scope.length > 100) {
+      throw new Error('invalid channel scope');
+    }
+    return scope.trim();
+  });
+  if (requestedScopes.length === 0 || requestedScopes.length > 50) {
+    throw new Error('channel scope request is empty or too large');
+  }
+  return { provider, installationPublicKey, requestedScopes };
 }
 /** core WorkflowAgentRecord → 协议 WorkflowAgentSummary（裁掉 prompt/recentToolCalls 等大字段）。 */
 function toWorkflowAgentSummary(a: WorkflowAgentRecord): WorkflowAgentSummary {

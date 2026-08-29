@@ -27,6 +27,8 @@ import type {
   ClientToServer,
   FeishuConfigPublic,
   FeishuConfigSaveRequest,
+  ChannelPairingPublic,
+  ChannelProvider,
   HealthInfo,
   ServerEndpoint,
   ServerToClient,
@@ -55,6 +57,19 @@ export interface FeishuConfigResult {
   error: string | null;
 }
 export type { FeishuConfigPublic, FeishuConfigSaveRequest };
+export type { ChannelPairingPublic, ChannelProvider };
+
+export interface ChannelPairingResult {
+  ok: boolean;
+  pairing: ChannelPairingPublic | null;
+  error: string | null;
+}
+
+export interface ChannelPairingActionResult<T = unknown> {
+  ok: boolean;
+  data: T | null;
+  error: string | null;
+}
 
 /**
  * 园区服务插件的企业定制配置（~/.otto-user/park-services.json）。
@@ -1265,6 +1280,11 @@ const IPC = {
   feishuGetConfig: 'otto:feishu-get-config',
   feishuSaveConfig: 'otto:feishu-save-config',
   feishuClearConfig: 'otto:feishu-clear-config',
+  channelPairingBegin: 'otto:channel-pairing-begin',
+  channelPairingStatus: 'otto:channel-pairing-status',
+  channelPairingApprove: 'otto:channel-pairing-approve',
+  channelPairingInstall: 'otto:channel-pairing-install',
+  channelPairingCancel: 'otto:channel-pairing-cancel',
   parkConfig: 'otto:park-config',
   themeGet: 'otto:theme-get',
   themeSet: 'otto:theme-set',
@@ -1433,6 +1453,11 @@ export interface OttoBridge {
   feishuSaveConfig(body: FeishuConfigSaveRequest): Promise<FeishuConfigResult>;
   /** 停守护 + 清除凭证（对应 CLI /feishu logout）。 */
   feishuClearConfig(): Promise<FeishuConfigResult>;
+  channelPairingBegin(provider: ChannelProvider): Promise<ChannelPairingResult>;
+  channelPairingStatus(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
+  channelPairingApprove(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
+  channelPairingInstall(pairingId: string): Promise<ChannelPairingActionResult>;
+  channelPairingCancel(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
   /** 园区服务企业定制配置；无配置文件时 null（用内置默认）。 */
   parkConfig(): Promise<ParkServicesConfig | null>;
   /** 当前外观主题（'system' 跟随系统 / 'light' / 'dark'）。 */
@@ -2384,6 +2409,21 @@ const bridge: OttoBridge = {
     return ipcRenderer.invoke(
       'otto:feishu-clear-config',
     ) as Promise<FeishuConfigResult>;
+  },
+  channelPairingBegin(provider: ChannelProvider): Promise<ChannelPairingResult> {
+    return ipcRenderer.invoke('otto:channel-pairing-begin', provider) as Promise<ChannelPairingResult>;
+  },
+  channelPairingStatus(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>> {
+    return ipcRenderer.invoke('otto:channel-pairing-status', pairingId) as Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
+  },
+  channelPairingApprove(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>> {
+    return ipcRenderer.invoke('otto:channel-pairing-approve', pairingId) as Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
+  },
+  channelPairingInstall(pairingId: string): Promise<ChannelPairingActionResult> {
+    return ipcRenderer.invoke('otto:channel-pairing-install', pairingId) as Promise<ChannelPairingActionResult>;
+  },
+  channelPairingCancel(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>> {
+    return ipcRenderer.invoke('otto:channel-pairing-cancel', pairingId) as Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
   },
   parkConfig(): Promise<ParkServicesConfig | null> {
     return ipcRenderer.invoke(

@@ -69,13 +69,16 @@ describe('channel pairing REST routes', () => {
     rmSync(userDir, { recursive: true, force: true });
   });
 
-  async function start(connectors = {}): Promise<{ baseUrl: string; token: string }> {
+  async function start(
+    connectors = {},
+    workspaceStore = new ProductWorkspaceStore(path.join(userDir, 'workspace.json')),
+  ): Promise<{ baseUrl: string; token: string }> {
     server = new OttoServer({
       port: 0,
       mock: true,
       channelConnectors: connectors,
       recurringTaskStateStore: new InMemoryRecurringTaskStateStore(),
-      productWorkspaceStore: new ProductWorkspaceStore(path.join(userDir, 'workspace.json')),
+      productWorkspaceStore: workspaceStore,
     });
     await server.start();
     const http = (server as unknown as { http: { address(): { port: number } } }).http;
@@ -235,7 +238,7 @@ describe('channel pairing REST routes', () => {
       providerUserId: 'ou_provider_user_1',
       canonicalUserId: 'otto-user-1',
       approvalId: 'approval-1',
-      approvedBy: 'admin-1',
+      approvedBy: 'spoofed-client-admin',
       expectedRevision: 0,
       // This untrusted field must never override the installation tenant.
       tenantId: 'tenant-attacker',
@@ -247,10 +250,12 @@ describe('channel pairing REST routes', () => {
     };
     const bound = await fetch(url, { method: 'POST', headers, body });
     expect(bound.status).toBe(200);
-    expect(await bound.json()).toMatchObject({
+    const boundPayload = await bound.json() as { data: { approvedBy: string } };
+    expect(boundPayload).toMatchObject({
       ok: true,
       data: { tenantId: 'tenant-1', canonicalUserId: 'otto-user-1', revision: 1, active: true },
     });
+    expect(boundPayload.data.approvedBy).not.toBe('spoofed-client-admin');
     const listed = await fetch(url, { headers });
     expect(await listed.json()).toMatchObject({
       ok: true,
@@ -264,10 +269,39 @@ describe('channel pairing REST routes', () => {
       headers,
       body: JSON.stringify({
         action: 'revoke', providerUserId: 'ou_provider_user_1',
-        approvalId: 'approval-2', approvedBy: 'admin-1', expectedRevision: 1,
+        approvalId: 'approval-2', expectedRevision: 1,
       }),
     });
     expect(revoked.status).toBe(200);
     expect(await revoked.json()).toMatchObject({ data: { active: false, revision: 2 } });
+  });
+
+  it('rejects enterprise members without organization management capability', async () => {
+    const workspace = new ProductWorkspaceStore(path.join(userDir, 'member-workspace.json'));
+    const owner = workspace.configureManager({ managerName: 'Owner', companyName: 'Acme' });
+    const department = owner.managerWorkspace!.organization.departments[0];
+    const position = owner.managerWorkspace!.organization.positions.find(
+      (candidate) => candidate.departmentId === department.id,
+    )!;
+    const invite = workspace.issueInvite({
+      kind: 'position', departmentId: department.id, positionId: position.id,
+    });
+    workspace.acceptInvite(invite.link, { userId: 'member-1', displayName: 'Member' });
+    const connector = fakeConnector();
+    const { baseUrl, token } = await start({ feishu: connector }, workspace);
+    const installationId = connector.listInstallations()[0].installationId;
+    const response = await fetch(
+      `${baseUrl}/channels/installations/${installationId}/identities`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'bind', providerUserId: 'ou_user_1', canonicalUserId: 'member-1',
+          approvalId: 'approval-1', expectedRevision: 0,
+        }),
+      },
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: 'channel_identity_admin_required' });
   });
 });

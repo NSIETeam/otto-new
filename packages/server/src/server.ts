@@ -2612,6 +2612,10 @@ export class OttoServer {
       if (req.method === 'GET' && action === 'identities') {
         operation = Promise.resolve(this.channelIdentityRegistry.list(installationId));
       } else if (req.method === 'POST' && action === 'identities') {
+        const actor = this.productWorkspace.snapshot().context;
+        if (actor.edition === 'enterprise' && !actor.capabilities.includes('organization:manage')) {
+          return sendJson(res, 403, err('channel_identity_admin_required'));
+        }
         operation = readJsonBody(req)
           .then((body) => parseChannelIdentityMutation(body))
           .then((input) => input.action === 'bind'
@@ -2622,7 +2626,7 @@ export class OttoServer {
               providerUserId: input.providerUserId,
               canonicalUserId: input.canonicalUserId,
               approvalId: input.approvalId,
-              approvedBy: input.approvedBy,
+              approvedBy: actor.userId,
               expectedRevision: input.expectedRevision,
             })
             : this.channelIdentityRegistry.revoke({
@@ -2631,7 +2635,7 @@ export class OttoServer {
               tenantId: installation.tenantId,
               providerUserId: input.providerUserId,
               approvalId: input.approvalId,
-              approvedBy: input.approvedBy,
+              approvedBy: actor.userId,
               expectedRevision: input.expectedRevision,
             }));
       } else if (req.method === 'GET' && !action) {
@@ -5181,7 +5185,6 @@ function parseChannelSendInput(body: unknown): {
 type ChannelIdentityMutationCommon = {
   providerUserId: string;
   approvalId: string;
-  approvedBy: string;
   expectedRevision: number;
 };
 type ChannelIdentityMutation =
@@ -5209,7 +5212,6 @@ function parseChannelIdentityMutation(body: unknown): ChannelIdentityMutation {
     action: input.action,
     providerUserId: readId('providerUserId'),
     approvalId: readId('approvalId'),
-    approvedBy: readId('approvedBy'),
     expectedRevision: expectedRevision as number,
   };
   return input.action === 'bind'

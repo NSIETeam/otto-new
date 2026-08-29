@@ -17,6 +17,8 @@ const installation = {
 describe('ChannelInstallationList', () => {
   const channelInstallations = vi.fn();
   const channelInstallationAction = vi.fn();
+  const channelIdentities = vi.fn();
+  const channelIdentityMutation = vi.fn();
 
   beforeEach(() => {
     channelInstallations.mockReset().mockResolvedValue({
@@ -38,9 +40,22 @@ describe('ChannelInstallationList', () => {
           }
         : { ok: true, data: action === 'revoke' ? { revoked: true } : {}, error: null },
     );
+    channelIdentities.mockReset().mockResolvedValue({ ok: true, data: [], error: null });
+    channelIdentityMutation.mockReset().mockResolvedValue({
+      ok: true,
+      data: {
+        provider: 'wecom', installationId: installation.installationId,
+        tenantId: 'corp-1', providerUserId: 'wm_user_1', canonicalUserId: 'otto-user-1',
+        active: true, revision: 1, approvalId: 'approval-1', approvedBy: 'admin-1',
+        boundAtMs: 1, updatedAtMs: 1,
+      },
+      error: null,
+    });
     (window as unknown as { otto: unknown }).otto = {
       channelInstallations,
       channelInstallationAction,
+      channelIdentities,
+      channelIdentityMutation,
     };
   });
 
@@ -69,6 +84,50 @@ describe('ChannelInstallationList', () => {
     await waitFor(() => expect(channelInstallationAction).toHaveBeenCalledWith(
       installation.installationId,
       'revoke',
+    ));
+  });
+
+  it('binds an explicitly approved identity through the shared supervisor', async () => {
+    render(<ChannelInstallationList provider="wecom" />);
+    fireEvent.click(await screen.findByRole('button', { name: '身份管理' }));
+    fireEvent.change(screen.getByLabelText('渠道用户 ID'), { target: { value: 'wm_user_1' } });
+    fireEvent.change(screen.getByLabelText('Otto 用户 ID'), { target: { value: 'otto-user-1' } });
+    fireEvent.change(screen.getByLabelText('审批 ID'), { target: { value: 'approval-1' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存身份绑定' }));
+    await waitFor(() => expect(channelIdentityMutation).toHaveBeenCalledWith(
+      installation.installationId,
+      {
+        action: 'bind', providerUserId: 'wm_user_1', canonicalUserId: 'otto-user-1',
+        approvalId: 'approval-1', expectedRevision: 0,
+      },
+    ));
+  });
+
+  it('requires approval fields and a second click before revoking an identity', async () => {
+    channelIdentities.mockResolvedValue({
+      ok: true,
+      data: [{
+        provider: 'wecom', installationId: installation.installationId,
+        tenantId: 'corp-1', providerUserId: 'wm_user_1', canonicalUserId: 'otto-user-1',
+        active: true, revision: 3, approvalId: 'approval-old', approvedBy: 'admin-old',
+        boundAtMs: 1, updatedAtMs: 1,
+      }],
+      error: null,
+    });
+    render(<ChannelInstallationList provider="wecom" />);
+    fireEvent.click(await screen.findByRole('button', { name: '身份管理' }));
+    fireEvent.click(await screen.findByRole('button', { name: '撤销身份' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('审批 ID');
+    fireEvent.change(screen.getByLabelText('审批 ID'), { target: { value: 'approval-2' } });
+    fireEvent.click(screen.getByRole('button', { name: '撤销身份' }));
+    expect(channelIdentityMutation).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '再次点击确认撤销身份' }));
+    await waitFor(() => expect(channelIdentityMutation).toHaveBeenCalledWith(
+      installation.installationId,
+      {
+        action: 'revoke', providerUserId: 'wm_user_1', approvalId: 'approval-2',
+        expectedRevision: 3,
+      },
     ));
   });
 });

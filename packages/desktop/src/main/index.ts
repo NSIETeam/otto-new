@@ -74,6 +74,10 @@ import {
   createChannelInstallationProof,
   type ChannelInstallationDeviceKeys,
 } from './channel-installation-proof.js';
+import {
+  isChannelInstallationId,
+  parseChannelIdentityMutationIpc,
+} from './channel-identity-ipc.js';
 import { cancelDurableWorkflowsForQuit } from './durable-workflow-quit.js';
 
 function ignoreBrokenPipe(stream: NodeJS.WriteStream): void {
@@ -611,6 +615,8 @@ const IPC = {
   channelPairingCancel: 'otto:channel-pairing-cancel',
   channelInstallations: 'otto:channel-installations',
   channelInstallationAction: 'otto:channel-installation-action',
+  channelIdentities: 'otto:channel-identities',
+  channelIdentityMutation: 'otto:channel-identity-mutation',
   rpaAccessibilityStatus: 'otto:rpa-accessibility-status',
   rpaAccessibilityRequest: 'otto:rpa-accessibility-request',
   parkConfig: 'otto:park-config',
@@ -4219,6 +4225,28 @@ function registerIpc(): void {
       const response = await requestChannelPairing(
         action === 'revoke' ? 'DELETE' : action === 'health' ? 'GET' : 'POST',
         `/channels/installations/${installationId}${action === 'revoke' ? '' : `/${String(action)}`}`,
+      );
+      return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+    },
+  );
+  ipcMain.handle(IPC.channelIdentities, async (_event, installationId: unknown) => {
+    if (!isChannelInstallationId(installationId)) {
+      return { ok: false, data: null, error: '安装编号不合法。' };
+    }
+    const response = await requestChannelPairing(
+      'GET', `/channels/installations/${installationId}/identities`,
+    );
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  });
+  ipcMain.handle(
+    IPC.channelIdentityMutation,
+    async (_event, installationId: unknown, input: unknown) => {
+      const parsed = parseChannelIdentityMutationIpc(installationId, input);
+      if (!parsed.ok) return { ok: false, data: null, error: parsed.error };
+      const response = await requestChannelPairing(
+        'POST',
+        `/channels/installations/${parsed.installationId}/identities`,
+        parsed.body,
       );
       return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
     },

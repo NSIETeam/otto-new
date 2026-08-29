@@ -37,7 +37,6 @@ function parseArguments(args: readonly string[]): {
   providerUserId?: string;
   canonicalUserId?: string;
   approvalId?: string;
-  approvedBy?: string;
   expectedRevision?: number;
 } {
   const action = (args[0] ?? 'status') as ChannelCliAction;
@@ -63,22 +62,21 @@ function parseArguments(args: readonly string[]): {
     const offset = action === 'bind-user' ? 1 : 0;
     const canonicalUserId = action === 'bind-user' ? args[3]?.trim() : undefined;
     const approvalId = args[3 + offset]?.trim();
-    const approvedBy = args[4 + offset]?.trim();
-    const rawRevision = args[5 + offset]?.trim();
+    const rawRevision = args[4 + offset]?.trim();
     const expectedRevision = rawRevision === undefined ? Number.NaN : Number(rawRevision);
     if (!installationId || !providerUserId || (action === 'bind-user' && !canonicalUserId)
-      || !approvalId || !approvedBy || !Number.isSafeInteger(expectedRevision)
+      || !approvalId || !Number.isSafeInteger(expectedRevision)
       || expectedRevision < 0) {
       throw new Error(
         action === 'bind-user'
-          ? '用法: otto <provider> bind-user <installation-id> <provider-user-id> <otto-user-id> <approval-id> <approved-by> <expected-revision>'
-          : '用法: otto <provider> revoke-user <installation-id> <provider-user-id> <approval-id> <approved-by> <expected-revision>',
+          ? '用法: otto <provider> bind-user <installation-id> <provider-user-id> <otto-user-id> <approval-id> <expected-revision>'
+          : '用法: otto <provider> revoke-user <installation-id> <provider-user-id> <approval-id> <expected-revision>',
       );
     }
     return {
       action, installationId, providerUserId,
       ...(canonicalUserId ? { canonicalUserId } : {}),
-      approvalId, approvedBy, expectedRevision,
+      approvalId, expectedRevision,
     };
   }
   return { action, ...(installationId ? { installationId } : {}) };
@@ -237,7 +235,6 @@ export async function runChannelCli(
           providerUserId: input.providerUserId,
           ...(input.canonicalUserId ? { canonicalUserId: input.canonicalUserId } : {}),
           approvalId: input.approvalId,
-          approvedBy: input.approvedBy,
           expectedRevision: input.expectedRevision,
         },
       )) as ChannelIdentityBindingV1;

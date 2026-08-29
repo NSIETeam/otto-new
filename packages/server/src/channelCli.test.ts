@@ -203,19 +203,19 @@ describe('runChannelCli', () => {
       .resolves.toBe(0);
     await expect(runChannelCli('lark', [
       'bind-user', installation.installationId, 'ou_user_1', 'otto-user-1',
-      'approval-1', 'admin-1', '0',
+      'approval-1', '0',
     ], dependencies)).resolves.toBe(0);
     await expect(runChannelCli('lark', [
       'revoke-user', installation.installationId, 'ou_user_1',
-      'approval-2', 'admin-1', '1',
+      'approval-2', '1',
     ], dependencies)).resolves.toBe(0);
     expect(JSON.parse(String(fetchImpl.mock.calls[3][1]?.body))).toEqual({
       action: 'bind', providerUserId: 'ou_user_1', canonicalUserId: 'otto-user-1',
-      approvalId: 'approval-1', approvedBy: 'admin-1', expectedRevision: 0,
+      approvalId: 'approval-1', expectedRevision: 0,
     });
     expect(JSON.parse(String(fetchImpl.mock.calls[5][1]?.body))).toEqual({
       action: 'revoke', providerUserId: 'ou_user_1',
-      approvalId: 'approval-2', approvedBy: 'admin-1', expectedRevision: 1,
+      approvalId: 'approval-2', expectedRevision: 1,
     });
     expect(output.join('\n')).toContain('ou_user_1\totto-user-1\tactive\trevision=1');
     expect(output.join('\n')).toContain('已撤销 ou_user_1 -> otto-user-1 revision=2');

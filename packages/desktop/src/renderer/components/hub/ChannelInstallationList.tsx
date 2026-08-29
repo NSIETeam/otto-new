@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type {
   ChannelHealth,
+  ChannelIdentityBindingV1,
   ChannelInstallation,
   ChannelProvider,
 } from '../../../preload/index.js';
@@ -17,10 +18,16 @@ export function ChannelInstallationList({
 }): React.JSX.Element {
   const [installations, setInstallations] = useState<ChannelInstallation[]>([]);
   const [health, setHealth] = useState<Record<string, ChannelHealth>>({});
+  const [identities, setIdentities] = useState<Record<string, ChannelIdentityBindingV1[]>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [unsupported, setUnsupported] = useState(false);
+  const [identityPanel, setIdentityPanel] = useState<string | null>(null);
+  const [providerUserId, setProviderUserId] = useState('');
+  const [canonicalUserId, setCanonicalUserId] = useState('');
+  const [approvalId, setApprovalId] = useState('');
+  const [confirmIdentityRevoke, setConfirmIdentityRevoke] = useState<string | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -46,6 +53,15 @@ export function ChannelInstallationList({
           : null;
       }));
       setHealth(Object.fromEntries(states.filter((state) => state !== null)));
+      if (typeof window.otto?.channelIdentities === 'function') {
+        const bindingStates = await Promise.all(matching.map(async (installation) => {
+          const response = await window.otto.channelIdentities(installation.installationId);
+          return response?.ok && response.data
+            ? [installation.installationId, response.data] as const
+            : [installation.installationId, []] as const;
+        }));
+        setIdentities(Object.fromEntries(bindingStates));
+      }
       setUnsupported(false);
       setError(null);
     } catch (loadError) {
@@ -95,6 +111,57 @@ export function ChannelInstallationList({
     }
   };
 
+  const mutateIdentity = async (
+    installation: ChannelInstallation,
+    action: 'bind' | 'revoke',
+    binding?: ChannelIdentityBindingV1,
+  ): Promise<void> => {
+    if (busy) return;
+    if (!approvalId.trim()) {
+      setError('请填写审批 ID；审批人将使用当前 Otto 登录身份。');
+      return;
+    }
+    if (action === 'bind' && (!providerUserId.trim() || !canonicalUserId.trim())) {
+      setError('请填写渠道用户 ID 和 Otto 用户 ID。');
+      return;
+    }
+    if (action === 'revoke' && binding && confirmIdentityRevoke !== binding.providerUserId) {
+      setConfirmIdentityRevoke(binding.providerUserId);
+      return;
+    }
+    if (typeof window.otto?.channelIdentityMutation !== 'function') {
+      setError('当前 Desktop 版本不支持身份绑定管理。');
+      return;
+    }
+    setBusy(installation.installationId);
+    setError(null);
+    try {
+      const current = binding ?? identities[installation.installationId]?.find(
+        (candidate) => candidate.providerUserId === providerUserId.trim(),
+      );
+      const response = await window.otto.channelIdentityMutation(
+        installation.installationId,
+        {
+          action,
+          providerUserId: binding?.providerUserId ?? providerUserId.trim(),
+          ...(action === 'bind' ? { canonicalUserId: canonicalUserId.trim() } : {}),
+          approvalId: approvalId.trim(),
+          expectedRevision: current?.revision ?? 0,
+        },
+      );
+      if (!response?.ok) setError(response?.error ?? '身份操作失败。');
+      else {
+        setProviderUserId('');
+        setCanonicalUserId('');
+        setApprovalId('');
+        await load();
+      }
+    } finally {
+      setBusy(null);
+      setConfirmIdentityRevoke(null);
+    }
+  };
+
   return (
     <div className="otto-channel-installations">
       <div className="otto-hub__section-title">已安装机器人</div>
@@ -129,7 +196,57 @@ export function ChannelInstallationList({
               >
                 {confirmRevoke === installation.installationId ? '再次点击确认注销' : '注销连接'}
               </button>
+              <button
+                type="button"
+                className="otto-hub__btn"
+                aria-expanded={identityPanel === installation.installationId}
+                onClick={() => setIdentityPanel((current) =>
+                  current === installation.installationId ? null : installation.installationId)}
+              >
+                身份管理
+              </button>
             </div>
+            {identityPanel === installation.installationId ? (
+              <div className="otto-channel-identities">
+                <div className="otto-hub__field-hint">只有已绑定且启用的身份可以从聊天控制 Otto。</div>
+                {(identities[installation.installationId] ?? []).map((binding) => (
+                  <div className="otto-channel-identities__row" key={binding.providerUserId}>
+                    <span>{binding.providerUserId} → {binding.canonicalUserId}</span>
+                    <Badge>{binding.active ? `已启用 · r${binding.revision}` : `已撤销 · r${binding.revision}`}</Badge>
+                    {binding.active ? (
+                      <button
+                        type="button"
+                        className="otto-hub__btn otto-hub__btn--danger"
+                        disabled={working}
+                        onClick={() => void mutateIdentity(installation, 'revoke', binding)}
+                      >
+                        {confirmIdentityRevoke === binding.providerUserId ? '再次点击确认撤销身份' : '撤销身份'}
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+                <label className="otto-hub__field">
+                  <span>渠道用户 ID</span>
+                  <input value={providerUserId} onChange={(event) => setProviderUserId(event.target.value)} />
+                </label>
+                <label className="otto-hub__field">
+                  <span>Otto 用户 ID</span>
+                  <input value={canonicalUserId} onChange={(event) => setCanonicalUserId(event.target.value)} />
+                </label>
+                <label className="otto-hub__field">
+                  <span>审批 ID</span>
+                  <input value={approvalId} onChange={(event) => setApprovalId(event.target.value)} />
+                </label>
+                <button
+                  type="button"
+                  className="otto-hub__btn otto-hub__btn--primary"
+                  disabled={working}
+                  onClick={() => void mutateIdentity(installation, 'bind')}
+                >
+                  保存身份绑定
+                </button>
+              </div>
+            ) : null}
           </Card>
         );
       })}

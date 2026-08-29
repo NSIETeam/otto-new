@@ -124,7 +124,7 @@ describe('ModuleWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开 PPT 创作专家' }));
     expect(onActivate).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent-ppt' }));
 
-    fireEvent.click(screen.getByRole('button', { name: '向园区服务添加模块' }));
+    fireEvent.click(screen.getByRole('button', { name: '管理“园区服务”中的模块' }));
     expect(onOpenMarketplace).toHaveBeenCalledWith('park-services');
   });
 
@@ -132,7 +132,7 @@ describe('ModuleWorkspace', () => {
     const { container } = renderWorkspace();
     const parkGrid = container.querySelector('[data-group-id="park-services"] .otto-module-group__grid');
     const parkChildren = parkGrid?.children ?? [];
-    const addModule = screen.getByRole('button', { name: '向园区服务添加模块' });
+    const addModule = screen.getByRole('button', { name: '管理“园区服务”中的模块' });
     const workspace = container.querySelector('.otto-module-workspace');
     const addGroup = screen.getByRole('button', { name: '添加功能组' });
 
@@ -271,7 +271,7 @@ describe('ModuleWorkspace', () => {
 
     const grid = container.querySelector('.otto-module-group__grid');
     expect(grid?.children).toHaveLength(7);
-    expect(grid?.children[6]).toBe(screen.getByRole('button', { name: '向六个模块添加模块' }));
+    expect(grid?.children[6]).toBe(screen.getByRole('button', { name: '管理“六个模块”中的模块' }));
     expect(grid?.classList.contains('otto-module-group__grid--rows-3')).toBe(true);
     expect(grid?.classList.contains('is-overflowing')).toBe(false);
   });
@@ -362,7 +362,7 @@ describe('ModuleWorkspace', () => {
   it('removes a module in edit mode and can undo for five seconds', () => {
     renderControlledWorkspace();
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     fireEvent.click(screen.getByRole('button', { name: '移除 园区公告' }));
     expect(screen.queryByRole('button', { name: '打开 园区公告' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '撤销移除' }));
@@ -376,7 +376,7 @@ describe('ModuleWorkspace', () => {
   it('invalidates stale undo after another layout edit', () => {
     renderControlledWorkspace();
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     fireEvent.click(screen.getByRole('button', { name: '移除 园区公告' }));
     expect(screen.getByRole('button', { name: '撤销移除' })).toBeTruthy();
 
@@ -393,7 +393,7 @@ describe('ModuleWorkspace', () => {
   it('clears transient editing and undo state when the storage scope changes', () => {
     const view = renderControlledWorkspace('scope-a');
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     fireEvent.click(screen.getByRole('button', { name: '移除 园区公告' }));
     expect(screen.getByRole('button', { name: '撤销移除' })).toBeTruthy();
 
@@ -431,7 +431,7 @@ describe('ModuleWorkspace', () => {
       .toEqual(['日常办公', '园区服务']);
 
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     const satisfaction = screen.getByRole('button', { name: '打开 满意度调查' });
     fireEvent.keyDown(satisfaction, { key: 'ArrowLeft' });
     const grid = document.querySelector('[data-group-id="park-services"] .otto-module-group__grid');
@@ -460,7 +460,7 @@ describe('ModuleWorkspace', () => {
   it('keeps editing visuals limited to remove controls', () => {
     renderControlledWorkspace();
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
 
     expect(screen.getByRole('button', { name: '移除 园区公告' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '拖动模块：园区公告' })).toBeNull();

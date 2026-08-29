@@ -219,6 +219,26 @@ export function addOrMoveModules(
   };
 }
 
+export function updateGroupModuleSelection(
+  layout: ModuleWorkspaceLayout,
+  targetGroupId: string,
+  moduleIds: readonly string[],
+): ModuleWorkspaceLayout {
+  if (!layout.groups.some((group) => group.id === targetGroupId)) return layout;
+
+  const selected = [...new Set(moduleIds.map((moduleId) => moduleId.trim()).filter(Boolean))];
+  const selectedSet = new Set(selected);
+  return {
+    ...layout,
+    groups: layout.groups.map((group) => group.id === targetGroupId
+      ? { ...group, moduleIds: selected }
+      : {
+        ...group,
+        moduleIds: group.moduleIds.filter((moduleId) => !selectedSet.has(moduleId)),
+      }),
+  };
+}
+
 function nextUniqueLabel(base: string, existing: Set<string>): string {
   if (!existing.has(base)) return base;
   let suffix = 2;

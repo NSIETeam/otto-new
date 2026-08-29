@@ -1508,6 +1508,7 @@ function OttoWorkspaceApp({
         onConfirm={(next) => { moduleWorkspace.setLayout(next); setModuleModal(null); }}
         onClose={() => setModuleModal(null)}
         onManageExperts={() => openModuleModal({ kind: 'custom-expert' })}
+        onDeleteExpert={handleDeleteCustomAgent}
         onCreateModule={() => openModuleModal({ kind: 'customer-module-authoring' })}
         onBrowseCustomerModules={() => openModuleModal({ kind: 'customer-module-market' })}
       />

@@ -38,6 +38,7 @@ function renderDialog(overrides: Partial<React.ComponentProps<typeof ModuleMarke
   const onConfirm = vi.fn();
   const onClose = vi.fn();
   const onManageExperts = vi.fn();
+  const onDeleteExpert = vi.fn();
   const view = render(
     <ModuleMarketplaceDialog
       open
@@ -47,21 +48,24 @@ function renderDialog(overrides: Partial<React.ComponentProps<typeof ModuleMarke
       onConfirm={onConfirm}
       onClose={onClose}
       onManageExperts={onManageExperts}
+      onDeleteExpert={onDeleteExpert}
       {...overrides}
     />,
   );
-  return { ...view, onConfirm, onClose, onManageExperts };
+  return { ...view, onConfirm, onClose, onManageExperts, onDeleteExpert };
 }
 
 describe('ModuleMarketplaceDialog', () => {
-  it('searches categories and applies a multi-select draft only on confirmation', () => {
+  it('adds and removes modules in one draft, applying it only on confirmation', () => {
     const { onConfirm } = renderDialog();
     expect(screen.getByRole('heading', { name: '常用' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '园区服务' })).toBeTruthy();
 
     const current = screen.getByRole('checkbox', { name: '园区公告' }) as HTMLInputElement;
     expect(current.checked).toBe(true);
-    expect(current.disabled).toBe(true);
+    expect(current.disabled).toBe(false);
+    expect(current.closest('label')?.textContent).toContain('取消勾选可移除');
+    fireEvent.click(current);
 
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索模块' }), {
       target: { value: 'PPT' },
@@ -70,13 +74,13 @@ describe('ModuleMarketplaceDialog', () => {
     expect(screen.queryByRole('checkbox', { name: '园区公告' })).toBeNull();
     fireEvent.click(ppt);
     expect(onConfirm).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '添加（1）' }));
+    fireEvent.click(screen.getByRole('button', { name: /保存更改/ }));
 
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
       groups: [
         expect.objectContaining({
           id: 'park-services',
-          moduleIds: ['park-announcement', 'agent-ppt'],
+          moduleIds: ['agent-ppt'],
         }),
         expect.objectContaining({ id: 'daily-office', moduleIds: [] }),
       ],
@@ -92,8 +96,18 @@ describe('ModuleMarketplaceDialog', () => {
     expect(memory.disabled).toBe(true);
     expect(memory.closest('label')?.textContent).toContain('需要企业知识库权限');
 
-    fireEvent.click(screen.getByRole('button', { name: '创建专家模块' }));
+    fireEvent.click(screen.getByRole('button', { name: '管理/删除我的专家' }));
     expect(onManageExperts).toHaveBeenCalledTimes(1);
+  });
+
+  it('deletes a user-created expert directly after confirmation', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const { onDeleteExpert } = renderDialog();
+
+    fireEvent.click(screen.getByRole('button', { name: '删除专家 客户成功助手' }));
+
+    expect(confirm).toHaveBeenCalledWith('永久删除专家“客户成功助手”？删除后会同时从所有功能组移除。');
+    expect(onDeleteExpert).toHaveBeenCalledWith('custom');
   });
 
   it('uses group identity rather than duplicate display names for module ownership', () => {
@@ -116,7 +130,7 @@ describe('ModuleMarketplaceDialog', () => {
 
   it('closes from backdrop and Escape', () => {
     const { onClose } = renderDialog();
-    const dialog = screen.getByRole('dialog', { name: '添加模块' });
+    const dialog = screen.getByRole('dialog', { name: '管理模块' });
     const backdrop = dialog.parentElement!;
 
     fireEvent.mouseDown(backdrop);
@@ -131,12 +145,12 @@ describe('ModuleMarketplaceDialog', () => {
     document.body.append(trigger);
     trigger.focus();
     const { rerender } = renderDialog();
-    const dialog = screen.getByRole('dialog', { name: '添加模块' });
-    const close = within(dialog).getByRole('button', { name: '关闭添加模块' });
+    const dialog = screen.getByRole('dialog', { name: '管理模块' });
+    const close = within(dialog).getByRole('button', { name: '关闭模块管理' });
     expect(document.activeElement).toBe(close);
 
     fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
-    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '创建专家模块' }));
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: '管理/删除我的专家' }));
     rerender(
       <ModuleMarketplaceDialog
         open={false}

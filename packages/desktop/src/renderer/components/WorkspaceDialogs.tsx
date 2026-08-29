@@ -362,6 +362,9 @@ export function CustomAgentManagerDialog({
         {error ? <p role="alert" className="otto-workspace-dialog__error">{error}</p> : null}
         <button type="submit">创建专家</button>
       </form>
+      {agents.length ? (
+        <p className="otto-custom-agent-list__hint">删除后，该专家会同时从所有功能组移除。</p>
+      ) : null}
       <div className="otto-workspace-dialog__list otto-custom-agent-list">
         {agents.map((agent) => (
           <article key={agent.id}>
@@ -384,8 +387,12 @@ export function CustomAgentManagerDialog({
               />
               <button
                 type="button"
+                className="otto-custom-agent-list__delete"
+                aria-label={`删除专家 ${agent.name}`}
                 onClick={() => {
-                  if (window.confirm(`删除专家“${agent.name}”？`)) onDelete(agent.id);
+                  if (window.confirm(
+                    `永久删除专家“${agent.name}”？删除后会同时从所有功能组移除。`,
+                  )) onDelete(agent.id);
                 }}
               >
                 删除

@@ -114,7 +114,7 @@ describe('ModuleWorkspace drag reorder contract', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     const groupList = container.querySelector('[data-reorder-group="groups"]');
     expect(groupList).toBeTruthy();
 
@@ -140,7 +140,7 @@ describe('ModuleWorkspace drag reorder contract', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     const moduleGrid = container.querySelector('[data-reorder-group="modules:park-services"]');
     expect(moduleGrid).toBeTruthy();
 
@@ -167,7 +167,7 @@ describe('ModuleWorkspace drag reorder contract', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     expect(container.querySelector('.otto-module-workspace.is-reduced-motion')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '拖动功能组：园区服务' })).toBeNull();
     expect(screen.queryByRole('button', { name: '拖动模块：园区公告' })).toBeNull();

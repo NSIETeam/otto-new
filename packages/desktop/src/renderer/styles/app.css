@@ -849,6 +849,11 @@
   gap: 8px;
 }
 
+.otto-module-marketplace__module-wrap {
+  position: relative;
+  min-width: 0;
+}
+
 .otto-module-marketplace__module {
   display: grid;
   min-width: 0;
@@ -859,6 +864,37 @@
   border: 1px solid var(--otto-border);
   border-radius: 12px;
   cursor: pointer;
+}
+
+.otto-module-marketplace__module.has-delete-action {
+  height: 100%;
+  padding-right: 66px;
+}
+
+.otto-module-marketplace__module.is-removing {
+  border-color: color-mix(in srgb, var(--otto-danger) 58%, var(--otto-border));
+  background: color-mix(in srgb, var(--otto-danger) 8%, var(--otto-surface));
+}
+
+.otto-module-marketplace__delete {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: 9px;
+  min-height: 28px;
+  padding: 0 9px;
+  transform: translateY(-50%);
+  border: 1px solid color-mix(in srgb, var(--otto-danger) 46%, var(--otto-border));
+  border-radius: 8px;
+  background: var(--otto-surface);
+  color: var(--otto-danger);
+  font: 600 11px var(--otto-font);
+  cursor: pointer;
+}
+
+.otto-module-marketplace__delete:hover {
+  border-color: var(--otto-danger);
+  background: color-mix(in srgb, var(--otto-danger) 9%, var(--otto-surface));
 }
 
 .otto-module-marketplace__module:hover:not(.is-disabled) {
@@ -897,6 +933,14 @@
 
 .otto-module-marketplace__footer {
   border-top: 1px solid var(--otto-border);
+}
+
+.otto-module-marketplace__error {
+  margin: 0;
+  padding: 10px 18px;
+  border-top: 1px solid var(--otto-border);
+  color: var(--otto-danger);
+  font-size: 12px;
 }
 
 .otto-module-marketplace__manage,
@@ -12682,6 +12726,17 @@ h6.otto-prose__h {
 .otto-workspace-dialog__list small { color: var(--otto-text-tertiary); }
 .otto-workspace-dialog__list footer { margin-top: 10px; }
 .otto-workspace-dialog__error { color: var(--otto-danger); }
+
+.otto-custom-agent-list__hint {
+  margin: 0 0 10px;
+  color: var(--otto-text-secondary);
+  font-size: 12px;
+}
+
+.otto-workspace-dialog .otto-custom-agent-list__delete {
+  border-color: color-mix(in srgb, var(--otto-danger) 46%, var(--otto-border));
+  color: var(--otto-danger);
+}
 
 /* 自定义专家模块图标 */
 .otto-module-icon--image {

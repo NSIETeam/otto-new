@@ -255,6 +255,30 @@ describe('WorkspaceDialogs', () => {
     expect(screen.getByLabelText('选择本地图片')).toBeTruthy();
   });
 
+  it('已有专家可在我的专家中确认后永久删除', () => {
+    const onDelete = vi.fn();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<CustomAgentManagerDialog
+      open
+      agents={[{
+        id: 'custom-bid',
+        name: '招投标助手',
+        instructions: '整理投标材料。',
+        createdAt: '2026-08-27T00:00:00.000Z',
+      }]}
+      onGenerate={vi.fn()}
+      onCreate={vi.fn()}
+      onDelete={onDelete}
+      onUpdateIcon={vi.fn()}
+      onClose={vi.fn()}
+    />);
+
+    expect(screen.getByText('删除后，该专家会同时从所有功能组移除。')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '删除专家 招投标助手' }));
+
+    expect(onDelete).toHaveBeenCalledWith('custom-bid');
+  });
+
   it('图标选择面板可以明确关闭，且不会修改当前图标', () => {
     const onUpdateIcon = vi.fn();
     render(<CustomAgentManagerDialog

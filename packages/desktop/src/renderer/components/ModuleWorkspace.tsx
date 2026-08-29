@@ -528,7 +528,7 @@ export function ModuleWorkspace({
                         setOpenPopover(null);
                       }}
                     >
-                      {editingGroupId === group.id ? '完成编辑' : '编辑模块'}
+                      {editingGroupId === group.id ? '完成调整' : '调整/移除模块'}
                     </button>
                     <button
                       type="button"
@@ -676,11 +676,11 @@ export function ModuleWorkspace({
               <button
                 type="button"
                 className="otto-module-group__add"
-                aria-label={`向${group.name}添加模块`}
+                aria-label={`管理“${group.name}”中的模块`}
                 onClick={() => onOpenMarketplace(group.id)}
               >
                 <span className="otto-module-group__add-icon" aria-hidden>＋</span>
-                <span>添加模块</span>
+                <span>管理模块</span>
               </button>
             </Reorder.Group>
           </article>

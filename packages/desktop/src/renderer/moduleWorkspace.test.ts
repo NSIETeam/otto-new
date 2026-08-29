@@ -14,6 +14,7 @@ import {
   reorderModulesInGroup,
   resolveModuleGridColumns,
   restoreDefaultModuleWorkspace,
+  updateGroupModuleSelection,
   updateModuleGroupRows,
   validateModuleGroupName,
   type ModuleWorkspaceCapabilities,
@@ -205,6 +206,27 @@ describe('module workspace layout operations', () => {
       'agent-excel',
     ]);
     expect(next.groups[1].moduleIds).toEqual(['agent-word']);
+  });
+
+  it('applies additions and removals for one group as a single selection', () => {
+    const next = updateGroupModuleSelection(
+      sampleLayout(),
+      'park-services',
+      ['park-satisfaction', 'agent-ppt', 'agent-excel', 'agent-ppt'],
+    );
+
+    expect(next.groups[0].moduleIds).toEqual([
+      'park-satisfaction',
+      'agent-ppt',
+      'agent-excel',
+    ]);
+    expect(next.groups[1].moduleIds).toEqual(['agent-word']);
+  });
+
+  it('ignores a group selection update when the target group does not exist', () => {
+    const current = sampleLayout();
+
+    expect(updateGroupModuleSelection(current, 'missing', ['agent-ppt'])).toBe(current);
   });
 
   it('removes only the requested module from layout', () => {

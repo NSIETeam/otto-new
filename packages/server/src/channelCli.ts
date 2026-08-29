@@ -14,6 +14,7 @@ import type {
   PairingSession,
 } from './modules/integration_adapters/channelConnector.js';
 import { channelInstallationProofPayload } from './modules/integration_adapters/channelConnector.js';
+import type { ChannelIdentityBindingV1 } from './modules/integration_adapters/channelIdentityRegistry.js';
 
 export interface ChannelCliDependencies {
   readEndpointRecord(): ServerEndpointRecord | undefined;
@@ -24,7 +25,8 @@ export interface ChannelCliDependencies {
   sleep?: (milliseconds: number) => Promise<void>;
 }
 
-type ChannelCliAction = 'login' | 'list' | 'status' | 'start' | 'stop' | 'send' | 'logout';
+type ChannelCliAction = 'login' | 'list' | 'status' | 'start' | 'stop' | 'send' | 'logout'
+  | 'identities' | 'bind-user' | 'revoke-user';
 
 function parseArguments(args: readonly string[]): {
   action: ChannelCliAction;
@@ -32,10 +34,16 @@ function parseArguments(args: readonly string[]): {
   target?: string;
   text?: string;
   idempotencyKey?: string;
+  providerUserId?: string;
+  canonicalUserId?: string;
+  approvalId?: string;
+  approvedBy?: string;
+  expectedRevision?: number;
 } {
   const action = (args[0] ?? 'status') as ChannelCliAction;
-  if (!['login', 'list', 'status', 'start', 'stop', 'send', 'logout'].includes(action)) {
-    throw new Error('用法: otto <feishu|lark|wecom> <login|list|status|start|stop|send|logout> ...');
+  if (!['login', 'list', 'status', 'start', 'stop', 'send', 'logout',
+    'identities', 'bind-user', 'revoke-user'].includes(action)) {
+    throw new Error('用法: otto <feishu|lark|wecom> <login|list|status|start|stop|send|logout|identities|bind-user|revoke-user> ...');
   }
   const installationId = args[1];
   if (installationId && !/^channel_(feishu|lark|wecom)_[a-f0-9]{24}$/.test(installationId)) {
@@ -49,6 +57,29 @@ function parseArguments(args: readonly string[]): {
       throw new Error('用法: otto <provider> send <installation-id> <target> <text> <idempotency-key>');
     }
     return { action, installationId, target, text, idempotencyKey };
+  }
+  if (action === 'bind-user' || action === 'revoke-user') {
+    const providerUserId = args[2]?.trim();
+    const offset = action === 'bind-user' ? 1 : 0;
+    const canonicalUserId = action === 'bind-user' ? args[3]?.trim() : undefined;
+    const approvalId = args[3 + offset]?.trim();
+    const approvedBy = args[4 + offset]?.trim();
+    const rawRevision = args[5 + offset]?.trim();
+    const expectedRevision = rawRevision === undefined ? Number.NaN : Number(rawRevision);
+    if (!installationId || !providerUserId || (action === 'bind-user' && !canonicalUserId)
+      || !approvalId || !approvedBy || !Number.isSafeInteger(expectedRevision)
+      || expectedRevision < 0) {
+      throw new Error(
+        action === 'bind-user'
+          ? '用法: otto <provider> bind-user <installation-id> <provider-user-id> <otto-user-id> <approval-id> <approved-by> <expected-revision>'
+          : '用法: otto <provider> revoke-user <installation-id> <provider-user-id> <approval-id> <approved-by> <expected-revision>',
+      );
+    }
+    return {
+      action, installationId, providerUserId,
+      ...(canonicalUserId ? { canonicalUserId } : {}),
+      approvalId, approvedBy, expectedRevision,
+    };
   }
   return { action, ...(installationId ? { installationId } : {}) };
 }
@@ -184,6 +215,36 @@ export async function runChannelCli(
     if (input.action === 'logout') {
       await request(`/channels/installations/${installation.installationId}`, 'DELETE');
       stdout(`${provider}: 已注销 ${installation.tenantName}`);
+      return 0;
+    }
+    if (input.action === 'identities') {
+      const identities = (await request(
+        `/channels/installations/${installation.installationId}/identities`,
+      )) as ChannelIdentityBindingV1[];
+      if (identities.length === 0) stdout(`${provider}: 暂无身份绑定`);
+      else identities.forEach((identity) => stdout(
+        `${identity.providerUserId}\t${identity.canonicalUserId}\t` +
+        `${identity.active ? 'active' : 'revoked'}\trevision=${identity.revision}`,
+      ));
+      return 0;
+    }
+    if (input.action === 'bind-user' || input.action === 'revoke-user') {
+      const identity = (await request(
+        `/channels/installations/${installation.installationId}/identities`,
+        'POST',
+        {
+          action: input.action === 'bind-user' ? 'bind' : 'revoke',
+          providerUserId: input.providerUserId,
+          ...(input.canonicalUserId ? { canonicalUserId: input.canonicalUserId } : {}),
+          approvalId: input.approvalId,
+          approvedBy: input.approvedBy,
+          expectedRevision: input.expectedRevision,
+        },
+      )) as ChannelIdentityBindingV1;
+      stdout(
+        `${provider}: ${identity.active ? '已绑定' : '已撤销'} ` +
+        `${identity.providerUserId} -> ${identity.canonicalUserId} revision=${identity.revision}`,
+      );
       return 0;
     }
     if (input.action === 'send') {

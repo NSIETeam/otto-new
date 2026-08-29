@@ -179,4 +179,45 @@ describe('runChannelCli', () => {
     expect(errors.join('\n')).toContain('控制令牌');
     expect(errors.join('\n')).toContain('非回环');
   });
+
+  it('lists, binds and revokes identities through the same local control API', async () => {
+    const output: string[] = [];
+    const active = {
+      provider: 'lark', installationId: installation.installationId, tenantId: 'tenant-1',
+      providerUserId: 'ou_user_1', canonicalUserId: 'otto-user-1', active: true,
+      revision: 1, approvalId: 'approval-1', approvedBy: 'admin-1',
+      boundAtMs: 1, updatedAtMs: 1,
+    };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json([installation])).mockResolvedValueOnce(json([active]))
+      .mockResolvedValueOnce(json([installation])).mockResolvedValueOnce(json(active))
+      .mockResolvedValueOnce(json([installation])).mockResolvedValueOnce(json({
+        ...active, active: false, revision: 2, approvalId: 'approval-2',
+      }));
+    const dependencies = {
+      readEndpointRecord: () => endpoint,
+      fetchImpl,
+      stdout: (text: string) => output.push(text),
+    };
+    await expect(runChannelCli('lark', ['identities', installation.installationId], dependencies))
+      .resolves.toBe(0);
+    await expect(runChannelCli('lark', [
+      'bind-user', installation.installationId, 'ou_user_1', 'otto-user-1',
+      'approval-1', 'admin-1', '0',
+    ], dependencies)).resolves.toBe(0);
+    await expect(runChannelCli('lark', [
+      'revoke-user', installation.installationId, 'ou_user_1',
+      'approval-2', 'admin-1', '1',
+    ], dependencies)).resolves.toBe(0);
+    expect(JSON.parse(String(fetchImpl.mock.calls[3][1]?.body))).toEqual({
+      action: 'bind', providerUserId: 'ou_user_1', canonicalUserId: 'otto-user-1',
+      approvalId: 'approval-1', approvedBy: 'admin-1', expectedRevision: 0,
+    });
+    expect(JSON.parse(String(fetchImpl.mock.calls[5][1]?.body))).toEqual({
+      action: 'revoke', providerUserId: 'ou_user_1',
+      approvalId: 'approval-2', approvedBy: 'admin-1', expectedRevision: 1,
+    });
+    expect(output.join('\n')).toContain('ou_user_1\totto-user-1\tactive\trevision=1');
+    expect(output.join('\n')).toContain('已撤销 ou_user_1 -> otto-user-1 revision=2');
+  });
 });

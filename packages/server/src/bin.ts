@@ -20,12 +20,14 @@ import { OttoServer } from './server.js';
 import {
   clearEndpoint,
   readEndpoint,
+  readEndpointRecord,
   writeEndpoint,
 } from './endpoint.js';
 import { DEFAULT_HOST, DEFAULT_PORT } from './protocol.js';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join as pathJoin } from 'node:path';
+import { runChannelCli } from './channelCli.js';
 
 /** 飞书凭证文件是否存在。与 desktop ServerManager 使用同一检测逻辑。 */
 function feishuCredentialsExist(): boolean {
@@ -125,9 +127,16 @@ async function main(): Promise<void> {
     case 'stop':
       cmdStop();
       break;
+    case 'feishu':
+    case 'lark':
+    case 'wecom':
+      process.exitCode = await runChannelCli(cmd, process.argv.slice(3), {
+        readEndpointRecord,
+      });
+      break;
     default:
 
-      console.error(`未知命令: ${cmd}（用 start | stop | status）`);
+      console.error(`未知命令: ${cmd}（用 start | stop | status | feishu | lark | wecom）`);
       process.exitCode = 2;
   }
 }

@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
+    "otto": "dist/bin.js",
     "otto-server": "dist/bin.js",
     "otto-database-encryption": "dist/src/modules/data_platform/databaseEncryptionCli.js",
     "otto-enterprise-infrastructure": "dist/src/modules/data_platform/enterpriseInfrastructureCli.js",

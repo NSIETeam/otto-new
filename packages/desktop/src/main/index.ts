@@ -60,6 +60,7 @@ import type {
 import {
   CustomerModuleHostBroker,
   CustomerModuleRunner,
+  RecurringTaskRegistry,
   parseCustomerModuleManifest,
   scanCustomerModuleWasm,
   validateCustomerModuleArchiveEntries,
@@ -519,6 +520,12 @@ let enterpriseTrayContacts: EnterpriseTrayContact[] = [];
 let isQuitting = false;
 /** Ephemeral private keys for in-progress provider pairings; never exposed to renderer. */
 const channelPairingPrivateKeys = new Map<string, string>();
+const desktopRecurringTasks = new RecurringTaskRegistry({
+  allowPaidBackground: false,
+  onError: (taskName, error) => {
+    console.warn(`[otto-desktop] 后台任务 ${taskName} 失败:`, error);
+  },
+});
 /** 视频编辑器窗口（OpenReel）。 */
 let videoEditorWindow: BrowserWindow | undefined;
 
@@ -1014,28 +1021,42 @@ const enterpriseSkillUsageReporter = new EnterpriseSkillUsageReporter({
 const enterpriseRegistrationIntents = new EnterpriseRegistrationIntentStore();
 let enterpriseSessionLoaded = false;
 let enterpriseIntentRendererReady = false;
-let enterpriseIdentityRefreshTimer: ReturnType<typeof setInterval> | undefined;
+let stopEnterpriseIdentityRefreshTask: (() => void) | undefined;
 const ENTERPRISE_IDENTITY_REFRESH_INTERVAL_MS = 2 * 60_000;
-let enterpriseModuleUpdateTimer: ReturnType<typeof setInterval> | undefined;
+let stopEnterpriseModuleUpdateTask: (() => void) | undefined;
 let enterpriseModuleUpdateFingerprint = '';
 let enterpriseModuleUpdatePolling = false;
 const ENTERPRISE_MODULE_UPDATE_POLL_INTERVAL_MS = 2 * 60_000;
-let enterpriseSkillUsageTimer: ReturnType<typeof setInterval> | undefined;
+let stopEnterpriseSkillUsageTask: (() => void) | undefined;
 const ENTERPRISE_SKILL_USAGE_POLL_INTERVAL_MS = 30_000;
 
 function startEnterpriseSkillUsageReporting(): void {
-  if (enterpriseSkillUsageTimer) return;
-  enterpriseSkillUsageTimer = setInterval(() => {
-    if (!isQuitting) void enterpriseSkillUsageReporter.poll();
-  }, ENTERPRISE_SKILL_USAGE_POLL_INTERVAL_MS);
-  enterpriseSkillUsageTimer.unref?.();
-  void enterpriseSkillUsageReporter.poll();
+  if (stopEnterpriseSkillUsageTask) return;
+  stopEnterpriseSkillUsageTask = desktopRecurringTasks.register({
+    name: 'desktop-enterprise-skill-usage-reporting',
+    source: 'packages/desktop/src/main/index.ts#enterprise-skill-usage',
+    definitionVersion: 1,
+    intervalMs: ENTERPRISE_SKILL_USAGE_POLL_INTERVAL_MS,
+    initialDelayMs: 0,
+    missedRunPolicy: 'skip',
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => {
+      try {
+        const stats = fs.statSync(path.join(worklogRootDir(), 'skill_usage.jsonl'));
+        return `${stats.size}:${stats.mtimeMs}`;
+      } catch {
+        return undefined;
+      }
+    },
+    run: async () => {
+      if (!isQuitting) await enterpriseSkillUsageReporter.poll();
+    },
+  });
 }
 
 function stopEnterpriseSkillUsageReporting(): void {
-  if (!enterpriseSkillUsageTimer) return;
-  clearInterval(enterpriseSkillUsageTimer);
-  enterpriseSkillUsageTimer = undefined;
+  stopEnterpriseSkillUsageTask?.();
+  stopEnterpriseSkillUsageTask = undefined;
 }
 
 function acceptEnterpriseRegistrationUrl(input: string): boolean {
@@ -1126,13 +1147,24 @@ function saveEnterpriseSession(): void {
 }
 
 function startEnterpriseIdentityRefresh(): void {
-  if (enterpriseIdentityRefreshTimer) return;
-  enterpriseIdentityRefreshTimer = setInterval(() => {
-    if (isQuitting) return;
-    loadEnterpriseSession();
-    if (!enterpriseClient.snapshot().token) return;
-    void enterpriseAuthOperations
-      .run(async () => {
+  if (stopEnterpriseIdentityRefreshTask) return;
+  stopEnterpriseIdentityRefreshTask = desktopRecurringTasks.register({
+    name: 'desktop-enterprise-identity-refresh',
+    source: 'packages/desktop/src/main/index.ts#enterprise-identity-refresh',
+    definitionVersion: 1,
+    intervalMs: ENTERPRISE_IDENTITY_REFRESH_INTERVAL_MS,
+    initialDelayMs: ENTERPRISE_IDENTITY_REFRESH_INTERVAL_MS,
+    missedRunPolicy: 'skip',
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => {
+      const account = enterpriseClient.authenticatedAccountSnapshot();
+      return !isQuitting && enterpriseClient.snapshot().token && account
+        ? `${account.id}:bucket:${Math.floor(Date.now() / ENTERPRISE_IDENTITY_REFRESH_INTERVAL_MS)}`
+        : undefined;
+    },
+    run: async () => {
+      loadEnterpriseSession();
+      await enterpriseAuthOperations.run(async () => {
         if (!enterpriseClient.snapshot().token) return;
         const session = await enterpriseClient.getSession();
         const outcome = await refreshEnterpriseIdentityLease(
@@ -1146,12 +1178,9 @@ function startEnterpriseIdentityRefresh(): void {
           enterpriseMlsOutboxRetry.wake();
           enterpriseMlsInboundPoll.wake();
         }
-      })
-      .catch((error) => {
-        console.warn('[otto-desktop] 刷新企业身份短租约失败:', error);
       });
-  }, ENTERPRISE_IDENTITY_REFRESH_INTERVAL_MS);
-  enterpriseIdentityRefreshTimer.unref?.();
+    },
+  });
 }
 
 function notifyEnterpriseAccountUpdated(account: EnterpriseAccount): void {
@@ -1162,9 +1191,8 @@ function notifyEnterpriseAccountUpdated(account: EnterpriseAccount): void {
 }
 
 function stopEnterpriseIdentityRefresh(): void {
-  if (!enterpriseIdentityRefreshTimer) return;
-  clearInterval(enterpriseIdentityRefreshTimer);
-  enterpriseIdentityRefreshTimer = undefined;
+  stopEnterpriseIdentityRefreshTask?.();
+  stopEnterpriseIdentityRefreshTask = undefined;
 }
 
 /**
@@ -1272,19 +1300,29 @@ async function checkEnterpriseModuleUpdates(
 }
 
 function startEnterpriseModuleUpdatePolling(): void {
-  if (enterpriseModuleUpdateTimer) return;
-  enterpriseModuleUpdateTimer = setInterval(() => {
-    if (isQuitting) return;
-    void checkEnterpriseModuleUpdates('interval');
-  }, ENTERPRISE_MODULE_UPDATE_POLL_INTERVAL_MS);
-  enterpriseModuleUpdateTimer.unref?.();
+  if (stopEnterpriseModuleUpdateTask) return;
+  stopEnterpriseModuleUpdateTask = desktopRecurringTasks.register({
+    name: 'desktop-enterprise-module-update-check',
+    source: 'packages/desktop/src/main/index.ts#enterprise-module-updates',
+    definitionVersion: 1,
+    intervalMs: ENTERPRISE_MODULE_UPDATE_POLL_INTERVAL_MS,
+    initialDelayMs: ENTERPRISE_MODULE_UPDATE_POLL_INTERVAL_MS,
+    missedRunPolicy: 'skip',
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => {
+      const account = enterpriseClient.authenticatedAccountSnapshot();
+      return !isQuitting && enterpriseClient.snapshot().token && account
+        ? `${account.id}:bucket:${Math.floor(Date.now() / ENTERPRISE_MODULE_UPDATE_POLL_INTERVAL_MS)}`
+        : undefined;
+    },
+    run: () => checkEnterpriseModuleUpdates('interval'),
+  });
   void checkEnterpriseModuleUpdates('startup');
 }
 
 function stopEnterpriseModuleUpdatePolling(): void {
-  if (!enterpriseModuleUpdateTimer) return;
-  clearInterval(enterpriseModuleUpdateTimer);
-  enterpriseModuleUpdateTimer = undefined;
+  stopEnterpriseModuleUpdateTask?.();
+  stopEnterpriseModuleUpdateTask = undefined;
 }
 
 function resetEnterpriseModuleUpdateState(): void {
@@ -2062,13 +2100,33 @@ function createTray(): void {
   };
 
   updateMenu();
-  setInterval(() => {
-    if (tray && !tray.isDestroyed()) updateMenu();
-  }, 2000);
+  desktopRecurringTasks.register({
+    name: 'desktop-tray-menu-refresh',
+    source: 'packages/desktop/src/main/index.ts#tray-menu',
+    definitionVersion: 1,
+    intervalMs: 2_000,
+    initialDelayMs: 2_000,
+    missedRunPolicy: 'skip',
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => tray && !tray.isDestroyed()
+      ? `bucket:${Math.floor(Date.now() / 2_000)}`
+      : undefined,
+    run: () => updateMenu(),
+  });
   void refreshEnterpriseTrayContacts();
-  setInterval(() => {
-    void refreshEnterpriseTrayContacts();
-  }, 8000);
+  desktopRecurringTasks.register({
+    name: 'desktop-enterprise-tray-contacts',
+    source: 'packages/desktop/src/main/index.ts#tray-contacts',
+    definitionVersion: 1,
+    intervalMs: 8_000,
+    initialDelayMs: 8_000,
+    missedRunPolicy: 'skip',
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => !isQuitting && enterpriseClient.snapshot().token
+      ? `bucket:${Math.floor(Date.now() / 8_000)}`
+      : undefined,
+    run: () => refreshEnterpriseTrayContacts(),
+  });
 
   tray.on('click', () => {
     void toggleEnterpriseTrayPopover();
@@ -5111,6 +5169,8 @@ if (!gotLock) {
     stopEnterpriseIdentityRefresh();
     stopEnterpriseModuleUpdatePolling();
     stopEnterpriseSkillUsageReporting();
+    desktopRecurringTasks.stopAll();
+    channelPairingPrivateKeys.clear();
     if (quitCleanupFinished) return;
     event.preventDefault();
     if (quitCleanupStarted) return;

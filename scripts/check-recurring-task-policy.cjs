@@ -13,7 +13,6 @@ const legacyMaximums = new Map(Object.entries({
   'packages/core/src/services/taskWatchdog.ts': 1,
   'packages/core/src/tools/generate-document.ts': 1,
   'packages/core/src/tools/shell.ts': 1,
-  'packages/desktop/src/main/index.ts': 5,
   'packages/desktop/src/main/server-manager.ts': 1,
   'packages/desktop/src/renderer/App.tsx': 4,
   'packages/desktop/src/renderer/components/AccountManagementPage.tsx': 1,

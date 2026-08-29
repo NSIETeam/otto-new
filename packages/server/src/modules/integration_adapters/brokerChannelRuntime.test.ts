@@ -116,6 +116,35 @@ describe('BrokerChannelRuntimeV1', () => {
     );
   });
 
+  it.each([429, 503])(
+    'does not replay an external write after broker HTTP %s',
+    async (status) => {
+      const fetchImpl = vi.fn(async () => new Response('', { status }));
+      const runtime = new BrokerChannelRuntimeV1({
+        baseUrl: 'https://connect.otto.example',
+        createSocket: () => new FakeSocket(),
+        fetchImpl,
+        onInbound: async () => 'ack',
+      });
+
+      await expect(runtime.send(installation, credential, {
+        target: 'chat-1',
+        text: 'done',
+        idempotencyKey: 'msg:http-failure-0123456789',
+      })).rejects.toThrow(`managed channel broker request failed (${status})`);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(fetchImpl).toHaveBeenCalledWith(
+        `https://connect.otto.example/v1/channel-installations/${installation.installationId}/messages`,
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'idempotency-key': 'msg:http-failure-0123456789',
+          }),
+        }),
+      );
+    },
+  );
+
   it('stops explicitly without reconnecting after the socket closes', async () => {
     vi.useFakeTimers();
     try {

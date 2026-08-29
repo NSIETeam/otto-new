@@ -407,7 +407,9 @@ describe('ManagedChannelConnectorV1', () => {
     expect(broker.poll).toHaveBeenCalledTimes(3);
   });
 
-  it('does not replay a provider write whose timeout has an unknown outcome', async () => {
+  it.each(['provider timeout', 'managed channel broker request failed (429)', 'managed channel broker request failed (503)'])(
+    'does not replay a provider write whose outcome is unknown after %s',
+    async (failureMessage) => {
     const { connector, runtime, vault, outboundLedger } = setup();
     const installation = {
       installationId: 'channel_lark_0123456789abcdef01234567',
@@ -420,7 +422,7 @@ describe('ManagedChannelConnectorV1', () => {
     };
     await vault.commit(installation, 'credential');
     const sendMock = vi.mocked(runtime.send);
-    sendMock.mockRejectedValueOnce(new Error('provider timeout'));
+    sendMock.mockRejectedValueOnce(new Error(failureMessage));
     const input = {
       target: 'chat-1',
       text: 'long task completed',
@@ -428,7 +430,7 @@ describe('ManagedChannelConnectorV1', () => {
     };
 
     await expect(connector.send(installation.installationId, input))
-      .rejects.toThrow('provider timeout');
+      .rejects.toThrow(failureMessage);
     await expect(connector.send(installation.installationId, input))
       .rejects.toThrow('outcome is unknown');
     expect(sendMock).toHaveBeenCalledOnce();
@@ -438,5 +440,6 @@ describe('ManagedChannelConnectorV1', () => {
       input,
     );
     expect(outboundLedger.unknown).toHaveBeenCalledOnce();
-  });
+    },
+  );
 });

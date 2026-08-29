@@ -224,4 +224,50 @@ describe('channel pairing REST routes', () => {
     });
     expect(connector.send).toHaveBeenCalledWith(installationId, input);
   });
+
+  it('binds and revokes channel identities through the authenticated installation surface', async () => {
+    const connector = fakeConnector();
+    const { baseUrl, token } = await start({ feishu: connector });
+    const installationId = connector.listInstallations()[0].installationId;
+    const url = `${baseUrl}/channels/installations/${installationId}/identities`;
+    const body = JSON.stringify({
+      action: 'bind',
+      providerUserId: 'ou_provider_user_1',
+      canonicalUserId: 'otto-user-1',
+      approvalId: 'approval-1',
+      approvedBy: 'admin-1',
+      expectedRevision: 0,
+      // This untrusted field must never override the installation tenant.
+      tenantId: 'tenant-attacker',
+    });
+    expect((await fetch(url, { method: 'POST', body })).status).toBe(401);
+    const headers = {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    };
+    const bound = await fetch(url, { method: 'POST', headers, body });
+    expect(bound.status).toBe(200);
+    expect(await bound.json()).toMatchObject({
+      ok: true,
+      data: { tenantId: 'tenant-1', canonicalUserId: 'otto-user-1', revision: 1, active: true },
+    });
+    const listed = await fetch(url, { headers });
+    expect(await listed.json()).toMatchObject({
+      ok: true,
+      data: [{ tenantId: 'tenant-1', providerUserId: 'ou_provider_user_1', active: true }],
+    });
+
+    const stale = await fetch(url, { method: 'POST', headers, body });
+    expect(stale.status).toBe(409);
+    const revoked = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        action: 'revoke', providerUserId: 'ou_provider_user_1',
+        approvalId: 'approval-2', approvedBy: 'admin-1', expectedRevision: 1,
+      }),
+    });
+    expect(revoked.status).toBe(200);
+    expect(await revoked.json()).toMatchObject({ data: { active: false, revision: 2 } });
+  });
 });

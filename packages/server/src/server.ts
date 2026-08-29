@@ -114,6 +114,11 @@ import type {
   ChannelProvider,
 } from './modules/integration_adapters/channelConnector.js';
 import {
+  JsonChannelIdentityRegistryV1,
+  createJsonChannelIdentityAuditSink,
+  type ChannelIdentityRegistryV1,
+} from './modules/integration_adapters/channelIdentityRegistry.js';
+import {
   loadUserSettingsSubset,
   patchUserSettings,
   loadMcpServers,
@@ -378,6 +383,8 @@ export interface OttoServerOptions {
   recurringTaskStateStore?: RecurringTaskStateStore;
   /** Real provider adapters. Missing providers stay visibly unavailable. */
   channelConnectors?: Partial<Record<ChannelProvider, ChannelConnectorV1>>;
+  /** Shared, revision-checked provider identity bindings. */
+  channelIdentityRegistry?: ChannelIdentityRegistryV1;
 }
 
 /** 飞书凭证存取接口（可注入；默认实现走 feishu/vendor/credentials.ts）。 */
@@ -486,6 +493,7 @@ export class OttoServer {
   private stopMemoryMaintenance?: () => void;
   private stopAutoCompression?: () => void;
   private readonly channelConnectors: Partial<Record<ChannelProvider, ChannelConnectorV1>>;
+  private readonly channelIdentityRegistry: ChannelIdentityRegistryV1;
   private readonly channelPairingProviders = new Map<string, ChannelProvider>();
 
   constructor(opts: OttoServerOptions = {}) {
@@ -521,6 +529,8 @@ export class OttoServer {
       },
     });
     this.channelConnectors = { ...opts.channelConnectors };
+    this.channelIdentityRegistry = opts.channelIdentityRegistry
+      ?? new JsonChannelIdentityRegistryV1({ audit: createJsonChannelIdentityAuditSink() });
     getHabitAnalyzer().setTaskRegistry(this.recurringTaskRegistry);
     this.globalAuthorizationMode =
       loadUserSettingsSubset().authorizationMode ?? 'manual';
@@ -2583,7 +2593,7 @@ export class OttoServer {
       return sendJson(res, 200, ok(installations));
     }
     const channelInstallationMatch = path.match(
-      /^\/channels\/installations\/(channel_(feishu|lark|wecom)_[a-f0-9]{24})(?:\/(start|stop|health|send))?$/,
+      /^\/channels\/installations\/(channel_(feishu|lark|wecom)_[a-f0-9]{24})(?:\/(start|stop|health|send|identities))?$/,
     );
     if (channelInstallationMatch) {
       if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
@@ -2599,7 +2609,32 @@ export class OttoServer {
         .find((candidate) => candidate.installationId === installationId);
       if (!installation) return sendJson(res, 404, err('channel_installation_not_found'));
       let operation: Promise<unknown>;
-      if (req.method === 'GET' && !action) {
+      if (req.method === 'GET' && action === 'identities') {
+        operation = Promise.resolve(this.channelIdentityRegistry.list(installationId));
+      } else if (req.method === 'POST' && action === 'identities') {
+        operation = readJsonBody(req)
+          .then((body) => parseChannelIdentityMutation(body))
+          .then((input) => input.action === 'bind'
+            ? this.channelIdentityRegistry.bind({
+              provider,
+              installationId,
+              tenantId: installation.tenantId,
+              providerUserId: input.providerUserId,
+              canonicalUserId: input.canonicalUserId,
+              approvalId: input.approvalId,
+              approvedBy: input.approvedBy,
+              expectedRevision: input.expectedRevision,
+            })
+            : this.channelIdentityRegistry.revoke({
+              provider,
+              installationId,
+              tenantId: installation.tenantId,
+              providerUserId: input.providerUserId,
+              approvalId: input.approvalId,
+              approvedBy: input.approvedBy,
+              expectedRevision: input.expectedRevision,
+            }));
+      } else if (req.method === 'GET' && !action) {
         operation = Promise.resolve(installation);
       } else if (req.method === 'GET' && action === 'health') {
         operation = connector.health(installationId);
@@ -5141,6 +5176,45 @@ function parseChannelSendInput(body: unknown): {
     throw new Error('channel message idempotency key is invalid');
   }
   return { target, text, idempotencyKey };
+}
+
+type ChannelIdentityMutationCommon = {
+  providerUserId: string;
+  approvalId: string;
+  approvedBy: string;
+  expectedRevision: number;
+};
+type ChannelIdentityMutation =
+  | (ChannelIdentityMutationCommon & { action: 'bind'; canonicalUserId: string })
+  | (ChannelIdentityMutationCommon & { action: 'revoke' });
+
+function parseChannelIdentityMutation(body: unknown): ChannelIdentityMutation {
+  if (typeof body !== 'object' || body === null) {
+    throw new Error('channel identity body must be a JSON object');
+  }
+  const input = body as Record<string, unknown>;
+  if (input.action !== 'bind' && input.action !== 'revoke') {
+    throw new Error('channel identity action is invalid');
+  }
+  const readId = (name: string): string => {
+    const value = typeof input[name] === 'string' ? input[name].trim() : '';
+    if (!value || value.length > 200) throw new Error(`${name} is invalid`);
+    return value;
+  };
+  const expectedRevision = input.expectedRevision;
+  if (!Number.isSafeInteger(expectedRevision) || (expectedRevision as number) < 0) {
+    throw new Error('expectedRevision is invalid');
+  }
+  const common = {
+    action: input.action,
+    providerUserId: readId('providerUserId'),
+    approvalId: readId('approvalId'),
+    approvedBy: readId('approvedBy'),
+    expectedRevision: expectedRevision as number,
+  };
+  return input.action === 'bind'
+    ? { ...common, action: 'bind', canonicalUserId: readId('canonicalUserId') }
+    : { ...common, action: 'revoke' };
 }
 /** core WorkflowAgentRecord → 协议 WorkflowAgentSummary（裁掉 prompt/recentToolCalls 等大字段）。 */
 function toWorkflowAgentSummary(a: WorkflowAgentRecord): WorkflowAgentSummary {

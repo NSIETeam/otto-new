@@ -1617,6 +1617,7 @@ export const HTTP_ROUTES = {
   channelPairing: (id: string) => `/channels/pairings/${id}`,
   channelInstallations: '/channels/installations',
   channelInstallation: (id: string) => `/channels/installations/${id}`,
+  channelIdentities: (id: string) => `/channels/installations/${id}/identities`,
   incrementalUpdatePush: '/internal/incremental-update/push',
   ws: '/ws',
 } as const;

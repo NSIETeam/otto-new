@@ -65,6 +65,32 @@ export interface JsonChannelIdentityRegistryOptions {
   audit: (event: Readonly<ChannelIdentityAuditEvent>) => void | Promise<void>;
 }
 
+export interface ChannelIdentityRegistryV1 extends ChannelIdentityResolverV1 {
+  list(installationId?: string): ChannelIdentityBindingV1[];
+  bind(input: ChannelIdentityBindingInput): Promise<ChannelIdentityBindingV1>;
+  revoke(input: {
+    provider: ChannelProvider;
+    installationId: string;
+    tenantId: string;
+    providerUserId: string;
+    approvalId: string;
+    approvedBy: string;
+    expectedRevision: number;
+  }): Promise<ChannelIdentityBindingV1>;
+}
+
+export function createJsonChannelIdentityAuditSink(filePath?: string) {
+  const target = filePath ?? path.join(
+    process.env.OTTO_USER_DIR?.trim() || path.join(os.homedir(), '.otto-user'),
+    'channel-identity-audit.jsonl',
+  );
+  return async (event: Readonly<ChannelIdentityAuditEvent>): Promise<void> => {
+    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(target, `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
+    fs.chmodSync(target, 0o600);
+  };
+}
+
 const PROVIDERS = new Set<ChannelProvider>(['feishu', 'lark', 'wecom']);
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{1,199}$/u;
 
@@ -88,7 +114,7 @@ function clone(binding: ChannelIdentityBindingV1): ChannelIdentityBindingV1 {
   return { ...binding };
 }
 
-export class JsonChannelIdentityRegistryV1 implements ChannelIdentityResolverV1 {
+export class JsonChannelIdentityRegistryV1 implements ChannelIdentityRegistryV1 {
   private readonly bindings = new Map<string, ChannelIdentityBindingV1>();
   private readonly filePath: string;
   private readonly now: () => number;

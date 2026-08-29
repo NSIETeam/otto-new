@@ -340,6 +340,8 @@ describe('HTTP_ROUTES 与常量', () => {
     expect(HTTP_ROUTES.models).toBe('/models');
     expect(HTTP_ROUTES.enterpriseIdentity).toBe('/internal/enterprise-identity');
     expect(HTTP_ROUTES.channelInstallations).toBe('/channels/installations');
+    expect(HTTP_ROUTES.channelIdentities('channel_lark_1'))
+      .toBe('/channels/installations/channel_lark_1/identities');
     expect(HTTP_ROUTES.channelInstallation('channel_lark_abc')).toBe(
       '/channels/installations/channel_lark_abc',
     );

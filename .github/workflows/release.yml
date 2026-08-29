@@ -91,6 +91,9 @@ jobs:
           PYTHON: python3.11
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Enforce release dependency audit
+        run: npm run security:dependencies:release
+
       - name: Verify hostile-server defenses and E2EE release authorization
         run: |
           npm run security:e2ee:adversarial

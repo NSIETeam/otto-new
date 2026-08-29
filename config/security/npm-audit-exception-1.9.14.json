@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "policyId": "otto-1.9.14-image-size-unreachable",
+  "release": "1.9.14",
+  "reviewedAt": "2026-08-29",
+  "expiresAt": "2026-09-15T00:00:00Z",
+  "exception": {
+    "advisories": [
+      {
+        "id": "GHSA-w3rx-r6r6-pgpr",
+        "url": "https://github.com/advisories/GHSA-w3rx-r6r6-pgpr",
+        "severity": "high",
+        "affectedRange": "<=2.0.2",
+        "patchedVersion": null
+      },
+      {
+        "id": "GHSA-5p2g-fcmc-qvqq",
+        "url": "https://github.com/advisories/GHSA-5p2g-fcmc-qvqq",
+        "severity": "high",
+        "affectedRange": "<=2.0.2",
+        "patchedVersion": null
+      }
+    ],
+    "vulnerablePackage": {
+      "name": "image-size",
+      "version": "1.2.1",
+      "lockPath": "node_modules/image-size",
+      "integrity": "sha512-rH+46sQJ2dlwfjfhCyNx5thzrv+dtmBIhPHk0zgRUukHzZ/kRueTJXoYYsclBaKcSMBWuGbOFXtioLpzTb5euw=="
+    },
+    "parentPackage": {
+      "name": "pptxgenjs",
+      "version": "4.0.1",
+      "lockPath": "node_modules/pptxgenjs",
+      "dependencySpecifier": "^1.2.1",
+      "integrity": "sha512-TeJISr8wouAuXw4C1F/mC33xbZs/FuEG6nH9FG1Zj+nuPcGMP5YRHl6X+j3HSUnS1f3at6k75ZZXPMZlA5Lj9A=="
+    },
+    "workspaceConsumers": [
+      {
+        "lockPath": "",
+        "dependencySpecifier": "^4.0.1"
+      },
+      {
+        "lockPath": "packages/core",
+        "dependencySpecifier": "4.0.1"
+      }
+    ],
+    "installedContract": {
+      "browserImageSize": false,
+      "runtimeFiles": {
+        "pptxgen.bundle.js": "4fb9eac5cfefb213e2d8743c2b7151025f31bfb3f834c73c12062916daa0f3f8",
+        "pptxgen.cjs.js": "873d182a8e2e1c0b5e522ef146117936b96b9b2024667bd4c1de59e2b031d27a",
+        "pptxgen.es.js": "05844c5625e2cda3b449eb967c2246dd57ca57341886a7c28eeebca263b29bd4",
+        "pptxgen.min.js": "097f0b92e15035a72bba72b59ef1ece62ab45ec6075ac85fe0e2d80d3f59b8e3"
+      },
+      "forbiddenRuntimeTokens": ["image-size"]
+    },
+    "evidence": [
+      "https://github.com/advisories/GHSA-w3rx-r6r6-pgpr",
+      "https://github.com/advisories/GHSA-5p2g-fcmc-qvqq",
+      "https://github.com/github/advisory-database/issues/9028",
+      "https://github.com/gitbrent/PptxGenJS/blob/v4.0.1/package.json"
+    ]
+  }
+}

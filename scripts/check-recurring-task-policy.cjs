@@ -5,12 +5,9 @@ const path = require('node:path');
 
 const legacyMaximums = new Map(Object.entries({
   'packages/core/src/acp-client/acpAgentClient.ts': 2,
-  'packages/core/src/core/proxyAuth.ts': 1,
   'packages/core/src/core/subAgent.ts': 1,
   'packages/core/src/lsp/binaryManager.ts': 1,
   'packages/core/src/services/mcpResponseGuard.ts': 1,
-  'packages/core/src/services/memoryPressureMonitor.ts': 1,
-  'packages/core/src/services/taskWatchdog.ts': 1,
   'packages/core/src/tools/generate-document.ts': 1,
   'packages/core/src/tools/shell.ts': 1,
   'packages/desktop/src/main/server-manager.ts': 1,

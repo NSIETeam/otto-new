@@ -182,20 +182,48 @@ const DEFAULT_SESSION_TITLE = '新会话';
 const SESSION_TITLE_INPUT_MAX_CHARS = 4_000;
 const DEFAULT_SESSION_TITLE_TIMEOUT_MS = 15_000;
 
+interface ProvisionalSessionTitle {
+  readonly title: string;
+}
+
 function normalizeGeneratedSessionTitle(raw: string): string | undefined {
   const title = raw
     .split(/\r?\n/, 1)[0]
     ?.trim()
-    .replace(/^[“”"'《》【】]+|[“”"'《》【】]+$/g, '');
-  return title && /^[\p{Script=Han}]{4,8}$/u.test(title) ? title : undefined;
+    .replace(/^#{1,6}\s*/u, '')
+    .replace(/^\*\*(.+)\*\*$/u, '$1')
+    .replace(/^[“”"'《》【】]+|[“”"'《》【】]+$/g, '')
+    .replace(/\s+/gu, ' ');
+  if (!title) return undefined;
+  const length = Array.from(title).length;
+  return length >= 4
+    && length <= 24
+    && /^[\p{Script=Han}\p{L}\p{N} ._+#-]+$/u.test(title)
+    ? title
+    : undefined;
 }
 
 function fallbackSessionTitle(firstUserMessage: string): string {
   const withoutPolitePrefix = firstUserMessage
     .trim()
-    .replace(/^(?:(?:请|麻烦|可以|能否)你?)?(?:帮我|帮忙)?(?:一下)?/u, '');
+    .replace(/^(?:(?:请问|想问|我想问|请|麻烦|可以|能否)你?)?(?:帮我|帮忙)?(?:一下)?/u, '');
   const han = withoutPolitePrefix.match(/\p{Script=Han}/gu)?.join('') ?? '';
-  if (han.length >= 4) return Array.from(han).slice(0, 8).join('');
+  const hasLatinOrNumber = /[\p{L}\p{N}]/u.test(
+    withoutPolitePrefix.replace(/\p{Script=Han}/gu, ''),
+  );
+  if (!hasLatinOrNumber && han.length >= 4) {
+    return Array.from(han).slice(0, 8).join('');
+  }
+  const mixed = withoutPolitePrefix
+    .split(/\r?\n/, 1)[0]
+    ?.replace(/https?:\/\/\S+/giu, '')
+    .replace(/[`*_#>]+/gu, '')
+    .replace(/[，。！？!?；;：:]+$/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  if (mixed && Array.from(mixed).length >= 4) {
+    return Array.from(mixed).slice(0, 18).join('');
+  }
   return '日常交流';
 }
 
@@ -434,7 +462,15 @@ export class OttoServer {
   /** 从接收消息到 runtime 接管前的窗口也禁止切目录。 */
   private readonly messageDispatches = new Map<string, number>();
   /** 同一会话只允许一个后台标题生成请求。 */
-  private readonly pendingSessionTitles = new Set<string>();
+  private readonly pendingSessionTitles = new Map<
+    string,
+    ProvisionalSessionTitle
+  >();
+  /** 首条消息即时生成的临时标题；AI 仅可覆盖仍未被用户修改的临时标题。 */
+  private readonly provisionalSessionTitles = new Map<
+    string,
+    ProvisionalSessionTitle
+  >();
   /** 在附件缓存前按 WS 接收顺序认领首条可标题化消息。 */
   private readonly claimedSessionTitles = new Set<string>();
   /** 手动命名永远高于迟到的 AI 标题。 */
@@ -712,6 +748,7 @@ export class OttoServer {
     this.sessionEvictUnsub?.();
     this.sessionEvictUnsub = undefined;
     this.pendingSessionTitles.clear();
+    this.provisionalSessionTitles.clear();
     this.claimedSessionTitles.clear();
     this.manuallyRenamedSessions.clear();
     this.externalInboundUnsub?.();
@@ -1437,6 +1474,7 @@ export class OttoServer {
         errorFrame(sessionId, 'no_session', '会话不存在'),
       );
     }
+    this.provisionalSessionTitles.delete(sessionId);
     this.manuallyRenamedSessions.add(sessionId);
     // renameSession 已 publish 给该会话订阅者；再全局广播一帧，覆盖未订阅它的窗口列表。
     this.broadcastAll({
@@ -3653,6 +3691,12 @@ export class OttoServer {
       payload: { message: userMsg },
     });
 
+    // Codex 式标题体验：首条问题一经接受就先显示可读标题。模型随后可异步
+    // 精炼它，但只有标题仍是该临时值时才允许覆盖，手动重命名始终优先。
+    const provisionalTitle = shouldGenerateTitle
+      ? this.applyProvisionalSessionTitle(sessionId, firstUserMessage)
+      : undefined;
+
     if (
       source === 'local' &&
       session.source === 'feishu' &&
@@ -3668,12 +3712,7 @@ export class OttoServer {
 
     // 内部测试阶段所有身份都必须先绑定自己的 API。真实运行不允许回退 mock
     if (!this.shouldMock() && this.modelInfos().every((model) => !model.enabled)) {
-      if (shouldGenerateTitle) {
-        this.applySessionTitleIfUnchanged(
-          sessionId,
-          fallbackSessionTitle(firstUserMessage),
-        );
-      }
+      this.finishProvisionalSessionTitle(sessionId, provisionalTitle);
       this.store.publish(sessionId, {
         type: 'error',
         payload: {
@@ -3687,24 +3726,14 @@ export class OttoServer {
     }
 
     if (this.shouldMock()) {
-      if (shouldGenerateTitle) {
-        this.applySessionTitleIfUnchanged(
-          sessionId,
-          fallbackSessionTitle(firstUserMessage),
-        );
-      }
+      this.finishProvisionalSessionTitle(sessionId, provisionalTitle);
       await this.mockEcho(sessionId);
       return;
     }
 
     let runtime = await this.ensureRuntime(sessionId);
     if (!runtime) {
-      if (shouldGenerateTitle) {
-        this.applySessionTitleIfUnchanged(
-          sessionId,
-          fallbackSessionTitle(firstUserMessage),
-        );
-      }
+      this.finishProvisionalSessionTitle(sessionId, provisionalTitle);
       this.store.setStatus(sessionId, 'idle');
       return;
     }
@@ -3718,6 +3747,7 @@ export class OttoServer {
       ? this.sessionAuthorizationError(latestSession)
       : '会话已不存在';
     if (!runtime || latestDenied) {
+      this.finishProvisionalSessionTitle(sessionId, provisionalTitle);
       runtime?.cancel();
       return this.send(
         conn.socket,
@@ -3728,11 +3758,12 @@ export class OttoServer {
         ),
       );
     }
-    if (shouldGenerateTitle) {
+    if (provisionalTitle && firstUserMessage !== undefined) {
       this.generateSessionTitleInBackground(
         sessionId,
         firstUserMessage,
         runtime,
+        provisionalTitle,
       );
     }
     const ephemeral = this.store.isEphemeralSession(sessionId);
@@ -3771,14 +3802,15 @@ export class OttoServer {
     sessionId: string,
     firstUserMessage: string,
     runtime: SessionRuntime,
+    provisionalTitle: ProvisionalSessionTitle,
   ): void {
     const fallbackTitle = fallbackSessionTitle(firstUserMessage);
     if (!runtime.generateTitle) {
-      this.applySessionTitleIfUnchanged(sessionId, fallbackTitle);
+      this.finishProvisionalSessionTitle(sessionId, provisionalTitle);
       return;
     }
     if (this.pendingSessionTitles.has(sessionId)) return;
-    this.pendingSessionTitles.add(sessionId);
+    this.pendingSessionTitles.set(sessionId, provisionalTitle);
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(
@@ -3791,19 +3823,26 @@ export class OttoServer {
       runtime.generateTitle!(firstUserMessage));
     void Promise.race([titlePromise, timeoutPromise])
       .then((rawTitle) => {
-        this.applySessionTitleIfUnchanged(
+        this.refineProvisionalSessionTitle(
           sessionId,
+          provisionalTitle,
           normalizeGeneratedSessionTitle(rawTitle) ?? fallbackTitle,
         );
       })
-      .catch(() => this.applySessionTitleIfUnchanged(sessionId, fallbackTitle))
+      .catch(() => undefined)
       .finally(() => {
         if (timeout) clearTimeout(timeout);
-        this.pendingSessionTitles.delete(sessionId);
+        if (this.pendingSessionTitles.get(sessionId) === provisionalTitle) {
+          this.pendingSessionTitles.delete(sessionId);
+        }
+        this.finishProvisionalSessionTitle(sessionId, provisionalTitle);
       });
   }
 
-  private applySessionTitleIfUnchanged(sessionId: string, title: string): void {
+  private applyProvisionalSessionTitle(
+    sessionId: string,
+    firstUserMessage: string,
+  ): ProvisionalSessionTitle | undefined {
     const latest = this.store.getSession(sessionId);
     if (
       !latest
@@ -3811,14 +3850,56 @@ export class OttoServer {
       || this.manuallyRenamedSessions.has(sessionId)
       || this.sessionAuthorizationError(latest)
     ) {
+      return undefined;
+    }
+    const title = fallbackSessionTitle(firstUserMessage);
+    const updated = this.store.renameSession(sessionId, title);
+    if (updated) {
+      const provisionalTitle = { title: updated.title };
+      this.provisionalSessionTitles.set(sessionId, provisionalTitle);
+      this.broadcastAll({
+        type: 'session_upsert',
+        payload: { session: updated },
+      });
+      return provisionalTitle;
+    }
+    return undefined;
+  }
+
+  private refineProvisionalSessionTitle(
+    sessionId: string,
+    provisionalTitle: ProvisionalSessionTitle,
+    generatedTitle: string,
+  ): void {
+    const latest = this.store.getSession(sessionId);
+    if (
+      !latest
+      || latest.title !== provisionalTitle.title
+      || this.provisionalSessionTitles.get(sessionId) !== provisionalTitle
+      || this.manuallyRenamedSessions.has(sessionId)
+      || this.sessionAuthorizationError(latest)
+      || generatedTitle === provisionalTitle.title
+    ) {
       return;
     }
-    const updated = this.store.renameSession(sessionId, title);
+    const updated = this.store.renameSession(sessionId, generatedTitle);
     if (updated) {
       this.broadcastAll({
         type: 'session_upsert',
         payload: { session: updated },
       });
+    }
+  }
+
+  private finishProvisionalSessionTitle(
+    sessionId: string,
+    provisionalTitle: ProvisionalSessionTitle | undefined,
+  ): void {
+    if (
+      provisionalTitle
+      && this.provisionalSessionTitles.get(sessionId) === provisionalTitle
+    ) {
+      this.provisionalSessionTitles.delete(sessionId);
     }
   }
 
@@ -3851,6 +3932,7 @@ export class OttoServer {
 
   private cleanupSessionTitleState(sessionId: string): void {
     this.pendingSessionTitles.delete(sessionId);
+    this.provisionalSessionTitles.delete(sessionId);
     this.claimedSessionTitles.delete(sessionId);
     this.manuallyRenamedSessions.delete(sessionId);
   }

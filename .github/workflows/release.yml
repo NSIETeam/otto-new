@@ -507,6 +507,7 @@ jobs:
     env:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
       DEPLOY_CONFIG_PATH: ${{ secrets.DEPLOY_CONFIG_PATH || '/etc/otto-enterprise/enterprise.env' }}
+      DEPLOY_SUDO_PASSWORD: ${{ secrets.DEPLOY_SUDO_PASSWORD }}
 
     steps:
       - name: Checkout source
@@ -520,7 +521,7 @@ jobs:
           test -n "${{ secrets.DEPLOY_USER }}"
           test -n "${{ secrets.DEPLOY_SSH_KEY }}"
           test -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}"
-          test -n "${{ secrets.DEPLOY_SUDO_PASSWORD }}"
+          test -n "$DEPLOY_SUDO_PASSWORD"
 
       - name: Download release workflow artifact
         uses: actions/download-artifact@v4
@@ -563,11 +564,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          REMOTE_DIR="/var/tmp/otto-enterprise-github/${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}"
+          DEPLOY_TRANSACTION_ID="${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "$DEPLOY_TRANSACTION_ID" =~ ^v[0-9A-Za-z._-]+-[0-9]+-[0-9]+$ ]]
+          [[ "$DEPLOY_TRANSACTION_ID" != *'..'* ]]
+          REMOTE_DIR="/var/tmp/otto-enterprise-github/$DEPLOY_TRANSACTION_ID"
           echo "REMOTE_DIR=$REMOTE_DIR" >> "$GITHUB_ENV"
           ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "mkdir -p '$REMOTE_DIR'"
+            "set -euo pipefail
+             [ ! -L '$REMOTE_DIR' ]
+             install -d -m 0700 '$REMOTE_DIR'"
           scp -i ~/.ssh/id_deploy -P "${DEPLOY_PORT}" enterprise-upload/otto-enterprise-oneclick-v${{ needs.build.outputs.version }}-* \
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$REMOTE_DIR/"
 
@@ -575,21 +581,55 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s\n' "${{ secrets.DEPLOY_SUDO_PASSWORD }}" | ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
+          [[ "$DEPLOY_CONFIG_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
+          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
             "set -euo pipefail
              cd '$REMOTE_DIR'
-             sha256sum -c ./*.sha256
-             ARCHIVE=\$(ls otto-enterprise-oneclick-v${{ needs.build.outputs.version }}-*.tar.gz | head -n 1)
+             sha256sum -c ./*.sha256 >/dev/null
+             mapfile -t ARCHIVES < <(find . -maxdepth 1 -type f -name 'otto-enterprise-oneclick-v${{ needs.build.outputs.version }}-*.tar.gz' -printf '%f\\n')
+             [ \"\${#ARCHIVES[@]}\" -eq 1 ]
+             ARCHIVE=\${ARCHIVES[0]}
+             [[ \"\$ARCHIVE\" =~ ^otto-enterprise-oneclick-v[0-9A-Za-z._-]+-[0-9a-f]{12}\\.tar\\.gz$ ]]
              rm -rf unpack
              mkdir unpack
              tar -xzf \"\$ARCHIVE\" -C unpack
-             PKG_DIR=\$(find unpack -mindepth 1 -maxdepth 1 -type d | head -n 1)
+             mapfile -t PKG_DIRS < <(find unpack -mindepth 1 -maxdepth 1 -type d -print)
+             [ \"\${#PKG_DIRS[@]}\" -eq 1 ]
              if [ -L /opt/otto-enterprise/current ]; then
-               sudo -S \"\$PKG_DIR/upgrade.sh\" --config '${DEPLOY_CONFIG_PATH}'
+               printf '%s\\n' upgrade
              else
-               sudo -S \"\$PKG_DIR/install.sh\" --config '${DEPLOY_CONFIG_PATH}'
-             fi"
+               printf '%s\\n' install
+             fi" > deployment-action.txt
+          DEPLOY_ACTION="$(cat deployment-action.txt)"
+          case "$DEPLOY_ACTION" in
+            install|upgrade) ;;
+            *) echo "unexpected deployment action: $DEPLOY_ACTION" >&2; exit 4 ;;
+          esac
+          if [ "$DEPLOY_ACTION" = "upgrade" ]; then
+            printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
+            ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
+              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+              "set -euo pipefail
+               cd '$REMOTE_DIR'
+               mapfile -t PKG_DIRS < <(find unpack -mindepth 1 -maxdepth 1 -type d -print)
+               [ \"\${#PKG_DIRS[@]}\" -eq 1 ]
+               PKG_DIR=\${PKG_DIRS[0]}
+               sudo -k -S -p '' \"\$PKG_DIR/backup-now.sh\" '${DEPLOY_CONFIG_PATH}'"
+          fi
+          case "$DEPLOY_ACTION" in
+            upgrade) DEPLOY_ENTRYPOINT=upgrade.sh ;;
+            install) DEPLOY_ENTRYPOINT=install.sh ;;
+          esac
+          printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
+          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "set -euo pipefail
+             cd '$REMOTE_DIR'
+             mapfile -t PKG_DIRS < <(find unpack -mindepth 1 -maxdepth 1 -type d -print)
+             [ \"\${#PKG_DIRS[@]}\" -eq 1 ]
+             PKG_DIR=\${PKG_DIRS[0]}
+             sudo -k -S -p '' \"\$PKG_DIR/${DEPLOY_ENTRYPOINT}\" --config '${DEPLOY_CONFIG_PATH}'"
 
   deploy-update-mirror:
     name: Deploy Desktop Update Mirror
@@ -609,6 +649,7 @@ jobs:
       }}
     env:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+      DEPLOY_SUDO_PASSWORD: ${{ secrets.DEPLOY_SUDO_PASSWORD }}
 
     steps:
       - name: Checkout source
@@ -622,7 +663,7 @@ jobs:
           test -n "${{ secrets.DEPLOY_USER }}"
           test -n "${{ secrets.DEPLOY_SSH_KEY }}"
           test -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}"
-          test -n "${{ secrets.DEPLOY_SUDO_PASSWORD }}"
+          test -n "$DEPLOY_SUDO_PASSWORD"
 
       - name: Download release workflow artifact
         uses: actions/download-artifact@v4
@@ -655,6 +696,13 @@ jobs:
             cd mirror-upload
             sha256sum Otto-* latest.json > SHA256SUMS
           )
+          cp .github/scripts/publish-update-mirror.sh mirror-upload/
+          PAYLOAD_MANIFEST_SHA256="$(sha256sum mirror-upload/SHA256SUMS | awk '{print $1}')"
+          PUBLISH_SCRIPT_SHA256="$(sha256sum mirror-upload/publish-update-mirror.sh | awk '{print $1}')"
+          [[ "$PAYLOAD_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PUBLISH_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          echo "PAYLOAD_MANIFEST_SHA256=$PAYLOAD_MANIFEST_SHA256" >> "$GITHUB_ENV"
+          echo "PUBLISH_SCRIPT_SHA256=$PUBLISH_SCRIPT_SHA256" >> "$GITHUB_ENV"
 
       - name: Configure SSH
         shell: bash
@@ -671,30 +719,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          REMOTE_DIR="/var/tmp/otto-update-mirror/${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}"
+          MIRROR_TRANSACTION_ID="${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "$MIRROR_TRANSACTION_ID" =~ ^v[0-9A-Za-z._-]+-[0-9]+-[0-9]+$ ]]
+          [[ "$MIRROR_TRANSACTION_ID" != *'..'* ]]
+          [[ "$PAYLOAD_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PUBLISH_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          REMOTE_DIR="/var/tmp/otto-update-mirror/$MIRROR_TRANSACTION_ID"
           ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "mkdir -p '$REMOTE_DIR'"
+            "set -euo pipefail
+             [ ! -L '$REMOTE_DIR' ]
+             install -d -m 0700 '$REMOTE_DIR'"
           scp -i ~/.ssh/id_deploy -P "${DEPLOY_PORT}" mirror-upload/* \
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$REMOTE_DIR/"
-          printf '%s\n' "${{ secrets.DEPLOY_SUDO_PASSWORD }}" | ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
+          printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
+          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
             "set -euo pipefail
              cd '$REMOTE_DIR'
-             sha256sum -c SHA256SUMS
-             sudo -S install -d -m 0755 '${UPDATE_MIRROR_ROOT}/downloads' '${UPDATE_MIRROR_ROOT}/otto-releases'
-             if [ ! -f previous-latest.json ] && [ ! -f previous-latest.absent ]; then
-               if sudo -S test -f '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json'; then
-                 sudo -S install -m 0644 '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json' '$REMOTE_DIR/previous-latest.json'
-               else
-                 touch previous-latest.absent
-               fi
-             fi
-             for file in Otto-*; do
-               sudo -S install -m 0644 \"\$file\" '${UPDATE_MIRROR_ROOT}/downloads/'\"\$file\"
-             done
-             sudo -S install -m 0644 latest.json '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json.next'
-             sudo -S mv '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json.next' '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json'"
+             [ ! -L publish-update-mirror.sh ]
+             test \"\$(sha256sum publish-update-mirror.sh | awk '{print \$1}')\" = '$PUBLISH_SCRIPT_SHA256'
+             test \"\$(sha256sum SHA256SUMS | awk '{print \$1}')\" = '$PAYLOAD_MANIFEST_SHA256'
+             sudo -k -S -p '' /bin/bash '$REMOTE_DIR/publish-update-mirror.sh' \
+               '$MIRROR_TRANSACTION_ID' '$PAYLOAD_MANIFEST_SHA256' '$PUBLISH_SCRIPT_SHA256'"
 
       - name: Verify public mirror
         shell: bash
@@ -830,8 +877,12 @@ jobs:
       }}
     env:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+      DEPLOY_SUDO_PASSWORD: ${{ secrets.DEPLOY_SUDO_PASSWORD }}
 
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
       - name: Configure SSH
         shell: bash
         run: |
@@ -840,7 +891,7 @@ jobs:
           test -n "${{ secrets.DEPLOY_USER }}"
           test -n "${{ secrets.DEPLOY_SSH_KEY }}"
           test -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}"
-          test -n "${{ secrets.DEPLOY_SUDO_PASSWORD }}"
+          test -n "$DEPLOY_SUDO_PASSWORD"
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
@@ -852,23 +903,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          REMOTE_DIR="/var/tmp/otto-update-mirror/${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}"
-          printf '%s\n' "${{ secrets.DEPLOY_SUDO_PASSWORD }}" | ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
+          MIRROR_TRANSACTION_ID="${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "$MIRROR_TRANSACTION_ID" =~ ^v[0-9A-Za-z._-]+-[0-9]+-[0-9]+$ ]]
+          [[ "$MIRROR_TRANSACTION_ID" != *'..'* ]]
+          ROLLBACK_SCRIPT_SHA256="$(sha256sum .github/scripts/rollback-update-mirror.sh | awk '{print $1}')"
+          [[ "$ROLLBACK_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          REMOTE_SCRIPT="/var/tmp/otto-update-mirror-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
+          scp -i ~/.ssh/id_deploy -P "${DEPLOY_PORT}" \
+            .github/scripts/rollback-update-mirror.sh \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$REMOTE_SCRIPT"
+          printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
+          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
             "set -euo pipefail
-             if [ ! -d '$REMOTE_DIR' ]; then
-               echo 'mirror staging directory was never created; no public manifest was changed'
-               exit 0
-             fi
-             cd '$REMOTE_DIR'
-             if [ -f previous-latest.json ]; then
-               sudo -S install -m 0644 previous-latest.json '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json.rollback-next'
-               sudo -S mv '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json.rollback-next' '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json'
-             elif [ -f previous-latest.absent ]; then
-               sudo -S rm -f '${UPDATE_MIRROR_ROOT}/otto-releases/latest.json'
-             else
-               echo 'mirror transaction did not reach the manifest backup; no public manifest was changed'
-             fi"
+             [ -f '$REMOTE_SCRIPT' ]
+             [ ! -L '$REMOTE_SCRIPT' ]
+             test \"\$(sha256sum '$REMOTE_SCRIPT' | awk '{print \$1}')\" = '$ROLLBACK_SCRIPT_SHA256'
+             sudo -k -S -p '' /bin/bash '$REMOTE_SCRIPT' \
+               '$MIRROR_TRANSACTION_ID' '$ROLLBACK_SCRIPT_SHA256'"
 
       - name: Return failed releases to draft state
         if: always()

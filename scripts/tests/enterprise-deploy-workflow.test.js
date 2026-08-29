@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import './release-deploy-workflow.contract.js';
 
 const repoRoot = path.resolve(import.meta.dirname, '..', '..');
 const workflow = readFileSync(

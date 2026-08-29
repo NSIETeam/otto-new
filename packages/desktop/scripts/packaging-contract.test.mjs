@@ -315,14 +315,29 @@ describe('desktop packaging contract', () => {
   });
 
   it('publishes releases only after the update mirror and enterprise deploy pass', async () => {
-    const workflow = await readFile(
-      path.join(repoRoot, '.github', 'workflows', 'release.yml'),
-      'utf8',
-    );
-    const deliveryScript = await readFile(
-      path.join(packageRoot, 'scripts', 'make-delivery-zip.mjs'),
-      'utf8',
-    );
+    const [
+      workflow,
+      deliveryScript,
+      publishMirrorScript,
+      rollbackMirrorScript,
+    ] = await Promise.all([
+      readFile(
+        path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+        'utf8',
+      ),
+      readFile(
+        path.join(packageRoot, 'scripts', 'make-delivery-zip.mjs'),
+        'utf8',
+      ),
+      readFile(
+        path.join(repoRoot, '.github', 'scripts', 'publish-update-mirror.sh'),
+        'utf8',
+      ),
+      readFile(
+        path.join(repoRoot, '.github', 'scripts', 'rollback-update-mirror.sh'),
+        'utf8',
+      ),
+    ]);
     expect(workflow).toContain('deploy-update-mirror:');
     expect(workflow).toContain('name: Deploy Desktop Update Mirror');
     expect(workflow).toContain('draft: true');
@@ -343,13 +358,14 @@ describe('desktop packaging contract', () => {
     ).toBe(2);
     expect(workflow).not.toContain("['macArm64', 'macX64', 'winX64']");
     expect(workflow).not.toContain("const crypto = require('node:crypto');");
-    expect(workflow).toContain('sha256sum -c SHA256SUMS');
-    expect(workflow).toContain('latest.json.next');
-    expect(workflow).toContain('previous-latest.json');
-    expect(workflow).toContain('previous-latest.absent');
+    expect(workflow).toContain('PAYLOAD_MANIFEST_SHA256');
+    expect(publishMirrorScript).toContain('sha256sum -c -- SHA256SUMS');
+    expect(publishMirrorScript).toContain('latest_next=');
+    expect(publishMirrorScript).toContain('previous-latest.json');
+    expect(publishMirrorScript).toContain('previous-latest.absent');
     expect(workflow).toContain('rollback-update-mirror:');
     expect(workflow).toContain('name: Roll back Desktop Update Mirror');
-    expect(workflow).toContain(
+    expect(rollbackMirrorScript).toContain(
       'mirror transaction did not reach the manifest backup; no public manifest was changed',
     );
     expect(workflow).toContain('Windows no-proxy download');
@@ -396,9 +412,9 @@ describe('desktop packaging contract', () => {
     const publishJob = workflow.slice(publishJobStart, rollbackJobStart);
     expect(enterpriseJob).toContain('      - verify-windows-signature');
     expect(mirrorJob).toContain('      - deploy-enterprise');
-    expect(publishJob.indexOf('name: Publish legacy compatibility release')).toBeLessThan(
-      publishJob.indexOf('name: Publish canonical release'),
-    );
+    expect(
+      publishJob.indexOf('name: Publish legacy compatibility release'),
+    ).toBeLessThan(publishJob.indexOf('name: Publish canonical release'));
     expect(workflow).not.toContain(
       'secrets.OTTO_RELEASES_TOKEN || secrets.GITHUB_TOKEN',
     );
@@ -421,6 +437,61 @@ describe('desktop packaging contract', () => {
       'deliverables/otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz.sig',
     );
     expect(workflow).toContain('probe-packaged-sqlcipher.mjs');
+  });
+
+  it('keeps both production workflows on the protected sudo and backup contract', async () => {
+    const [releaseWorkflow, deployWorkflow, publishScript, rollbackScript] =
+      await Promise.all([
+        readFile(
+          path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+          'utf8',
+        ),
+        readFile(
+          path.join(repoRoot, '.github', 'workflows', 'deploy-server.yml'),
+          'utf8',
+        ),
+        readFile(
+          path.join(repoRoot, '.github', 'scripts', 'publish-update-mirror.sh'),
+          'utf8',
+        ),
+        readFile(
+          path.join(
+            repoRoot,
+            '.github',
+            'scripts',
+            'rollback-update-mirror.sh',
+          ),
+          'utf8',
+        ),
+      ]);
+
+    for (const workflow of [releaseWorkflow, deployWorkflow]) {
+      expect(workflow).toContain(
+        'DEPLOY_SUDO_PASSWORD: ${{ secrets.DEPLOY_SUDO_PASSWORD }}',
+      );
+      expect(workflow).toContain('printf \'%s\\n\' "$DEPLOY_SUDO_PASSWORD" |');
+      expect(workflow).not.toContain(
+        'printf \'%s\\n\' "${{ secrets.DEPLOY_SUDO_PASSWORD }}" |',
+      );
+    }
+
+    const actionIndex = releaseWorkflow.indexOf('> deployment-action.txt');
+    const backupIndex = releaseWorkflow.indexOf('backup-now.sh');
+    const deployIndex = releaseWorkflow.indexOf('${DEPLOY_ENTRYPOINT}');
+    const mirrorIndex = releaseWorkflow.indexOf(
+      "/bin/bash '$REMOTE_DIR/publish-update-mirror.sh'",
+    );
+    const rollbackIndex = releaseWorkflow.indexOf("/bin/bash '$REMOTE_SCRIPT'");
+    expect(actionIndex).toBeGreaterThan(-1);
+    expect(backupIndex).toBeGreaterThan(actionIndex);
+    expect(deployIndex).toBeGreaterThan(backupIndex);
+    expect(mirrorIndex).toBeGreaterThan(deployIndex);
+    expect(rollbackIndex).toBeGreaterThan(mirrorIndex);
+    expect(releaseWorkflow.match(/sudo -k -S -p ''/g)).toHaveLength(4);
+    expect(releaseWorkflow).not.toContain('sudo -S ');
+    expect(publishScript).toContain('payload manifest digest mismatch');
+    expect(publishScript).toContain('previous-latest.absent');
+    expect(rollbackScript).toContain('rollback script digest mismatch');
   });
 
   it('uses the shared update manifest verifier in the local release gate', async () => {

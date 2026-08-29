@@ -47,7 +47,12 @@ const scenarios: readonly DeterministicScenario[] = [
       const root = await mkdtemp(path.join(os.tmpdir(), 'otto-evals-rpa-approval-'));
       try {
         let driverCalls = 0;
-        const workflow = { id: 'download-report', version: 1 as const, steps: [{ id: 'download', action: 'web.click' as const, args: { selector: '#download' }, sideEffect: 'external' as const }] };
+        const workflow = {
+          id: 'download-report',
+          version: 1 as const,
+          allowedHosts: ['example.com'],
+          steps: [{ id: 'download', action: 'web.click' as const, args: { selector: '#download' }, sideEffect: 'external' as const }],
+        };
         const store = new FileRpaRunStore(path.join(root, 'runs'));
         const runner = new RpaRunner([workflow], store, {
           async authorize({ run, step }) {

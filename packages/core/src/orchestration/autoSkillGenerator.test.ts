@@ -265,6 +265,7 @@ describe('AutoSkillGenerator 个人 Skill 候选闭环', () => {
     startAutoSkillScanner(fakeConfig, () => 'user-1', {
       initialDelayMs: 1,
       intervalMs: 60_000,
+      getInputVersion: () => 'worklog:v1',
       onCandidatesStaged,
     });
 

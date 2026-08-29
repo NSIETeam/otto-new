@@ -27,6 +27,7 @@ import {
   type ExistingSkillSummary,
 } from './autoSkillQuality.js';
 import { textSimilarity } from '../utils/topicSimilarity.js';
+import { RecurringTaskRegistry } from '../services/recurringTaskRegistry.js';
 import {
   LocalKnowledgeStore,
   personalKnowledgeFreshness,
@@ -1307,9 +1308,7 @@ function formatTitle(steps: string[]): string {
 // ============================================================
 
 let globalFeishuNotifier: AutoSkillFeishuNotifier | null = null;
-let scanTimer: ReturnType<typeof setInterval> | null = null;
-let initialScanTimer: ReturnType<typeof setTimeout> | null = null;
-let scanInFlight = false;
+let stopScannerTask: (() => void) | undefined;
 
 // ── 实时触发监视器 ──
 let realtimeWatcher: AutoSkillRealtimeWatcherType | null = null;
@@ -1330,6 +1329,10 @@ export interface AutoSkillScannerOptions {
   intervalMs?: number;
   /** 每轮候选原子落盘后通知桌面/飞书刷新；不代表安装。 */
   onCandidatesStaged?: (candidates: SkillCandidate[]) => void | Promise<void>;
+  /** Shared resident-task registry. Paid scanning is rejected unless enabled there. */
+  taskRegistry?: RecurringTaskRegistry;
+  /** Stable fingerprint of the work logs. Undefined means there is no work. */
+  getInputVersion?: () => string | undefined;
 }
 
 /** 注入飞书通知器 */
@@ -1379,46 +1382,33 @@ export function startAutoSkillScanner(
   getUserId: () => string,
   options: AutoSkillScannerOptions = {},
 ): boolean {
-  if (scanTimer || initialScanTimer) return false;
+  if (stopScannerTask) return false;
   const intervalMs = options.intervalMs ?? 24 * 60 * 60 * 1000;
   const initialDelayMs = options.initialDelayMs ?? 15_000;
+  const registry = options.taskRegistry ?? new RecurringTaskRegistry({ allowPaidBackground: true });
 
-  const scan = async (): Promise<void> => {
-    // 慢磁盘/大量日志时不叠加第二轮扫描。
-    if (scanInFlight) return;
-    scanInFlight = true;
-    try {
+  stopScannerTask = registry.register({
+    name: 'auto-skill-candidate-scan',
+    source: 'packages/core/src/orchestration/autoSkillGenerator.ts#scanner',
+    definitionVersion: 1,
+    intervalMs,
+    initialDelayMs,
+    missedRunPolicy: 'skip',
+    estimatedCostUsdPerRun: 0.01,
+    getInputVersion: options.getInputVersion ?? (() => undefined),
+    run: async () => {
       const candidates = await scanAndStageSkillCandidates(config, getUserId);
       await options.onCandidatesStaged?.(candidates);
-    } catch (err) {
-      console.warn(`[AutoSkill] Scanner error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      scanInFlight = false;
-    }
-  };
-
-  initialScanTimer = setTimeout(async () => {
-    initialScanTimer = null;
-    await scan();
-  }, initialDelayMs);
-  initialScanTimer.unref?.();
-
-  scanTimer = setInterval(() => void scan(), intervalMs);
-  scanTimer.unref?.();
+    },
+  });
+  if (!stopScannerTask) return false;
   console.log('[AutoSkill] Scanner started (24h interval)');
   return true;
 }
 
 /** 停止定时扫描 */
 export function stopAutoSkillScanner(): void {
-  if (initialScanTimer) {
-    clearTimeout(initialScanTimer);
-    initialScanTimer = null;
-  }
-  if (scanTimer) {
-    clearInterval(scanTimer);
-    scanTimer = null;
-  }
-  scanInFlight = false;
+  stopScannerTask?.();
+  stopScannerTask = undefined;
   console.log('[AutoSkill] Scanner stopped');
 }

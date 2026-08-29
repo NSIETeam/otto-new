@@ -23,8 +23,9 @@ import {
   type Server as HttpServer,
   type ServerResponse,
 } from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import * as path from 'node:path';
 import { homedir } from 'node:os';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -163,6 +164,7 @@ import {
   type SimpleMessage,
   getSessionManager,
   getAutoMemoryEngine,
+  resolveDefaultWorklogDir,
   loadBuiltinSkillInstructions,
   getWebSearchDiagnostics,
 } from 'otto-core';
@@ -469,6 +471,7 @@ export class OttoServer {
   private externalInboundUnsub?: () => void;
   /** 进程级自动 Skill 扫描器由当前 server 实例启动时，停机时负责释放。 */
   private autoSkillScannerStarted = false;
+  private autoSkillScannerConfig?: CoreConfig;
   private readonly productWorkspace: ProductWorkspaceStore;
   private readonly chatFileCacheDir?: string;
   private readonly sessionTitleTimeoutMs: number;
@@ -580,16 +583,17 @@ export class OttoServer {
 
     // 无付费的本地记忆维护与可能调用模型的上下文压缩必须分开登记。
     // 新安装只会注册前者；后者严格跟随用户的显式后台模型开关。
-    this.startResidentMaintenanceTasks(
-      loadUserSettingsSubset().backgroundModelTasksEnabled === true,
-    );
+    const backgroundModelTasksEnabled =
+      loadUserSettingsSubset().backgroundModelTasksEnabled === true;
+    this.startResidentMaintenanceTasks(backgroundModelTasksEnabled);
 
     // 自动 Skill 只分析本地工作日志并暂存“待确认候选”，不会直接写 SKILL.md。
-    // 延迟首扫 15 秒，避免与桌面首屏初始化争抢磁盘；定时器 unref，不阻塞进程退出。
+    // 它可能调用模型，因此仅在显式开启后台模型任务后登记；输入日志不变时跳过。
     try {
       const scannerConfig = createCoreConfig({
         sessionId: 'auto-skill-scanner',
       });
+      this.autoSkillScannerConfig = scannerConfig;
       setAutoSkillConfigForProfile(scannerConfig);
 
       // 实时触发监视器：每完成一个操作就检查是否达到重复阈值
@@ -623,18 +627,7 @@ export class OttoServer {
       habitAnalyzer.start();
 
 
-      this.autoSkillScannerStarted = startAutoSkillScanner(
-        scannerConfig,
-        () => this.productWorkspace.snapshot().context.userId,
-        {
-          onCandidatesStaged: (candidates) => {
-            this.broadcastAll({
-              type: 'pending_auto_skills',
-              payload: { candidates: candidates.map(publicAutoSkillCandidate) },
-            });
-          },
-        },
-      );
+      this.setAutoSkillScannerEnabled(backgroundModelTasksEnabled);
     } catch (error) {
       console.warn(
         `[AutoSkill] Scanner startup skipped: ${error instanceof Error ? error.message : String(error)}`,
@@ -694,7 +687,7 @@ export class OttoServer {
         recentActions: [],
         pendingTasks: 0,
         hasUpcomingMeeting: false,
-      }));
+      }), this.recurringTaskRegistry);
       console.log('[Server] ProactiveService started (local mode)');
     } catch (err) {
       console.warn('[Server] ProactiveService init failed (non-fatal):', err);
@@ -1543,6 +1536,7 @@ export class OttoServer {
         patchUserSettings({ backgroundModelTasksEnabled: value });
         getHabitAnalyzer().setBackgroundModelCallsEnabled(value);
         this.setAutoCompressionEnabled(value);
+        this.setAutoSkillScannerEnabled(value);
       } else if (key === 'preferredLanguage') {
         if (typeof value !== 'string') {
           throw new Error('preferredLanguage 的值必须是字符串');
@@ -2091,7 +2085,9 @@ export class OttoServer {
         // Maintenance includes time-based expiry, so each cadence bucket is a
         // real deterministic input even when user content did not change.
         getInputVersion: () => `bucket:${Math.floor(Date.now() / MAINTENANCE_INTERVAL_MS)}`,
-        run: () => getAutoMemoryEngine().runMaintenanceCycle(),
+        run: async () => {
+          await getAutoMemoryEngine().runMaintenanceCycle();
+        },
       });
     }
     this.setAutoCompressionEnabled(backgroundModelTasksEnabled);
@@ -2123,6 +2119,46 @@ export class OttoServer {
       },
       run: () => this.runAutoCompressionCycle(),
     });
+  }
+
+  private autoSkillWorkLogVersion(): string | undefined {
+    const dailyDir = path.join(resolveDefaultWorklogDir(), 'daily');
+    try {
+      const inputs = readdirSync(dailyDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
+        .map((entry) => {
+          const stats = statSync(path.join(dailyDir, entry.name));
+          return `${entry.name}:${stats.size}:${stats.mtimeMs}`;
+        })
+        .sort();
+      if (inputs.length === 0) return undefined;
+      return createHash('sha256').update(inputs.join('|')).digest('hex');
+    } catch {
+      return undefined;
+    }
+  }
+
+  private setAutoSkillScannerEnabled(enabled: boolean): void {
+    if (!enabled) {
+      if (this.autoSkillScannerStarted) stopAutoSkillScanner();
+      this.autoSkillScannerStarted = false;
+      return;
+    }
+    if (this.autoSkillScannerStarted || !this.autoSkillScannerConfig) return;
+    this.autoSkillScannerStarted = startAutoSkillScanner(
+      this.autoSkillScannerConfig,
+      () => this.productWorkspace.snapshot().context.userId,
+      {
+        taskRegistry: this.recurringTaskRegistry,
+        getInputVersion: () => this.autoSkillWorkLogVersion(),
+        onCandidatesStaged: (candidates) => {
+          this.broadcastAll({
+            type: 'pending_auto_skills',
+            payload: { candidates: candidates.map(publicAutoSkillCandidate) },
+          });
+        },
+      },
+    );
   }
 
   /**

@@ -177,8 +177,49 @@ describe('ManagedChannelConnectorV1', () => {
 
     expect(vault.commit).toHaveBeenCalledWith(installation, 'provider-refresh-token');
     expect(runtime.start).toHaveBeenCalledWith(installation, 'provider-refresh-token');
-    expect(runtime.revoke).toHaveBeenCalledWith(installation, 'provider-refresh-token');
+    expect(runtime.revoke).toHaveBeenCalledWith(installation, 'provider-refresh-token', {
+      idempotencyKey: `channel-revoke:${installation.installationId}`,
+    });
     expect(vault.listInstallations()).toEqual([]);
+  });
+
+  it('removes local authorization when provider revocation outcome is unknown', async () => {
+    const { connector, runtime, vault } = setup();
+    const keys = generateKeyPairSync('ed25519');
+    const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const pairing = await connector.beginPairing({
+      provider: 'lark',
+      installationPublicKey: publicKey.trim(),
+      requestedScopes: ['im:message'],
+    });
+    await connector.acceptProviderAuthorization({
+      pairingId: pairing.pairingId,
+      nonce: 'single-use-pairing-nonce-with-enough-entropy',
+      plaintextCredential: 'provider-refresh-token',
+      authorization: {
+        tenantId: 'tenant-1',
+        tenantName: 'Acme',
+        botName: 'Otto',
+        grantedScopes: ['im:message'],
+      },
+    });
+    const installation = await connector.completeInstallation(pairing.pairingId, {
+      installationPublicKey: publicKey,
+      signature: sign(
+        null,
+        channelInstallationProofPayload(pairing.pairingId),
+        keys.privateKey,
+      ).toString('base64url'),
+    });
+    vi.mocked(runtime.revoke).mockRejectedValueOnce(new Error('provider timeout'));
+
+    await expect(connector.revoke(installation.installationId)).rejects.toThrow(
+      'provider revocation outcome is unknown; local authorization was removed',
+    );
+    expect(vault.listInstallations()).toEqual([]);
+    await expect(connector.start(installation.installationId)).rejects.toThrow(
+      'channel installation was not found',
+    );
   });
 
   it('does not expose or persist a credential before device proof succeeds', async () => {

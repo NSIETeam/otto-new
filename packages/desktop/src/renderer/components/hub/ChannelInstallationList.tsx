@@ -8,6 +8,7 @@ import type {
   ChannelProvider,
 } from '../../../preload/index.js';
 import { Badge, Card, Empty } from './HubUI.js';
+import { startNonOverlappingPoll } from '../../lib/nonOverlappingPoll.js';
 
 const REFRESH_MS = 10_000;
 
@@ -69,19 +70,7 @@ export function ChannelInstallationList({
     }
   }, [provider]);
 
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const refresh = async (): Promise<void> => {
-      await load();
-      if (!cancelled) timer = setTimeout(() => void refresh(), REFRESH_MS);
-    };
-    void refresh();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [load]);
+  useEffect(() => startNonOverlappingPoll(load, REFRESH_MS), [load]);
 
   const act = async (
     installation: ChannelInstallation,
@@ -103,8 +92,10 @@ export function ChannelInstallationList({
         installation.installationId,
         action,
       );
-      if (!response?.ok) setError(response?.error ?? '渠道操作失败。');
-      else await load();
+      if (!response?.ok) {
+        if (action === 'revoke') await load();
+        setError(response?.error ?? '渠道操作失败。');
+      } else await load();
     } finally {
       setBusy(null);
       setConfirmRevoke(null);

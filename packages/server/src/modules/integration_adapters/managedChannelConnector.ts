@@ -36,6 +36,7 @@ export interface ChannelRuntimeAdapterV1 {
   revoke(
     installation: Readonly<ChannelInstallation>,
     plaintextCredential: string,
+    context: { idempotencyKey: string },
   ): Promise<void>;
   send(
     installation: Readonly<ChannelInstallation>,
@@ -226,8 +227,23 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
         tenantId: installation.tenantId,
       };
       const credential = await this.options.vault.loadCredential(lookup);
-      await this.options.runtime.revoke(installation, credential);
+      let remoteFailure: unknown;
+      try {
+        await this.options.runtime.revoke(installation, credential, {
+          idempotencyKey: `channel-revoke:${installationId}`,
+        });
+      } catch (error) {
+        remoteFailure = error;
+      }
+      // Local authorization is always removed. A remote timeout must never
+      // allow this installation to reconnect on the next Otto start.
       await this.options.vault.remove(lookup);
+      if (remoteFailure) {
+        throw new Error(
+          'provider revocation outcome is unknown; local authorization was removed and will not reconnect',
+          { cause: remoteFailure },
+        );
+      }
     });
   }
 

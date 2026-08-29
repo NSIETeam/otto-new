@@ -143,6 +143,38 @@ describe('BrokerChannelRuntimeV1', () => {
     }
   });
 
+  it('uses an idempotency key and forgets runtime state when provider revoke times out', async () => {
+    const socket = new FakeSocket();
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('provider timeout');
+    });
+    const runtime = new BrokerChannelRuntimeV1({
+      baseUrl: 'https://connect.otto.example',
+      createSocket: () => socket,
+      fetchImpl,
+      onInbound: async () => 'ack',
+    });
+    const starting = runtime.start(installation, credential);
+    socket.emit('open');
+    await starting;
+
+    await expect(runtime.revoke(installation, credential, {
+      idempotencyKey: `channel-revoke:${installation.installationId}`,
+    })).rejects.toThrow('provider timeout');
+    expect(fetchImpl).toHaveBeenCalledWith(
+      `https://connect.otto.example/v1/channel-installations/${installation.installationId}`,
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({
+          'idempotency-key': `channel-revoke:${installation.installationId}`,
+        }),
+      }),
+    );
+    expect(() => runtime.health(installation.installationId)).toThrow(
+      'managed channel runtime is not started',
+    );
+  });
+
   it('reconnects after an unexpected close and aborts stalled broker writes', async () => {
     vi.useFakeTimers();
     try {

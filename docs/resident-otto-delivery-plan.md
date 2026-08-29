@@ -337,6 +337,7 @@ means no source-level substitute is accepted.
 | Abandoned provider credentials and device proof keys are erased at the five-minute deadline without an idle network call | `managedChannelConnector.ts`, `channel-pairing-key-store.ts`, focused expiry tests | Automated |
 | Protected credential custody and idempotent outbound writes | `channelCredentialVault.ts`, `channelOutboundLedger.ts`, focused persistence tests | Automated |
 | Provider timeout and interrupted prepared writes become persisted `unknown_outcome` and cannot auto-replay | `channelOutboundLedger.ts`, `managedChannelConnector.ts`, focused recovery tests | Automated |
+| Channel revoke is fail-closed locally and uses a stable provider idempotency key | `managedChannelConnector.ts`, `brokerChannelRuntime.ts`, Server and Desktop focused revoke tests | Automated; provider-side completion may remain unknown |
 | Broker outbound runtime, tenant checking, timeout and reconnect | `brokerChannelRuntime.ts`, `brokerChannelRuntime.test.ts` | Automated |
 | Explicit provider-to-Otto identity binding and revocation | `channelIdentityRegistry.ts`, Server REST, CLI and Desktop tests | Automated |
 | Chat command authorization, deduplication and visible reply before ACK | `channelTaskControl.ts`, `brokerChannelTaskBridge.ts`, focused tests | Automated |
@@ -378,3 +379,8 @@ means no source-level substitute is accepted.
   idempotency, and channel identity policy. `meeting_actions` now exposes a
   local `list_due` operation; external delivery must use the managed channel
   workflow and its explicit approval path.
+- Channel revocation now removes the local credential and runtime state even
+  when the provider DELETE times out, so a revoked installation cannot silently
+  reconnect after restart. The DELETE carries a stable idempotency key and the
+  Desktop removes the local installation while showing that the remote outcome
+  is unknown; this does not claim that provider-side revocation completed.

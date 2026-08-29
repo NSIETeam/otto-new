@@ -143,18 +143,24 @@ export class BrokerChannelRuntimeV1 implements ChannelRuntimeAdapterV1 {
   async revoke(
     installation: Readonly<ChannelInstallation>,
     plaintextCredential: string,
+    context: { idempotencyKey: string },
   ): Promise<void> {
     const credential = parseCredential(plaintextCredential);
     const state = this.states.get(installation.installationId);
     if (state) await this.stop(installation.installationId);
-    await this.request(
-      credential,
-      'DELETE',
-      `/v1/channel-installations/${installation.installationId}`,
-    );
-    if (state) {
-      state.state = 'revoked';
-      this.states.delete(installation.installationId);
+    try {
+      await this.request(
+        credential,
+        'DELETE',
+        `/v1/channel-installations/${installation.installationId}`,
+        undefined,
+        context.idempotencyKey,
+      );
+    } finally {
+      if (state) {
+        state.state = 'revoked';
+        this.states.delete(installation.installationId);
+      }
     }
   }
 

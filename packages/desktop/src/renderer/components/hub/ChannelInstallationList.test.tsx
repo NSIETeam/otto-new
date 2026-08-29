@@ -87,6 +87,47 @@ describe('ChannelInstallationList', () => {
     ));
   });
 
+  it('removes a locally revoked installation while showing an unknown remote outcome', async () => {
+    let installed = true;
+    channelInstallations.mockImplementation(async () => ({
+      ok: true,
+      data: installed ? [installation] : [],
+      error: null,
+    }));
+    channelInstallationAction.mockImplementation(async (_id: string, action: string) => {
+      if (action === 'health') {
+        return {
+          ok: true,
+          data: {
+            installationId: installation.installationId,
+            running: true,
+            state: 'connected',
+            reconnectCount: 0,
+          },
+          error: null,
+        };
+      }
+      if (action === 'revoke') {
+        installed = false;
+        return {
+          ok: false,
+          data: null,
+          error: 'provider revocation outcome is unknown; local authorization was removed and will not reconnect',
+        };
+      }
+      return { ok: true, data: {}, error: null };
+    });
+
+    render(<ChannelInstallationList provider="wecom" />);
+    fireEvent.click(await screen.findByRole('button', { name: '注销连接' }));
+    fireEvent.click(screen.getByRole('button', { name: '再次点击确认注销' }));
+
+    expect(await screen.findByText('尚未安装此渠道的机器人。')).toBeTruthy();
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'local authorization was removed',
+    );
+  });
+
   it('binds an explicitly approved identity through the shared supervisor', async () => {
     render(<ChannelInstallationList provider="wecom" />);
     fireEvent.click(await screen.findByRole('button', { name: '身份管理' }));

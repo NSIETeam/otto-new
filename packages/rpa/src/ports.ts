@@ -3,7 +3,7 @@
 import type { RpaArtifact, RpaRun, RpaStepDefinition } from './contracts.js';
 
 export interface RpaRunStore {
-  create(workflow: { id: string; version: 1; steps: readonly RpaStepDefinition[] }): Promise<RpaRun>;
+  create(workflow: { id: string; version: 1; allowedHosts: readonly string[]; steps: readonly RpaStepDefinition[] }): Promise<RpaRun>;
   get(runId: string): Promise<RpaRun | null>;
   save(run: RpaRun, expectedRevision: number): Promise<RpaRun>;
 }
@@ -18,10 +18,12 @@ export interface RpaPolicyPort {
 }
 
 export interface RpaDriver {
-  execute(input: { run: RpaRun; step: RpaStepDefinition; idempotencyKey: string }): Promise<{
+  execute(input: { run: RpaRun; step: RpaStepDefinition; idempotencyKey: string; signal?: AbortSignal }): Promise<{
     output?: unknown;
     artifacts?: ReadonlyArray<{ mediaType: string; bytes: Uint8Array; redactedSummary: string }>;
   }>;
+  /** Releases run-scoped browser/process resources. Must be safe to call repeatedly. */
+  closeRun?(runId: string): Promise<void>;
 }
 
 export interface RpaArtifactStore {

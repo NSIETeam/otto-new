@@ -35,7 +35,7 @@ export class RpaRunner {
     return this.store.create(workflow);
   }
 
-  async runNext(runId: string): Promise<RpaRun | null> {
+  async runNext(runId: string, signal?: AbortSignal): Promise<RpaRun | null> {
     const run = await this.store.get(runId);
     if (!run || ['awaiting_approval', 'paused', 'unknown_outcome', 'failed', 'cancelled', 'succeeded'].includes(run.state)) {
       return run;
@@ -66,6 +66,7 @@ export class RpaRunner {
         run: clone(claimed),
         step,
         idempotencyKey: receiptFor(claimed, step.id)!.idempotencyKey,
+        signal,
       });
       const saved = await this.store.get(runId);
       if (!saved) return null;
@@ -78,12 +79,75 @@ export class RpaRunner {
       completed.state = 'succeeded';
       saved.currentStepId = null;
       saved.state = 'pending';
-      return this.store.save(saved, saved.revision);
+      const result = await this.store.save(saved, saved.revision);
+      if (!workflow.steps.some((candidate) => receiptFor(result, candidate.id)?.state === 'pending')) {
+        return this.finish(result);
+      }
+      return result;
     } catch (error) {
       const saved = await this.store.get(runId);
       if (!saved) return null;
+      if (signal?.aborted) {
+        const interrupted = receiptFor(saved, step.id)!;
+        if (step.sideEffect === 'external') {
+          interrupted.state = 'unknown_outcome';
+          interrupted.error = 'Execution was cancelled after an external action began; human reconciliation is required.';
+          saved.state = 'unknown_outcome';
+        } else {
+          interrupted.state = 'failed';
+          interrupted.error = 'Execution was cancelled by the user.';
+          saved.state = 'cancelled';
+          saved.currentStepId = null;
+        }
+        const cancelled = await this.store.save(saved, saved.revision);
+        await this.closeRun(runId);
+        return cancelled;
+      }
       return this.fail(saved, step, error instanceof Error ? error.message : String(error));
     }
+  }
+
+  async runUntilBlocked(runId: string, signal?: AbortSignal): Promise<RpaRun | null> {
+    for (let stepCount = 0; stepCount < 100; stepCount += 1) {
+      if (signal?.aborted) throw signal.reason ?? new Error('RPA run was cancelled.');
+      const run = await this.runNext(runId, signal);
+      if (!run || run.state !== 'pending') return run;
+    }
+    throw new Error('RPA run exceeded the 100-step foreground execution limit.');
+  }
+
+  async pause(runId: string, note = 'Paused for human interaction.'): Promise<RpaRun | null> {
+    const run = await this.store.get(runId);
+    if (!run || ['cancelled', 'succeeded', 'failed', 'unknown_outcome'].includes(run.state)) return run;
+    run.state = 'paused';
+    run.takeoverNote = note.trim().slice(0, 500) || 'Paused for human interaction.';
+    const saved = await this.store.save(run, run.revision);
+    await this.closeRun(run.id);
+    return saved;
+  }
+
+  async resume(runId: string): Promise<RpaRun | null> {
+    const run = await this.store.get(runId);
+    if (!run) return null;
+    if (run.state !== 'paused') throw new Error('Only a paused RPA run can be resumed.');
+    run.state = 'pending';
+    run.currentStepId = null;
+    run.takeoverNote = undefined;
+    return this.store.save(run, run.revision);
+  }
+
+  async cancel(runId: string): Promise<RpaRun | null> {
+    const run = await this.store.get(runId);
+    if (!run || ['cancelled', 'succeeded'].includes(run.state)) return run;
+    if (run.state === 'unknown_outcome') {
+      throw new Error('An RPA run with an unknown external outcome requires human reconciliation before it can be closed.');
+    }
+    run.state = 'cancelled';
+    run.currentStepId = null;
+    run.approvalId = undefined;
+    const saved = await this.store.save(run, run.revision);
+    await this.closeRun(runId);
+    return saved;
   }
 
   async recover(runId: string): Promise<RpaRun | null> {
@@ -98,7 +162,9 @@ export class RpaRunner {
       active.state = 'unknown_outcome';
       active.error = 'Execution was interrupted after an external action began; human takeover or reconciliation is required.';
       run.state = 'unknown_outcome';
-      return this.store.save(run, run.revision);
+      const saved = await this.store.save(run, run.revision);
+      await this.closeRun(run.id);
+      return saved;
     }
     active.state = 'pending';
     active.error = undefined;
@@ -133,13 +199,17 @@ export class RpaRunner {
     }
     run.state = 'paused';
     run.takeoverNote = note.trim().slice(0, 500) || 'Human takeover requested.';
-    return this.store.save(run, run.revision);
+    const saved = await this.store.save(run, run.revision);
+    await this.closeRun(run.id);
+    return saved;
   }
 
   private async finish(run: RpaRun): Promise<RpaRun> {
     run.state = 'succeeded';
     run.currentStepId = null;
-    return this.store.save(run, run.revision);
+    const saved = await this.store.save(run, run.revision);
+    await this.closeRun(run.id);
+    return saved;
   }
 
   private async fail(run: RpaRun, step: RpaStepDefinition, error: string): Promise<RpaRun> {
@@ -148,7 +218,13 @@ export class RpaRunner {
     receipt.error = error;
     run.state = 'failed';
     run.currentStepId = step.id;
-    return this.store.save(run, run.revision);
+    const saved = await this.store.save(run, run.revision);
+    await this.closeRun(run.id);
+    return saved;
+  }
+
+  private async closeRun(runId: string): Promise<void> {
+    await this.driver.closeRun?.(runId);
   }
 
   private workflow(id: string, version: number): RpaWorkflowV1 {

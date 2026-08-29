@@ -47,6 +47,7 @@ function memoryStore(): RpaRunStore {
 const workflow: RpaWorkflowV1 = {
   id: 'download-report',
   version: 1,
+  allowedHosts: ['example.com'],
   steps: [{ id: 'download', action: 'web.click', args: { selector: '#download' }, sideEffect: 'external' }],
 };
 
@@ -102,7 +103,105 @@ describe('RpaRunner', () => {
 
     expect(waiting).toMatchObject({ state: 'awaiting_approval' });
     expect(approved?.receipts[0]).toMatchObject({ approvalId: 'approval-1' });
-    expect(completed).toMatchObject({ state: 'pending', receipts: [{ state: 'succeeded' }] });
+    expect(completed).toMatchObject({ state: 'succeeded', receipts: [{ state: 'succeeded' }] });
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a resumable run and releases its run-scoped resources', async () => {
+    const closeRun = vi.fn();
+    const runner = new RpaRunner([workflow], memoryStore(), {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute: vi.fn(), closeRun }, { put: vi.fn() });
+    const run = await runner.start(workflow.id);
+
+    const cancelled = await runner.cancel(run.id);
+
+    expect(cancelled).toMatchObject({ state: 'cancelled', currentStepId: null });
+    expect(closeRun).toHaveBeenCalledWith(run.id);
+    expect(await runner.runNext(run.id)).toMatchObject({ state: 'cancelled' });
+  });
+
+  it('does not allow cancellation to hide an unknown external outcome', async () => {
+    const store = memoryStore();
+    const runner = new RpaRunner([workflow], store, {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute: vi.fn() }, { put: vi.fn() });
+    const run = await runner.start(workflow.id);
+    const interrupted = await store.get(run.id);
+    interrupted!.state = 'running';
+    interrupted!.currentStepId = 'download';
+    interrupted!.receipts[0].state = 'started';
+    await store.save(interrupted!, interrupted!.revision);
+    await runner.recover(run.id);
+
+    await expect(runner.cancel(run.id)).rejects.toThrow('human reconciliation');
+  });
+
+  it('passes cancellation through to the driver and closes resources after completion', async () => {
+    const safeWorkflow: RpaWorkflowV1 = {
+      id: 'read-report', version: 1,
+      allowedHosts: ['example.com'],
+      steps: [{ id: 'read', action: 'web.extract', args: { selector: '#report' }, sideEffect: 'none' }],
+    };
+    const execute = vi.fn().mockResolvedValue({ output: { text: 'done' } });
+    const closeRun = vi.fn();
+    const runner = new RpaRunner([safeWorkflow], memoryStore(), {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute, closeRun }, { put: vi.fn() });
+    const run = await runner.start(safeWorkflow.id);
+    const controller = new AbortController();
+
+    const completed = await runner.runNext(run.id, controller.signal);
+
+    expect(completed).toMatchObject({ state: 'succeeded' });
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }));
+    expect(closeRun).toHaveBeenCalledWith(run.id);
+  });
+
+  it('runs safe steps until completion and supports an explicit human pause and resume', async () => {
+    const safeWorkflow: RpaWorkflowV1 = {
+      id: 'two-steps', version: 1, allowedHosts: ['example.com'],
+      steps: [
+        { id: 'one', action: 'checkpoint', args: {}, sideEffect: 'none' },
+        { id: 'two', action: 'checkpoint', args: {}, sideEffect: 'none' },
+      ],
+    };
+    const execute = vi.fn().mockResolvedValue({ output: {} });
+    const closeRun = vi.fn();
+    const runner = new RpaRunner([safeWorkflow], memoryStore(), {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute, closeRun }, { put: vi.fn() });
+    const run = await runner.start(safeWorkflow.id);
+
+    const paused = await runner.pause(run.id, 'Solve captcha');
+    const resumed = await runner.resume(run.id);
+    const completed = await runner.runUntilBlocked(run.id);
+
+    expect(paused).toMatchObject({ state: 'paused', takeoverNote: 'Solve captcha' });
+    expect(resumed).toMatchObject({ state: 'pending', takeoverNote: undefined });
+    expect(completed).toMatchObject({ state: 'succeeded' });
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('records cancellation without replaying an in-flight step', async () => {
+    const safeWorkflow: RpaWorkflowV1 = {
+      id: 'cancel-safe', version: 1, allowedHosts: ['example.com'],
+      steps: [{ id: 'wait', action: 'web.wait', args: { selector: '#done' }, sideEffect: 'none' }],
+    };
+    const controller = new AbortController();
+    const execute = vi.fn().mockImplementation(async () => {
+      controller.abort(new Error('cancelled'));
+      throw controller.signal.reason;
+    });
+    const closeRun = vi.fn();
+    const runner = new RpaRunner([safeWorkflow], memoryStore(), {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute, closeRun }, { put: vi.fn() });
+    const run = await runner.start(safeWorkflow.id);
+
+    const cancelled = await runner.runNext(run.id, controller.signal);
+
+    expect(cancelled).toMatchObject({ state: 'cancelled', receipts: [{ state: 'failed', error: 'Execution was cancelled by the user.' }] });
+    expect(closeRun).toHaveBeenCalledWith(run.id);
   });
 });

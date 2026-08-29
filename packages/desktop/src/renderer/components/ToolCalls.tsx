@@ -231,9 +231,13 @@ function automationAction(action: string | undefined): string {
   switch (action) {
     case 'start': return '创建自动流程';
     case 'run_next': return '执行下一步';
+    case 'run_all': return '运行至暂停或完成';
+    case 'pause': return '暂停自动流程';
+    case 'resume': return '继续自动流程';
     case 'approve': return '记录执行批准';
     case 'recover': return '检查中断状态';
     case 'take_over': return '人工接管流程';
+    case 'cancel': return '取消自动流程';
     case 'status': return '查看流程状态';
     default: return '处理自动流程';
   }

@@ -11,7 +11,7 @@ const browserSuite = process.env['RUN_RPA_BROWSER_E2E'] === '1' ? describe : des
 
 function input(action: Parameters<RpaDriver['execute']>[0]['step']['action'], args: Record<string, unknown>): Parameters<RpaDriver['execute']>[0] {
   return {
-    run: { id: 'rpa-e2e-run' } as Parameters<RpaDriver['execute']>[0]['run'],
+    run: { id: 'rpa-e2e-run', workflow: { allowedHosts: ['127.0.0.1'] } } as unknown as Parameters<RpaDriver['execute']>[0]['run'],
     step: { action, args } as Parameters<RpaDriver['execute']>[0]['step'],
     idempotencyKey: `rpa-e2e-run:${action}:1`,
   };
@@ -25,9 +25,14 @@ browserSuite('Playwright RPA browser boundary', () => {
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const { port } = server.address() as AddressInfo;
-    const driver = new RunScopedWebDriver(new PlaywrightWebSessionFactory({
-      executablePath: process.env['OTTO_RPA_BROWSER_EXECUTABLE'],
-    }));
+    const driver = new RunScopedWebDriver(
+      new PlaywrightWebSessionFactory({
+        executablePath: process.env['OTTO_RPA_BROWSER_EXECUTABLE'],
+      }),
+      // This suite owns the isolated loopback server. Production uses the
+      // fail-closed navigation policy and cannot opt into loopback implicitly.
+      { authorize: async () => {} },
+    );
     try {
       await driver.execute(input('web.navigate', { url: `http://127.0.0.1:${port}/` }));
       await driver.execute(input('web.fill', { selector: '#name', value: 'Otto' }));

@@ -7,6 +7,11 @@ export type RpaActionKind =
   | 'web.extract'
   | 'web.screenshot'
   | 'web.wait'
+  | 'desktop.launch'
+  | 'desktop.type_text'
+  | 'desktop.hotkey'
+  | 'desktop.click'
+  | 'desktop.screenshot'
   | 'checkpoint';
 export type RpaRunState =
   | 'pending'
@@ -30,6 +35,8 @@ export interface RpaStepDefinition {
 export interface RpaWorkflowV1 {
   id: string;
   version: 1;
+  /** Exact hosts or leading-wildcard subdomains that navigation may reach. */
+  allowedHosts: readonly string[];
   steps: readonly RpaStepDefinition[];
 }
 

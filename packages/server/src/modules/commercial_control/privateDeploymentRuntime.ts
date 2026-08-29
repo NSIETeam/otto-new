@@ -2,6 +2,8 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
+import { RecurringTaskRegistry } from 'otto-core';
+
 export interface PrivateDeploymentRuntimeServices {
   refreshDeploymentLicenseLease(): Promise<{
     refreshed: boolean;
@@ -45,6 +47,7 @@ export interface PrivateDeploymentRuntimeOptions {
   healthIntervalMs?: number;
   initialDelayMs?: number;
   onError?: (error: unknown) => void;
+  taskRegistry?: RecurringTaskRegistry;
 }
 
 /** Runs lease renewal and telemetry delivery without blocking customer traffic. */
@@ -58,12 +61,9 @@ export function startPrivateDeploymentRuntime(
     options.healthIntervalMs ?? 15 * 60_000,
   );
   let nextHealthAt = Date.now();
-  let stopped = false;
-  let running = false;
+  const taskRegistry = options.taskRegistry ?? new RecurringTaskRegistry();
 
   const tick = async () => {
-    if (stopped || running) return;
-    running = true;
     try {
       await services.refreshDeploymentLicenseLease();
       if (Date.now() >= nextHealthAt) {
@@ -82,18 +82,16 @@ export function startPrivateDeploymentRuntime(
       await services.flushBillingUsageQueue();
     } catch (error) {
       options.onError?.(error);
-    } finally {
-      running = false;
     }
   };
 
-  const initial = setTimeout(() => void tick(), options.initialDelayMs ?? 2_000);
-  initial.unref();
-  const interval = setInterval(() => void tick(), intervalMs);
-  interval.unref();
-  return () => {
-    stopped = true;
-    clearTimeout(initial);
-    clearInterval(interval);
-  };
+  return taskRegistry.register({
+    name: 'server.private-deployment-control-sync',
+    source: 'packages/server/src/modules/commercial_control/privateDeploymentRuntime.ts',
+    intervalMs,
+    initialDelayMs: options.initialDelayMs ?? 2_000,
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => String(Math.floor(Date.now() / intervalMs)),
+    run: tick,
+  }) ?? (() => undefined);
 }

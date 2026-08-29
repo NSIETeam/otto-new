@@ -3,6 +3,7 @@
  */
 
 import { FederationGatewayError } from './federationClient.js';
+import { RecurringTaskRegistry } from 'otto-core';
 import type {
   ClaimedFederationEnvelope,
   SignedFederationEnvelope,
@@ -143,32 +144,28 @@ export function startFederationRuntime(
     intervalMs?: number;
     initialDelayMs?: number;
     onError?: (error: unknown) => void;
+    taskRegistry?: RecurringTaskRegistry;
   } = {},
 ): () => void {
   const configuredInterval = Number(options.intervalMs);
   const intervalMs = Number.isFinite(configuredInterval)
     ? Math.max(2_000, configuredInterval)
     : 10_000;
-  let stopped = false;
-  let running = false;
+  const taskRegistry = options.taskRegistry ?? new RecurringTaskRegistry();
   const tick = async () => {
-    if (stopped || running) return;
-    running = true;
     try {
       await runFederationCycle(services);
     } catch (error) {
       options.onError?.(error);
-    } finally {
-      running = false;
     }
   };
-  const initial = setTimeout(() => void tick(), options.initialDelayMs ?? 1_000);
-  initial.unref();
-  const interval = setInterval(() => void tick(), intervalMs);
-  interval.unref();
-  return () => {
-    stopped = true;
-    clearTimeout(initial);
-    clearInterval(interval);
-  };
+  return taskRegistry.register({
+    name: 'server.federation-gateway-cycle',
+    source: 'packages/server/src/modules/federation_gateway/federationRuntime.ts',
+    intervalMs,
+    initialDelayMs: options.initialDelayMs ?? 1_000,
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => String(Math.floor(Date.now() / intervalMs)),
+    run: tick,
+  }) ?? (() => undefined);
 }

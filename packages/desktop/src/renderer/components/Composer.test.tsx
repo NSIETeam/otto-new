@@ -13,6 +13,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { ModelInfo } from 'otto-server';
 import { Composer, insertComposerDraft } from './Composer.js';
 import * as transport from '../transport.js';
@@ -46,6 +48,16 @@ function openMenu() {
 }
 
 describe('输入区工具布局与弹层', () => {
+  it('全屏与窄屏下上下文工具条和输入框共用同一内容列', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles/app.css'), 'utf8');
+    expect(css).toMatch(
+      /\.otto-composer__contextbar\s*\{[^}]*margin:\s*0 auto 7px;[^}]*\}/s,
+    );
+    expect(css).toMatch(
+      /\.otto-thread__inner,\s*\.otto-composer__contextbar,\s*\.otto-composer__inner,\s*\.otto-composer__hint\s*\{[^}]*max-width:\s*880px;[^}]*\}/s,
+    );
+  });
+
   it('工作目录和授权位于输入面板上方，模型位于发送按钮左侧，且无独立文件夹按钮', () => {
     const { container } = render(
       <Composer

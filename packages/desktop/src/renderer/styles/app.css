@@ -2752,7 +2752,7 @@ h6.otto-prose__h {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 7px;
+  margin: 0 auto 7px;
   padding: 0 4px;
 }
 .otto-contextpill {
@@ -9691,6 +9691,7 @@ body[data-otto-surface='desktop-pet'] #root {
   padding-top: 24px;
 }
 .otto-thread__inner,
+.otto-composer__contextbar,
 .otto-composer__inner,
 .otto-composer__hint {
   max-width: 820px;
@@ -9862,6 +9863,7 @@ body[data-otto-surface='desktop-pet'] #root {
 }
 
 .otto-thread__inner,
+.otto-composer__contextbar,
 .otto-composer__inner,
 .otto-composer__hint {
   max-width: 880px;

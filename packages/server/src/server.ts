@@ -119,6 +119,7 @@ import {
   type ChannelIdentityRegistryV1,
 } from './modules/integration_adapters/channelIdentityRegistry.js';
 import type { ManagedChannelPlatformV1 } from './modules/integration_adapters/managedChannelPlatform.js';
+import type { ResidentWorkflowSupervisor } from 'otto-workflow';
 import {
   loadUserSettingsSubset,
   patchUserSettings,
@@ -388,6 +389,8 @@ export interface OttoServerOptions {
   channelIdentityRegistry?: ChannelIdentityRegistryV1;
   /** Fully composed managed-channel runtime; deployment supplies secure stores and workflow backend. */
   managedChannelPlatform?: ManagedChannelPlatformV1;
+  /** Authoritative durable workflow worker used by Desktop and remote channels. */
+  residentWorkflowSupervisor?: ResidentWorkflowSupervisor;
 }
 
 /** 飞书凭证存取接口（可注入；默认实现走 feishu/vendor/credentials.ts）。 */
@@ -497,6 +500,8 @@ export class OttoServer {
   private stopAutoCompression?: () => void;
   private readonly channelConnectors: Partial<Record<ChannelProvider, ChannelConnectorV1>>;
   private readonly managedChannelPlatform?: ManagedChannelPlatformV1;
+  private readonly residentWorkflowSupervisor?: ResidentWorkflowSupervisor;
+  private stopResidentWorkflowWorker?: () => void;
   private readonly channelIdentityRegistry: ChannelIdentityRegistryV1;
   private readonly channelPairingProviders = new Map<string, ChannelProvider>();
 
@@ -533,6 +538,7 @@ export class OttoServer {
       },
     });
     this.managedChannelPlatform = opts.managedChannelPlatform;
+    this.residentWorkflowSupervisor = opts.residentWorkflowSupervisor;
     this.channelConnectors = {
       ...opts.managedChannelPlatform?.connectors,
       ...opts.channelConnectors,
@@ -613,6 +619,7 @@ export class OttoServer {
     // 新安装只会注册前者；后者严格跟随用户的显式后台模型开关。
     const backgroundModelTasksEnabled =
       loadUserSettingsSubset().backgroundModelTasksEnabled === true;
+    await this.residentWorkflowSupervisor?.recoverInterrupted();
     this.startResidentMaintenanceTasks(backgroundModelTasksEnabled);
 
     // 自动 Skill 只分析本地工作日志并暂存“待确认候选”，不会直接写 SKILL.md。
@@ -729,6 +736,8 @@ export class OttoServer {
     this.stopMemoryMaintenance = undefined;
     this.stopAutoCompression?.();
     this.stopAutoCompression = undefined;
+    this.stopResidentWorkflowWorker?.();
+    this.stopResidentWorkflowWorker = undefined;
     getHabitAnalyzer().stop();
     this.recurringTaskRegistry.stopAll();
     this.sessionEvictUnsub?.();
@@ -2104,6 +2113,19 @@ export class OttoServer {
   }
 
   private startResidentMaintenanceTasks(backgroundModelTasksEnabled: boolean): void {
+    if (this.residentWorkflowSupervisor && !this.stopResidentWorkflowWorker) {
+      this.stopResidentWorkflowWorker = this.recurringTaskRegistry.register({
+        name: 'server-durable-workflow-worker',
+        source: 'packages/server/src/server.ts#resident-workflow',
+        definitionVersion: 1,
+        intervalMs: 1_000,
+        initialDelayMs: 0,
+        estimatedCostUsdPerRun: 0,
+        missedRunPolicy: 'run-once',
+        getInputVersion: () => this.residentWorkflowSupervisor!.inputVersion(),
+        run: () => this.residentWorkflowSupervisor!.tick().then(() => undefined),
+      });
+    }
     if (!this.stopMemoryMaintenance) {
       this.stopMemoryMaintenance = this.recurringTaskRegistry.register({
         name: 'server-local-memory-maintenance',

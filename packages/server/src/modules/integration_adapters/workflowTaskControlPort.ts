@@ -7,6 +7,10 @@ import type {
   ChannelTaskMessageContext,
   ChannelTaskSummary,
 } from './channelTaskControl.js';
+import {
+  type ResidentWorkflowSupervisor,
+  type WorkflowRuntime,
+} from 'otto-workflow';
 
 export interface ControllableWorkflowRun {
   id: string;
@@ -36,6 +40,87 @@ export interface ChannelTaskProposalBackend {
     idempotencyKey: string;
     context: ChannelTaskMessageContext;
   }): Promise<{ proposalId: string; preview: string; requiresApproval: true }>;
+}
+
+/** Direct adapter over the authoritative durable workflow supervisor. */
+export class ResidentWorkflowControlBackendV1 implements WorkflowControlBackend {
+  constructor(private readonly supervisor: ResidentWorkflowSupervisor) {}
+
+  list(): Promise<ControllableWorkflowRun[]> {
+    return this.supervisor.list();
+  }
+
+  get(runId: string): Promise<ControllableWorkflowRun | null> {
+    return this.supervisor.get(runId);
+  }
+
+  pause(runId: string): Promise<ControllableWorkflowRun | null> {
+    return this.supervisor.pause(runId);
+  }
+
+  resume(runId: string): Promise<ControllableWorkflowRun | null> {
+    return this.supervisor.resume(runId);
+  }
+
+  cancel(runId: string): Promise<ControllableWorkflowRun | null> {
+    return this.supervisor.cancel(runId);
+  }
+
+  takeOver(runId: string, note: string): Promise<ControllableWorkflowRun | null> {
+    return this.supervisor.takeOver(runId, note);
+  }
+
+  approve(
+    runId: string,
+    stepId: string,
+    approvalId: string,
+  ): Promise<ControllableWorkflowRun | null> {
+    return this.supervisor.approve(runId, stepId, approvalId);
+  }
+}
+
+/** Creates a persisted, approval-gated agent run for natural-language chat work. */
+export class DurableChannelTaskProposalBackendV1 implements ChannelTaskProposalBackend {
+  constructor(private readonly runtime: WorkflowRuntime) {}
+
+  async create(input: {
+    request: string;
+    idempotencyKey: string;
+    context: ChannelTaskMessageContext;
+  }): Promise<{ proposalId: string; preview: string; requiresApproval: true }> {
+    const run = await this.runtime.start({
+      id: 'channel-task-proposal-v1',
+      version: 1,
+      steps: [{
+        id: 'execute-request',
+        kind: 'agent',
+        sideEffect: 'external',
+        requiresApproval: true,
+        input: {
+          request: input.request,
+          idempotencyKey: input.idempotencyKey,
+          origin: {
+            provider: input.context.provider,
+            installationId: input.context.installationId,
+            tenantId: input.context.tenantId,
+            userId: input.context.userId,
+            messageId: input.context.messageId,
+            receivedAtMs: input.context.receivedAtMs,
+          },
+        },
+      }],
+    });
+    const waiting = await this.runtime.runNext(run.id);
+    const approvalId = waiting?.steps.find(
+      (step) => step.status === 'waiting_approval',
+    )?.approvalId;
+    if (!approvalId) throw new Error('durable channel proposal did not enter approval state');
+    return {
+      proposalId: run.id,
+      preview: `任务已持久化，尚未执行。确认范围和费用后发送 /approve ${approvalId}`,
+      requiresApproval: true,
+    };
+  }
 }
 
 function summary(run: ControllableWorkflowRun): ChannelTaskSummary {

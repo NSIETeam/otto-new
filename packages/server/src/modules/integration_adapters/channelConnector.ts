@@ -104,7 +104,6 @@ export interface ChannelConnectorV1 {
   listInstallations(): ChannelInstallation[];
   beginPairing(input: BeginPairingInput): Promise<PairingSession>;
   getPairingStatus(pairingId: string): Promise<PairingSession>;
-  approveAdmin(pairingId: string): Promise<PairingSession>;
   denyPairing(pairingId: string, reason?: string): Promise<PairingSession>;
   completeInstallation(
     pairingId: string,

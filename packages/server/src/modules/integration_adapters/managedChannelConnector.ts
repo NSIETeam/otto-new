@@ -156,10 +156,6 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
     return pairing;
   }
 
-  approveAdmin(pairingId: string): Promise<PairingSession> {
-    return this.options.coordinator.approveAdmin(pairingId);
-  }
-
   async denyPairing(pairingId: string, reason?: string): Promise<PairingSession> {
     const pairing = await this.options.coordinator.deny(pairingId, reason);
     this.pendingCredentials.delete(pairingId);

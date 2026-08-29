@@ -94,4 +94,29 @@ describe('ResidentWorkflowSupervisor', () => {
     await supervisor.tick();
     expect(await supervisor.inputVersion()).toBeUndefined();
   });
+
+  it('records approval through the supervisor before executing protected work', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-resident-workflow-approval-'));
+    roots.push(root);
+    const store = new FileWorkflowStore(root);
+    const execute = vi.fn(async () => ({ ok: true }));
+    const runtime = new WorkflowRuntime(store, { execute });
+    const supervisor = new ResidentWorkflowSupervisor(store, runtime);
+    const run = await runtime.start({
+      id: 'remote-proposal', version: 1,
+      steps: [{
+        id: 'execute', kind: 'agent', input: { request: '巡检日报' },
+        sideEffect: 'none', requiresApproval: true,
+      }],
+    });
+    await supervisor.tick();
+    const waiting = await supervisor.get(run.id);
+    const approvalId = waiting!.steps[0].approvalId!;
+    expect(waiting).toMatchObject({ status: 'waiting_approval' });
+    expect(execute).not.toHaveBeenCalled();
+    await supervisor.approve(run.id, 'execute', approvalId);
+    await supervisor.tick();
+    expect(await supervisor.get(run.id)).toMatchObject({ status: 'succeeded' });
+    expect(execute).toHaveBeenCalledOnce();
+  });
 });

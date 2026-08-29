@@ -10,7 +10,7 @@ export interface RecurringTaskDefinition {
   initialDelayMs?: number;
   missedRunPolicy?: 'skip' | 'run-once';
   estimatedCostUsdPerRun: number;
-  getInputVersion: () => string | undefined;
+  getInputVersion: () => string | undefined | Promise<string | undefined>;
   run: () => void | Promise<void>;
 }
 
@@ -99,6 +99,7 @@ export class RecurringTaskRegistry {
       && restored.definitionVersion === definitionVersion
       ? restored
       : undefined;
+    const initialVersion = definition.getInputVersion();
     const task: RegisteredRecurringTask = {
       name: definition.name,
       source: definition.source,
@@ -106,7 +107,7 @@ export class RecurringTaskRegistry {
       intervalMs: definition.intervalMs,
       estimatedCostUsdPerRun: definition.estimatedCostUsdPerRun,
       paid,
-      inputVersion: definition.getInputVersion(),
+      inputVersion: typeof initialVersion === 'string' ? initialVersion : undefined,
       lastCompletedInputVersion: compatibleState?.lastCompletedInputVersion,
       running: false,
       stop: () => {
@@ -136,7 +137,7 @@ export class RecurringTaskRegistry {
     };
     const tick = async () => {
       if (stopped) return;
-      const version = definition.getInputVersion();
+      const version = await definition.getInputVersion();
       task.inputVersion = version;
       if (version === undefined || version === task.lastCompletedInputVersion) {
         schedule();
@@ -154,6 +155,11 @@ export class RecurringTaskRegistry {
       }
     };
     this.tasks.set(definition.name, task);
+    if (initialVersion instanceof Promise) {
+      void initialVersion.then((version) => {
+        if (!stopped) task.inputVersion = version;
+      }).catch((error) => this.onError(definition.name, error));
+    }
     const configuredInitialDelay = definition.initialDelayMs ?? definition.intervalMs;
     const restoredDelay = compatibleState
       ? compatibleState.nextRunAtMs - this.now()

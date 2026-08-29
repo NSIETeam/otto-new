@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { InMemoryRecurringTaskStateStore } from 'otto-core';
 
 import { OttoServer } from './server.js';
+import type { ResidentWorkflowSupervisor } from 'otto-workflow';
 
-function createServer(): OttoServer {
+function createServer(residentWorkflowSupervisor?: ResidentWorkflowSupervisor): OttoServer {
   return new OttoServer({
     port: 0,
     mock: true,
     recurringTaskStateStore: new InMemoryRecurringTaskStateStore(),
+    residentWorkflowSupervisor,
   });
 }
 
@@ -77,6 +79,35 @@ describe('OttoServer resident task registration', () => {
     await vi.advanceTimersByTimeAsync(paid?.intervalMs ?? 0);
     expect(server.residentTasks().find((task) => task.paid)?.lastCompletedInputVersion)
       .toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it('registers one non-overlapping durable workflow worker and skips unchanged revisions', async () => {
+    vi.useFakeTimers();
+    let inputVersion: string | undefined = 'wf-1:1';
+    const tick = vi.fn(async () => []);
+    const supervisor = {
+      inputVersion: vi.fn(async () => inputVersion),
+      tick,
+    } as unknown as ResidentWorkflowSupervisor;
+    const server = createServer(supervisor);
+    configureMaintenance(server, false);
+    expect(server.residentTasks()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'server-durable-workflow-worker',
+        source: 'packages/server/src/server.ts#resident-workflow',
+        paid: false,
+        intervalMs: 1_000,
+      }),
+    ]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tick).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(tick).toHaveBeenCalledOnce();
+    inputVersion = 'wf-1:2';
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(tick).toHaveBeenCalledTimes(2);
+    await server.stop();
     vi.useRealTimers();
   });
 });

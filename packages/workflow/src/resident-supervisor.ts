@@ -84,6 +84,10 @@ export class ResidentWorkflowSupervisor {
     return this.runtime.cancel(runId);
   }
 
+  approve(runId: string, stepId: string, approvalId: string): Promise<WorkflowRun | null> {
+    return this.runtime.approve(runId, stepId, approvalId);
+  }
+
   takeOver(runId: string, note: string): Promise<WorkflowRun | null> {
     return this.runtime.takeOver(runId, note);
   }

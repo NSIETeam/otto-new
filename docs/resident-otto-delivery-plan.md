@@ -320,3 +320,34 @@ Each explicit item in this document must map to a source file, automated test,
 runtime artifact, or manual smoke record. Missing or indirect evidence means
 the item remains incomplete. A green narrow unit test does not prove the full
 resident, channel, visual, or RPA requirement.
+
+## Implementation evidence snapshot (2026-08-30)
+
+This table is intentionally stricter than a feature checklist. “Automated”
+means the named source and focused test prove the behavior. “Pending smoke”
+means no source-level substitute is accepted.
+
+| Requirement | Evidence | State |
+| --- | --- | --- |
+| Shared QR connector and device-bound installation | `channelConnector.ts`, `managedChannelConnector.ts`, focused connector tests | Automated |
+| Protected credential custody and idempotent outbound writes | `channelCredentialVault.ts`, `channelOutboundLedger.ts`, focused persistence tests | Automated |
+| Broker outbound runtime, tenant checking, timeout and reconnect | `brokerChannelRuntime.ts`, `brokerChannelRuntime.test.ts` | Automated |
+| Explicit provider-to-Otto identity binding and revocation | `channelIdentityRegistry.ts`, Server REST, CLI and Desktop tests | Automated |
+| Chat command authorization, deduplication and visible reply before ACK | `channelTaskControl.ts`, `brokerChannelTaskBridge.ts`, focused tests | Automated |
+| Natural-language request becomes durable approval-gated work | `workflowTaskControlPort.ts`, `durableWorkflowChannelBackend.test.ts` | Automated |
+| Non-overlapping workflow worker skips unchanged persisted revisions | `recurringTaskRegistry.ts`, `server.residentTasks.test.ts` | Automated |
+| Real managed Feishu/Lark installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
+| Real managed WeCom installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
+| macOS Accessibility RPA control and recovery | Signed local build and isolated macOS account | Pending smoke |
+| 24/72 hour zero-paid-call idle proof | Release-candidate simulation artifact | Pending |
+
+### Cleanup decisions
+
+- Removed the public `ChannelConnectorV1.approveAdmin()` method. Provider admin
+  approval is accepted only as a Broker state transition; a local REST, CLI or
+  Desktop caller cannot manufacture it.
+- The legacy self-hosted Feishu credential path remains only as an explicitly
+  labelled advanced compatibility path. It must not be reused by managed QR
+  connectors or treated as the default onboarding design.
+- Generated `dist`, release packages and test reports are evidence artifacts,
+  not source inputs, and must remain outside committed source payloads.

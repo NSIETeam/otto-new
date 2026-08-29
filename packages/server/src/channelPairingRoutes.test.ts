@@ -14,6 +14,7 @@ import type {
   PairingSession,
 } from './modules/integration_adapters/channelConnector.js';
 import type { ManagedChannelPlatformV1 } from './modules/integration_adapters/managedChannelPlatform.js';
+import type { ResidentWorkflowSupervisor } from 'otto-workflow';
 
 const pairing: PairingSession = {
   pairingId: 'pair_0123456789abcdef01234567',
@@ -38,7 +39,6 @@ function fakeConnector(): ChannelConnectorV1 {
     listInstallations: vi.fn(() => [installation]),
     beginPairing: vi.fn(async () => pairing),
     getPairingStatus: vi.fn(async () => pairing),
-    approveAdmin: vi.fn(async () => ({ ...pairing, status: 'user_authorized' })),
     denyPairing: vi.fn(async () => ({ ...pairing, status: 'denied' })),
     completeInstallation: vi.fn(async () => installation),
     start: vi.fn(async () => ({ installationId: 'install-1', running: true, state: 'connected', reconnectCount: 0 })),
@@ -74,12 +74,14 @@ describe('channel pairing REST routes', () => {
     connectors = {},
     workspaceStore = new ProductWorkspaceStore(path.join(userDir, 'workspace.json')),
     managedChannelPlatform?: ManagedChannelPlatformV1,
+    residentWorkflowSupervisor?: ResidentWorkflowSupervisor,
   ): Promise<{ baseUrl: string; token: string }> {
     server = new OttoServer({
       port: 0,
       mock: true,
       channelConnectors: connectors,
       managedChannelPlatform,
+      residentWorkflowSupervisor,
       recurringTaskStateStore: new InMemoryRecurringTaskStateStore(),
       productWorkspaceStore: workspaceStore,
     });
@@ -156,7 +158,6 @@ describe('channel pairing REST routes', () => {
       { method: 'POST', headers: auth },
     );
     expect(localApproval.status).toBe(405);
-    expect(connector.approveAdmin).not.toHaveBeenCalled();
     expect(connector.completeInstallation).toHaveBeenCalledOnce();
     expect(connector.completeInstallation).toHaveBeenCalledWith(
       pairing.pairingId,
@@ -315,10 +316,17 @@ describe('channel pairing REST routes', () => {
       connectors: { feishu: connector },
       stopAll,
     } as unknown as ManagedChannelPlatformV1;
+    const recoverInterrupted = vi.fn(async () => []);
+    const supervisor = {
+      recoverInterrupted,
+      inputVersion: async () => undefined,
+      tick: async () => [],
+    } as unknown as ResidentWorkflowSupervisor;
     const { baseUrl, token } = await start(
       {},
       new ProductWorkspaceStore(path.join(userDir, 'platform-workspace.json')),
       platform,
+      supervisor,
     );
     const response = await fetch(`${baseUrl}/channels/installations`, {
       headers: { authorization: `Bearer ${token}` },
@@ -329,5 +337,6 @@ describe('channel pairing REST routes', () => {
     await server!.stop();
     server = undefined;
     expect(stopAll).toHaveBeenCalledOnce();
+    expect(recoverInterrupted).toHaveBeenCalledOnce();
   });
 });

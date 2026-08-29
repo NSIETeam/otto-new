@@ -125,4 +125,28 @@ describe('RecurringTaskRegistry', () => {
     expect(registry.list()[0]?.lastCompletedInputVersion).toBeUndefined();
     registry.stopAll();
   });
+
+  it('awaits asynchronous input versions and still skips unchanged work', async () => {
+    vi.useFakeTimers();
+    let version: string | undefined = 'workflow:1';
+    const run = vi.fn();
+    const registry = new RecurringTaskRegistry();
+    registry.register({
+      name: 'durable-workflow', source: 'test', intervalMs: 1_000,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: async () => version,
+      run,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(run).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(run).toHaveBeenCalledOnce();
+    version = 'workflow:2';
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(run).toHaveBeenCalledTimes(2);
+    version = undefined;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(run).toHaveBeenCalledTimes(2);
+    registry.stopAll();
+  });
 });

@@ -46,6 +46,7 @@ concurrency:
 env:
   NODE_VERSION: '22.23.1'
   ELECTRON_VERSION: '43.2.0'
+  RUST_TOOLCHAIN: '1.97.1'
   SQLCIPHER_SOURCE_REVISION: e2a6040f2ae5cfff2b3e08eb3320007d93cdf3fc
   RELEASES_REPO: NSIETeam/otto-new
   LEGACY_RELEASES_REPO: Felix201209/otto-releases
@@ -58,11 +59,72 @@ jobs:
     name: Build verified SQLCipher native matrix
     uses: ./.github/workflows/sqlcipher-native.yml
 
+  otto-native:
+    name: Build verified Otto native ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            target: win32-x64
+            cargo_target: x86_64-pc-windows-msvc
+          - runner: macos-15-intel
+            target: darwin-x64
+            cargo_target: x86_64-apple-darwin
+          - runner: macos-15
+            target: darwin-arm64
+            cargo_target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install locked Rust toolchain target
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target "${{ matrix.cargo_target }}"
+          rustup default "$RUST_TOOLCHAIN"
+
+      - name: Build and probe exact Otto native runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/otto-native-runtime.mjs build \
+            --target "${{ matrix.target }}" \
+            --build-commit "$GITHUB_SHA" \
+            --toolchain "$RUST_TOOLCHAIN" \
+            --probe
+
+      - name: Attest Otto native runtime and manifest
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: native/otto-native/${{ matrix.target }}/*
+
+      - name: Upload exact Otto native runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: otto-native-${{ matrix.target }}
+          path: native/otto-native/${{ matrix.target }}
+          if-no-files-found: error
+
   build:
     name: Check, Build, Draft Release
     runs-on: macos-latest
     timeout-minutes: 90
-    needs: sqlcipher-native
+    needs:
+      - sqlcipher-native
+      - otto-native
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
@@ -155,6 +217,40 @@ jobs:
           done < <(find native/sqlcipher-node -type f -name better_sqlite3.node -print0)
           gh attestation verify native/sqlcipher-node/matrix-manifest.json \
             --repo "$GITHUB_REPOSITORY"
+
+      - name: Download verified Otto native win32-x64 runtime
+        uses: actions/download-artifact@v7
+        with:
+          name: otto-native-win32-x64
+          path: native/otto-native/win32-x64
+
+      - name: Download verified Otto native darwin-x64 runtime
+        uses: actions/download-artifact@v7
+        with:
+          name: otto-native-darwin-x64
+          path: native/otto-native/darwin-x64
+
+      - name: Download verified Otto native darwin-arm64 runtime
+        uses: actions/download-artifact@v7
+        with:
+          name: otto-native-darwin-arm64
+          path: native/otto-native/darwin-arm64
+
+      - name: Verify and authenticate Otto native matrix before packaging
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for target in win32-x64 darwin-x64 darwin-arm64; do
+            node scripts/otto-native-runtime.mjs verify \
+              --target "$target" \
+              --expected-build-commit "$GITHUB_SHA" \
+              --expected-toolchain "$RUST_TOOLCHAIN"
+            while IFS= read -r -d '' artifact; do
+              gh attestation verify "$artifact" --repo "$GITHUB_REPOSITORY"
+            done < <(find "native/otto-native/$target" -maxdepth 1 -type f -print0)
+          done
 
       - name: Resolve release version
         id: version
@@ -301,12 +397,26 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          for dmg in \
-            "packages/desktop/release/Otto-${VERSION}-arm64.dmg" \
-            "packages/desktop/release/Otto-${VERSION}-x64.dmg"; do
+          for arch in arm64 x64; do
+            dmg="packages/desktop/release/Otto-${VERSION}-${arch}.dmg"
             codesign --verify --verbose=2 "$dmg"
             spctl --assess --type open --context context:primary-signature \
               --verbose=4 "$dmg"
+            mount_point="$(mktemp -d)"
+            hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "$dmg" >/dev/null
+            app="$mount_point/Otto.app"
+            native_runtime="$app/Contents/Resources/otto-native/darwin-${arch}/otto-native"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            codesign --verify --strict --verbose=2 "$native_runtime"
+            node packages/desktop/scripts/verify-packaged-otto-native.mjs \
+              "$app/Contents/Resources/app.asar" \
+              --platform darwin \
+              --arch "$arch" \
+              --expected-build-commit "${{ steps.source.outputs.commit }}" \
+              --packaged \
+              --require-code-signature
+            hdiutil detach "$mount_point"
+            rmdir "$mount_point"
           done
 
       - name: Build enterprise server package
@@ -480,13 +590,29 @@ jobs:
           }
           $electron = Join-Path $installRoot 'Otto.exe'
           $binding = Join-Path $installRoot 'resources\sqlcipher\better_sqlite3.node'
+          $nativeRuntime = Join-Path $installRoot 'resources\otto-native\win32-x64\otto-native.exe'
           if (-not (Test-Path -LiteralPath $electron)) { throw 'Installed Otto.exe is missing' }
           if (-not (Test-Path -LiteralPath $binding)) { throw 'Installed SQLCipher binding is missing' }
+          if (-not (Test-Path -LiteralPath $nativeRuntime)) { throw 'Installed Otto native runtime is missing' }
+          $nativeSignature = Get-AuthenticodeSignature -LiteralPath $nativeRuntime
+          if ($nativeSignature.Status -ne 'Valid' -or -not $nativeSignature.SignerCertificate) {
+            throw "Otto native Authenticode verification failed: $($nativeSignature.Status) $($nativeSignature.StatusMessage)"
+          }
+          Write-Host "Otto native signer: $($nativeSignature.SignerCertificate.Subject)"
           $env:ELECTRON_RUN_AS_NODE = '1'
           & $electron packages/desktop/scripts/probe-packaged-sqlcipher.mjs `
             --binding $binding
           if ($LASTEXITCODE -ne 0) {
             throw "Packaged SQLCipher runtime probe failed: $LASTEXITCODE"
+          }
+
+          $archive = Join-Path $installRoot 'resources\app.asar'
+          & $electron packages/desktop/scripts/verify-packaged-runtime.mjs `
+            $archive --platform win32 --arch x64 `
+            --expected-build-commit '${{ needs.build.outputs.source_commit }}' `
+            --probe-native --require-native-authenticode
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged desktop runtime verification failed: $LASTEXITCODE"
           }
 
   deploy-enterprise:

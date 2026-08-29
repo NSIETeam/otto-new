@@ -159,6 +159,7 @@ describe('desktop packaging contract', () => {
       'sbom.cdx.json',
       'THIRD_PARTY_NOTICES.md',
     ]);
+    expect(afterPack.OTTO_NATIVE_RESOURCE_FILES).toEqual(['manifest.json']);
   });
 
   it('never packages local Rust build outputs with the desktop runtime', async () => {
@@ -171,9 +172,9 @@ describe('desktop packaging contract', () => {
     expect(files).toContain('!**/node_modules/@otto/native/src/**');
     expect(files).toContain('!**/node_modules/@otto/native/node_modules/**');
     expect(files).toContain('!**/node_modules/@otto/native/Cargo.*');
-    expect(packageJson.build.asarUnpack).toEqual([
-      'node_modules/@otto/native/bin/**/*',
-    ]);
+    expect(files).toContain('!**/node_modules/@otto/native/bin/**');
+    expect(files).toContain('node_modules/@otto/native/dist/index.js');
+    expect(packageJson.build).not.toHaveProperty('asarUnpack');
     expect(packageJson.build.files).toContain(
       '!**/node_modules/pdf-parse/lib/pdf.js/v1.9.426/**',
     );
@@ -205,6 +206,7 @@ describe('desktop packaging contract', () => {
       '!**/node_modules/@otto/native/target/**',
       '!**/node_modules/@otto/native/src/**',
       '!**/node_modules/@otto/native/node_modules/**',
+      '!**/node_modules/@otto/native/bin/**',
       '!**/node_modules/better-sqlite3/deps/**',
       '!**/node_modules/better-sqlite3/src/**',
       '!**/node_modules/better-sqlite3/build/Release/obj/**',
@@ -212,15 +214,24 @@ describe('desktop packaging contract', () => {
       '!**/node_modules/pdf-parse/lib/pdf.js/v1.10.88/**',
       '!**/node_modules/pdf-parse/lib/pdf.js/v2.0.550/**',
       '!**/node_modules/playwright-core/lib/vite/**',
+      '!**/node_modules/**/spec/**',
+      '!**/node_modules/**/specs/**',
+      '!**/node_modules/**/__mocks__/**',
+      '!**/node_modules/**/__image_snapshots__/**',
+      '!**/*.d.cts',
+      '!**/*.d.mts',
+      '!**/tsconfig*.json',
+      '!**/.last_build',
     ]) {
       expect(files).toContain(exclusion);
     }
     expect(files).not.toContain(
       '!**/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
     );
-    expect(packageJson.build.asarUnpack).toEqual([
-      'node_modules/@otto/native/bin/**/*',
-    ]);
+    expect(packageJson.build.files).toContain(
+      'node_modules/@otto/native/dist/index.js',
+    );
+    expect(packageJson.build).not.toHaveProperty('asarUnpack');
   });
 
   it('runs the shared app.asar content and size gate on every packaged platform', async () => {
@@ -235,9 +246,75 @@ describe('desktop packaging contract', () => {
     expect(afterPack.MAX_APP_ASAR_BYTES).toBe(120 * 1024 * 1024);
     expect(afterPack.packagedResourcesRoot).toBeTypeOf('function');
     expect(afterPack.verifyPackagedPayload).toBeTypeOf('function');
+    expect(afterPack.copyOttoNativeAsset).toBeTypeOf('function');
+    expect(afterPack.finalizePackagedOttoNativeAsset).toBeTypeOf('function');
     expect(verifier).toContain('findForbiddenAsarEntries(entries)');
     expect(verifier).toContain('app.asar exceeds size budget');
     expect(runtimeVerifier).toContain('verifyPackagedContent(archivePath)');
+    expect(runtimeVerifier).toContain('verifyPackagedOttoNative({');
+  });
+
+  it('builds, authenticates, and probes one Otto native runtime per packaged architecture', async () => {
+    const [packageJson, workflow, desktopMain] = await Promise.all([
+      readFile(path.join(packageRoot, 'package.json'), 'utf8').then(JSON.parse),
+      readFile(
+        path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+        'utf8',
+      ),
+      readFile(path.join(packageRoot, 'src', 'main', 'index.ts'), 'utf8'),
+    ]);
+
+    for (const target of ['win32-x64', 'darwin-x64', 'darwin-arm64']) {
+      expect(workflow).toContain(`target: ${target}`);
+      expect(workflow).toContain(`name: otto-native-${target}`);
+    }
+    for (const cargoTarget of [
+      'x86_64-pc-windows-msvc',
+      'x86_64-apple-darwin',
+      'aarch64-apple-darwin',
+    ]) {
+      expect(workflow).toContain(`cargo_target: ${cargoTarget}`);
+    }
+    expect(workflow).toContain('node scripts/otto-native-runtime.mjs build');
+    expect(workflow).toContain('node scripts/otto-native-runtime.mjs verify');
+    expect(workflow).toContain(
+      'subject-path: native/otto-native/${{ matrix.target }}/*',
+    );
+    expect(workflow).toContain("RUST_TOOLCHAIN: '1.97.1'");
+    expect(workflow).toContain('rustup toolchain install "$RUST_TOOLCHAIN"');
+    expect(workflow).toContain('--toolchain "$RUST_TOOLCHAIN"');
+    expect(workflow).toContain('--expected-toolchain "$RUST_TOOLCHAIN"');
+    expect(workflow).not.toContain('rustup toolchain install stable');
+    expect(workflow).toContain('gh attestation verify "$artifact"');
+    expect(workflow).toContain('--probe-native');
+    expect(workflow).toContain('--require-native-authenticode');
+    expect(workflow).toContain('--require-code-signature');
+    expect(workflow).toContain('hdiutil attach -nobrowse -readonly');
+    expect(workflow).toContain(
+      'Resources/otto-native/darwin-${arch}/otto-native',
+    );
+    expect(workflow).toContain(
+      'Get-AuthenticodeSignature -LiteralPath $nativeRuntime',
+    );
+    const afterPackSource = await readFile(
+      path.join(packageRoot, 'scripts', 'after-pack.cjs'),
+      'utf8',
+    );
+    expect(afterPackSource).toContain(
+      'await context.packager.signIf(ottoNativeAsset.binaryPath)',
+    );
+    expect(afterPackSource).toContain('resolveMacSigningIdentity(context)');
+    expect(afterPackSource).toContain("kind: 'codesign'");
+    expect(afterPackSource).toContain('verifyCodeSignature(appPath, true)');
+    expect(packageJson.build.mac.signIgnore).toEqual([
+      '/Contents/Resources/otto-native/',
+    ]);
+    expect(packageJson.build.files).toContain(
+      'node_modules/@otto/native/dist/index.js',
+    );
+    expect(desktopMain).toContain("'otto-native',");
+    expect(desktopMain).toContain('`${process.platform}-${process.arch}`');
+    expect(desktopMain).not.toContain("'app.asar.unpacked',");
   });
 
   it('uses the current dependency collector and verifies the packaged Windows runtime', async () => {
@@ -312,6 +389,19 @@ describe('desktop packaging contract', () => {
     expect(script).toContain("smokeNativeMacArtifact('x64')");
     expect(script).toContain('process.arch !== artifactArch');
     expect(script).toContain('跳过 Mac ${artifactArch} 跨架构动态验收');
+  });
+
+  it('verifies the final signed Mac native runtime after app signing', async () => {
+    const script = await readFile(
+      path.join(packageRoot, 'scripts', 'make-delivery-zip.mjs'),
+      'utf8',
+    );
+    expect(script).toContain(
+      "verifySignedMacApplication('mac-arm64', 'arm64')",
+    );
+    expect(script).toContain("verifySignedMacApplication('mac', 'x64')");
+    expect(script).toContain("'--require-code-signature'");
+    expect(script).toContain("'codesign',");
   });
 
   it('publishes releases only after the update mirror and enterprise deploy pass', async () => {

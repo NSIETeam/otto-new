@@ -44,6 +44,9 @@ describe('packaged content gate', () => {
     const entries = [
       '/dist/main/index.js.map',
       '/node_modules/example/tests/parser.test.js',
+      '/node_modules/example/spec/parser.spec.js',
+      '/node_modules/example/__mocks__/fs.js',
+      '/node_modules/example/src/__image_snapshots__/render-1-snap.png',
       '/node_modules/example/docs/README.html',
       '/node_modules/@otto/native/target/release/otto_native.dll',
       '/node_modules/@otto/native/src/lib.rs',
@@ -53,6 +56,10 @@ describe('packaged content gate', () => {
       '/node_modules/pdf-parse/lib/pdf.js/v1.9.426/build/pdf.js',
       '/node_modules/playwright-core/lib/vite/traceViewer/index.html',
       '/node_modules/electron/dist/electron.exe',
+      '/node_modules/example/index.d.cts',
+      '/node_modules/example/index.d.mts',
+      '/node_modules/example/tsconfig.build.json',
+      '/node_modules/otto-core/dist/.last_build',
     ];
 
     const violations = findForbiddenAsarEntries(entries);

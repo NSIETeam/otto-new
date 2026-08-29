@@ -914,11 +914,8 @@ function packagedOpenMlsBinaryPath(): string | undefined {
   if (!app.isPackaged) return undefined;
   return path.join(
     process.resourcesPath,
-    'app.asar.unpacked',
-    'node_modules',
-    '@otto',
-    'native',
-    'bin',
+    'otto-native',
+    `${process.platform}-${process.arch}`,
     process.platform === 'win32' ? 'otto-native.exe' : 'otto-native',
   );
 }

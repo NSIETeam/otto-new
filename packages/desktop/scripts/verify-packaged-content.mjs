@@ -28,12 +28,16 @@ export const FORBIDDEN_ASAR_PREFIXES = Object.freeze([
 ]);
 
 const FORBIDDEN_DIRECTORY_NAMES = new Set([
+  '__image_snapshots__',
+  '__mocks__',
   '__tests__',
   'coverage',
   'doc',
   'docs',
   'example',
   'examples',
+  'spec',
+  'specs',
   'test',
   'tests',
 ]);
@@ -106,6 +110,8 @@ export function findForbiddenAsarEntries(entries) {
     }
     if (
       FORBIDDEN_BUILD_FILES.has(basename) ||
+      basename === '.last_build' ||
+      /\.d\.(?:cts|mts|ts)$/u.test(basename) ||
       /^tsconfig(?:\..+)?\.json$/u.test(basename)
     ) {
       violations.push({ entry, reason: 'build configuration file' });

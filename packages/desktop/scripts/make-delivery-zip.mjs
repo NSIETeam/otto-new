@@ -259,20 +259,57 @@ function runBuildStep(
   }
 }
 
-function verifySignedMacApplication(unpackedOutput) {
+function verifySignedMacApplication(unpackedOutput, arch) {
   const appPath = path.join(RELEASE_DIR, unpackedOutput, 'Otto.app');
   if (!existsSync(appPath)) {
     throw new Error(`缺少待验证的 macOS 应用包: ${appPath}`);
   }
-  execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath], {
-    stdio: 'inherit',
-  });
+  execFileSync(
+    'codesign',
+    ['--verify', '--deep', '--strict', '--verbose=2', appPath],
+    {
+      stdio: 'inherit',
+    },
+  );
+  const resourcesPath = path.join(appPath, 'Contents', 'Resources');
+  const nativeRuntime = path.join(
+    resourcesPath,
+    'otto-native',
+    `darwin-${arch}`,
+    'otto-native',
+  );
+  execFileSync(
+    'codesign',
+    ['--verify', '--strict', '--verbose=2', nativeRuntime],
+    { stdio: 'inherit' },
+  );
+  const nativeVerifyArguments = [
+    path.join(__dirname, 'verify-packaged-otto-native.mjs'),
+    path.join(resourcesPath, 'app.asar'),
+    '--platform',
+    'darwin',
+    '--arch',
+    arch,
+    '--packaged',
+    '--require-code-signature',
+  ];
+  if (process.env.GITHUB_SHA) {
+    nativeVerifyArguments.push(
+      '--expected-build-commit',
+      process.env.GITHUB_SHA,
+    );
+  }
+  execFileSync(process.execPath, nativeVerifyArguments, { stdio: 'inherit' });
   execFileSync('xcrun', ['stapler', 'validate', appPath], {
     stdio: 'inherit',
   });
-  execFileSync('spctl', ['--assess', '--type', 'execute', '--verbose=4', appPath], {
-    stdio: 'inherit',
-  });
+  execFileSync(
+    'spctl',
+    ['--assess', '--type', 'execute', '--verbose=4', appPath],
+    {
+      stdio: 'inherit',
+    },
+  );
   log('BUILD', `Developer ID 与公证票据验证通过: ${unpackedOutput}/Otto.app`);
 }
 
@@ -381,7 +418,7 @@ async function build(sourceCommit) {
     MAC_BUILD_ENV,
     ALLOW_UNSIGNED_MAC
       ? undefined
-      : () => verifySignedMacApplication('mac-arm64'),
+      : () => verifySignedMacApplication('mac-arm64', 'arm64'),
   );
   smokeNativeMacArtifact('arm64');
 
@@ -401,7 +438,7 @@ async function build(sourceCommit) {
     MAC_BUILD_ENV,
     ALLOW_UNSIGNED_MAC
       ? undefined
-      : () => verifySignedMacApplication('mac'),
+      : () => verifySignedMacApplication('mac', 'x64'),
   );
   smokeNativeMacArtifact('x64');
 

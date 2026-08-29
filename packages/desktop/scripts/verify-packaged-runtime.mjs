@@ -9,6 +9,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import asar from '@electron/asar';
 import { verifyPackagedContent } from './verify-packaged-content.mjs';
+import { verifyPackagedOttoNative } from './verify-packaged-otto-native.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(scriptDir, '..');
@@ -45,6 +46,9 @@ export function verifyPackagedRuntime(
   platform = process.platform,
   arch = process.arch,
   expectedBuildCommit = process.env.GITHUB_SHA,
+  probeNative = false,
+  requireNativeAuthenticode = false,
+  requireNativeCodeSignature = false,
 ) {
   if (!existsSync(archivePath)) {
     throw new Error(`app.asar not found: ${archivePath}`);
@@ -115,6 +119,16 @@ export function verifyPackagedRuntime(
       );
     }
   }
+
+  const nativeRuntime = verifyPackagedOttoNative({
+    archivePath,
+    platform,
+    arch,
+    expectedBuildCommit,
+    requireAuthenticodeSigned: requireNativeAuthenticode,
+    requireCodeSignature: requireNativeCodeSignature,
+    probe: probeNative,
+  });
 
   const sqlCipherDirectory = path.join(path.dirname(archivePath), 'sqlcipher');
   const sqlCipherBinding = path.join(sqlCipherDirectory, 'better_sqlite3.node');
@@ -261,7 +275,7 @@ export function verifyPackagedRuntime(
     }
   }
 
-  return actual;
+  return { ...actual, nativeRuntime };
 }
 
 function main() {
@@ -287,6 +301,9 @@ function main() {
     platform,
     arch,
     expectedBuildCommit,
+    process.argv.includes('--probe-native'),
+    process.argv.includes('--require-native-authenticode'),
+    process.argv.includes('--require-native-code-signature'),
   );
   console.log(`[packaged-runtime] verified ${JSON.stringify(versions)}`);
 }

@@ -89,14 +89,21 @@
     "files": [
       "dist/**/*",
       "package.json",
+      "node_modules/@otto/native/dist/index.js",
       "!**/*.map",
       "!**/*.md",
       "!**/*.markdown",
       "!**/*.ts",
       "!**/*.d.ts",
+      "!**/*.d.cts",
+      "!**/*.d.mts",
       "!**/node_modules/**/test/**",
       "!**/node_modules/**/tests/**",
+      "!**/node_modules/**/spec/**",
+      "!**/node_modules/**/specs/**",
       "!**/node_modules/**/__tests__/**",
+      "!**/node_modules/**/__mocks__/**",
+      "!**/node_modules/**/__image_snapshots__/**",
       "!**/node_modules/**/docs/**",
       "!**/node_modules/**/doc/**",
       "!**/node_modules/**/examples/**",
@@ -110,6 +117,7 @@
       "!**/node_modules/@otto/native/node_modules/**",
       "!**/node_modules/@otto/native/Cargo.*",
       "!**/node_modules/@otto/native/tsconfig*.json",
+      "!**/node_modules/@otto/native/bin/**",
       "!**/node_modules/better-sqlite3/deps/**",
       "!**/node_modules/better-sqlite3/src/**",
       "!**/node_modules/better-sqlite3/binding.gyp",
@@ -130,15 +138,14 @@
       "!**/junit.xml",
       "!**/*.tsbuildinfo",
       "!**/*.test.*",
+      "!**/tsconfig*.json",
+      "!**/.last_build",
       "!**/__tests__/**"
     ],
     "extraMetadata": {
       "main": "dist/main/index.js"
     },
     "asar": true,
-    "asarUnpack": [
-      "node_modules/@otto/native/bin/**/*"
-    ],
     "npmRebuild": false,
     "mac": {
       "artifactName": "Otto-${version}-${arch}.${ext}",
@@ -157,6 +164,9 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": true,
       "notarize": true,
+      "signIgnore": [
+        "/Contents/Resources/otto-native/"
+      ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Otto 使用麦克风将语音转换为聊天输入文字。"
       },

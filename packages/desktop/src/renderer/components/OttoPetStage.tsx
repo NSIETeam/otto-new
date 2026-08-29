@@ -13,6 +13,7 @@ const ATLAS_COLUMNS = 8;
 const ATLAS_ROWS = 9;
 const LOGIN_DISPLAY_SCALE = 1.65;
 const WIDGET_DISPLAY_SCALE = 0.37;
+const DESKTOP_DISPLAY_SCALE = 0.62;
 
 type PetStateId =
   | 'idle'
@@ -24,6 +25,8 @@ type PetStateId =
   | 'waiting'
   | 'running'
   | 'review';
+
+export type DesktopPetReaction = 'waving' | 'jumping' | 'review';
 
 interface PetAnimation {
   id: PetStateId;
@@ -94,13 +97,9 @@ interface AmbientStep {
   loops: number;
 }
 
-// 非运行态有自己的陪伴节奏；回答状态本身仍由消息侧橘色标记负责。
+// 空闲态只安静待机。挥手、跳跃和观察均由明确业务事件触发，不再自动轮播。
 const AMBIENT_SEQUENCE: readonly AmbientStep[] = [
-  { state: 'idle', loops: 3 },
-  { state: 'waving', loops: 2 },
-  { state: 'waiting', loops: 2 },
-  { state: 'jumping', loops: 2 },
-  { state: 'review', loops: 2 },
+  { state: 'idle', loops: 1 },
 ];
 
 const RUNNING_SEQUENCE: readonly AmbientStep[] = [
@@ -134,32 +133,44 @@ export function OttoPetStage({
   running,
   variant,
   workLabel,
+  reaction,
+  interactionHeld = false,
 }: {
   running: boolean;
-  variant: 'login' | 'widget';
+  variant: 'login' | 'widget' | 'desktop';
   workLabel?: string;
+  reaction?: DesktopPetReaction | null;
+  interactionHeld?: boolean;
 }): React.JSX.Element {
   const reducedMotion = useReducedMotion();
   const [stepIndex, setStepIndex] = useState(0);
   const [frameIndex, setFrameIndex] = useState(0);
   const [loopIndex, setLoopIndex] = useState(0);
 
-  const sequence = reducedMotion
+  const reactionSequence = useMemo<readonly AmbientStep[] | null>(
+    () => reaction ? [{ state: reaction, loops: 1 }] : null,
+    [reaction],
+  );
+  const desktopInteractionHeld = variant === 'desktop' && interactionHeld;
+  const sequence = desktopInteractionHeld
     ? REDUCED_MOTION_SEQUENCE
-    : running
-      ? RUNNING_SEQUENCE
-      : AMBIENT_SEQUENCE;
+    : reducedMotion
+    ? REDUCED_MOTION_SEQUENCE
+    : reactionSequence ?? (running ? RUNNING_SEQUENCE : AMBIENT_SEQUENCE);
   const step = sequence[stepIndex % sequence.length];
   const animation = PET_ANIMATIONS[step.state];
+  const desktopIdleFrozen = variant === 'desktop' && (
+    interactionHeld || (!running && !reaction)
+  );
 
   useEffect(() => {
     setStepIndex(0);
     setFrameIndex(0);
     setLoopIndex(0);
-  }, [reducedMotion, running]);
+  }, [interactionHeld, reaction, reducedMotion, running]);
 
   useEffect(() => {
-    if (reducedMotion) return;
+    if (reducedMotion || desktopIdleFrozen) return;
     const timeout = window.setTimeout(() => {
       const nextFrame = frameIndex + 1;
       if (nextFrame < animation.durations.length) {
@@ -180,7 +191,15 @@ export function OttoPetStage({
     }, animation.durations[frameIndex]);
 
     return () => window.clearTimeout(timeout);
-  }, [animation, frameIndex, loopIndex, reducedMotion, sequence.length, step.loops]);
+  }, [
+    animation,
+    desktopIdleFrozen,
+    frameIndex,
+    loopIndex,
+    reducedMotion,
+    sequence.length,
+    step.loops,
+  ]);
 
   const totalStateDuration = useMemo(
     () =>
@@ -188,21 +207,26 @@ export function OttoPetStage({
       step.loops,
     [animation, step.loops],
   );
-  const displayScale = variant === 'login' ? LOGIN_DISPLAY_SCALE : WIDGET_DISPLAY_SCALE;
+  const displayScale = variant === 'login'
+    ? LOGIN_DISPLAY_SCALE
+    : variant === 'desktop'
+      ? DESKTOP_DISPLAY_SCALE
+      : WIDGET_DISPLAY_SCALE;
   const displayWidth = Number((CELL_WIDTH * displayScale).toFixed(2));
   const displayHeight = Number((CELL_HEIGHT * displayScale).toFixed(2));
 
   const spriteStyle: React.CSSProperties = {
     width: displayWidth,
     height: displayHeight,
-    backgroundImage: `url(${ottoPetAtlasUrl})`,
-    backgroundRepeat: 'no-repeat',
-    backgroundSize: `${CELL_WIDTH * ATLAS_COLUMNS * displayScale}px ${
-      CELL_HEIGHT * ATLAS_ROWS * displayScale
-    }px`,
-    backgroundPosition: `${-frameIndex * CELL_WIDTH * displayScale}px ${
-      -animation.row * CELL_HEIGHT * displayScale
-    }px`,
+    overflow: 'hidden',
+  };
+  const atlasStyle: React.CSSProperties = {
+    width: CELL_WIDTH * ATLAS_COLUMNS * displayScale,
+    height: CELL_HEIGHT * ATLAS_ROWS * displayScale,
+    maxWidth: 'none',
+    transform: `translate3d(${
+      -frameIndex * CELL_WIDTH * displayScale
+    }px, ${-animation.row * CELL_HEIGHT * displayScale}px, 0)`,
   };
 
   const motionStyle = {
@@ -211,6 +235,37 @@ export function OttoPetStage({
 
   const travelling =
     animation.id === 'running-right' || animation.id === 'running-left';
+
+  if (variant === 'desktop') {
+    return (
+      <aside
+        className="otto-desktop-pet"
+        aria-label="Otto 桌面宠物"
+        title={workLabel ?? (running ? '正在处理当前对话' : '等待下一项工作')}
+        data-testid="otto-pet-stage"
+        data-current-state={animation.id}
+        data-running={running ? 'true' : 'false'}
+      >
+        <div
+          className="otto-pet-stage__motion"
+          style={motionStyle}
+          data-state={animation.id}
+          data-frame={frameIndex}
+          data-reduced-motion={reducedMotion ? 'true' : 'false'}
+        >
+          <div className="otto-pet-stage__sprite" style={spriteStyle}>
+            <img
+              className="otto-pet-stage__atlas"
+              src={ottoPetAtlasUrl}
+              alt=""
+              draggable={false}
+              style={atlasStyle}
+            />
+          </div>
+        </div>
+      </aside>
+    );
+  }
 
   if (variant === 'widget') {
     return (
@@ -229,7 +284,15 @@ export function OttoPetStage({
             data-frame={frameIndex}
             data-reduced-motion={reducedMotion ? 'true' : 'false'}
           >
-            <div className="otto-pet-stage__sprite" style={spriteStyle} />
+            <div className="otto-pet-stage__sprite" style={spriteStyle}>
+              <img
+                className="otto-pet-stage__atlas"
+                src={ottoPetAtlasUrl}
+                alt=""
+                draggable={false}
+                style={atlasStyle}
+              />
+            </div>
           </div>
         </div>
         <div className="otto-pet-widget__copy">
@@ -268,7 +331,15 @@ export function OttoPetStage({
           data-frame={frameIndex}
           data-reduced-motion={reducedMotion ? 'true' : 'false'}
         >
-          <div className="otto-pet-stage__sprite" style={spriteStyle} aria-hidden="true" />
+          <div className="otto-pet-stage__sprite" style={spriteStyle} aria-hidden="true">
+            <img
+              className="otto-pet-stage__atlas"
+              src={ottoPetAtlasUrl}
+              alt=""
+              draggable={false}
+              style={atlasStyle}
+            />
+          </div>
         </div>
       </div>
     </section>

@@ -5147,7 +5147,7 @@ h6.otto-prose__h {
   flex-direction: column;
 }
 
-/* 小宠物默认不占布局；开启后才以右下角状态挂件出现。 */
+/* 小宠物卡片由独立透明窗口承载；组件本身仍可单独测试/预览。 */
 .otto-pet-widget {
   position: fixed;
   right: 22px;
@@ -5185,6 +5185,15 @@ h6.otto-prose__h {
 .otto-pet-stage__sprite {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+}
+.otto-pet-stage__atlas {
+  display: block;
+  max-width: none;
+  pointer-events: none;
+  user-select: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  -webkit-user-drag: none;
 }
 .otto-pet-widget__copy {
   display: grid;
@@ -5224,6 +5233,92 @@ h6.otto-prose__h {
 .otto-pet-widget__light.is-red { color: #dc5c61; background: #dc5c61; }
 .otto-pet-widget__light.is-yellow { color: #d89d2b; background: #d89d2b; }
 .otto-pet-widget__light.is-green { color: #4fa877; background: #4fa877; }
+
+html[data-otto-surface='desktop-pet'],
+body[data-otto-surface='desktop-pet'],
+body[data-otto-surface='desktop-pet'] #root {
+  overflow: hidden;
+  background: transparent !important;
+}
+.otto-desktop-pet-surface {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  outline: none;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+.otto-desktop-pet__hit-target {
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  z-index: 1;
+  width: 112px;
+  height: 132px;
+  outline: none;
+  cursor: grab;
+  pointer-events: auto;
+  transform: translateX(-50%);
+}
+.otto-desktop-pet__hit-target:active {
+  cursor: grabbing;
+}
+.otto-desktop-pet {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  display: block;
+  width: 148px;
+  height: 148px;
+  overflow: hidden;
+  background: transparent;
+  filter: drop-shadow(0 8px 8px rgba(22, 36, 50, 0.22));
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+.otto-desktop-pet .otto-pet-stage__motion {
+  bottom: 5px;
+}
+.otto-desktop-pet__bubble {
+  position: absolute;
+  /* Anchor the bubble to the pet's visible head, not the transparent
+     BrowserWindow/sprite bounds. This keeps speech visually attached. */
+  bottom: 121px;
+  left: 50%;
+  z-index: 2;
+  max-width: 164px;
+  padding: 7px 11px;
+  border-radius: 14px 14px 14px 4px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 7px 18px rgba(22, 36, 50, 0.18);
+  color: #263341;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: otto-pet-bubble-in 180ms ease-out both;
+}
+.otto-desktop-pet__bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 0 0 2px 0;
+  background: rgba(255, 255, 255, 0.94);
+  transform: translateX(-50%) rotate(45deg);
+}
+@keyframes otto-pet-bubble-in {
+  from { opacity: 0; transform: translate(-50%, 4px) scale(.94); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
 
 /* 登录页复用同一套 hatch-pet 图集：只放大 sprite，不带右栏标题、地面和位移动画。 */
 .otto-pet-stage.otto-pet-stage--login {

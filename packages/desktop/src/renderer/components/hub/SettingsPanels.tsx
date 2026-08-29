@@ -306,7 +306,7 @@ export function PrefsPanel({
           <div className="otto-hub__setting">
             <div className="otto-hub__setting-text">
               <div className="otto-hub__field-label">小宠物挂件</div>
-              <div className="otto-hub__field-hint">在右下角显示 Otto 的实时工作状态。</div>
+              <div className="otto-hub__field-hint">单击互动、双击打开 Otto、按住拖动；自动记住位置。</div>
             </div>
             <button
               type="button"

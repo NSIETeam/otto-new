@@ -22,4 +22,8 @@ export function writePetWidgetEnabled(enabled: boolean): void {
     // A blocked localStorage must not prevent the settings page from rendering.
   }
   window.dispatchEvent(new Event(PET_WIDGET_PREFERENCE_EVENT));
+  const desktopSync = window.otto?.desktopPetSetEnabled?.(enabled);
+  void desktopSync?.catch(() => {
+    // 桌面窗口同步失败不阻断设置页；下次 renderer 启动会再次同步。
+  });
 }

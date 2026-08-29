@@ -31,11 +31,6 @@ import {
 import type { SlashCommand } from './SlashCommands.js';
 import { IconArrowDown, IconPanelRight, OttoAvatar } from './icons.js';
 
-import { OttoPetStage } from './OttoPetStage.js';
-import {
-  PET_WIDGET_PREFERENCE_EVENT,
-  readPetWidgetEnabled,
-} from '../petWidgetPreference.js';
 
 /** 视口距底多近算「贴底」（px），贴底才自动跟随流式增量。 */
 const NEAR_BOTTOM = 80;
@@ -144,7 +139,6 @@ export function ChatView({
   const [hasUnread, setHasUnread] = useState(false);
   const [showJump, setShowJump] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const [petWidgetEnabled, setPetWidgetEnabled] = useState(readPetWidgetEnabled);
   // 空态示例胶囊注入 composer 的草稿（每次点击带新 token 触发再注入）。
   const [draft, setDraft] = useState<{ text: string; n: number }>({
     text: '',
@@ -198,10 +192,20 @@ export function ChatView({
   }, [session?.sessionId]);
 
   useEffect(() => {
-    const syncPreference = (): void => setPetWidgetEnabled(readPetWidgetEnabled());
-    window.addEventListener(PET_WIDGET_PREFERENCE_EVENT, syncPreference);
-    return () => window.removeEventListener(PET_WIDGET_PREFERENCE_EVENT, syncPreference);
-  }, []);
+    const workLabel = busy
+      ? '正在处理当前对话'
+      : session
+        ? '等待你的下一项工作'
+        : '准备开始新的对话';
+    const desktopPetSync = window.otto?.desktopPetUpdateState?.({
+      running: busy,
+      workLabel,
+      sessionId: session?.sessionId ?? null,
+    });
+    void desktopPetSync?.catch(() => {
+      // 独立小宠物窗口不可用时不影响聊天。
+    });
+  }, [busy, session]);
 
   const jumpToBottom = () => {
     const el = threadRef.current;
@@ -299,14 +303,6 @@ export function ChatView({
 
       {/* 园区服务插件：常驻挂载（右侧面板「园区服务」入口经事件打开弹窗）。 */}
 
-
-      {petWidgetEnabled ? (
-        <OttoPetStage
-          variant="widget"
-          running={busy}
-          workLabel={busy ? '正在处理当前对话' : session ? '等待你的下一项工作' : '准备开始新的对话'}
-        />
-      ) : null}
 
       <Composer
         models={models}

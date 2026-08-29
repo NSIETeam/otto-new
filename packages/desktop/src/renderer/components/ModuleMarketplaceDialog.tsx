@@ -33,8 +33,6 @@ export interface ModuleMarketplaceDialogProps {
   onClose(): void;
   onManageExperts(): void;
   onDeleteExpert?(id: string): void;
-  onCreateModule?(): void;
-  onBrowseCustomerModules?(): void;
 }
 
 function focusableElements(container: HTMLElement): HTMLElement[] {
@@ -52,8 +50,6 @@ export function ModuleMarketplaceDialog({
   onClose,
   onManageExperts,
   onDeleteExpert,
-  onCreateModule,
-  onBrowseCustomerModules,
 }: ModuleMarketplaceDialogProps): React.JSX.Element | null {
   const [query, setQuery] = useState('');
   const [selection, setSelection] = useState<Set<string>>(() => new Set());
@@ -274,12 +270,6 @@ export function ModuleMarketplaceDialog({
           <button type="button" className="otto-module-marketplace__manage" onClick={onManageExperts}>
             管理/删除我的专家
           </button>
-          {onCreateModule ? <button type="button" className="otto-module-marketplace__manage" onClick={onCreateModule}>
-            包装客户模块
-          </button> : null}
-          {onBrowseCustomerModules ? <button type="button" className="otto-module-marketplace__manage" onClick={onBrowseCustomerModules}>
-            客户模块市场
-          </button> : null}
           <button
             type="button"
             className="otto-module-marketplace__confirm"

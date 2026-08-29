@@ -12,8 +12,6 @@ export type ModuleModalState =
   | { kind: 'auto-skill' }
   | { kind: 'custom-expert'; expertId?: string }
   | { kind: 'customer-module'; moduleId: string; version: string }
-  | { kind: 'customer-module-authoring' }
-  | { kind: 'customer-module-market' }
   | null;
 
 export function openModuleModal(

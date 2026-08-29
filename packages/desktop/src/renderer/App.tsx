@@ -60,8 +60,6 @@ import {
 } from './components/ParkServicesPlugin.js';
 import { ModuleMarketplaceDialog } from './components/ModuleMarketplaceDialog.js';
 import { CustomerModuleRunDialog } from './components/CustomerModuleRunDialog.js';
-import { CustomerModuleAuthoringDialog } from './components/CustomerModuleAuthoringDialog.js';
-import { CustomerModuleMarketDialog } from './components/CustomerModuleMarketDialog.js';
 import { ModuleGroupCatalogDialog } from './components/ModuleGroupCatalogDialog.js';
 import { ConfirmDialog } from './components/ConfirmDialog.js';
 import {
@@ -1548,27 +1546,6 @@ function OttoWorkspaceApp({
         onClose={() => setModuleModal(null)}
         onManageExperts={() => openModuleModal({ kind: 'custom-expert' })}
         onDeleteExpert={handleDeleteCustomAgent}
-        onCreateModule={() => openModuleModal({ kind: 'customer-module-authoring' })}
-        onBrowseCustomerModules={() => openModuleModal({ kind: 'customer-module-market' })}
-      />
-      <CustomerModuleMarketDialog
-        open={moduleModal?.kind === 'customer-module-market'}
-        installed={installedCustomerModules}
-        onInstalled={(record) => setInstalledCustomerModules((current) => [
-          ...current.filter((item) => item.id !== record.id),
-          record,
-        ])}
-        onInstalledChanged={setInstalledCustomerModules}
-        onCreate={() => openModuleModal({ kind: 'customer-module-authoring' })}
-        onClose={() => setModuleModal(null)}
-      />
-      <CustomerModuleAuthoringDialog
-        open={moduleModal?.kind === 'customer-module-authoring'}
-        publisher={{ id: account.id, name: account.name }}
-        onSubmit={async (submission) => {
-          await window.otto.customerModuleSubmit(submission);
-        }}
-        onClose={() => setModuleModal(null)}
       />
       <CustomerModuleRunDialog
         open={moduleModal?.kind === 'customer-module'}

@@ -103,6 +103,8 @@ describe('ModuleMarketplaceDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '管理/删除我的专家' }));
     expect(onManageExperts).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '包装客户模块' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '客户模块市场' })).toBeNull();
   });
 
   it('deletes a user-created expert directly after confirmation', () => {

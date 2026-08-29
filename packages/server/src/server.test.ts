@@ -134,7 +134,12 @@ describe('会话运行时模型边界', () => {
     const customModel = 'custom:openai-responses:gpt-5.6-sol@test';
     expect(resolveSessionRuntimeModel('enterprise', customModel)).toBe(customModel);
     expect(resolveSessionRuntimeModel('personal', customModel)).toBe(customModel);
-    expect(resolveSessionRuntimeModel('enterprise', 'otto:managed')).toBeUndefined();
+    expect(() => resolveSessionRuntimeModel('enterprise', 'otto:managed')).toThrow(
+      /企业托管模型暂不可用/,
+    );
+    expect(resolveSessionRuntimeModel('enterprise', 'otto:managed', true)).toBe(
+      'otto:managed',
+    );
   });
 });
 

@@ -575,9 +575,14 @@ export function getDeploymentLicense(
   return toDeploymentLicenseView(store, row ?? null);
 }
 
+export interface DeploymentLicenseImportOptions {
+  allowMissingOrganization?: boolean;
+}
+
 export function importDeploymentLicense(
   store: DeploymentRepositoryStore,
   raw: unknown,
+  options: DeploymentLicenseImportOptions = {},
 ): DeploymentLicenseView {
   const envelope = safeJsonObject(raw);
   const payload = safeJsonObject(envelope.license ?? envelope.payload);
@@ -608,7 +613,9 @@ export function importDeploymentLicense(
   const organization = store.db()
     .prepare('SELECT id FROM organizations WHERE id = ?')
     .get(organizationId) as { id: string } | undefined;
-  if (!organization) throw new Error('license organizationId mismatch');
+  if (!organization && !options.allowMissingOrganization) {
+    throw new Error('license organizationId mismatch');
+  }
   const modules = Array.isArray(payload.modules)
     ? [...new Set(payload.modules
         .filter((item): item is string => typeof item === 'string' && item.length > 0)
@@ -1058,6 +1065,16 @@ export interface DeploymentUpdatePolicyCredentials {
   leaseToken: string;
 }
 
+export interface DeploymentEdgeGatewayCredentials {
+  licenseId: string;
+  deploymentId: string;
+  organizationId: string;
+  machineFingerprint: string;
+  leaseEndpoint: string;
+  leaseToken: string;
+  edgeGatewayUrl: string;
+}
+
 /** Returns decrypted credentials only to the in-process commercial control composition. */
 export function getDeploymentUpdatePolicyCredentials(
   store: DeploymentRepositoryStore,
@@ -1075,6 +1092,49 @@ export function getDeploymentUpdatePolicyCredentials(
     machineFingerprint: getMachineFingerprint(),
     leaseEndpoint: license.lease.endpoint,
     leaseToken,
+  };
+}
+
+/**
+ * Returns deployment-scoped secrets only to the in-process model gateway
+ * broker. Neither an account client nor the local Agent receives leaseToken.
+ */
+export function getDeploymentEdgeGatewayCredentials(
+  store: DeploymentRepositoryStore,
+): DeploymentEdgeGatewayCredentials | null {
+  const license = getDeploymentLicense(store);
+  if (
+    license.id === 'unlicensed' ||
+    license.offline ||
+    !license.organizationId ||
+    !license.lease.endpoint ||
+    license.lease.status !== 'active' ||
+    ['missing', 'invalid', 'revoked', 'expired'].includes(license.status)
+  ) {
+    return null;
+  }
+  const payload = latestLicensePayload(store);
+  const leaseToken = payload.leaseToken;
+  const edgeGatewayUrl =
+    process.env.OTTO_EDGE_GATEWAY_URL?.trim() ||
+    (typeof payload.edgeGatewayUrl === 'string'
+      ? payload.edgeGatewayUrl.trim()
+      : '');
+  if (
+    typeof leaseToken !== 'string' ||
+    leaseToken.length < 32 ||
+    !edgeGatewayUrl
+  ) {
+    return null;
+  }
+  return {
+    licenseId: license.id,
+    deploymentId: license.deploymentId,
+    organizationId: license.organizationId,
+    machineFingerprint: getMachineFingerprint(),
+    leaseEndpoint: license.lease.endpoint,
+    leaseToken,
+    edgeGatewayUrl,
   };
 }
 
@@ -1600,10 +1660,17 @@ export function exportDeploymentDiagnostics(
 export function isLicenseUsableForOrganizationFeature(
   store: DeploymentRepositoryStore,
   feature: OrganizationFeatureKey,
+  organizationId?: string | null,
 ): boolean {
   const license = getDeploymentLicense(store);
   if (!license.enforce && ['active', 'expiring', 'grace'].includes(license.status)) return true;
   if (!['active', 'expiring', 'grace'].includes(license.status)) return false;
+  if (
+    organizationId !== undefined &&
+    (!organizationId || license.organizationId !== organizationId)
+  ) {
+    return false;
+  }
   for (const moduleName of license.modules) {
     if (LICENSE_MODULE_FEATURES[moduleName]?.includes(feature)) return true;
   }

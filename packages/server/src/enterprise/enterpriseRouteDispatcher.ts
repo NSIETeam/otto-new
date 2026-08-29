@@ -27,8 +27,11 @@ import {
 import { handleOrganizationRoute } from '../modules/identity_organization/index.js';
 import { handleGeneralizedParkRoute } from './generalizedParkRoutes.js';
 import { handleHealthRoute } from './healthRoutes.js';
+import { handlePrivateDeploymentBootstrapRoute } from './privateDeploymentBootstrapRoutes.js';
+import type { PrivateDeploymentBootstrapCoordinator } from '../modules/deployment_lifecycle/index.js';
 import { handleLocalAgentRoute } from './localAgentRoutes.js';
 import { handleMemberWorkflowRoute } from './memberWorkflowRoutes.js';
+import { handleModelGatewayRoute } from './modelGatewayRoutes.js';
 import { handleSkillMarketplaceRoute } from './skillMarketplaceRoutes.js';
 import { handleCustomerModuleMarketplaceRoute } from './customerModuleMarketplaceRoutes.js';
 import { handleParkResourceRoute } from './parkResourceRoutes.js';
@@ -66,6 +69,10 @@ export interface EnterpriseRouteDispatcherDeps {
   deploymentInfo: EnterpriseRouteDeploymentInfo;
   apiVersion: number;
   capabilities: readonly string[];
+  privateDeploymentBootstrap: Pick<
+    PrivateDeploymentBootstrapCoordinator,
+    'prepare' | 'readiness'
+  >;
   atoaClaims: Map<string, number>;
   atoaClaimTtlMs: number;
   isPublicSimplePark: boolean;
@@ -73,6 +80,7 @@ export interface EnterpriseRouteDispatcherDeps {
   readBody(req: IncomingMessage, maxLength?: number): Promise<Record<string, unknown>>;
   sendJSON(res: ServerResponse, status: number, data: unknown): void;
   extractToken(req: IncomingMessage): string;
+  modelGatewayFetch?: typeof fetch;
   /** CONTROL-12 签名指令队列 HTTP 端点（可选；未启用时为 undefined）。 */
   controlCommandHandle?(
     deps: {
@@ -103,6 +111,7 @@ export async function dispatchEnterpriseRoute({
   deploymentInfo,
   apiVersion,
   capabilities,
+  privateDeploymentBootstrap,
   atoaClaims,
   atoaClaimTtlMs,
   isPublicSimplePark,
@@ -110,6 +119,7 @@ export async function dispatchEnterpriseRoute({
   readBody,
   sendJSON,
   extractToken,
+  modelGatewayFetch,
   controlCommandHandle,
 }: EnterpriseRouteDispatcherDeps): Promise<boolean> {
   // CONTROL-12 签名指令队列端点（配置了 Control 信任根时先于企业路由处理）。
@@ -130,6 +140,20 @@ export async function dispatchEnterpriseRoute({
   }
 
   if (
+    await handlePrivateDeploymentBootstrapRoute({
+      path,
+      method,
+      res,
+      req,
+      readBody,
+      services: privateDeploymentBootstrap,
+      sendJSON,
+    })
+  ) {
+    return true;
+  }
+
+  if (
     handleHealthRoute({
       path,
       method,
@@ -137,6 +161,7 @@ export async function dispatchEnterpriseRoute({
       apiVersion,
       capabilities,
       deploymentInfo,
+      readiness: privateDeploymentBootstrap.readiness,
       sendJSON,
     })
   ) {
@@ -211,6 +236,22 @@ export async function dispatchEnterpriseRoute({
       readBody,
       sendJSON,
       extractToken,
+    })
+  ) {
+    return true;
+  }
+
+  if (
+    await handleModelGatewayRoute({
+      path,
+      method,
+      req,
+      res,
+      memberAccount,
+      services: db,
+      readBody,
+      sendJSON,
+      fetchImpl: modelGatewayFetch,
     })
   ) {
     return true;

@@ -351,6 +351,14 @@ export interface CustomModelConfig {
   /** API密钥，支持环境变量替换（如 ${OPENAI_API_KEY}） */
   apiKey: string;
 
+  /**
+   * Runtime-only short-lived API token provider for Otto-managed models.
+   * Neither this function nor its return value may be persisted or logged.
+   * It is invoked immediately before every HTTP attempt so retries can use a
+   * refreshed token.
+   */
+  apiKeyProvider?: () => Promise<string>;
+
   /** 模型ID（传递给API的实际模型名称） */
   modelId: string;
 

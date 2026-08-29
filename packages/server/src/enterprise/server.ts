@@ -72,8 +72,15 @@ import {
 } from '../modules/commercial_control/index.js';
 import {
   controlPublicKeysFromEnv,
+  type ControlCommandEnvelope,
 } from '../modules/control_commands/index.js';
+import { createEnterpriseInitiationCommandExecutor } from '../modules/enterprise_initiation/index.js';
 import { createEnterpriseControlCommandBoundary } from './controlCommandIntegration.js';
+import {
+  startPrivateDeploymentBootstrapRuntime,
+  type PrivateDeploymentBootstrapCoordinator,
+} from '../modules/deployment_lifecycle/index.js';
+import { createEnterprisePrivateDeploymentBootstrap } from './privateDeploymentBootstrapIntegration.js';
 
 export { adminAccountsHTML } from './adminAccountsPage.js';
 export {
@@ -122,6 +129,8 @@ export interface EnterpriseServerOptions {
   controlCommandExecute?: (command: ControlCommandEnvelopeLike) => ControlCommandRunResultShim;
   /** 密码登录限流参数；生产使用安全默认值，测试可注入时钟和较小阈值。 */
   loginRateLimit?: PasswordLoginRateLimitOptions;
+  /** Test seam; production derives bootstrap credentials from server-side environment only. */
+  privateDeploymentBootstrapCoordinator?: PrivateDeploymentBootstrapCoordinator;
 }
 
 /** 与 control_command 边界的信封/执行结果类型对齐（避免 server.ts 循环依赖）。 */
@@ -151,7 +160,7 @@ export interface VerificationSmsSender {
 
 const ENTERPRISE_API_VERSION = 4;
 
-const ENTERPRISE_CAPABILITIES = [
+export const ENTERPRISE_CAPABILITIES = [
   'password_auth',
   'sms_login',
   'sms_registration',
@@ -190,6 +199,7 @@ const ENTERPRISE_CAPABILITIES = [
   'park_tenant_profiles_v1',
   'park_service_statistics_v1',
   'private_deployment_v1',
+  'private_deployment_bootstrap_v1',
   'license_enforcement_v1',
   'encrypted_telemetry_queue_v1',
   'signed_telemetry_transport_v1',
@@ -199,6 +209,7 @@ const ENTERPRISE_CAPABILITIES = [
   'park_meeting_slots_v1',
   'modular_update_push_v1',
   'signed_update_policy_v1',
+  'managed_model_gateway_v1',
   'control_command_queue_v1',
   'account_data_sync_v1',
   'enterprise_skill_market_v1',
@@ -228,6 +239,7 @@ function readBody(
   req: IncomingMessage,
   maxLength = 1_000_000,
 ): Promise<RouteBody> {
+  if (req.readableEnded || req.complete) return Promise.resolve({});
   return new Promise((resolve) => {
     let body = '';
     let tooLarge = false;
@@ -262,6 +274,7 @@ function makeHandler(
   loginRateLimiter: LoginRateLimiter,
   deploymentInfo: DeploymentInfo,
   localAgentPairingEnabled: boolean,
+  privateDeploymentBootstrap: PrivateDeploymentBootstrapCoordinator,
   featureFlags?: FeatureFlagManager,
   billingFetch: typeof fetch = fetch,
   controlCommandHandle?: (deps: {
@@ -481,7 +494,10 @@ function makeHandler(
         : true;
       if (
         commercialFeature &&
-        !db.isLicenseUsableForOrganizationFeature(commercialFeature)
+        !db.isLicenseUsableForOrganizationFeature(
+          commercialFeature,
+          commercialOrganizationId,
+        )
       ) {
         auditCommercialDecision('commercial_module_denied', {
           code: 'commercial_module_not_entitled',
@@ -602,6 +618,7 @@ function makeHandler(
           deploymentInfo,
           apiVersion: ENTERPRISE_API_VERSION,
           capabilities: ENTERPRISE_CAPABILITIES,
+          privateDeploymentBootstrap,
           atoaClaims,
           atoaClaimTtlMs: ATOA_CLAIM_TTL_MS,
           isPublicSimplePark,
@@ -609,6 +626,7 @@ function makeHandler(
           readBody,
           sendJSON,
           extractToken,
+          modelGatewayFetch: billingFetch,
           controlCommandHandle,
         })
       ) {
@@ -667,6 +685,7 @@ export function createEnterpriseServer(opts: EnterpriseServerOptions = {}): {
   generatedToken: boolean;
   repairSmsSender: RepairNotificationSender | null;
   repairFeishuSender: RepairNotificationSender | null;
+  privateDeploymentBootstrap: PrivateDeploymentBootstrapCoordinator;
 } {
   const host = opts.host || process.env.OTTO_ENTERPRISE_HOST || '127.0.0.1';
   const port =
@@ -737,18 +756,54 @@ export function createEnterpriseServer(opts: EnterpriseServerOptions = {}): {
   const controlKeys =
     opts.controlPublicKeys ?? controlPublicKeysFromEnv(process.env);
   const controlExecute =
-    opts.controlCommandExecute ?? (() => ({
-      status: 'failed' as const,
-      resultSummary: 'no executor configured',
-      errorCategory: 'not_configured',
-    }));
+    opts.controlCommandExecute ??
+    createEnterpriseInitiationCommandExecutor({
+      getDeploymentLicense: db.getDeploymentLicense,
+      provision: db.provisionBootstrapEnterprise,
+    });
   const controlBoundary = createEnterpriseControlCommandBoundary({
-    deploymentId:
-      process.env.OTTO_ENTERPRISE_DEPLOYMENT_ID || publicBaseUrl,
+    deploymentId: db.getDeploymentId(),
     controlPublicKeys: controlKeys,
     signingPrivateKey: opts.controlSigningPrivateKey,
     execute: controlExecute,
   });
+  const applyProvisioningCommand = (command: unknown): void => {
+    if (!controlBoundary.enabled) {
+      throw new Error('bootstrap_provisioning_not_configured');
+    }
+    const submitted = controlBoundary.submit(command as ControlCommandEnvelope);
+    if (submitted.kind !== 'accepted') {
+      throw new Error(
+        submitted.kind === 'invalid_signature'
+          ? 'bootstrap_provisioning_signature_invalid'
+          : 'bootstrap_provisioning_rejected',
+      );
+    }
+    for (let index = 0; index < 100; index += 1) {
+      const receipt = controlBoundary.services.queryReceipt(submitted.commandId);
+      if (receipt) {
+        if (receipt.status !== 'succeeded') {
+          throw new Error('bootstrap_provisioning_failed');
+        }
+        return;
+      }
+      if (!controlBoundary.services.drainOnce().executed) break;
+    }
+    throw new Error('bootstrap_provisioning_incomplete');
+  };
+  const deploymentInfo = {
+    version,
+    buildCommit,
+    startedAt: new Date().toISOString(),
+  };
+  const privateDeploymentBootstrap =
+    opts.privateDeploymentBootstrapCoordinator ??
+    createEnterprisePrivateDeploymentBootstrap({
+      appVersion: version,
+      buildCommit,
+      publicOrigin: publicBaseUrl,
+      applyProvisioningCommand,
+    });
   const server = createServer(
     makeHandler(
       adminToken,
@@ -757,12 +812,9 @@ export function createEnterpriseServer(opts: EnterpriseServerOptions = {}): {
       repairFeishuSender,
       publicBaseUrl,
       loginRateLimiter,
-      {
-        version,
-        buildCommit,
-        startedAt: new Date().toISOString(),
-      },
+      deploymentInfo,
       opts.localAgentPairingEnabled === true,
+      privateDeploymentBootstrap,
       featureFlags,
       opts.billingFetch,
       controlBoundary.enabled ? controlBoundary.handleRoute : undefined,
@@ -777,6 +829,7 @@ export function createEnterpriseServer(opts: EnterpriseServerOptions = {}): {
     generatedToken,
     repairSmsSender,
     repairFeishuSender,
+    privateDeploymentBootstrap,
   };
 }
 
@@ -853,6 +906,7 @@ export function startEnterpriseServer(
     generatedToken,
     repairSmsSender,
     repairFeishuSender,
+    privateDeploymentBootstrap,
   } = createEnterpriseServer(validatedOptions);
   const generatedTokenPath = generatedToken
     ? persistGeneratedAdminToken(adminToken)
@@ -898,11 +952,20 @@ export function startEnterpriseServer(
         error,
       ),
   });
+  const stopPrivateDeploymentBootstrapRuntime =
+    startPrivateDeploymentBootstrapRuntime(privateDeploymentBootstrap, {
+      onError: (error) =>
+        console.error(
+          '[Otto Enterprise] private deployment bootstrap failed',
+          error,
+        ),
+    });
   let stopFederationRuntime: () => void;
   try {
     stopFederationRuntime = db.startFederationRuntime();
   } catch (error) {
     stopPrivateDeploymentRuntime();
+    stopPrivateDeploymentBootstrapRuntime();
     server.close();
     throw error;
   }
@@ -911,6 +974,7 @@ export function startEnterpriseServer(
     stopDataProtectionRuntime = db.startDataProtectionRuntime();
   } catch (error) {
     stopPrivateDeploymentRuntime();
+    stopPrivateDeploymentBootstrapRuntime();
     stopFederationRuntime();
     server.close();
     throw error;
@@ -943,6 +1007,7 @@ export function startEnterpriseServer(
     clearImmediate(initialMlsCleanup);
     clearInterval(mlsCleanupTimer);
     stopPrivateDeploymentRuntime();
+    stopPrivateDeploymentBootstrapRuntime();
     stopFederationRuntime();
     stopDataProtectionRuntime();
     server.close();
@@ -952,6 +1017,7 @@ export function startEnterpriseServer(
     clearImmediate(initialMlsCleanup);
     clearInterval(mlsCleanupTimer);
     stopPrivateDeploymentRuntime();
+    stopPrivateDeploymentBootstrapRuntime();
     stopFederationRuntime();
     stopDataProtectionRuntime();
     stopTicketNotificationRuntime();

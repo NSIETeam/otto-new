@@ -191,4 +191,48 @@ describe('private deployment schema contributor', () => {
       database.close();
     }
   });
+
+  it('adds fail-closed reconciliation state to an existing admission outbox', () => {
+    const database = new Database(':memory:');
+    try {
+      database.exec(`
+        CREATE TABLE billing_admission_outbox (
+          id TEXT PRIMARY KEY,
+          deployment_id TEXT NOT NULL,
+          organization_id TEXT NOT NULL,
+          hold_id TEXT NOT NULL,
+          module TEXT NOT NULL,
+          units INTEGER NOT NULL,
+          reference_id TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          desired_outcome TEXT,
+          status TEXT NOT NULL DEFAULT 'authorized',
+          attempts INTEGER NOT NULL DEFAULT 0,
+          created_at_ms INTEGER NOT NULL,
+          finalized_at_ms INTEGER,
+          next_attempt_at_ms INTEGER,
+          last_error TEXT,
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO billing_admission_outbox
+          (id, deployment_id, organization_id, hold_id, module, units,
+           reference_id, idempotency_key, created_at_ms)
+        VALUES
+          ('admission-old', 'dep-old', 'org-old', 'hold_old', 'model_gateway',
+           1, 'task-old', 'admission:old', 1000);
+      `);
+
+      applySchema(database);
+
+      expect(database.prepare(
+        `SELECT id, reconciliation_required
+         FROM billing_admission_outbox WHERE id = 'admission-old'`,
+      ).get()).toEqual({
+        id: 'admission-old',
+        reconciliation_required: 0,
+      });
+    } finally {
+      database.close();
+    }
+  });
 });

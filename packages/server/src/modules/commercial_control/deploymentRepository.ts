@@ -1193,6 +1193,7 @@ export function createDeploymentBillingUsageStore(
     db: store.db,
     deploymentId: () => getDeploymentId(store),
     credentials: () => getDeploymentBillingCredentials(store),
+    billingEnforcement: () => getDeploymentLicense(store).billingEnforcement,
     fieldCipher: store.fieldCipher,
   };
 }

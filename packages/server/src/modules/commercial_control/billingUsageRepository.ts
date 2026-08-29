@@ -51,6 +51,8 @@ export interface BillingUsageRepositoryStore {
   db(): Database;
   deploymentId(): string;
   credentials(): DeploymentBillingCredentials | null;
+  /** Preserve fail-closed admission when credentials are temporarily unavailable. */
+  billingEnforcement?(): 'disabled' | 'enforce';
   fieldCipher?: EncryptedFieldCipher;
 }
 

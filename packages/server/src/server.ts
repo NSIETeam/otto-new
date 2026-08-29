@@ -118,6 +118,7 @@ import {
   createJsonChannelIdentityAuditSink,
   type ChannelIdentityRegistryV1,
 } from './modules/integration_adapters/channelIdentityRegistry.js';
+import type { ManagedChannelPlatformV1 } from './modules/integration_adapters/managedChannelPlatform.js';
 import {
   loadUserSettingsSubset,
   patchUserSettings,
@@ -385,6 +386,8 @@ export interface OttoServerOptions {
   channelConnectors?: Partial<Record<ChannelProvider, ChannelConnectorV1>>;
   /** Shared, revision-checked provider identity bindings. */
   channelIdentityRegistry?: ChannelIdentityRegistryV1;
+  /** Fully composed managed-channel runtime; deployment supplies secure stores and workflow backend. */
+  managedChannelPlatform?: ManagedChannelPlatformV1;
 }
 
 /** 飞书凭证存取接口（可注入；默认实现走 feishu/vendor/credentials.ts）。 */
@@ -493,6 +496,7 @@ export class OttoServer {
   private stopMemoryMaintenance?: () => void;
   private stopAutoCompression?: () => void;
   private readonly channelConnectors: Partial<Record<ChannelProvider, ChannelConnectorV1>>;
+  private readonly managedChannelPlatform?: ManagedChannelPlatformV1;
   private readonly channelIdentityRegistry: ChannelIdentityRegistryV1;
   private readonly channelPairingProviders = new Map<string, ChannelProvider>();
 
@@ -528,7 +532,11 @@ export class OttoServer {
         console.warn(`[ResidentTask] ${taskName} failed:`, error);
       },
     });
-    this.channelConnectors = { ...opts.channelConnectors };
+    this.managedChannelPlatform = opts.managedChannelPlatform;
+    this.channelConnectors = {
+      ...opts.managedChannelPlatform?.connectors,
+      ...opts.channelConnectors,
+    };
     this.channelIdentityRegistry = opts.channelIdentityRegistry
       ?? new JsonChannelIdentityRegistryV1({ audit: createJsonChannelIdentityAuditSink() });
     getHabitAnalyzer().setTaskRegistry(this.recurringTaskRegistry);
@@ -755,6 +763,7 @@ export class OttoServer {
       }
     }
     await this.feishu?.stop().catch(() => undefined);
+    await this.managedChannelPlatform?.stopAll().catch(() => undefined);
     // 停机不留孤儿轮次：cancel + dispose 所有已 attach 的 runtime，
     // 否则 server 关了 agent 还在后台烧 token / 跑工具（maxTurns=-1 不限回合）。
     await Promise.all(

@@ -13,6 +13,7 @@ import type {
   ChannelConnectorV1,
   PairingSession,
 } from './modules/integration_adapters/channelConnector.js';
+import type { ManagedChannelPlatformV1 } from './modules/integration_adapters/managedChannelPlatform.js';
 
 const pairing: PairingSession = {
   pairingId: 'pair_0123456789abcdef01234567',
@@ -72,11 +73,13 @@ describe('channel pairing REST routes', () => {
   async function start(
     connectors = {},
     workspaceStore = new ProductWorkspaceStore(path.join(userDir, 'workspace.json')),
+    managedChannelPlatform?: ManagedChannelPlatformV1,
   ): Promise<{ baseUrl: string; token: string }> {
     server = new OttoServer({
       port: 0,
       mock: true,
       channelConnectors: connectors,
+      managedChannelPlatform,
       recurringTaskStateStore: new InMemoryRecurringTaskStateStore(),
       productWorkspaceStore: workspaceStore,
     });
@@ -303,5 +306,28 @@ describe('channel pairing REST routes', () => {
     );
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ error: 'channel_identity_admin_required' });
+  });
+
+  it('uses a composed managed platform and stops it with the server lifecycle', async () => {
+    const connector = fakeConnector();
+    const stopAll = vi.fn(async () => undefined);
+    const platform = {
+      connectors: { feishu: connector },
+      stopAll,
+    } as unknown as ManagedChannelPlatformV1;
+    const { baseUrl, token } = await start(
+      {},
+      new ProductWorkspaceStore(path.join(userDir, 'platform-workspace.json')),
+      platform,
+    );
+    const response = await fetch(`${baseUrl}/channels/installations`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(await response.json()).toMatchObject({
+      data: [{ provider: 'feishu', tenantId: 'tenant-1' }],
+    });
+    await server!.stop();
+    server = undefined;
+    expect(stopAll).toHaveBeenCalledOnce();
   });
 });

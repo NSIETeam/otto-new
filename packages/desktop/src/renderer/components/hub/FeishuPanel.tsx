@@ -68,6 +68,7 @@ export function FeishuPanel(): React.JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     void loadConfig();
     const poll = async (): Promise<void> => {
       try {
@@ -75,13 +76,14 @@ export function FeishuPanel(): React.JSX.Element {
         if (!cancelled && res) setStatus(res);
       } catch {
         // 查询失败保留上一帧，下轮再试。
+      } finally {
+        if (!cancelled) timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
       }
     };
     void poll();
-    const timer = setInterval(() => void poll(), POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
       if (confirmTimer.current) clearTimeout(confirmTimer.current);
     };
   }, []);

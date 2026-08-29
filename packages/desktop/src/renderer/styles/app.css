@@ -6468,6 +6468,11 @@ h6.otto-prose__h {
   pointer-events: auto;
 }
 .otto-park-dialog {
+  /* Park subpages live inside the neutral right rail. Scope the shared
+     interactive tokens here so legacy business-blue styles cannot leak in. */
+  --otto-accent: var(--otto-text);
+  --otto-accent-hover: var(--otto-text);
+  --otto-accent-soft: color-mix(in srgb, var(--otto-text) 10%, transparent);
   width: min(1180px, calc(100vw - 48px));
   max-height: min(760px, calc(100vh - 48px));
   overflow: auto;
@@ -7039,8 +7044,8 @@ h6.otto-prose__h {
   padding: 5px 9px;
 }
 .otto-park-demo__status.is-done {
-  background: color-mix(in srgb, #22a06b 13%, transparent);
-  color: #168557;
+  background: color-mix(in srgb, var(--otto-success) 13%, transparent);
+  color: var(--otto-success);
 }
 .otto-park-demo__summary {
   display: flex;
@@ -7158,12 +7163,12 @@ h6.otto-prose__h {
   color: var(--otto-text-secondary);
 }
 .otto-park-demo__timeline li.is-complete .otto-park-demo__marker {
-  border-color: #22a06b;
-  background: #22a06b;
-  color: #fff;
+  border-color: var(--otto-success);
+  background: var(--otto-success);
+  color: var(--otto-bg);
 }
 .otto-park-demo__timeline li.is-complete:not(:last-child)::before {
-  background: #22a06b;
+  background: var(--otto-success);
 }
 .otto-park-demo__actions {
   display: flex;
@@ -7176,7 +7181,7 @@ h6.otto-prose__h {
   border: 1px solid var(--otto-accent);
   border-radius: var(--otto-radius-sm);
   background: var(--otto-accent);
-  color: #fff;
+  color: var(--otto-bg);
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
@@ -7309,9 +7314,9 @@ h6.otto-prose__h {
   font-style: normal;
 }
 .otto-park-toast--result {
-  border-color: color-mix(in srgb, #168557 32%, var(--otto-border));
+  border-color: color-mix(in srgb, var(--otto-success) 32%, var(--otto-border));
 }
-.otto-park-toast--result span { color: #168557; }
+.otto-park-toast--result span { color: var(--otto-success); }
 .otto-park-survey {
   grid-template-columns: minmax(180px, .55fr) minmax(0, 1fr);
 }
@@ -7354,7 +7359,7 @@ h6.otto-prose__h {
   font-size: 12px;
 }
 .otto-park-survey__result strong {
-  color: #168557;
+  color: var(--otto-success);
   font-weight: 650;
 }
 
@@ -7594,7 +7599,7 @@ h6.otto-prose__h {
   font-weight: 650;
 }
 .otto-park-transfer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
-.otto-park-form__receipt { color: #168557; font-size: 11px; }
+.otto-park-form__receipt { color: var(--otto-success); font-size: 11px; }
 .otto-park-request-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .otto-park-request-summary .is-wide { grid-column: 1 / -1; }
 .otto-park-request-summary div { display: grid; gap: 3px; padding: 8px; border-radius: var(--otto-radius-sm); background: var(--otto-bg); }

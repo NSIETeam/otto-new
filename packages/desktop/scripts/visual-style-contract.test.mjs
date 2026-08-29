@@ -47,6 +47,17 @@ describe('desktop visual style contract', () => {
     expect(css).not.toContain('var(--surface-subtle, #f5f7fa)');
   });
 
+  it('keeps park service subpages on the neutral right-rail palette', async () => {
+    const css = await readFile(
+      path.join(packageRoot, 'src', 'renderer', 'styles', 'app.css'),
+      'utf8',
+    );
+
+    expect(css).toMatch(/\.otto-park-dialog\s*\{[^}]*--otto-accent: var\(--otto-text\);[^}]*--otto-accent-hover: var\(--otto-text\);[^}]*--otto-accent-soft: color-mix\(in srgb, var\(--otto-text\) 10%, transparent\);/su);
+    expect(css).toMatch(/\.otto-park-demo__primary\s*\{[^}]*color: var\(--otto-bg\);/su);
+    expect(css).not.toMatch(/\.otto-park-(?:demo|toast|survey)[^{]*\{[^}]*(?:#22a06b|#168557)/su);
+  });
+
   it('keeps built-in workspace modules on the shared line-icon family', async () => {
     const catalog = await readFile(
       path.join(packageRoot, 'src', 'renderer', 'moduleCatalog.ts'),

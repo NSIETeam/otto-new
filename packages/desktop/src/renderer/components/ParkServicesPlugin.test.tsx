@@ -6,7 +6,7 @@
 
 /**
  * ParkServicesPlugin 单测（v1.6.0 起无悬浮小钮，入口=openParkServices 事件）：
- * 默认不渲染、事件打开、9 项服务 3×3、内置流程可本地演示、三种关闭、
+ * 默认不渲染、事件打开、九项服务与企业星链图、内置流程可本地演示、三种关闭、
  * 无障碍属性、企业定制覆盖。
  */
 
@@ -37,6 +37,7 @@ afterEach(() => {
       'notificationShow', 'notificationMarkRead', 'onNotificationSessionOpen',
       'enterpriseParkPublications', 'enterpriseParkPublicationRead', 'enterpriseParkSurveySubmit',
       'enterpriseParkView', 'enterpriseParkStatistics', 'enterpriseParkResources',
+      'enterpriseParkStarMap',
       'enterpriseOrganizationView', 'parkConfig',
     ]) delete (window.otto as unknown as Record<string, unknown>)[key];
   }
@@ -243,20 +244,20 @@ describe('ParkServicesPlugin', () => {
     expect(container.querySelector('.otto-park-fab')).toBeNull();
   });
 
-  it('openParkServices 事件打开居中对话框，9 项服务齐全', () => {
+  it('openParkServices 事件打开居中对话框，九项服务与企业星链图齐全', () => {
     render(<ParkServicesPlugin />);
     openDialog();
     expect(screen.getByRole('dialog')).toBeTruthy();
     for (const name of [
       '装修管理', '满意度调查', '园区公告', '停车办理', '网络与固话', '会议室预约',
-      '电卡服务', '物业报修', '车辆与访客',
+      '电卡服务', '物业报修', '车辆与访客', '企业星链图',
     ]) {
       expect(screen.getByText(name)).toBeTruthy();
     }
     expect(screen.queryByText('行政后勤')).toBeNull();
     expect(screen.queryByText('班车通勤')).toBeNull();
     expect(screen.queryByText('餐饮服务')).toBeNull();
-    expect(document.querySelectorAll('.otto-park-service')).toHaveLength(9);
+    expect(document.querySelectorAll('.otto-park-service')).toHaveLength(10);
     expect(Array.from(document.querySelectorAll('.otto-park-service__name')).slice(0, 2).map((node) => node.textContent)).toEqual(['园区公告', '满意度调查']);
   });
 

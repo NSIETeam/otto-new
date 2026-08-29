@@ -70,6 +70,7 @@ const COMMERCIAL_ROUTE_RULES: readonly CommercialRouteRule[] = [
   { feature: 'park_service', matches: prefix('/enterprise/park-services') },
   { feature: 'park_service', matches: prefix('/enterprise/park-resources') },
   { feature: 'park_service', matches: prefix('/enterprise/park-statistics') },
+  { feature: 'park_service', matches: prefix('/enterprise/organization/public-profile') },
   { feature: 'skill_market', matches: prefix('/enterprise/skills') },
   { feature: 'skill_market', matches: prefix('/enterprise/customer-modules') },
   { feature: 'skill_market', matches: prefix('/enterprise/platform/customer-modules') },

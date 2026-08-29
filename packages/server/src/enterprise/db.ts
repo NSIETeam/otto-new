@@ -1037,6 +1037,8 @@ export const {
   deleteParkMeetingRoom,
   delegateParkDataStatistics,
   getPark,
+  getEnterpriseParkStarMap,
+  getEnterprisePublicProfile,
   getParkDataStatisticsTemplate,
   getParkForOrganization,
   getParkServiceStatistics,
@@ -1082,6 +1084,7 @@ export const {
   updateParkService,
   updateParkSettings,
   updateParkTenantProfile,
+  updateEnterprisePublicProfile,
   updateTicket,
 } = createParkServicesComposition<AccountView, OrganizationView>({
   db: getDB,

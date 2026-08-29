@@ -802,6 +802,42 @@ export interface EnterprisePark {
   tenantRoomNumber?: string | null;
 }
 
+export interface EnterprisePublicProfileInput {
+  summary: string;
+  website: string;
+  industryTags: string[];
+  productsServices: string[];
+  capabilities: string[];
+  cooperationNeeds: string[];
+  publicContact: string;
+  isPublic: boolean;
+}
+
+export interface EnterprisePublicProfile extends EnterprisePublicProfileInput {
+  organizationId: string;
+  organizationName: string;
+  updatedAt: string | null;
+}
+
+export interface EnterpriseParkPartnershipEdge {
+  id: string;
+  sourceOrganizationId: string;
+  targetOrganizationId: string;
+  strength: 'strong' | 'promising' | 'exploratory';
+  ruleConfidence: number;
+  evidence: string[];
+  unverifiedQuestions: string[];
+}
+
+export interface EnterpriseParkStarMap {
+  parkId: string;
+  parkName: string;
+  currentOrganizationId: string;
+  generatedAt: string;
+  nodes: EnterprisePublicProfile[];
+  edges: EnterpriseParkPartnershipEdge[];
+}
+
 export interface EnterpriseParkTenantProfile {
   organizationId: string;
   parkId: string;
@@ -1290,6 +1326,9 @@ const IPC = {
   enterpriseParkProfileUpdate: 'otto:enterprise-park-profile-update',
   enterpriseParkInviteIssue: 'otto:enterprise-park-invite-issue',
   enterpriseParkTenants: 'otto:enterprise-park-tenants',
+  enterprisePublicProfile: 'otto:enterprise-public-profile',
+  enterprisePublicProfileUpdate: 'otto:enterprise-public-profile-update',
+  enterpriseParkStarMap: 'otto:enterprise-park-star-map',
   enterpriseParkStatistics: 'otto:enterprise-park-statistics',
   enterpriseParkSpecialists: 'otto:enterprise-park-specialists',
   enterpriseParkSpecialistSet: 'otto:enterprise-park-specialist-set',
@@ -1966,6 +2005,11 @@ export interface OttoBridge {
     maxUses?: number | null,
   ): Promise<EnterpriseParkInvite>;
   enterpriseParkTenants(): Promise<EnterpriseParkTenantOrganization[]>;
+  enterprisePublicProfile(): Promise<EnterprisePublicProfile>;
+  enterprisePublicProfileUpdate(
+    input: EnterprisePublicProfileInput,
+  ): Promise<EnterprisePublicProfile>;
+  enterpriseParkStarMap(): Promise<EnterpriseParkStarMap>;
   enterpriseParkStatistics(): Promise<EnterpriseParkStatistics>;
   enterpriseParkSpecialists(): Promise<EnterpriseParkSpecialist[]>;
   enterpriseParkSpecialistSet(
@@ -3469,6 +3513,20 @@ const bridge: OttoBridge = {
     return ipcRenderer.invoke(IPC.enterpriseParkTenants) as Promise<
       EnterpriseParkTenantOrganization[]
     >;
+  },
+  enterprisePublicProfile(): Promise<EnterprisePublicProfile> {
+    return ipcRenderer.invoke(IPC.enterprisePublicProfile) as Promise<EnterprisePublicProfile>;
+  },
+  enterprisePublicProfileUpdate(
+    input: EnterprisePublicProfileInput,
+  ): Promise<EnterprisePublicProfile> {
+    return ipcRenderer.invoke(
+      IPC.enterprisePublicProfileUpdate,
+      input,
+    ) as Promise<EnterprisePublicProfile>;
+  },
+  enterpriseParkStarMap(): Promise<EnterpriseParkStarMap> {
+    return ipcRenderer.invoke(IPC.enterpriseParkStarMap) as Promise<EnterpriseParkStarMap>;
   },
   enterpriseParkStatistics(): Promise<EnterpriseParkStatistics> {
     return ipcRenderer.invoke(

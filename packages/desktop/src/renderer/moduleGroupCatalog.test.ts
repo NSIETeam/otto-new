@@ -17,15 +17,16 @@ const recruitmentTemplate = listModuleGroupTemplates('enterprise').find((templat
 ))!;
 
 describe('official module group catalog', () => {
-  it('defines the Hongchuang park group as exactly nine official service modules', () => {
+  it('defines the Hongchuang park group as nine services plus the enterprise star map', () => {
     expect(parkTemplate.name).toBe('宏创园区服务');
     expect(parkTemplate.moduleIds).toEqual(HONGCHUANG_PARK_SERVICE_MODULE_IDS);
-    expect(parkTemplate.moduleIds).toHaveLength(9);
+    expect(parkTemplate.moduleIds).toHaveLength(10);
+    expect(parkTemplate.moduleIds).toContain('park-enterprise-star-map');
     expect(parkTemplate.package).toEqual({
       source: 'official',
       packageId: 'otto.group.hongchuang-park-services',
       publisherId: 'otto.official',
-      version: '1.0.0',
+      version: '1.1.0',
     });
   });
 
@@ -84,7 +85,7 @@ describe('official module group catalog', () => {
     expect(installModuleGroupTemplate(installed, parkTemplate)).toBe(installed);
   });
 
-  it('adds the official group to a new layout with all nine IDs retained', () => {
+  it('adds the official group to a new layout with all ten IDs retained', () => {
     const layout: ModuleWorkspaceLayout = {
       version: 1,
       groups: [{ id: 'daily-office', name: '日常办公', rows: 2, moduleIds: ['agent-ppt'] }],

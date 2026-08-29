@@ -764,6 +764,42 @@ export interface EnterprisePark {
   tenantRoomNumber?: string | null;
 }
 
+export interface EnterprisePublicProfileInput {
+  summary: string;
+  website: string;
+  industryTags: string[];
+  productsServices: string[];
+  capabilities: string[];
+  cooperationNeeds: string[];
+  publicContact: string;
+  isPublic: boolean;
+}
+
+export interface EnterprisePublicProfile extends EnterprisePublicProfileInput {
+  organizationId: string;
+  organizationName: string;
+  updatedAt: string | null;
+}
+
+export interface EnterpriseParkPartnershipEdge {
+  id: string;
+  sourceOrganizationId: string;
+  targetOrganizationId: string;
+  strength: 'strong' | 'promising' | 'exploratory';
+  ruleConfidence: number;
+  evidence: string[];
+  unverifiedQuestions: string[];
+}
+
+export interface EnterpriseParkStarMap {
+  parkId: string;
+  parkName: string;
+  currentOrganizationId: string;
+  generatedAt: string;
+  nodes: EnterprisePublicProfile[];
+  edges: EnterpriseParkPartnershipEdge[];
+}
+
 export interface EnterpriseParkTenantProfile {
   organizationId: string;
   parkId: string;
@@ -3212,6 +3248,33 @@ export class EnterpriseClient {
         '/enterprise/park/tenants',
       )
     ).organizations;
+  }
+
+  async getEnterprisePublicProfile(): Promise<EnterprisePublicProfile> {
+    return (
+      await this.request<{ profile: EnterprisePublicProfile }>(
+        '/enterprise/organization/public-profile',
+      )
+    ).profile;
+  }
+
+  async updateEnterprisePublicProfile(
+    input: EnterprisePublicProfileInput,
+  ): Promise<EnterprisePublicProfile> {
+    return (
+      await this.request<{ profile: EnterprisePublicProfile }>(
+        '/enterprise/organization/public-profile',
+        { method: 'PUT', body: JSON.stringify(input) },
+      )
+    ).profile;
+  }
+
+  async getEnterpriseParkStarMap(): Promise<EnterpriseParkStarMap> {
+    return (
+      await this.request<{ starMap: EnterpriseParkStarMap }>(
+        '/enterprise/park/star-map',
+      )
+    ).starMap;
   }
 
   async getParkStatistics(): Promise<EnterpriseParkStatistics> {

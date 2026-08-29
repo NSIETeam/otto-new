@@ -43,6 +43,7 @@ export type ParkModuleTarget =
   | 'electric-card'
   | 'repair'
   | 'vehicle-visit'
+  | 'enterprise-star-map'
   | 'staff-tasks'
   | 'my-applications';
 
@@ -151,6 +152,12 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
   {
     id: 'park-vehicle-visit', label: '车辆与访客', category: 'park', icon: 'park-vehicle-visit',
     activation: { kind: 'dialog', dialog: 'park', target: 'vehicle-visit' },
+    availabilityRule: 'park',
+  },
+  {
+    id: 'park-enterprise-star-map', label: '企业星链图', category: 'park', icon: 'park-overview',
+    description: '根据同园区企业主动公开的能力、产品与合作需求，生成可解释的合作线索。',
+    activation: { kind: 'dialog', dialog: 'park', target: 'enterprise-star-map' },
     availabilityRule: 'park',
   },
   {

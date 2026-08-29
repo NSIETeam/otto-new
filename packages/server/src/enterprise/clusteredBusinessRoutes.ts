@@ -24,6 +24,11 @@ import type {
   PostgresEnterpriseBusinessRepository,
 } from './postgresBusinessRepository.js';
 import type { OrganizationFeatureKey } from '../productModules.js';
+import { inferParkPartnerships } from '../modules/park_services/parkPartnershipInference.js';
+import type {
+  EnterprisePublicProfile,
+  EnterprisePublicProfileInput,
+} from '../modules/park_services/parkPartnershipTypes.js';
 import type {
   PostgresEnterpriseAccountView,
   PostgresEnterpriseCoreRepository,
@@ -122,6 +127,25 @@ function text(
   }
   if (normalized.length > maximum) throw new Error(`${label} is too long`);
   return normalized;
+}
+
+function textList(
+  value: unknown,
+  label: string,
+  maximumItems = 20,
+): string[] {
+  if (!Array.isArray(value)) return [];
+  const items = Array.from(
+    new Set(
+      value
+        .map((item) => text(item, label, 80, false))
+        .filter((item): item is string => Boolean(item)),
+    ),
+  );
+  if (items.length > maximumItems) {
+    throw new Error(`${label} supports at most ${maximumItems} items`);
+  }
+  return items;
 }
 
 function knowledgeView(record: PostgresBusinessRecord<KnowledgePayload>) {
@@ -1007,6 +1031,131 @@ type ParkMembershipPayload = {
   joinedAt: string;
 };
 
+type EnterprisePublicProfilePayload = EnterprisePublicProfileInput &
+  Record<string, unknown>;
+
+function enterprisePublicProfileView(
+  organizationId: string,
+  organizationName: string,
+  record: PostgresBusinessRecord<EnterprisePublicProfilePayload> | null,
+): EnterprisePublicProfile {
+  return {
+    organizationId,
+    organizationName,
+    summary: record?.payload.summary ?? '',
+    website: record?.payload.website ?? '',
+    industryTags: record?.payload.industryTags ?? [],
+    productsServices: record?.payload.productsServices ?? [],
+    capabilities: record?.payload.capabilities ?? [],
+    cooperationNeeds: record?.payload.cooperationNeeds ?? [],
+    publicContact: record?.payload.publicContact ?? '',
+    isPublic: record?.payload.isPublic === true,
+    updatedAt: record?.updatedAt ?? null,
+  };
+}
+
+async function handleEnterprisePublicProfile(
+  input: ClusteredBusinessRouteInput,
+): Promise<boolean> {
+  if (input.path !== '/enterprise/organization/public-profile') return false;
+  if (input.method !== 'GET' && input.method !== 'PUT') return false;
+  const organizationId = input.member.organizationId;
+  const organization = await input.repository.getOrganization(organizationId);
+  if (!organization) {
+    input.sendJson(input.res, 404, { error: 'organization not found' });
+    return true;
+  }
+  const identity = {
+    organizationId,
+    domain: 'park' as const,
+    resourceType: 'public_profile',
+    resourceId: `public_profile_${organizationId}`,
+  };
+  const current =
+    await input.repository.getBusinessRecord<EnterprisePublicProfilePayload>(
+      identity,
+    );
+  if (input.method === 'GET') {
+    input.sendJson(input.res, 200, {
+      profile: enterprisePublicProfileView(
+        organizationId,
+        organization.name,
+        current,
+      ),
+    });
+    return true;
+  }
+  if (!input.member.isAdmin) {
+    input.sendJson(input.res, 403, {
+      error: 'administrator permission required',
+    });
+    return true;
+  }
+  const body = await input.readBody(input.req);
+  const payload: EnterprisePublicProfilePayload = {
+    summary: text(body.summary, 'organization summary', 1000, false) ?? '',
+    website: text(body.website, 'organization website', 300, false) ?? '',
+    industryTags: textList(body.industryTags, 'industry tag'),
+    productsServices: textList(body.productsServices, 'product or service'),
+    capabilities: textList(body.capabilities, 'organization capability'),
+    cooperationNeeds: textList(body.cooperationNeeds, 'cooperation need'),
+    publicContact:
+      text(body.publicContact, 'public contact', 240, false) ?? '',
+    isPublic: body.isPublic === true,
+  };
+  if (payload.website && !/^https?:\/\//iu.test(payload.website)) {
+    input.sendJson(input.res, 400, {
+      error: 'organization website must start with http:// or https://',
+    });
+    return true;
+  }
+  if (
+    payload.isPublic &&
+    (!payload.summary ||
+      payload.productsServices.length +
+        payload.capabilities.length +
+        payload.cooperationNeeds.length ===
+        0)
+  ) {
+    input.sendJson(input.res, 400, {
+      error:
+        'complete the summary and at least one offering, capability or cooperation need before publishing',
+    });
+    return true;
+  }
+  const saved = current
+    ? await updateRecordWithRetry(input.repository, identity, () => ({
+        status: 'active',
+        payload,
+      }))
+    : await input.repository.createBusinessRecord({
+        ...identity,
+        ownerAccountId: input.member.id,
+        payload,
+      });
+  if (!saved) throw new Error('business record changed concurrently');
+  await input.repository.appendBusinessEvent({
+    ...identity,
+    actorAccountId: input.member.id,
+    eventType: 'visibility_updated',
+    payload: {
+      isPublic: payload.isPublic,
+      industryTagCount: payload.industryTags.length,
+      productServiceCount: payload.productsServices.length,
+      capabilityCount: payload.capabilities.length,
+      cooperationNeedCount: payload.cooperationNeeds.length,
+    },
+  });
+  input.sendJson(input.res, 200, {
+    profile: enterprisePublicProfileView(
+      organizationId,
+      organization.name,
+      saved,
+    ),
+  });
+  return true;
+}
+
 async function parkAuthority(input: ClusteredBusinessRouteInput): Promise<{
   park: PostgresBusinessRecord<ParkPayload> | null;
   membership: PostgresBusinessRecord<ParkMembershipPayload> | null;
@@ -1322,6 +1471,64 @@ async function handlePark(
       })),
     );
     input.sendJson(input.res, 200, { organizations });
+    return true;
+  }
+
+  if (input.path === '/enterprise/park/star-map' && input.method === 'GET') {
+    const authority = await parkAuthority(input);
+    if (!authority.park) {
+      input.sendJson(input.res, 404, { error: 'park not found' });
+      return true;
+    }
+    const memberships =
+      await input.repository.listParkTenantMemberships<ParkMembershipPayload>(
+        authority.resourceOrganizationId,
+      );
+    const organizationIds = Array.from(
+      new Set([
+        authority.park.payload.adminOrganizationId,
+        ...memberships.map((membership) => membership.organizationId),
+      ]),
+    );
+    const profiles = (
+      await Promise.all(
+        organizationIds.map(async (candidateOrganizationId) => {
+          const [organization, profile] = await Promise.all([
+            input.repository.getOrganization(candidateOrganizationId),
+            input.repository.getBusinessRecord<EnterprisePublicProfilePayload>({
+              organizationId: candidateOrganizationId,
+              domain: 'park',
+              resourceType: 'public_profile',
+              resourceId: `public_profile_${candidateOrganizationId}`,
+            }),
+          ]);
+          if (
+            !organization ||
+            organization.status !== 'active' ||
+            !profile ||
+            profile.status !== 'active' ||
+            !profile.payload.isPublic
+          ) {
+            return null;
+          }
+          return enterprisePublicProfileView(
+            candidateOrganizationId,
+            organization.name,
+            profile,
+          );
+        }),
+      )
+    ).filter((profile): profile is EnterprisePublicProfile => profile !== null);
+    input.sendJson(input.res, 200, {
+      starMap: {
+        parkId: authority.park.resourceId,
+        parkName: authority.park.payload.name,
+        currentOrganizationId: organizationId,
+        generatedAt: new Date().toISOString(),
+        nodes: profiles,
+        edges: inferParkPartnerships(profiles),
+      },
+    });
     return true;
   }
 
@@ -2955,6 +3162,7 @@ export async function handleClusteredBusinessRoute(
     (await handleAccountSync(input)) ||
     (await handleKnowledge(input)) ||
     (await handleSkills(input)) ||
+    (await handleEnterprisePublicProfile(input)) ||
     (await handlePark(input)) ||
     (await handleTickets(input)) ||
     (await handleCommercialControl(input))

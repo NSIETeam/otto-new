@@ -14,6 +14,7 @@ describe('commercial enterprise route policy', () => {
     ['/enterprise/park-settings', 'park_service'],
     ['/enterprise/park-meeting-rooms', 'park_service'],
     ['/enterprise/park-meeting-slots', 'park_service'],
+    ['/enterprise/organization/public-profile', 'park_service'],
     ['/enterprise/skills/leaderboard', 'skill_market'],
     ['/enterprise/customer-modules/com.acme.report/1.0.0/install', 'skill_market'],
     ['/enterprise/platform/customer-modules/com.acme.report/1.0.0/review', 'skill_market'],

@@ -699,6 +699,9 @@ const IPC = {
   enterpriseParkProfileUpdate: 'otto:enterprise-park-profile-update',
   enterpriseParkInviteIssue: 'otto:enterprise-park-invite-issue',
   enterpriseParkTenants: 'otto:enterprise-park-tenants',
+  enterprisePublicProfile: 'otto:enterprise-public-profile',
+  enterprisePublicProfileUpdate: 'otto:enterprise-public-profile-update',
+  enterpriseParkStarMap: 'otto:enterprise-park-star-map',
   enterpriseParkStatistics: 'otto:enterprise-park-statistics',
   enterpriseParkSpecialists: 'otto:enterprise-park-specialists',
   enterpriseParkSpecialistSet: 'otto:enterprise-park-specialist-set',
@@ -3934,6 +3937,39 @@ function registerIpc(): void {
   ipcMain.handle(IPC.enterpriseParkTenants, async () => {
     loadEnterpriseSession();
     return enterpriseClient.listParkTenantOrganizations();
+  });
+  ipcMain.handle(IPC.enterprisePublicProfile, async () => {
+    loadEnterpriseSession();
+    return enterpriseClient.getEnterprisePublicProfile();
+  });
+  ipcMain.handle(
+    IPC.enterprisePublicProfileUpdate,
+    async (_event, input: unknown) => {
+      loadEnterpriseSession();
+      const body =
+        input && typeof input === 'object' && !Array.isArray(input)
+          ? (input as Record<string, unknown>)
+          : {};
+      const stringList = (value: unknown) =>
+        Array.isArray(value)
+          ? value.filter((item): item is string => typeof item === 'string')
+          : [];
+      return enterpriseClient.updateEnterprisePublicProfile({
+        summary: typeof body.summary === 'string' ? body.summary : '',
+        website: typeof body.website === 'string' ? body.website : '',
+        industryTags: stringList(body.industryTags),
+        productsServices: stringList(body.productsServices),
+        capabilities: stringList(body.capabilities),
+        cooperationNeeds: stringList(body.cooperationNeeds),
+        publicContact:
+          typeof body.publicContact === 'string' ? body.publicContact : '',
+        isPublic: body.isPublic === true,
+      });
+    },
+  );
+  ipcMain.handle(IPC.enterpriseParkStarMap, async () => {
+    loadEnterpriseSession();
+    return enterpriseClient.getEnterpriseParkStarMap();
   });
   ipcMain.handle(IPC.enterpriseParkStatistics, async () => {
     loadEnterpriseSession();

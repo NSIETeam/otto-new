@@ -19,6 +19,7 @@ import {
   EnterpriseAdministrationPanel,
   type EnterpriseAdministrationSection,
 } from './EnterpriseAdministrationPanel.js';
+import { EnterprisePublicProfilePanel } from './EnterprisePublicProfilePanel.js';
 import {
   IconBuilding,
   IconDashboard,
@@ -27,7 +28,10 @@ import {
   IconPlus,
 } from './icons.js';
 
-type EnterpriseManagementSection = 'members' | EnterpriseAdministrationSection;
+type EnterpriseManagementSection =
+  | 'members'
+  | 'profile'
+  | EnterpriseAdministrationSection;
 
 export interface AccountDraft {
   username: string;
@@ -693,6 +697,13 @@ export function AccountManagementPage({
       icon: IconIdBadge,
     },
     {
+      id: 'profile',
+      label: '企业资料',
+      description: '维护对外介绍，并决定是否进入企业星链图',
+      meta: '公开资料与合作线索',
+      icon: IconBuilding,
+    },
+    {
       id: 'park',
       label: '产业园端',
       description: '管理入驻、园区服务和内容发布',
@@ -755,7 +766,7 @@ export function AccountManagementPage({
       <aside className="otto-account-workspace__rail" aria-label="企业管理导航">
         <header className="otto-account-hero">
           <h1>企业管理</h1>
-          <p>管理组织结构、成员身份、企业能力和产业园服务。</p>
+          <p>管理组织结构、成员身份、企业资料、企业能力和产业园服务。</p>
         </header>
         <nav className="otto-account-workspace__tabs" aria-label="企业管理分类" role="tablist">
           {managementSections.map((section, sectionIndex) => {
@@ -921,9 +932,17 @@ export function AccountManagementPage({
       ) : null}
 
       {currentAccount.isAdmin ? (
+        activeSection === 'profile' ? <EnterprisePublicProfilePanel /> : null
+      ) : null}
+
+      {currentAccount.isAdmin ? (
         <EnterpriseAdministrationPanel
           accounts={accounts}
-          activeSection={activeSection === 'members' ? null : activeSection}
+          activeSection={
+            activeSection === 'members' || activeSection === 'profile'
+              ? null
+              : activeSection
+          }
           onChanged={() => {
             void window.otto.enterpriseAccounts().then(setAccounts).catch((cause: unknown) => {
               setError(errorMessage(cause));

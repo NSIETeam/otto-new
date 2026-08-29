@@ -47,6 +47,9 @@ describe('park core schema contributor', () => {
         INSERT INTO park_service_specialists
           (park_id, service_id, account_id)
         VALUES ('park-a', 'repair', 'account-specialist');
+        INSERT INTO enterprise_public_profiles
+          (organization_id, summary, is_public, updated_by_account_id)
+        VALUES ('org-tenant', 'Public profile', 1, 'account-specialist');
       `);
 
       applyDatabaseSchemaContributors(database, [PARK_CORE_SCHEMA_CONTRIBUTOR]);
@@ -80,6 +83,14 @@ describe('park core schema contributor', () => {
           )
           .get(),
       ).toEqual({ address: 'Building A', room_number: '5-101' });
+      expect(
+        database
+          .prepare(
+            `SELECT summary, is_public FROM enterprise_public_profiles
+             WHERE organization_id = 'org-tenant'`,
+          )
+          .get(),
+      ).toEqual({ summary: 'Public profile', is_public: 1 });
       expect(
         database
           .prepare(

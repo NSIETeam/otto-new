@@ -6,7 +6,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ChannelProvider } from './channelConnector.js';
 
-export type ChannelOutboundState = 'prepared' | 'failed' | 'committed';
+export type ChannelOutboundState = 'prepared' | 'failed' | 'committed' | 'unknown_outcome';
 
 export interface ChannelOutboundReceipt {
   idempotencyKey: string;
@@ -43,6 +43,11 @@ export interface ChannelOutboundLedgerV1 {
     requestHash: string,
     failureCode: string,
   ): Promise<ChannelOutboundRecord>;
+  unknown(
+    idempotencyKey: string,
+    requestHash: string,
+    failureCode: string,
+  ): Promise<ChannelOutboundRecord>;
 }
 
 interface RegistryV1 {
@@ -75,7 +80,13 @@ export class JsonChannelOutboundLedgerV1 implements ChannelOutboundLedgerV1 {
         if (existing.installationId !== input.installationId || existing.provider !== input.provider) {
           throw new Error('channel outbound idempotency conflict');
         }
-        if (existing.state !== 'committed') {
+        if (existing.state === 'prepared') {
+          // A previous process or request may have dispatched this write. It
+          // cannot be safely replayed until provider state is reconciled.
+          existing.state = 'unknown_outcome';
+          existing.updatedAtMs = this.now();
+          existing.failureCode = 'interrupted_after_prepare';
+        } else if (existing.state === 'failed') {
           existing.state = 'prepared';
           existing.attempts += 1;
           existing.updatedAtMs = this.now();
@@ -133,6 +144,22 @@ export class JsonChannelOutboundLedgerV1 implements ChannelOutboundLedgerV1 {
       const record = this.requireRecord(registry, idempotencyKey, requestHash);
       if (record.state === 'committed') return record;
       record.state = 'failed';
+      record.updatedAtMs = this.now();
+      record.failureCode = failureCode.trim().slice(0, 100) || 'unknown';
+      return record;
+    });
+  }
+
+  async unknown(
+    idempotencyKey: string,
+    requestHash: string,
+    failureCode: string,
+  ): Promise<ChannelOutboundRecord> {
+    this.validate(idempotencyKey, requestHash);
+    return this.write((registry) => {
+      const record = this.requireRecord(registry, idempotencyKey, requestHash);
+      if (record.state === 'committed') return record;
+      record.state = 'unknown_outcome';
       record.updatedAtMs = this.now();
       record.failureCode = failureCode.trim().slice(0, 100) || 'unknown';
       return record;

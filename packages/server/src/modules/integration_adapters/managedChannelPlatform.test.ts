@@ -62,6 +62,9 @@ describe('ManagedChannelPlatformV1', () => {
         fail: vi.fn(async (_idempotencyKey, _requestHash, failureCode) => ({
           ...outboundRecord, state: 'failed' as const, failureCode,
         })),
+        unknown: vi.fn(async (_idempotencyKey, _requestHash, failureCode) => ({
+          ...outboundRecord, state: 'unknown_outcome' as const, failureCode,
+        })),
       },
       identityRegistry: {
         list: () => [],

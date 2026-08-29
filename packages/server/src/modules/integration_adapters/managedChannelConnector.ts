@@ -256,11 +256,24 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
         requestHash,
       });
       if (prepared.state === 'committed' && prepared.receipt) return prepared.receipt;
-      const credential = await this.options.vault.loadCredential({
-        installationId,
-        provider: installation.provider,
-        tenantId: installation.tenantId,
-      });
+      if (prepared.state === 'unknown_outcome') {
+        throw new Error('channel outbound outcome is unknown; reconcile before retrying');
+      }
+      let credential: string;
+      try {
+        credential = await this.options.vault.loadCredential({
+          installationId,
+          provider: installation.provider,
+          tenantId: installation.tenantId,
+        });
+      } catch (error) {
+        await this.options.outboundLedger.fail(
+          input.idempotencyKey,
+          requestHash,
+          error instanceof Error ? error.name : 'credential_unavailable',
+        ).catch(() => undefined);
+        throw error;
+      }
       try {
         const result = await this.options.runtime.send(
           installation,
@@ -275,7 +288,7 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
         if (!committed.receipt) throw new Error('channel outbound receipt is missing');
         return committed.receipt;
       } catch (error) {
-        await this.options.outboundLedger.fail(
+        await this.options.outboundLedger.unknown(
           input.idempotencyKey,
           requestHash,
           error instanceof Error ? error.name : 'unknown',

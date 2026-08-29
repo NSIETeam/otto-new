@@ -71,7 +71,7 @@ function setup() {
   const outboundLedger: ChannelOutboundLedgerV1 = {
     prepare: vi.fn(async (input) => {
       const existing = outboundRecords.get(input.idempotencyKey);
-      if (existing?.state === 'committed') return existing;
+      if (existing?.state === 'committed' || existing?.state === 'unknown_outcome') return existing;
       const record: ChannelOutboundRecord = existing
         ? { ...existing, state: 'prepared', attempts: existing.attempts + 1 }
         : { ...input, state: 'prepared', attempts: 1, updatedAtMs: 1 };
@@ -98,6 +98,16 @@ function setup() {
       };
       outboundRecords.set(idempotencyKey, failed);
       return failed;
+    }),
+    unknown: vi.fn(async (idempotencyKey, requestHash, failureCode) => {
+      const unknown: ChannelOutboundRecord = {
+        ...outboundRecords.get(idempotencyKey)!,
+        requestHash,
+        state: 'unknown_outcome',
+        failureCode,
+      };
+      outboundRecords.set(idempotencyKey, unknown);
+      return unknown;
     }),
   };
   const coordinator = new ChannelPairingCoordinator({
@@ -356,7 +366,7 @@ describe('ManagedChannelConnectorV1', () => {
     expect(broker.poll).toHaveBeenCalledTimes(3);
   });
 
-  it('recovers message delivery with the same provider idempotency key', async () => {
+  it('does not replay a provider write whose timeout has an unknown outcome', async () => {
     const { connector, runtime, vault, outboundLedger } = setup();
     const installation = {
       installationId: 'channel_lark_0123456789abcdef01234567',
@@ -379,18 +389,13 @@ describe('ManagedChannelConnectorV1', () => {
     await expect(connector.send(installation.installationId, input))
       .rejects.toThrow('provider timeout');
     await expect(connector.send(installation.installationId, input))
-      .resolves.toMatchObject({
-        idempotencyKey: input.idempotencyKey,
-        providerMessageId: 'provider-message-1',
-      });
-    await expect(connector.send(installation.installationId, input))
-      .resolves.toMatchObject({ providerMessageId: 'provider-message-1' });
-    expect(sendMock).toHaveBeenCalledTimes(2);
-    expect(sendMock).toHaveBeenLastCalledWith(
+      .rejects.toThrow('outcome is unknown');
+    expect(sendMock).toHaveBeenCalledOnce();
+    expect(sendMock).toHaveBeenCalledWith(
       installation,
       'credential',
       input,
     );
-    expect(outboundLedger.fail).toHaveBeenCalledOnce();
+    expect(outboundLedger.unknown).toHaveBeenCalledOnce();
   });
 });

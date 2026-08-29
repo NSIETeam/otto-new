@@ -49,6 +49,36 @@ describe('JsonChannelOutboundLedgerV1', () => {
       .toEqual(committed.receipt);
   });
 
+  it('turns an interrupted prepared write into unknown_outcome and never prepares it again', async () => {
+    const { ledger } = fixture();
+    const input = {
+      idempotencyKey: 'msg:unknown0123456789',
+      installationId: 'channel_lark_0123456789abcdef01234567',
+      provider: 'lark' as const,
+      requestHash: hash,
+    };
+    expect((await ledger.prepare(input)).state).toBe('prepared');
+    expect(await ledger.prepare(input)).toMatchObject({
+      state: 'unknown_outcome', attempts: 1, failureCode: 'interrupted_after_prepare',
+    });
+    expect((await ledger.prepare(input)).state).toBe('unknown_outcome');
+  });
+
+  it('persists an explicitly unknown provider outcome for reconciliation', async () => {
+    const { root, ledger } = fixture();
+    const input = {
+      idempotencyKey: 'msg:timeout0123456789',
+      installationId: 'channel_wecom_0123456789abcdef01234567',
+      provider: 'wecom' as const,
+      requestHash: hash,
+    };
+    await ledger.prepare(input);
+    expect((await ledger.unknown(input.idempotencyKey, hash, 'provider_timeout')).state)
+      .toBe('unknown_outcome');
+    expect(fs.readFileSync(path.join(root, 'outbound.json'), 'utf8'))
+      .toContain('unknown_outcome');
+  });
+
   it('rejects key reuse for a different request or installation', async () => {
     const { ledger } = fixture();
     const input = {

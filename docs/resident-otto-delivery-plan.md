@@ -336,6 +336,7 @@ means no source-level substitute is accepted.
 | Pairing QR survives nonce-redacted polling; transient status failures recover without overlapping requests | `ChannelPairingCard.tsx`, focused fake-timer UI tests | Automated |
 | Abandoned provider credentials and device proof keys are erased at the five-minute deadline without an idle network call | `managedChannelConnector.ts`, `channel-pairing-key-store.ts`, focused expiry tests | Automated |
 | Protected credential custody and idempotent outbound writes | `channelCredentialVault.ts`, `channelOutboundLedger.ts`, focused persistence tests | Automated |
+| Provider timeout and interrupted prepared writes become persisted `unknown_outcome` and cannot auto-replay | `channelOutboundLedger.ts`, `managedChannelConnector.ts`, focused recovery tests | Automated |
 | Broker outbound runtime, tenant checking, timeout and reconnect | `brokerChannelRuntime.ts`, `brokerChannelRuntime.test.ts` | Automated |
 | Explicit provider-to-Otto identity binding and revocation | `channelIdentityRegistry.ts`, Server REST, CLI and Desktop tests | Automated |
 | Chat command authorization, deduplication and visible reply before ACK | `channelTaskControl.ts`, `brokerChannelTaskBridge.ts`, focused tests | Automated |

@@ -18,6 +18,7 @@ import { askLocalPeerOtto } from '../peerOttoRunner.js';
 import { IconChevronDown, IconPaperclip, IconPlus } from './icons.js';
 import { AtoaConsultDialog } from './AtoaConsultDialog.js';
 import type { EnterpriseUnreadCounts } from '../enterpriseUnreadNotifications.js';
+import { startNonOverlappingPoll } from '../lib/nonOverlappingPoll.js';
 
 const ORGANIZATION_REFRESH_MS = 10_000;
 const DIRECT_CHAT_CASCADE_PX = 28;
@@ -265,13 +266,13 @@ export function OrganizationTree({
     };
 
     void loadOrganization(true);
-    const timer = window.setInterval(() => {
-      void loadOrganization(false);
-    }, ORGANIZATION_REFRESH_MS);
+    const stopPolling = startNonOverlappingPoll(
+      () => loadOrganization(false), ORGANIZATION_REFRESH_MS, { runImmediately: false },
+    );
 
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stopPolling();
     };
   }, [
     hasAuthenticatedOrganization,
@@ -837,10 +838,10 @@ export function DirectMessagePanel({
       }
     };
     void load();
-    const timer = window.setInterval(() => void load(), 2000);
+    const stopPolling = startNonOverlappingPoll(() => load(), 2_000, { runImmediately: false });
     return () => {
       active = false;
-      window.clearInterval(timer);
+      stopPolling();
     };
   }, [member.id, onMessageRead]);
 

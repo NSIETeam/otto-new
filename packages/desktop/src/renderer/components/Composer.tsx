@@ -400,7 +400,7 @@ export function Composer({
   }, [openPopover]);
 
   const stopVoiceMeter = (): void => {
-    if (voiceTimerRef.current !== null) window.clearInterval(voiceTimerRef.current);
+    if (voiceTimerRef.current !== null) window.clearTimeout(voiceTimerRef.current);
     voiceTimerRef.current = null;
     if (voiceMeterFrameRef.current !== null) cancelAnimationFrame(voiceMeterFrameRef.current);
     voiceMeterFrameRef.current = null;
@@ -412,7 +412,11 @@ export function Composer({
 
   const startVoiceMeter = (stream: MediaStream): void => {
     setVoiceSeconds(0);
-    voiceTimerRef.current = window.setInterval(() => setVoiceSeconds((v) => v + 1), 1000);
+    const tickVoiceSeconds = (): void => {
+      setVoiceSeconds((value) => value + 1);
+      voiceTimerRef.current = window.setTimeout(tickVoiceSeconds, 1_000);
+    };
+    voiceTimerRef.current = window.setTimeout(tickVoiceSeconds, 1_000);
     const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return;
     try {

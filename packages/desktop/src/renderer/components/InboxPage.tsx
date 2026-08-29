@@ -21,6 +21,7 @@ import type {
 } from '../../preload/index.js';
 import { isAuthenticatedEnterpriseAccount } from '../internal-test-access.js';
 import { createQrMatrix } from '../lib/qrMatrix.js';
+import { startNonOverlappingPoll } from '../lib/nonOverlappingPoll.js';
 import {
   buildAtoaRequest,
   displayDirectMessageContent,
@@ -154,11 +155,13 @@ export function InboxPage({
       refreshNotifications(),
       refreshFederationContacts(),
     ]).finally(() => setLoading(false));
-    const timer = window.setInterval(() => {
-      void refreshNotifications();
-      void refreshFederationContacts();
-    }, INBOX_REFRESH_MS);
-    return () => window.clearInterval(timer);
+    return startNonOverlappingPoll(
+      async () => {
+        await Promise.all([refreshNotifications(), refreshFederationContacts()]);
+      },
+      INBOX_REFRESH_MS,
+      { runImmediately: false },
+    );
   }, [hasAuth, refreshFederationContacts, refreshNotifications]);
 
   // —— 构建会话列表 ——

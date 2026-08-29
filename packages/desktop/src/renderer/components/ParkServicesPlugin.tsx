@@ -23,6 +23,7 @@ import type {
 import defaultMeetingRoomImage from '../assets/meeting-room-default.png';
 import type { ParkModuleTarget } from '../moduleCatalog.js';
 import { parkISODate, parkMinuteOfDay } from '../parkBusinessTime.js';
+import { startNonOverlappingPoll } from '../lib/nonOverlappingPoll.js';
 import {
   IconBuilding,
   IconCalendarCheck,
@@ -498,7 +499,7 @@ function AnnouncementView({ onBack }: { onBack: () => void }): React.JSX.Element
       setError(null);
     } catch (cause) { setError(errorMessage(cause)); } finally { setLoading(false); }
   }, []);
-  useEffect(() => { void refresh(); const timer = window.setInterval(() => { void refresh(); }, 5000); return () => window.clearInterval(timer); }, [refresh]);
+  useEffect(() => startNonOverlappingPoll(refresh, 5_000), [refresh]);
   const openItem = async (item: EnterpriseParkPublication): Promise<void> => {
     setSelectedId(item.id);
     if (!item.readAt) {
@@ -709,16 +710,10 @@ function ServiceRequestView({ service, onBack, onComplete, focusTicket }: {
     }
   }, [service.id]);
 
+  useEffect(() => startNonOverlappingPoll(refresh, 5_000), [refresh]);
   useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 5000);
-    return () => window.clearInterval(timer);
-  }, [refresh]);
-  useEffect(() => {
-    void refreshResources();
     if (service.id !== 'meeting-room') return undefined;
-    const timer = window.setInterval(() => { void refreshResources(); }, 5000);
-    return () => window.clearInterval(timer);
+    return startNonOverlappingPoll(refreshResources, 5_000);
   }, [refreshResources, service.id]);
 
   const selectedRoom = resources?.meetingRooms.find((room) => room.id === form.roomId) ?? null;
@@ -1605,11 +1600,10 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
       }
     };
 
-    void refreshStatistics();
-    const timer = window.setInterval(() => { void refreshStatistics(); }, 30_000);
+    const stopPolling = startNonOverlappingPoll(refreshStatistics, 30_000);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stopPolling();
     };
   }, [internalAdminPreview, open, parkAdminOrganization]);
 
@@ -1636,9 +1630,8 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
         // 未登录或服务器暂不可达时等待下一次轮询。
       }
     };
-    void poll();
-    const timer = window.setInterval(() => { void poll(); }, 5000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    const stopPolling = startNonOverlappingPoll(poll, 5_000);
+    return () => { cancelled = true; stopPolling(); };
   }, [internalAdminPreview, parkEnabled]);
 
   useEffect(() => {
@@ -1890,9 +1883,8 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
         // 未登录、服务器暂不可达时安静重试；报修页打开后会显示具体错误。
       }
     };
-    void poll();
-    const timer = window.setInterval(() => { void poll(); }, 5000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    const stopPolling = startNonOverlappingPoll(poll, 5_000);
+    return () => { cancelled = true; stopPolling(); };
   }, [internalAdminPreview, parkEnabled]);
 
   const close = (): void => {

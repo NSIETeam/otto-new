@@ -231,17 +231,17 @@ export function EnterpriseLoginPage({
 
   useEffect(() => {
     if (countdown <= 0) return undefined;
-    const timer = window.setInterval(() => setCountdown((value) => Math.max(0, value - 1)), 1000);
-    return () => window.clearInterval(timer);
+    const timer = window.setTimeout(() => setCountdown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
   }, [countdown]);
 
   useEffect(() => {
     if (loginCountdown <= 0) return undefined;
-    const timer = window.setInterval(
+    const timer = window.setTimeout(
       () => setLoginCountdown((value) => Math.max(0, value - 1)),
       1000,
     );
-    return () => window.clearInterval(timer);
+    return () => window.clearTimeout(timer);
   }, [loginCountdown]);
 
   const requestCode = async (): Promise<void> => {

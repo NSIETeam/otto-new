@@ -109,14 +109,14 @@
     "serverVersion": "1.9.14",
     "serverPackageVersion": "0.1.0",
     "apiVersion": 4,
-    "enterpriseSchemaVersion": 23,
+    "enterpriseSchemaVersion": 24,
     "databaseMigration": {
       "source": "scripts/enterprise-release-contract.mjs",
       "supportedSchemaFrom": [
         2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-        22, 23
+        22, 23, 24
       ],
-      "schemaTo": 23
+      "schemaTo": 24
     },
     "capabilities": [
       "password_auth",
@@ -211,7 +211,7 @@
       "id": "version_schema_capability_mapping",
       "status": "verified",
       "evidence": [
-        "The validator binds product version 1.9.14, Enterprise API 4, schema 23, capabilities and product modules to source constants."
+        "The validator binds product version 1.9.14, Enterprise API 4, schema 24, capabilities and product modules to source constants."
       ]
     },
     {

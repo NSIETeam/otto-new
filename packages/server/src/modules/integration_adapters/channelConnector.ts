@@ -320,10 +320,11 @@ export class ChannelPairingCoordinator {
   async deny(pairingId: string, reason = 'authorization denied'): Promise<PairingSession> {
     const pairing = this.requirePairing(pairingId);
     await this.expireIfNeeded(pairing);
-    if (!['waiting_scan', 'waiting_admin'].includes(pairing.status)) {
+    if (!['waiting_scan', 'waiting_admin', 'user_authorized', 'verifying'].includes(pairing.status)) {
       throw new Error(`cannot deny channel pairing from ${pairing.status}`);
     }
     pairing.failureReason = reason;
+    pairing.tokenHash.fill(0);
     await this.transition(pairing, 'denied', reason);
     return this.toPublic(pairing);
   }

@@ -33,6 +33,16 @@ export interface ChannelCredentialLookup {
   tenantId: string;
 }
 
+export interface ChannelCredentialVaultV1 {
+  commit(
+    installation: Readonly<ChannelInstallation>,
+    plaintextCredential: string,
+  ): Promise<void>;
+  loadCredential(lookup: ChannelCredentialLookup): Promise<string>;
+  remove(lookup: ChannelCredentialLookup): Promise<boolean>;
+  listInstallations(): ChannelInstallation[];
+}
+
 const INSTALLATION_ID_PATTERN = /^channel_(feishu|lark|wecom)_[a-f0-9]{24}$/;
 
 function sameInstallation(
@@ -42,7 +52,7 @@ function sameInstallation(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export class JsonChannelCredentialVaultV1 {
+export class JsonChannelCredentialVaultV1 implements ChannelCredentialVaultV1 {
   private writeTail: Promise<void> = Promise.resolve();
 
   constructor(

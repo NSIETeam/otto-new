@@ -282,6 +282,13 @@ SHA-256，上传或复制失败不会阻断 Otto 业务，但会进入健康状�
 不会替客户覆盖密钥。私聊正文以及 License 内的租约令牌、遥测令牌均使用字段密钥
 AES-256-GCM 加密，服务启动时会先迁移旧明文数据并验证密钥，失败时拒绝对外提供服务。
 
+一键安装还会强制使用 SQLCipher 加密整个 `data.db`。默认由安装器生成独立的 32 字节
+密钥并以 `root:otto-enterprise`、`0640` 保存到
+`/etc/otto-enterprise/database-sqlcipher.key`；客户已有密钥托管时可在安装前设置
+`OTTO_DATABASE_ENCRYPTION_KEY_FILE` 为服务账号可读的绝对路径。升级会先识别明文或
+SQLCipher 数据库，创建一致性快照并逐表核对行数，canary 通过后才切换 release；不得删除、
+替换或把该密钥提交到 Git、迁移压缩包和日志。
+
 如配置 `OTTO_TELEMETRY_ENDPOINT`，地址必须使用 HTTPS。遥测请求除 Bearer 令牌外还
 携带 HMAC-SHA256 签名、时间戳和一次性随机数；接收端只接受 5 分钟窗口内且未重放的
 请求，本地遥测保留期由 `OTTO_TELEMETRY_RETENTION_DAYS` 控制。正式交付前必须填写

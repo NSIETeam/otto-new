@@ -50,6 +50,7 @@ done
 
 otto_load_config "$CONFIG_PATH"
 OTTO_ALLOW_SMS_DISABLED="${OTTO_ALLOW_SMS_DISABLED:-0}"
+OTTO_DATABASE_ENCRYPTION_KEY_FILE="${OTTO_DATABASE_ENCRYPTION_KEY_FILE:-}"
 case "$OTTO_ALLOW_SMS_DISABLED" in
   0|1) ;;
   *) otto_die "OTTO_ALLOW_SMS_DISABLED 只能是 0 或 1" ;;
@@ -76,6 +77,8 @@ CURRENT_REAL="$(readlink -f "${INSTALL_ROOT}/current")"
 [ -f "$SERVICE_UNIT" ] && [ ! -L "$SERVICE_UNIT" ] || otto_die "systemd 单元不存在或不安全：${SERVICE_UNIT}" 3
 
 NODE_PATH="${INSTALL_ROOT}/runtime/current/bin/node"
+[ "$("$NODE_PATH" --version)" = "v${OTTO_NODE_VERSION}" ] \
+  || otto_die "现有固定 Node runtime 与 SQLCipher ABI 不匹配；需要 v${OTTO_NODE_VERSION}" 3
 RELEASE_INFO="$("$NODE_PATH" "${SCRIPT_DIR}/tools/verify-release.mjs" "${SCRIPT_DIR}/release")"
 RELEASE_VERSION="$("$NODE_PATH" -e "const x=JSON.parse(process.argv[1]);console.log(x.version)" "$RELEASE_INFO")"
 BUILD_ID="$("$NODE_PATH" -e "const x=JSON.parse(process.argv[1]);console.log(x.buildCommit)" "$RELEASE_INFO")"
@@ -113,6 +116,10 @@ NEW_DATA="${TXN_DIR}/data.db.next"
 ROLLBACK_NEEDED=0
 OLD_DEPLOY_BACKUP="${TXN_DIR}/deploy.before"
 CONFIG_BACKUP="${TXN_DIR}/enterprise.env.before"
+BASELINE_INSPECTION="${TXN_DIR}/database-inspection.before.json"
+MANAGED_DATABASE_KEY_PATH="$(dirname -- "$CONFIG_PATH")/database-sqlcipher.key"
+DATABASE_KEY_MANAGED=0
+DATABASE_KEY_CREATED=0
 SERVICE_STOPPED=0
 UPGRADE_SUCCEEDED=0
 
@@ -141,6 +148,10 @@ cleanup() {
       fi
       if [ -f "$CONFIG_BACKUP" ]; then
         install -o root -g root -m 0600 "$CONFIG_BACKUP" "$CONFIG_PATH" || true
+      fi
+      if [ "$DATABASE_KEY_CREATED" -eq 1 ] \
+        && [ -f "$MANAGED_DATABASE_KEY_PATH" ]; then
+        rm -f "$MANAGED_DATABASE_KEY_PATH"
       fi
       if [ -d "$OLD_DEPLOY_BACKUP" ]; then
         if rm -rf "${INSTALL_ROOT}/deploy.rollback" \
@@ -185,12 +196,46 @@ if [ "$DRY_RUN" -eq 0 ]; then
   systemctl stop otto-enterprise
   SERVICE_STOPPED=1
 fi
-"$NODE_PATH" "${SCRIPT_DIR}/tools/db-tool.mjs" backup \
-"${DATA_DIR}/data.db" "$OLD_DATA_BACKUP" >/dev/null
+otto_require_command od
+otto_require_command tr
+DATABASE_HEADER="$(od -An -tx1 -N16 "${DATA_DIR}/data.db" | tr -d ' \n')"
+if [ "$DATABASE_HEADER" = "53514c69746520666f726d6174203300" ]; then
+  "$NODE_PATH" "${SCRIPT_DIR}/tools/db-tool.mjs" backup \
+    "${DATA_DIR}/data.db" "$OLD_DATA_BACKUP" >"$BASELINE_INSPECTION"
+else
+  [ -n "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" ] \
+    || otto_die "现有数据库不是明文 SQLite，但运行配置缺少 SQLCipher 密钥" 3
+  "$NODE_PATH" "${SCRIPT_DIR}/tools/migrate-check.mjs" \
+    "$CURRENT_REAL" "$DATA_DIR" --snapshot "$OLD_DATA_BACKUP" \
+    >"$BASELINE_INSPECTION"
+fi
 cp -p "$OLD_DATA_BACKUP" "$NEW_DATA"
 CANARY_DIR="${TXN_DIR}/canary"
 mkdir -p "$CANARY_DIR"
 cp -p "$NEW_DATA" "${CANARY_DIR}/data.db"
+
+if [ -z "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" ]; then
+  if [ -e "$MANAGED_DATABASE_KEY_PATH" ] || [ -L "$MANAGED_DATABASE_KEY_PATH" ]; then
+    otto_die "运行配置未声明 SQLCipher 密钥，但托管密钥路径已存在；拒绝覆盖" 3
+  fi
+  CANARY_DATABASE_KEY="${TXN_DIR}/database-sqlcipher.key"
+  "$NODE_PATH" --input-type=module -e \
+    "import { randomBytes } from 'node:crypto'; import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[1], randomBytes(32), { flag: 'wx', mode: 0o600 });" \
+    "$CANARY_DATABASE_KEY"
+  OTTO_DATABASE_ENCRYPTION_KEY_FILE="$CANARY_DATABASE_KEY"
+  DATABASE_KEY_MANAGED=1
+else
+  [[ "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" = /* ]] \
+    || otto_die "OTTO_DATABASE_ENCRYPTION_KEY_FILE 必须使用绝对路径"
+  [ -f "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" ] \
+    && [ ! -L "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" ] \
+    || otto_die "OTTO_DATABASE_ENCRYPTION_KEY_FILE 必须指向普通文件且不能是符号链接"
+fi
+export OTTO_DATABASE_ENCRYPTION="required"
+export OTTO_DATABASE_ENCRYPTION_KEY_FILE
+export OTTO_DATABASE_ENCRYPTION_KEY_ID="oneclick-offline-database-key"
+export OTTO_DATABASE_ENCRYPTION_KEY_READONLY="true"
+export OTTO_SQLCIPHER_NATIVE_BINDING="$SQLCIPHER_RELEASE_BINDING"
 
 CANARY_READY_FILE="${TXN_DIR}/canary-ready.json"
 CANARY_PORT=""
@@ -208,7 +253,9 @@ export OTTO_APP_VERSION="$RELEASE_VERSION"
 export OTTO_BUILD_COMMIT="$BUILD_ID"
 export OTTO_LICENSE_TRUST_FILE="${SCRIPT_DIR}/release/license-public-keys.json"
 
-"$NODE_PATH" "${SCRIPT_DIR}/tools/migrate-check.mjs" "${SCRIPT_DIR}/release" "$CANARY_DIR" >/dev/null
+"$NODE_PATH" "${SCRIPT_DIR}/tools/migrate-check.mjs" \
+  "${SCRIPT_DIR}/release" "$CANARY_DIR" \
+  --baseline "$BASELINE_INSPECTION" >/dev/null
 otto_log "启动 127.0.0.1:自动分配端口 升级 canary"
 "$NODE_PATH" "${SCRIPT_DIR}/release/run.mjs" >"${TXN_DIR}/canary.log" 2>&1 &
 CANARY_PID=$!
@@ -281,12 +328,31 @@ if [ -d "${INSTALL_ROOT}/deploy" ] && [ ! -L "${INSTALL_ROOT}/deploy" ]; then
 fi
 systemctl stop otto-enterprise
 install -o otto-enterprise -g otto-enterprise -m 0600 "${CANARY_DIR}/data.db" "${DATA_DIR}/data.db"
+if [ "$DATABASE_KEY_MANAGED" -eq 1 ]; then
+  chown root:otto-enterprise "$(dirname -- "$MANAGED_DATABASE_KEY_PATH")"
+  chmod 0750 "$(dirname -- "$MANAGED_DATABASE_KEY_PATH")"
+  install -o root -g otto-enterprise -m 0640 \
+    "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" "$MANAGED_DATABASE_KEY_PATH"
+  OTTO_DATABASE_ENCRYPTION_KEY_FILE="$MANAGED_DATABASE_KEY_PATH"
+  DATABASE_KEY_CREATED=1
+else
+  runuser -u otto-enterprise -- test -r "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" \
+    || otto_die "otto-enterprise 服务账号无法读取外部 SQLCipher 密钥"
+fi
 UPDATED_CONFIG="${TXN_DIR}/enterprise.env.next"
 "$NODE_PATH" --input-type=module - "$CONFIG_PATH" "$UPDATED_CONFIG" \
+  "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" \
+  "${TARGET_RELEASE}/native/sqlcipher/linux-${RUNTIME_ARCH}/better_sqlite3.node" \
   "$RELEASE_VERSION" "$BUILD_ID" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
-const [source, target, appVersion, buildCommit] = process.argv.slice(2);
+const [source, target, keyPath, bindingPath, appVersion, buildCommit] =
+  process.argv.slice(2);
 const managedKeys = new Set([
+  'OTTO_DATABASE_ENCRYPTION',
+  'OTTO_DATABASE_ENCRYPTION_KEY_FILE',
+  'OTTO_DATABASE_ENCRYPTION_KEY_ID',
+  'OTTO_DATABASE_ENCRYPTION_KEY_READONLY',
+  'OTTO_SQLCIPHER_NATIVE_BINDING',
   'OTTO_APP_VERSION',
   'OTTO_BUILD_COMMIT',
 ]);
@@ -298,6 +364,11 @@ const retained = readFileSync(source, 'utf8')
   });
 while (retained.at(-1) === '') retained.pop();
 for (const [key, value] of [
+  ['OTTO_DATABASE_ENCRYPTION', 'required'],
+  ['OTTO_DATABASE_ENCRYPTION_KEY_FILE', keyPath],
+  ['OTTO_DATABASE_ENCRYPTION_KEY_ID', 'oneclick-offline-database-key'],
+  ['OTTO_DATABASE_ENCRYPTION_KEY_READONLY', 'true'],
+  ['OTTO_SQLCIPHER_NATIVE_BINDING', bindingPath],
   ['OTTO_APP_VERSION', appVersion],
   ['OTTO_BUILD_COMMIT', buildCommit],
 ]) retained.push(`${key}=${JSON.stringify(value)}`);

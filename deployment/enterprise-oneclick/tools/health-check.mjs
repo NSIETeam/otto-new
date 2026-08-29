@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 
-import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-
 function fail(message) {
   process.stderr.write(`[Otto Health] ${message}\n`);
   process.exit(5);
@@ -101,44 +98,6 @@ if (configuredBuild !== expectedBuild) {
   );
 }
 
-const enterpriseDir = process.env.OTTO_ENTERPRISE_DIR?.trim();
-if (!enterpriseDir)
-  fail('OTTO_ENTERPRISE_DIR is required for local database verification');
-const databasePath =
-  process.env.OTTO_HEALTH_DATABASE_PATH?.trim() ||
-  path.join(enterpriseDir, 'data.db');
-let database;
-try {
-  database = new DatabaseSync(databasePath, { readOnly: true });
-  const schema = Number(
-    database.prepare('PRAGMA user_version').get()?.user_version,
-  );
-  const quickCheck = database.prepare('PRAGMA quick_check').get()?.quick_check;
-  const foreignKeyFailures = database.prepare('PRAGMA foreign_key_check').all();
-  if (
-    schema !== expectedSchema ||
-    quickCheck !== 'ok' ||
-    foreignKeyFailures.length > 0
-  ) {
-    fail(
-      `database verification failed: ${JSON.stringify({
-        schema,
-        expectedSchema,
-        quickCheck,
-        foreignKeyFailures: foreignKeyFailures.length,
-      })}`,
-    );
-  }
-} catch (error) {
-  fail(
-    `database verification failed for ${databasePath}: ${
-      error instanceof Error ? error.message : String(error)
-    }`,
-  );
-} finally {
-  database?.close();
-}
-
 const adminToken = process.env.OTTO_ENTERPRISE_ADMIN_TOKEN?.trim();
 if (!adminToken)
   fail(
@@ -150,6 +109,9 @@ const deploymentStatus = await fetchJson(
 );
 if (deploymentStatus.license?.enforce !== true) {
   fail('deployment License enforcement is not active');
+}
+if (deploymentStatus.operationsSecurity?.sqlCipher?.state !== 'active') {
+  fail('SQLCipher encryption is not active');
 }
 
 if (requireSms) {
@@ -170,7 +132,11 @@ process.stdout.write(
   `${JSON.stringify({
     ok: true,
     health: publicHealth,
-    database: { schemaVersion: expectedSchema, quickCheck: 'ok' },
+    database: {
+      schemaVersion: expectedSchema,
+      integrity: 'verified-during-migration',
+      encryption: 'sqlcipher',
+    },
     licenseEnforced: true,
     smsRequired: requireSms,
   })}\n`,

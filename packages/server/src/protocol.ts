@@ -347,7 +347,11 @@ export type CancelMsg = Envelope<
 /** 设置当前模型。 */
 export type SetModelMsg = Envelope<
   'set_model',
-  { sessionId: string; model: string }
+  {
+    sessionId: string;
+    model: string;
+    confirmedUnknownOutcomeRequestId?: string;
+  }
 >;
 
 /** 切换当前会话的真实工作目录。路径须由 desktop 主进程授权，server 仍会复核。 */
@@ -1006,7 +1010,17 @@ export type RuntimeActivityMsg = Envelope<
 /** 错误帧。 */
 export type ErrorMsg = Envelope<
   'error',
-  { sessionId?: string; code: string; message: string }
+  {
+    sessionId?: string;
+    code: string;
+    message: string;
+    modelRequestSafety?: {
+      requestId: string;
+      requestState: 'unknown_outcome';
+      providerRequestId?: string;
+      requiresProviderSwitchConfirmation: true;
+    };
+  }
 >;
 
 /** 企业服务器通知桌面端检查补丁 / 内核 / 组件增量更新。 */
@@ -1276,7 +1290,7 @@ export type ExportResultMsg = Envelope<
 
 // ── P2：Workflow 面板 / 扩展列表 / IDE 伴生状态 回包 ───────────────────────
 
-export type WorkflowStatusValue = 'running' | 'completed' | 'failed';
+export type WorkflowStatusValue = 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface WorkflowAgentSummary {
   agentId: string;
@@ -1817,6 +1831,11 @@ export function validateClientPayload(msg: {
       if (!isNonEmptyString(p['sessionId']))
         return 'sessionId 必须是非空字符串';
       if (!isNonEmptyString(p['model'])) return 'model 必须是非空字符串';
+      if (p['confirmedUnknownOutcomeRequestId'] !== undefined
+        && (!isNonEmptyString(p['confirmedUnknownOutcomeRequestId'])
+          || p['confirmedUnknownOutcomeRequestId'].trim().length === 0)) {
+        return 'confirmedUnknownOutcomeRequestId 必须是非空字符串';
+      }
       return null;
     }
     case 'set_session_workspace': {

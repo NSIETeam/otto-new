@@ -976,7 +976,9 @@ describe('受保护 vs 公开路由边界', () => {
       ...payload,
       id: 'lic_test_baseline_directory',
       revision: 2,
-      modules: ['model_gateway'],
+      // Use an unrelated implemented capability to prove that the
+      // same-organization baseline remains available without tree or chat entitlements.
+      modules: ['skill_market'],
       issuedAtMs: payload.issuedAtMs + 1,
     };
     const baselineImported = await fetch(

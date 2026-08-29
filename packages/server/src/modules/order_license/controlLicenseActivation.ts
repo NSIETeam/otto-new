@@ -90,7 +90,9 @@ export async function controlLicenseClaim(
 function readCurrentLicense(database: Database): { status: string } | null {
   try {
     const row = database.prepare(
-      'SELECT id FROM deployment_license ORDER BY updated_at DESC LIMIT 1',
+      `SELECT id FROM deployment_license
+       ORDER BY updated_at DESC, issued_at_ms DESC, revision DESC, rowid DESC
+       LIMIT 1`,
     ).get() as { id?: string } | undefined;
     if (!row || !row.id) return null;
     return { status: 'present' };

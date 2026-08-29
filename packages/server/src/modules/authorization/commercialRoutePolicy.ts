@@ -57,7 +57,6 @@ export function baselineOrganizationFeatureForEnterpriseRoute(
  * export its data.
  */
 const COMMERCIAL_ROUTE_RULES: readonly CommercialRouteRule[] = [
-  { feature: 'model_gateway', matches: prefix('/enterprise/model-gateway') },
   { feature: 'atoa', matches: prefix('/enterprise/federation/a2a') },
   { feature: 'direct_messages', matches: prefix('/enterprise/federation') },
   { feature: 'atoa', matches: prefix('/enterprise/atoa') },

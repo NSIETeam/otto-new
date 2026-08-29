@@ -567,7 +567,9 @@ export function getDeploymentLicense(
 ): DeploymentLicenseView {
   const row = store.db()
     .prepare(
-      'SELECT * FROM deployment_license ORDER BY updated_at DESC LIMIT 1',
+      `SELECT * FROM deployment_license
+       ORDER BY updated_at DESC, issued_at_ms DESC, revision DESC, rowid DESC
+       LIMIT 1`,
     )
     .get() as DeploymentLicenseRow | undefined;
   return toDeploymentLicenseView(store, row ?? null);
@@ -1030,7 +1032,11 @@ function latestLicensePayload(
   store: DeploymentRepositoryStore,
 ): Record<string, unknown> {
   const row = store.db()
-    .prepare('SELECT id, raw_json FROM deployment_license ORDER BY updated_at DESC LIMIT 1')
+    .prepare(
+      `SELECT id, raw_json FROM deployment_license
+       ORDER BY updated_at DESC, issued_at_ms DESC, revision DESC, rowid DESC
+       LIMIT 1`,
+    )
     .get() as { id: string; raw_json: string } | undefined;
   if (!row) return {};
   try {

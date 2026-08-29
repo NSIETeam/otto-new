@@ -365,3 +365,9 @@ means no source-level substitute is accepted.
   async polling or deadline-based one-shot timers. Core protocol watchdogs and
   Server generated admin pages remain separately auditable and are not claimed
   complete by the renderer migration.
+- Removed the legacy Core `MultiChannelGateway` and `multi_channel` tool. They
+  formed a second provider-specific gateway, wrote provider secrets outside the
+  credential vault, and let meeting reminders bypass durable workflow,
+  idempotency, and channel identity policy. `meeting_actions` now exposes a
+  local `list_due` operation; external delivery must use the managed channel
+  workflow and its explicit approval path.

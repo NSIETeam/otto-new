@@ -326,7 +326,6 @@ const defaultRuntimeFactory: RuntimeFactory = async (
     ...(summary?.productEdition !== 'enterprise'
       ? {
           excludeTools: [
-            'multi_channel',
             'memory_manager',
             'feishu_project_collab',
             'delegate_to_agent',

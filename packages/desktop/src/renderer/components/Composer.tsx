@@ -197,7 +197,6 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: 'feishu-start', description: '启动飞书网关（立即执行）', action: 'local' },
   { id: 'feishu-stop', description: '停止飞书网关（立即执行）', action: 'local' },
   { id: 'feishu-status', description: '查看飞书连接状态', action: 'local' },
-  { id: 'multi-channel', description: '检查微信/企微/钉钉多渠道', action: 'prompt', prompt: '请检查 Otto 的多渠道能力：微信、企业微信、钉钉、飞书适配器和 multi_channel 工具是否可用。' },
   { id: 'ppt', description: 'PPT 创作专家', action: 'agent', agentProfileId: 'ppt' },
   { id: 'doc', description: '文档写作专家', action: 'agent', agentProfileId: 'doc' },
   { id: 'pdf', description: 'PDF 处理专家', action: 'agent', agentProfileId: 'pdf' },

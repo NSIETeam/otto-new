@@ -179,4 +179,62 @@ describe('ChannelPairingCoordinator', () => {
       ),
     ).rejects.toThrow('provider tenant identity is required');
   });
+
+  it('recovers an idempotent credential commit without replaying authorization', async () => {
+    const { coordinator, events } = setup();
+    const keys = generateKeyPairSync('ed25519');
+    const installationPublicKey = keys.publicKey
+      .export({ type: 'spki', format: 'pem' })
+      .toString();
+    const pairing = await coordinator.begin({
+      provider: 'feishu',
+      installationPublicKey,
+      requestedScopes: ['im:message'],
+    });
+    await coordinator.authorize(
+      pairing.pairingId,
+      'single-use-pairing-nonce-with-enough-entropy',
+      {
+        tenantId: 'tenant-1',
+        tenantName: 'Acme',
+        botName: 'Otto',
+        grantedScopes: ['im:message'],
+      },
+    );
+    const proof = {
+      installationPublicKey,
+      signature: sign(
+        null,
+        channelInstallationProofPayload(pairing.pairingId),
+        keys.privateKey,
+      ).toString('base64url'),
+    };
+    const attemptedKeys: string[] = [];
+
+    await expect(
+      coordinator.complete(pairing.pairingId, proof, ({ idempotencyKey }) => {
+        attemptedKeys.push(idempotencyKey);
+        throw new Error('secure storage temporarily unavailable');
+      }),
+    ).rejects.toThrow('secure storage temporarily unavailable');
+    expect((await coordinator.get(pairing.pairingId)).status).toBe('verifying');
+
+    const installed = await coordinator.complete(
+      pairing.pairingId,
+      proof,
+      ({ idempotencyKey }) => attemptedKeys.push(idempotencyKey),
+    );
+    expect(attemptedKeys).toEqual([
+      installed.installationId,
+      installed.installationId,
+    ]);
+    expect((await coordinator.get(pairing.pairingId)).status).toBe('connected');
+    expect(events.map((event) => event.to)).toEqual([
+      'waiting_scan',
+      'user_authorized',
+      'installing',
+      'verifying',
+      'connected',
+    ]);
+  });
 });

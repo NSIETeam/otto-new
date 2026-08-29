@@ -70,6 +70,12 @@ export interface ChannelInstallationProof {
   signature: string;
 }
 
+export interface ChannelInstallationCommitContext {
+  /** Stable across recovery attempts; use as the external-write idempotency key. */
+  idempotencyKey: string;
+  installation: Readonly<ChannelInstallation>;
+}
+
 export function channelInstallationProofPayload(pairingId: string): Buffer {
   if (!PAIRING_ID_PATTERN.test(pairingId)) {
     throw new Error('invalid channel pairing id');
@@ -252,10 +258,15 @@ export class ChannelPairingCoordinator {
   async complete(
     pairingId: string,
     proof: ChannelInstallationProof,
+    commit?: (context: ChannelInstallationCommitContext) => void | Promise<void>,
   ): Promise<ChannelInstallation> {
     const pairing = this.requirePairing(pairingId);
     await this.expireIfNeeded(pairing);
-    this.assertStatus(pairing, 'user_authorized');
+    if (pairing.status !== 'user_authorized' && pairing.status !== 'verifying') {
+      throw new Error(
+        `channel pairing is ${pairing.status}, expected user_authorized or verifying`,
+      );
+    }
     const installationKey = proof.installationPublicKey.trim();
     if (
       !installationKey ||
@@ -282,9 +293,11 @@ export class ChannelPairingCoordinator {
     }
     const authorization = pairing.authorization;
     if (!authorization) throw new Error('channel pairing authorization is missing');
-    await this.transition(pairing, 'installing');
-    await this.transition(pairing, 'verifying');
-    const installation: ChannelInstallation = {
+    if (pairing.status === 'user_authorized') {
+      await this.transition(pairing, 'installing');
+      await this.transition(pairing, 'verifying');
+    }
+    const installation = pairing.installation ?? {
       installationId: `channel_${pairing.provider}_${pairing.pairingId.slice(5)}`,
       provider: pairing.provider,
       tenantId: authorization.tenantId,
@@ -294,6 +307,10 @@ export class ChannelPairingCoordinator {
       connectedAtMs: this.now(),
     };
     pairing.installation = installation;
+    await commit?.({
+      idempotencyKey: installation.installationId,
+      installation: { ...installation, grantedScopes: [...installation.grantedScopes] },
+    });
     // The bearer is single use. Erase even its hash after installation.
     pairing.tokenHash.fill(0);
     await this.transition(pairing, 'connected');

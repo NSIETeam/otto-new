@@ -452,6 +452,25 @@ export function IconClose({ size, className }: IconProps): React.JSX.Element {
   );
 }
 
+export function IconTrash({ size, className }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
+export function IconMoreHorizontal({ size, className }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(size)} className={className} fill="currentColor" stroke="none">
+      <circle cx="5" cy="12" r="1.7" />
+      <circle cx="12" cy="12" r="1.7" />
+      <circle cx="19" cy="12" r="1.7" />
+    </svg>
+  );
+}
+
 /** 眼睛（显示明文 API key）。线性描边，与图标集统一。 */
 export function IconEye({ size, className }: IconProps): React.JSX.Element {
   return (

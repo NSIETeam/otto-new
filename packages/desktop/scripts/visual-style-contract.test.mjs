@@ -70,6 +70,18 @@ describe('desktop visual style contract', () => {
     expect(catalog).not.toContain('if (profile.icon) return `generated:${profile.icon}`');
   });
 
+  it('keeps common navigation and overlay icons in the shared icon registry', async () => {
+    const sources = await Promise.all(
+      [
+        ['src', 'renderer', 'App.tsx'],
+        ['src', 'renderer', 'components', 'Sidebar.tsx'],
+        ['src', 'renderer', 'components', 'AllConversations.tsx'],
+      ].map((segments) => readFile(path.join(packageRoot, ...segments), 'utf8')),
+    );
+
+    for (const source of sources) expect(source).not.toContain('<svg');
+  });
+
   it('keeps both browser previews on the desktop React instance for visual audits', async () => {
     const configs = await Promise.all(
       ['webpack.preview.cjs', 'webpack.live.cjs'].map((file) =>

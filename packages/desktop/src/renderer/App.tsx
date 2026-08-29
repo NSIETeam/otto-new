@@ -87,6 +87,7 @@ import { AccountManagementPage } from './components/AccountManagementPage.js';
 import { OrganizationPage } from './components/OrganizationPage.js';
 import { InboxPage } from './components/InboxPage.js';
 import { WorkPage } from './components/WorkPage.js';
+import { IconClose } from './components/icons.js';
 import { useEnterpriseAuth } from './state/useEnterpriseAuth.js';
 import { localDateKey } from './localDateKey.js';
 import type {
@@ -1668,14 +1669,7 @@ function ErrorToast({
         aria-label="关闭提示"
         title="关闭"
       >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M6 6l12 12M18 6L6 18"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
+        <IconClose size={13} />
       </button>
     </div>
   );

@@ -99,6 +99,7 @@ export function FeishuStatusBadge({
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async (): Promise<void> => {
       try {
         const res = await window.otto?.feishuStatus();
@@ -108,13 +109,14 @@ export function FeishuStatusBadge({
         }
       } catch {
         // 查询失败保留上一帧状态（title 里仍是最近一次真话），下轮再试。
+      } finally {
+        if (!cancelled) timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
       }
     };
     void poll();
-    const timer = setInterval(() => void poll(), POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
     };
     // onStatus 由父组件以稳定引用传入（useCallback/一次性函数）；不进依赖数组，
     // 避免父组件每次渲染重建轮询循环。

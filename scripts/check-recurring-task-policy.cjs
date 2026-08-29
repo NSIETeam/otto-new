@@ -24,7 +24,6 @@ const legacyMaximums = new Map(Object.entries({
   'packages/desktop/src/renderer/components/hub/FeishuPanel.tsx': 1,
   'packages/server/src/enterprise/adminAccountsPage.ts': 1,
   'packages/server/src/enterprise/adminDashboardPage.ts': 1,
-  'packages/server/src/enterprise/server.ts': 2,
   'packages/server/src/modules/commercial_control/privateDeploymentRuntime.ts': 1,
   'packages/server/src/modules/data_platform/keyRotationCoordinator.ts': 1,
   'packages/server/src/modules/federation_gateway/federationRuntime.ts': 1,

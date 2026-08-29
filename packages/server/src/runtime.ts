@@ -88,8 +88,7 @@ class ModelOutcomeUnknownError extends Error {
 
   safetyDetails() {
     return { requestId: this.requestId, requestState: 'unknown_outcome' as const,
-      ...(this.providerRequestId ? { providerRequestId: this.providerRequestId } : {}),
-      requiresProviderSwitchConfirmation: true as const };
+      ...(this.providerRequestId ? { providerRequestId: this.providerRequestId } : {}) };
   }
 }
 
@@ -372,7 +371,6 @@ export class CoreSessionRuntime implements SessionRuntime {
   private abort?: AbortController;
   private running = false;
   private authorizationMode: RuntimeAuthorizationMode = 'manual';
-  private pendingProviderSwitchRisk?: ModelOutcomeUnknownError;
   /**
    * 挂起中的工具确认：callId → resolver。AskUserQuestion 弹卡后在此登记，
    * server 收到 tool_confirmation_response 调 resolveToolConfirmation 唤醒。
@@ -418,13 +416,7 @@ export class CoreSessionRuntime implements SessionRuntime {
     // this.config.setApprovalMode?.(ApprovalMode.DEFAULT);
   }
 
-  async setModel(model: string, confirmedUnknownOutcomeRequestId?: string): Promise<void> {
-    const pending = this.pendingProviderSwitchRisk;
-    if (pending && confirmedUnknownOutcomeRequestId !== pending.requestId) {
-      throw new Error(
-        `上一次请求结果未知，切换模型前必须明确确认可能重复计费。请求编号：${pending.requestId}`,
-      );
-    }
+  async setModel(model: string): Promise<void> {
     // 不能只改 Config：OttoChat 会缓存 specifiedModel，真实出网请求仍会走旧模型。
     // 统一走 core 的 switchModel，让 Config、live chat、工具与系统提示词一起切换。
     const result = await this.config
@@ -433,7 +425,6 @@ export class CoreSessionRuntime implements SessionRuntime {
     if (!result.success) {
       throw new Error(result.error || `无法切换到模型 ${model}`);
     }
-    if (pending) this.pendingProviderSwitchRisk = undefined;
   }
 
   async generateTitle(firstUserMessage: string): Promise<string> {
@@ -833,9 +824,6 @@ export class CoreSessionRuntime implements SessionRuntime {
       if (signal.aborted) {
         publishCancellation();
       } else {
-        if (e instanceof ModelOutcomeUnknownError) {
-          this.pendingProviderSwitchRisk = e;
-        }
         const message = userFacingRuntimeError(e);
         if (assistantId !== null) {
           const finalText = assistantText.trim() ? assistantText : message;
@@ -1358,7 +1346,6 @@ export class CoreSessionRuntime implements SessionRuntime {
     message: string,
     modelRequestSafety?: {
       requestId: string; requestState: 'unknown_outcome'; providerRequestId?: string;
-      requiresProviderSwitchConfirmation: true;
     },
   ): void {
     this.store.publish(this.sessionId, {

@@ -524,11 +524,8 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
       requestId,
       requestState: 'unknown_outcome',
       providerRequestId,
-      requiresProviderSwitchConfirmation: true,
     });
-    await expect(runtime.setModel('secondary-model')).rejects.toThrow('必须明确确认');
-    expect(switchModel).not.toHaveBeenCalled();
-    await expect(runtime.setModel('secondary-model', requestId)).resolves.toBeUndefined();
+    await expect(runtime.setModel('secondary-model')).resolves.toBeUndefined();
     expect(switchModel).toHaveBeenCalledWith('secondary-model', expect.any(AbortSignal));
   });
 

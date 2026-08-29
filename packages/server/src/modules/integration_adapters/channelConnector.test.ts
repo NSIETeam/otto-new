@@ -49,7 +49,14 @@ describe('ChannelPairingCoordinator', () => {
     expect(authorized.status).toBe('user_authorized');
     expect(authorized.qrPayload).toBe('');
 
-    const installation = await coordinator.complete(pairing.pairingId);
+    await expect(
+      coordinator.complete(pairing.pairingId, 'another-device-public-key'),
+    ).rejects.toThrow('installation public key does not match');
+
+    const installation = await coordinator.complete(
+      pairing.pairingId,
+      'device-public-key',
+    );
     expect(installation).toMatchObject({
       provider: 'lark', tenantId: 'tenant-1', tenantName: 'Acme', botName: 'Otto',
       grantedScopes: ['im:message'],
@@ -81,7 +88,9 @@ describe('ChannelPairingCoordinator', () => {
       },
     );
     expect(waiting.status).toBe('waiting_admin');
-    await expect(coordinator.complete(pairing.pairingId)).rejects.toThrow('waiting_admin');
+    await expect(
+      coordinator.complete(pairing.pairingId, 'device-public-key'),
+    ).rejects.toThrow('waiting_admin');
     expect((await coordinator.approveAdmin(pairing.pairingId)).status).toBe('user_authorized');
   });
 
@@ -119,5 +128,27 @@ describe('ChannelPairingCoordinator', () => {
       'single-use-pairing-nonce-with-enough-entropy',
       { tenantId: 't', tenantName: 'T', botName: 'B', grantedScopes: ['admin:all'] },
     )).rejects.toThrow('unrequested channel scope');
+  });
+
+  it('rejects incomplete provider identity data before installation', async () => {
+    const { coordinator } = setup();
+    const pairing = await coordinator.begin({
+      provider: 'wecom',
+      installationPublicKey: 'device-public-key',
+      requestedScopes: ['message:send'],
+    });
+
+    await expect(
+      coordinator.authorize(
+        pairing.pairingId,
+        'single-use-pairing-nonce-with-enough-entropy',
+        {
+          tenantId: '   ',
+          tenantName: 'Example tenant',
+          botName: 'Otto',
+          grantedScopes: ['message:send'],
+        },
+      ),
+    ).rejects.toThrow('provider tenant identity is required');
   });
 });

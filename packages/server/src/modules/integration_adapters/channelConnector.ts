@@ -197,11 +197,23 @@ export class ChannelPairingCoordinator {
     if (!timingSafeEqual(pairing.tokenHash, candidateHash)) {
       throw new Error('invalid channel pairing nonce');
     }
+    const tenantId = authorization.tenantId.trim();
+    const tenantName = authorization.tenantName.trim();
+    const botName = authorization.botName.trim();
+    if (!tenantId || !tenantName || !botName) {
+      throw new Error('provider tenant identity is required');
+    }
     const granted = validateScopes(authorization.grantedScopes);
     if (granted.some((scope) => !pairing.requestedScopes.includes(scope))) {
       throw new Error('provider granted an unrequested channel scope');
     }
-    pairing.authorization = { ...authorization, grantedScopes: granted };
+    pairing.authorization = {
+      ...authorization,
+      tenantId,
+      tenantName,
+      botName,
+      grantedScopes: granted,
+    };
     const next = authorization.requiresAdminApproval ? 'waiting_admin' : 'user_authorized';
     await this.transition(pairing, next);
     return this.toPublic(pairing);
@@ -215,10 +227,20 @@ export class ChannelPairingCoordinator {
     return this.toPublic(pairing);
   }
 
-  async complete(pairingId: string): Promise<ChannelInstallation> {
+  async complete(
+    pairingId: string,
+    installationPublicKey: string,
+  ): Promise<ChannelInstallation> {
     const pairing = this.requirePairing(pairingId);
     await this.expireIfNeeded(pairing);
     this.assertStatus(pairing, 'user_authorized');
+    const installationKey = installationPublicKey.trim();
+    if (
+      !installationKey ||
+      pairing.installationKeyHash !== digest(installationKey).toString('hex')
+    ) {
+      throw new Error('installation public key does not match channel pairing');
+    }
     const authorization = pairing.authorization;
     if (!authorization) throw new Error('channel pairing authorization is missing');
     await this.transition(pairing, 'installing');

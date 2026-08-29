@@ -96,14 +96,12 @@ export function ChannelPairingCard({ provider }: { provider: ChannelProvider }):
     }
   };
 
-  const action = async (kind: 'approve' | 'install' | 'cancel'): Promise<void> => {
+  const action = async (kind: 'install' | 'cancel'): Promise<void> => {
     if (!pairing || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const response = kind === 'approve'
-        ? await window.otto?.channelPairingApprove(pairing.pairingId)
-        : kind === 'install'
+      const response = kind === 'install'
           ? await window.otto?.channelPairingInstall(pairing.pairingId)
           : await window.otto?.channelPairingCancel(pairing.pairingId);
       if (!response?.ok) {
@@ -146,9 +144,6 @@ export function ChannelPairingCard({ provider }: { provider: ChannelProvider }):
             <div className="otto-hub__feishu-actions">
               {pairing.status === 'waiting_scan' && pairing.qrPayload ? (
                 <button type="button" className="otto-hub__btn" onClick={() => void window.otto?.openExternal(pairing.qrPayload)}>在浏览器打开</button>
-              ) : null}
-              {pairing.status === 'waiting_admin' ? (
-                <button type="button" className="otto-hub__btn otto-hub__btn--primary" disabled={busy} onClick={() => void action('approve')}>管理员已批准</button>
               ) : null}
               {pairing.status === 'user_authorized' ? (
                 <button type="button" className="otto-hub__btn otto-hub__btn--primary" disabled={busy} onClick={() => void action('install')}>确认权限并安装</button>

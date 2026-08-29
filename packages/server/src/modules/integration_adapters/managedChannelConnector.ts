@@ -43,6 +43,7 @@ export interface ManagedProviderAuthorization {
 
 export type ChannelPairingBrokerStatus =
   | { status: 'waiting' }
+  | { status: 'admin_approved' }
   | {
       status: 'authorized';
       authorization: PairingAuthorization;
@@ -101,9 +102,9 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
 
   async getPairingStatus(pairingId: string): Promise<PairingSession> {
     let pairing = await this.options.coordinator.get(pairingId);
-    if (pairing.status === 'waiting_scan') {
+    if (pairing.status === 'waiting_scan' || pairing.status === 'waiting_admin') {
       const remote = await this.options.broker.poll(pairingId);
-      if (remote.status === 'authorized') {
+      if (remote.status === 'authorized' && pairing.status === 'waiting_scan') {
         const nonce = this.requireBrokerNonce(pairingId);
         pairing = await this.acceptProviderAuthorization({
           pairingId,
@@ -111,6 +112,8 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
           authorization: remote.authorization,
           plaintextCredential: remote.plaintextCredential,
         });
+      } else if (remote.status === 'admin_approved' && pairing.status === 'waiting_admin') {
+        pairing = await this.options.coordinator.approveAdmin(pairingId);
       } else if (remote.status === 'denied') {
         pairing = await this.options.coordinator.deny(
           pairingId,

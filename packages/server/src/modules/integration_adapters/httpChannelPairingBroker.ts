@@ -70,6 +70,7 @@ export class HttpChannelPairingBrokerV1 implements ChannelPairingBrokerV1 {
     if (!body || typeof body !== 'object') throw new Error('channel pairing broker returned invalid status');
     const input = body as Record<string, unknown>;
     if (input.status === 'waiting') return { status: 'waiting' };
+    if (input.status === 'admin_approved') return { status: 'admin_approved' };
     if (input.status === 'denied') {
       return {
         status: 'denied',

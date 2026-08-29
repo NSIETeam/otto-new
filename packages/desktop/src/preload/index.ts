@@ -1282,7 +1282,6 @@ const IPC = {
   feishuClearConfig: 'otto:feishu-clear-config',
   channelPairingBegin: 'otto:channel-pairing-begin',
   channelPairingStatus: 'otto:channel-pairing-status',
-  channelPairingApprove: 'otto:channel-pairing-approve',
   channelPairingInstall: 'otto:channel-pairing-install',
   channelPairingCancel: 'otto:channel-pairing-cancel',
   rpaAccessibilityStatus: 'otto:rpa-accessibility-status',
@@ -1457,7 +1456,6 @@ export interface OttoBridge {
   feishuClearConfig(): Promise<FeishuConfigResult>;
   channelPairingBegin(provider: ChannelProvider): Promise<ChannelPairingResult>;
   channelPairingStatus(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
-  channelPairingApprove(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
   channelPairingInstall(pairingId: string): Promise<ChannelPairingActionResult>;
   channelPairingCancel(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
   rpaAccessibilityStatus(): Promise<{ platform: string; supported: boolean; trusted: boolean }>;
@@ -2419,9 +2417,6 @@ const bridge: OttoBridge = {
   },
   channelPairingStatus(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>> {
     return ipcRenderer.invoke('otto:channel-pairing-status', pairingId) as Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
-  },
-  channelPairingApprove(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>> {
-    return ipcRenderer.invoke('otto:channel-pairing-approve', pairingId) as Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
   },
   channelPairingInstall(pairingId: string): Promise<ChannelPairingActionResult> {
     return ipcRenderer.invoke('otto:channel-pairing-install', pairingId) as Promise<ChannelPairingActionResult>;

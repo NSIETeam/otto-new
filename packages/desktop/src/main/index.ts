@@ -607,7 +607,6 @@ const IPC = {
   feishuClearConfig: 'otto:feishu-clear-config',
   channelPairingBegin: 'otto:channel-pairing-begin',
   channelPairingStatus: 'otto:channel-pairing-status',
-  channelPairingApprove: 'otto:channel-pairing-approve',
   channelPairingInstall: 'otto:channel-pairing-install',
   channelPairingCancel: 'otto:channel-pairing-cancel',
   rpaAccessibilityStatus: 'otto:rpa-accessibility-status',
@@ -4195,8 +4194,6 @@ function registerIpc(): void {
   };
   ipcMain.handle(IPC.channelPairingStatus, (_event, pairingId: unknown) =>
     pairingAction(pairingId, 'GET'));
-  ipcMain.handle(IPC.channelPairingApprove, (_event, pairingId: unknown) =>
-    pairingAction(pairingId, 'POST', '/approve'));
   ipcMain.handle(IPC.channelPairingInstall, (_event, pairingId: unknown) =>
     pairingAction(pairingId, 'POST', '/install'));
   ipcMain.handle(IPC.channelPairingCancel, (_event, pairingId: unknown) =>

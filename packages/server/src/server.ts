@@ -2557,8 +2557,6 @@ export class OttoServer {
       let operation: Promise<unknown>;
       if (req.method === 'GET' && !action) {
         operation = connector.getPairingStatus(pairingId);
-      } else if (req.method === 'POST' && action === 'approve') {
-        operation = connector.approveAdmin(pairingId);
       } else if (req.method === 'POST' && action === 'install') {
         operation = readJsonBody(req)
           .then((body) => parseChannelInstallationProof(body))

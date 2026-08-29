@@ -253,4 +253,35 @@ describe('ManagedChannelConnectorV1', () => {
     expect(startMock.mock.invocationCallOrder[0])
       .toBeLessThan(stopMock.mock.invocationCallOrder[0]);
   });
+
+  it('waits for broker-confirmed administrator approval', async () => {
+    const { connector, broker, setBrokerStatus } = setup();
+    const keys = generateKeyPairSync('ed25519');
+    const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const pairing = await connector.beginPairing({
+      provider: 'lark',
+      installationPublicKey: publicKey,
+      requestedScopes: ['im:message'],
+    });
+    setBrokerStatus({
+      status: 'authorized',
+      plaintextCredential: 'broker-refresh-token',
+      authorization: {
+        tenantId: 'tenant-1',
+        tenantName: 'Acme',
+        botName: 'Otto',
+        grantedScopes: ['im:message'],
+        requiresAdminApproval: true,
+      },
+    });
+    expect((await connector.getPairingStatus(pairing.pairingId)).status)
+      .toBe('waiting_admin');
+    setBrokerStatus({ status: 'waiting' });
+    expect((await connector.getPairingStatus(pairing.pairingId)).status)
+      .toBe('waiting_admin');
+    setBrokerStatus({ status: 'admin_approved' });
+    expect((await connector.getPairingStatus(pairing.pairingId)).status)
+      .toBe('user_authorized');
+    expect(broker.poll).toHaveBeenCalledTimes(3);
+  });
 });

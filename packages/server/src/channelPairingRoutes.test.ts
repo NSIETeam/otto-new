@@ -101,7 +101,7 @@ describe('channel pairing REST routes', () => {
     });
   });
 
-  it('delegates begin, status, approval, install and cancellation to one provider connector', async () => {
+  it('delegates begin, status, install and cancellation without local admin bypass', async () => {
     const connector = fakeConnector();
     const { baseUrl, token } = await start({ feishu: connector });
     const auth = { authorization: `Bearer ${token}` };
@@ -119,7 +119,6 @@ describe('channel pairing REST routes', () => {
 
     for (const [suffix, method] of [
       ['', 'GET'],
-      ['/approve', 'POST'],
       ['', 'DELETE'],
     ] as const) {
       const response = await fetch(`${baseUrl}/channels/pairings/${pairing.pairingId}${suffix}`, {
@@ -141,7 +140,12 @@ describe('channel pairing REST routes', () => {
     );
     expect(installed.status).toBe(200);
     expect(connector.getPairingStatus).toHaveBeenCalledOnce();
-    expect(connector.approveAdmin).toHaveBeenCalledOnce();
+    const localApproval = await fetch(
+      `${baseUrl}/channels/pairings/${pairing.pairingId}/approve`,
+      { method: 'POST', headers: auth },
+    );
+    expect(localApproval.status).toBe(405);
+    expect(connector.approveAdmin).not.toHaveBeenCalled();
     expect(connector.completeInstallation).toHaveBeenCalledOnce();
     expect(connector.completeInstallation).toHaveBeenCalledWith(
       pairing.pairingId,

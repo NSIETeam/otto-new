@@ -25,7 +25,6 @@ describe('ChannelPairingCard', () => {
       channelPairingBegin,
       channelPairingInstall,
       channelPairingStatus: vi.fn(),
-      channelPairingApprove: vi.fn(),
       channelPairingCancel: vi.fn(),
       openExternal: vi.fn(),
     };
@@ -57,5 +56,18 @@ describe('ChannelPairingCard', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认权限并安装' }));
     await waitFor(() => expect(channelPairingInstall).toHaveBeenCalledWith(basePairing.pairingId));
     expect(await screen.findByText('机器人连接成功。')).toBeTruthy();
+  });
+
+  it('waits for provider-confirmed admin approval without a local bypass button', async () => {
+    channelPairingBegin.mockResolvedValue({
+      ok: true,
+      pairing: { ...basePairing, status: 'waiting_admin' },
+      error: null,
+    });
+    render(<ChannelPairingCard provider="feishu" />);
+    fireEvent.click(screen.getByRole('button', { name: '生成飞书连接二维码' }));
+
+    expect(await screen.findByText('平台要求企业管理员批准，批准后才能安装。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '管理员已批准' })).toBeNull();
   });
 });

@@ -4,7 +4,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { ModelRequestSafetyError } from './modelRequestSafety.js';
-import { shouldRetryCustomModel } from './customModelRuntimeHelpers.js';
+import {
+  readStreamWithIdleTimeout,
+  shouldRetryCustomModel,
+} from './customModelRuntimeHelpers.js';
 
 const requestId = 'otto-model-00000000-0000-4000-8000-000000000030';
 
@@ -29,5 +32,23 @@ describe('custom model retry safety', () => {
       requestId,
       requestState: 'not_sent',
     }))).toBe(true);
+  });
+
+  it('marks an idle stream as unknown without advertising it as retryable', async () => {
+    const reader = {
+      read: () => new Promise<ReadableStreamReadResult<Uint8Array>>(() => undefined),
+      cancel: async () => undefined,
+    } as unknown as ReadableStreamDefaultReader<Uint8Array>;
+
+    const error = await readStreamWithIdleTimeout(reader, 1).catch(
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toMatchObject({ isStreamInterrupt: true });
+    expect(error).not.toHaveProperty('isRetryable');
+    expect(error).toHaveProperty(
+      'message',
+      expect.stringContaining('will not retry it automatically'),
+    );
   });
 });

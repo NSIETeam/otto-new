@@ -20,7 +20,8 @@ import {
  * 不发 RST）——这种情况 reader.read() 既不 resolve 也不 reject，整个 agent turn
  * 会无限挂起到用户手动 abort。这里给每个 read() 包一层空闲超时，镜像
  * OttoServerAdapter.withTimeout 的代理路径模式，保持两条路径行为一致：
- * 超时即 cancel reader 并抛出可重试的 stream-interrupt 错误，让 turn 快速失败带指引。
+ * 超时即 cancel reader 并抛出带结构化标记的 unknown-outcome 错误。上游可能已经
+ * 接收或计费，因此调用方必须停止，不能自动重放请求或切换 provider。
  *
  * 每来一个数据块计时器就重置（下一次 read() 新建定时器），所以只防单块卡顿，
  * 不对总时长设限——长推理同样不受影响。
@@ -33,15 +34,14 @@ export async function readStreamWithIdleTimeout<T>(
 
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
-      // 中断卡死的连接，并抛出带标记的可重试错误（与代理路径一致）
+      // 中断卡死的连接；标记结果未知，供 runtime 发出双重计费风险提示。
       reader.cancel().catch(() => undefined);
       const err = new Error(
         `[Custom Model] Stream read timeout after ${Math.round(timeoutMs / 1000)}s ` +
           `(no data received in this chunk). The upstream connection appears stalled. ` +
-          `Please retry your request.`,
+          `The request outcome is unknown and Otto will not retry it automatically.`,
       );
       (err as { isStreamInterrupt?: boolean }).isStreamInterrupt = true;
-      (err as { isRetryable?: boolean }).isRetryable = true;
       reject(err);
     }, timeoutMs);
   });

@@ -403,6 +403,86 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
     expect(JSON.stringify(frames)).not.toContain('fetch failed');
   });
 
+  it.each([429, 500, 501, 599])(
+    '结构化 HTTP %i 在 runtime 归类为结果未知且不重放',
+    async (status) => {
+      async function* stream(): AsyncGenerator<unknown> {
+        yield await Promise.reject(Object.assign(new Error('opaque provider failure'), {
+          status,
+        }));
+      }
+      const store = new InMemorySessionStore();
+      const session = store.createSession({ title: `HTTP ${status}` });
+      const frames: ServerToClient[] = [];
+      store.subscribe(session.sessionId, (frame) => frames.push(frame));
+      const runtime = new CoreSessionRuntime(
+        store,
+        session.sessionId,
+        makeFakeConfig(stream),
+        noOpWorkLogger,
+      );
+      await runtime.initialize();
+
+      await runtime.run([{ type: 'text', value: '你好' }], 'local');
+
+      const error = frames.find((frame) => frame.type === 'error');
+      expect(error?.type === 'error' && error.payload.code)
+        .toBe('model_outcome_unknown');
+      expect(error?.type === 'error' && error.payload.message)
+        .not.toContain('opaque provider failure');
+    },
+  );
+
+  it.each([
+    Object.assign(new Error('opaque timeout'), { name: 'TimeoutError' }),
+    Object.assign(new Error('opaque stream disconnect'), { isStreamInterrupt: true }),
+    Object.assign(new Error('opaque socket failure'), { code: 'ECONNRESET' }),
+  ])('结构化超时/断流在 runtime 归类为结果未知', async (transportError) => {
+    async function* stream(): AsyncGenerator<unknown> {
+      yield await Promise.reject(transportError);
+    }
+    const store = new InMemorySessionStore();
+    const session = store.createSession({ title: '传输结果未知' });
+    const frames: ServerToClient[] = [];
+    store.subscribe(session.sessionId, (frame) => frames.push(frame));
+    const runtime = new CoreSessionRuntime(
+      store,
+      session.sessionId,
+      makeFakeConfig(stream),
+      noOpWorkLogger,
+    );
+    await runtime.initialize();
+
+    await runtime.run([{ type: 'text', value: '你好' }], 'local');
+
+    const error = frames.find((frame) => frame.type === 'error');
+    expect(error?.type === 'error' && error.payload.code)
+      .toBe('model_outcome_unknown');
+  });
+
+  it('普通 HTTP 4xx 不误报为结果未知', async () => {
+    async function* stream(): AsyncGenerator<unknown> {
+      yield await Promise.reject(Object.assign(new Error('bad request'), { status: 400 }));
+    }
+    const store = new InMemorySessionStore();
+    const session = store.createSession({ title: 'HTTP 400' });
+    const frames: ServerToClient[] = [];
+    store.subscribe(session.sessionId, (frame) => frames.push(frame));
+    const runtime = new CoreSessionRuntime(
+      store,
+      session.sessionId,
+      makeFakeConfig(stream),
+      noOpWorkLogger,
+    );
+    await runtime.initialize();
+
+    await runtime.run([{ type: 'text', value: '你好' }], 'local');
+
+    const error = frames.find((frame) => frame.type === 'error');
+    expect(error?.type === 'error' && error.payload.code).toBe('core_error');
+    expect(error?.type === 'error' && error.payload.message).toBe('bad request');
+  });
+
   it('首个 token 前结果未知时也不自动切到备用模型', async () => {
     const brokenModel: CustomModelConfig = {
       displayName: 'DeepSeek',
@@ -479,7 +559,7 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
     expect(error?.type === 'error' && error.payload.code)
       .toBe('model_outcome_unknown');
   });
-  it('透传 Edge 请求编号并阻止未确认的供应商切换', async () => {
+  it('透传 Edge 请求编号，同时允许用户显式切换后续模型', async () => {
     const requestId = 'otto-model-00000000-0000-4000-8000-000000000001';
     const providerRequestId = 'provider-request-123';
     async function* stream(): AsyncGenerator<unknown> {

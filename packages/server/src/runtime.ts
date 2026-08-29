@@ -92,29 +92,60 @@ class ModelOutcomeUnknownError extends Error {
   }
 }
 
-/** 把带 cause 的 Node/undici 网络错误链摊平成可匹配文本，但不暴露给最终用户。 */
-function runtimeErrorText(error: unknown): string {
-  const messages: string[] = [];
+/** 遍历 Error.cause 链，读取 provider/Node/undici 提供的结构化失败信息。 */
+function runtimeErrorChain(error: unknown): unknown[] {
+  const chain: unknown[] = [];
   let current: unknown = error;
   const seen = new Set<unknown>();
-  while (current != null && !seen.has(current) && messages.length < 6) {
+  while (current != null && !seen.has(current) && chain.length < 6) {
     seen.add(current);
-    if (current instanceof Error) {
-      messages.push(`${current.name}: ${current.message}`);
-      current = (current as Error & { cause?: unknown }).cause;
-    } else {
-      messages.push(String(current));
-      break;
-    }
+    chain.push(current);
+    if (typeof current !== 'object') break;
+    current = (current as { cause?: unknown }).cause;
   }
-  return messages.join(' | ');
+  return chain;
 }
 
-/** 只对连接层故障自动换模型；鉴权、配额、参数错误仍交给当前模型如实报错。 */
-function isRetryableModelConnectionError(error: unknown): boolean {
-  return /(?:fetch failed|network\s*error|socket(?:\s+hang\s+up)?|connection\s+(?:reset|refused|closed)|\bECONN(?:RESET|REFUSED|ABORTED)\b|\bEPIPE\b|\bETIMEDOUT\b|\bENOTFOUND\b|\bEAI_AGAIN\b|\bUND_ERR_[A-Z_]+\b|\b(?:502|503|504)\b)/i.test(
-    runtimeErrorText(error),
-  );
+/**
+ * 判断请求是否已越过「确认未发送」边界、因而结果可能未知。
+ *
+ * 这里只负责归类并停止；绝不据此自动重试或切换 provider。优先读取 status、
+ * code 和 stream 标记等结构化字段。最后的 TypeError 文本分支仅兼容 undici 在
+ * 没有暴露 cause/code 时产生的通用 `fetch failed` 错误。
+ */
+function isAmbiguousModelTransportOutcome(error: unknown): boolean {
+  return runtimeErrorChain(error).some((entry) => {
+    if (typeof entry !== 'object' || entry === null) return false;
+    const details = entry as {
+      status?: unknown;
+      code?: unknown;
+      name?: unknown;
+      message?: unknown;
+      isStreamInterrupt?: unknown;
+    };
+    if (
+      typeof details.status === 'number' &&
+      (details.status === 429 || (details.status >= 500 && details.status <= 599))
+    ) {
+      return true;
+    }
+    if (details.isStreamInterrupt === true || details.name === 'TimeoutError') {
+      return true;
+    }
+    if (
+      typeof details.code === 'string' &&
+      /^(?:ECONNRESET|ECONNREFUSED|ECONNABORTED|EPIPE|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR_[A-Z_]+)$/i.test(
+        details.code,
+      )
+    ) {
+      return true;
+    }
+    return (
+      entry instanceof TypeError &&
+      typeof details.message === 'string' &&
+      /^(?:fetch failed|network error)$/i.test(details.message.trim())
+    );
+  });
 }
 
 function userFacingRuntimeError(error: unknown): string {
@@ -130,7 +161,7 @@ function userFacingRuntimeError(error: unknown): string {
       error.providerRequestId
         ? `\n供应商请求编号：${error.providerRequestId}` : ''}`;
   }
-  if (isRetryableModelConnectionError(error)) return MODEL_CONNECTION_ERROR;
+  if (isAmbiguousModelTransportOutcome(error)) return MODEL_CONNECTION_ERROR;
   return message;
 }
 
@@ -700,7 +731,7 @@ export class CoreSessionRuntime implements SessionRuntime {
               }
               throw error;
             }
-            if (!signal.aborted && isRetryableModelConnectionError(error)) {
+            if (!signal.aborted && isAmbiguousModelTransportOutcome(error)) {
               throw new ModelOutcomeUnknownError(promptId, error);
             }
             throw error;

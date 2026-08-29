@@ -13,6 +13,7 @@ import {
   callOpenAIResponsesModel,
   callOpenAIResponsesModelStream,
 } from './customModelOpenAIClient.js';
+import { ModelRequestSafetyError } from './modelRequestSafety.js';
 
 const request = {
   contents: [
@@ -135,7 +136,7 @@ describe('OpenAI runtime API token provider', () => {
     );
   });
 
-  it('refreshes the runtime token before a retry attempt', async () => {
+  it('refreshes the runtime token only for a confirmed-not-sent retry', async () => {
     vi.useFakeTimers();
     const apiKeyProvider = vi
       .fn<() => Promise<string>>()
@@ -143,7 +144,11 @@ describe('OpenAI runtime API token provider', () => {
       .mockResolvedValueOnce('refreshed-token');
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response('temporary failure', { status: 500 }))
+      .mockRejectedValueOnce(new ModelRequestSafetyError({
+        message: 'edge confirmed request was not sent',
+        requestId: 'otto-model-00000000-0000-4000-8000-000000000001',
+        requestState: 'not_sent',
+      }))
       .mockResolvedValueOnce(chatResponse());
 
     const result = callOpenAICompatibleModel(
@@ -156,6 +161,47 @@ describe('OpenAI runtime API token provider', () => {
     expect(apiKeyProvider).toHaveBeenCalledTimes(2);
     expect(authorizationOf(fetchMock.mock.calls[0])).toBe('Bearer expired-token');
     expect(authorizationOf(fetchMock.mock.calls[1])).toBe('Bearer refreshed-token');
+  });
+
+  it.each([429, 500])(
+    'does not retry an HTTP %i response or refresh its runtime token',
+    async (status) => {
+      const apiKeyProvider = vi.fn().mockResolvedValue('short-lived-token');
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('ambiguous provider outcome', { status }),
+      );
+
+      await expect(
+        callOpenAICompatibleModel(
+          createConfig('openai', apiKeyProvider),
+          request,
+        ),
+      ).rejects.toMatchObject({ status });
+
+      expect(apiKeyProvider).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not retry an unknown timeout outcome', async () => {
+    const apiKeyProvider = vi.fn().mockResolvedValue('short-lived-token');
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new ModelRequestSafetyError({
+        message: 'response timeout after request transmission',
+        requestId: 'otto-model-00000000-0000-4000-8000-000000000002',
+        requestState: 'unknown_outcome',
+      }),
+    );
+
+    await expect(
+      callOpenAICompatibleModel(
+        createConfig('openai', apiKeyProvider),
+        request,
+      ),
+    ).rejects.toMatchObject({ requestState: 'unknown_outcome' });
+
+    expect(apiKeyProvider).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed before fetch when the runtime token is empty', async () => {

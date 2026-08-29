@@ -17,8 +17,11 @@ import {
   resolveAuthHeaders,
   resolveEnvVar,
   resolveOutputTokens,
-  shouldRetryCustomModel,
 } from './customModelRuntimeHelpers.js';
+import {
+  canAutomaticallyRetryModelRequest,
+  ModelRequestSafetyError,
+} from './modelRequestSafety.js';
 import {
   buildOpenAIChatRequestBody,
   buildOpenAIResponsesRequestBody,
@@ -28,6 +31,12 @@ import {
 import { addFunctionCallsGetter } from './providerConverters/shared.js';
 
 type OpenAIRequest = Record<string, unknown>;
+
+/** Never infer replay safety from HTTP status, timeout text, or provider hints. */
+function shouldRetryOpenAIModelRequest(error: Error): boolean {
+  return error instanceof ModelRequestSafetyError
+    && canAutomaticallyRetryModelRequest(error);
+}
 
 async function resolveAttemptApiKey(
   modelConfig: CustomModelConfig,
@@ -54,7 +63,7 @@ async function resolveAttemptAuthHeaders(
 
 /**
  * OpenAI 兼容模型单次调用
- * 使用指数退避重试策略处理 429 和 5xx 错误
+ * 仅在上游明确确认请求未发送时重试；429/5xx 结果一律不自动重放
  */
 export async function callOpenAICompatibleModel(
   modelConfig: CustomModelConfig,
@@ -101,7 +110,7 @@ export async function callOpenAICompatibleModel(
       return mapOpenAIChatCompletionResponse(await response.json());
     },
     {
-      shouldRetry: shouldRetryCustomModel,
+      shouldRetry: shouldRetryOpenAIModelRequest,
     },
   );
 }
@@ -109,7 +118,7 @@ export async function callOpenAICompatibleModel(
 /**
  * OpenAI Responses API 单次调用
  * 使用 POST /responses 端点
- * 使用指数退避重试策略处理 429 和 5xx 错误
+ * 仅在上游明确确认请求未发送时重试
  */
 export async function callOpenAIResponsesModel(
   modelConfig: CustomModelConfig,
@@ -156,7 +165,7 @@ export async function callOpenAIResponsesModel(
       return mapOpenAIResponsesResponse(await response.json());
     },
     {
-      shouldRetry: shouldRetryCustomModel,
+      shouldRetry: shouldRetryOpenAIModelRequest,
     },
   );
 }
@@ -164,7 +173,7 @@ export async function callOpenAIResponsesModel(
 /**
  * OpenAI Responses API 流式调用
  * 使用 POST /responses 端点 + stream: true
- * 使用指数退避重试策略处理初始连接的 429 和 5xx 错误
+ * 仅在上游明确确认请求未发送时重试初始连接
  */
 export async function* callOpenAIResponsesModelStream(
   modelConfig: CustomModelConfig,
@@ -210,7 +219,7 @@ export async function* callOpenAIResponsesModelStream(
       return res;
     },
     {
-      shouldRetry: shouldRetryCustomModel,
+      shouldRetry: shouldRetryOpenAIModelRequest,
     },
   );
 
@@ -408,7 +417,7 @@ export async function* callOpenAIResponsesModelStream(
 
 /**
  * OpenAI 兼容模型流式调用
- * 使用指数退避重试策略处理初始连接的 429 和 5xx 错误
+ * 仅在上游明确确认请求未发送时重试初始连接
  */
 export async function* callOpenAICompatibleModelStream(
   modelConfig: CustomModelConfig,
@@ -454,7 +463,7 @@ export async function* callOpenAICompatibleModelStream(
       return res;
     },
     {
-      shouldRetry: shouldRetryCustomModel,
+      shouldRetry: shouldRetryOpenAIModelRequest,
     },
   );
 

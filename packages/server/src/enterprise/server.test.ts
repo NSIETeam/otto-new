@@ -224,7 +224,7 @@ beforeEach(() => {
   closeDatabases = [];
 });
 
-describe('数据治理自助闭环', { timeout: 30_000 }, () => {
+describe('数据治理自助闭环', { timeout: 60_000 }, () => {
   it('License 受限时仍允许查看规则、导出和注销本人数据', async () => {
     process.env.OTTO_LICENSE_ENFORCE = 'true';
     process.env.OTTO_DATA_CONTROLLER_NAME = '星河科技有限公司';

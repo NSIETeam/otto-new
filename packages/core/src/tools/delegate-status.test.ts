@@ -96,6 +96,21 @@ describe('CheckDelegateStatusTool', () => {
     expect(res.returnDisplay).toContain('Connection timeout');
   });
 
+  it('reports an interrupted task with its explicit resume handle', async () => {
+    const mgr = getBackgroundTaskManager();
+    const bgTask = mgr.createTask('[Codex] long task', '/proj', 'codex');
+    bgTask.status = 'interrupted';
+    bgTask.sessionId = 'session-resume-1';
+    bgTask.error = '中断：系统不会自动重放。';
+
+    const tool = makeTool();
+    const res = await tool.execute({ taskId: bgTask.id }, new AbortController().signal);
+    expect(res.status).toBe('interrupted');
+    expect(res.returnDisplay).toContain('⚠️');
+    expect(res.llmContent).toContain('session-resume-1');
+    expect(res.returnDisplay).toContain('不会自动重放');
+  });
+
   it('rejects empty taskId', async () => {
     const tool = makeTool();
     const res = await tool.execute({ taskId: '  ' }, new AbortController().signal);

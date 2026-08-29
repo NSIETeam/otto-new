@@ -343,6 +343,7 @@ means no source-level substitute is accepted.
 | Chat command authorization, deduplication and visible reply before ACK | `channelTaskControl.ts`, `brokerChannelTaskBridge.ts`, focused tests | Automated |
 | Natural-language request becomes durable approval-gated work | `workflowTaskControlPort.ts`, `durableWorkflowChannelBackend.test.ts` | Automated |
 | Non-overlapping workflow worker skips unchanged persisted revisions | `recurringTaskRegistry.ts`, `server.residentTasks.test.ts` | Automated |
+| ACP delegate session handle is persisted before work and restart becomes visible `interrupted`, never silent replay | `acpAgentClient.ts`, `backgroundTaskManager.ts`, delegate status and restart tests | Automated migration guard; Workflow is not yet the sole task store |
 | Real managed Feishu/Lark installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | Real managed WeCom installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | macOS Accessibility RPA control and recovery | Signed local build and isolated macOS account | Pending smoke |
@@ -384,3 +385,9 @@ means no source-level substitute is accepted.
   reconnect after restart. The DELETE carries a stable idempotency key and the
   Desktop removes the local installation while showing that the remote outcome
   is unknown; this does not claim that provider-side revocation completed.
+- Removed duplicate self-fallbacks for `OTTO_DELEGATE_TASKS_DIR` and
+  `OTTO_CC_TIMEOUT_MINUTES`; they could never select a distinct legacy value
+  and obscured the active configuration contract. ACP delegate sessions now
+  persist their native resume handle immediately. A daemon restart records an
+  explicit `interrupted` state and never automatically resubmits the prompt;
+  full migration from `BackgroundTaskManager` to Workflow remains pending.

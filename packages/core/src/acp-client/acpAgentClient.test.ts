@@ -107,7 +107,7 @@ describe('runDelegatedTask', () => {
   }, 30_000);
 
   it('captures structured progress (tool count, plan, token usage)', async () => {
-    const snapshots: Array<{ toolCallCount: number }> = [];
+    const snapshots: Array<{ toolCallCount: number; sessionId?: string }> = [];
     const result = await runDelegatedTask({
       agentType: 'claude-code',
       task: 'do something rich',
@@ -119,7 +119,10 @@ describe('runDelegatedTask', () => {
         args: [STUB],
         env: { STUB_MODE: 'rich' },
       },
-      onProgress: (p) => snapshots.push({ toolCallCount: p.toolCallCount }),
+      onProgress: (p) => snapshots.push({
+        toolCallCount: p.toolCallCount,
+        sessionId: p.sessionId,
+      }),
     });
 
     expect(result.status).toBe('success');
@@ -135,6 +138,7 @@ describe('runDelegatedTask', () => {
     });
     // The structured callback fired during the turn.
     expect(snapshots.length).toBeGreaterThan(0);
+    expect(snapshots.some((snapshot) => snapshot.sessionId === 'stub-session-1')).toBe(true);
   }, 30_000);
 
   it('fails with actionable guidance when the agent cannot be launched', async () => {

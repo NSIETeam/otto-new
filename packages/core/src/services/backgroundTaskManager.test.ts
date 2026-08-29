@@ -36,6 +36,7 @@ describe('BackgroundTaskManager structured progress', () => {
     const task = mgr.createTask('[Claude Code] do x', '/proj', 'claude-code');
     mgr.updateProgress(task.id, progress({
       currentTool: 'Edit foo.ts',
+      sessionId: 'session-progress-1',
       toolCallCount: 3,
       plan: [{ content: 'a', status: 'completed' }],
       tokenUsed: 500,
@@ -44,6 +45,7 @@ describe('BackgroundTaskManager structured progress', () => {
 
     const updated = mgr.getTask(task.id)!;
     expect(updated.currentTool).toBe('Edit foo.ts');
+    expect(updated.sessionId).toBe('session-progress-1');
     expect(updated.toolCallCount).toBe(3);
     expect(updated.plan).toEqual([{ content: 'a', status: 'completed' }]);
     expect(updated.tokenUsed).toBe(500);
@@ -70,16 +72,20 @@ describe('BackgroundTaskManager persistence', () => {
     expect(got!.restoredFromDisk).toBe(true);
   });
 
-  it('normalizes a still-running task to failed on reload (restart recovery)', () => {
+  it('marks a still-running task interrupted with an explicit resume handle on reload', () => {
     const mgr = new BackgroundTaskManager({ storageDir: dir });
     const task = mgr.createTask('[Claude Code] long job', '/proj', 'claude-code');
+    mgr.updateProgress(task.id, progress({ sessionId: 'session-resume-1' }));
     expect(task.status).toBe('running');
     // Simulate a crash: the process dies without a terminal transition.
 
     const reloaded = new BackgroundTaskManager({ storageDir: dir });
     const got = reloaded.getTask(task.id)!;
-    expect(got.status).toBe('failed');
+    expect(got.status).toBe('interrupted');
     expect(got.error).toContain('重启');
+    expect(got.error).toContain('session-resume-1');
+    expect(got.error).toContain('不会自动重放');
+    expect(got.sessionId).toBe('session-resume-1');
     expect(got.restoredFromDisk).toBe(true);
   });
 

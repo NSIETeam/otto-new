@@ -18,7 +18,7 @@ export interface CheckDelegateStatusParams {
 
 /** Result shape for {@link CheckDelegateStatusTool}. */
 export interface CheckDelegateStatusResult extends ToolResult {
-  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'not_found';
+  status: 'running' | 'interrupted' | 'completed' | 'failed' | 'cancelled' | 'not_found';
 }
 
 /**
@@ -42,7 +42,7 @@ export class CheckDelegateStatusTool extends BaseTool<
         'You do NOT need to check repeatedly — the system will notify you when the task completes.',
         'Only use this if you specifically need to know the current progress before continuing your work.',
         '',
-        'Returns: task status (running/completed/failed/cancelled) + recent activity summary.',
+        'Returns: task status (running/interrupted/completed/failed/cancelled) + recent activity summary.',
       ].join('\n'),
       Icon.Info,
       {
@@ -129,6 +129,7 @@ export class CheckDelegateStatusTool extends BaseTool<
     const icon = isFinished
       ? task.status === 'completed' ? '✅'
         : task.status === 'failed' ? '❌'
+        : task.status === 'interrupted' ? '⚠️'
         : '⏹️'
       : '⏳';
 
@@ -140,6 +141,7 @@ export class CheckDelegateStatusTool extends BaseTool<
         duration,
         answer: isFinished ? task.answer : undefined,
         error: task.error,
+        sessionId: task.sessionId,
       }),
       returnDisplay:
         `${icon} Claude Code Task ${task.id} — ${task.status} (${duration}s)\n\n${progressText || '(no output yet)'}`,

@@ -51,7 +51,7 @@ export interface BackgroundTask {
   directory?: string;
   /** Discriminator: 'shell' for process-based tasks, 'claude-code' / 'codex' for ACP delegate tasks. */
   kind?: 'shell' | 'claude-code' | 'codex';
-  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'running' | 'interrupted' | 'completed' | 'failed' | 'cancelled';
   pid?: number;
   startTime: number;
   endTime?: number;
@@ -86,6 +86,7 @@ export type BackgroundTaskEvent =
   | { type: 'task-output'; taskId: string; output: string }
   | { type: 'task-stderr'; taskId: string; stderr: string }
   | { type: 'task-progress'; task: BackgroundTask }
+  | { type: 'task-interrupted'; task: BackgroundTask }
   | { type: 'task-completed'; task: BackgroundTask }
   | { type: 'task-failed'; task: BackgroundTask }
   | { type: 'task-cancelled'; task: BackgroundTask };
@@ -151,6 +152,7 @@ export class BackgroundTaskManager extends EventEmitter {
     const task = this.tasks.get(taskId);
     if (!task) return undefined;
     if (progress.currentTool !== undefined) task.currentTool = progress.currentTool;
+    if (progress.sessionId !== undefined) task.sessionId = progress.sessionId;
     task.toolCallCount = progress.toolCallCount;
     if (progress.plan !== undefined) task.plan = progress.plan;
     if (progress.tokenUsed !== undefined) task.tokenUsed = progress.tokenUsed;
@@ -370,6 +372,7 @@ export class BackgroundTaskManager extends EventEmitter {
       'task-output',
       'task-stderr',
       'task-progress',
+      'task-interrupted',
       'task-completed',
       'task-failed',
       'task-cancelled',
@@ -444,11 +447,15 @@ export class BackgroundTaskManager extends EventEmitter {
         const task = JSON.parse(raw) as BackgroundTask;
         if (!task?.id) continue;
         if (task.status === 'running') {
-          task.status = 'failed';
+          task.status = 'interrupted';
+          const recovery = task.sessionId
+            ? `可使用原会话 ${task.sessionId} 显式恢复；系统不会自动重放。`
+            : '未保存可恢复会话句柄，需要人工核对后重新发起。';
           task.error = task.error
-            ? `${task.error}\n(中断：守护进程已重启)`
-            : '中断：守护进程在该任务运行期间重启。';
+            ? `${task.error}\n(中断：守护进程已重启；${recovery})`
+            : `中断：守护进程在该任务运行期间重启。${recovery}`;
           task.endTime = task.endTime ?? Date.now();
+          this.emit('task-interrupted', { type: 'task-interrupted', task });
         }
         task.restoredFromDisk = true;
         this.tasks.set(task.id, task);
@@ -467,14 +474,10 @@ let globalTaskManager: BackgroundTaskManager | null = null;
 export function getBackgroundTaskManager(): BackgroundTaskManager {
   if (!globalTaskManager) {
     // Persistence dir resolution for the process-wide singleton:
-    //   - OTTO_DELEGATE_TASKS_DIR overrides the location (legacy:
-    //     OTTO_DELEGATE_TASKS_DIR) (any deployment).
+    //   - OTTO_DELEGATE_TASKS_DIR overrides the location (any deployment).
     //   - Under vitest, disable persistence so tests never touch the real home.
     //   - Otherwise default to ~/.otto-user/delegate-tasks.
-    const override = (
-      process.env.OTTO_DELEGATE_TASKS_DIR ??
-      process.env.OTTO_DELEGATE_TASKS_DIR
-    )?.trim();
+    const override = process.env.OTTO_DELEGATE_TASKS_DIR?.trim();
     const storageDir = override
       ? override
       : process.env.VITEST

@@ -122,6 +122,8 @@ export interface DelegatePlanEntry {
  * card). All fields are cumulative for the current turn.
  */
 export interface DelegateProgress {
+  /** Native ACP session handle, persisted as soon as the session is created. */
+  sessionId?: string;
   /** Title of the tool call currently in flight, if any. */
   currentTool?: string;
   /** Number of tool calls started so far this turn. */
@@ -277,6 +279,12 @@ class DelegateClient implements acp.Client {
     if (!force && now - this.lastProgressFlush < OUTPUT_UPDATE_INTERVAL_MS) return;
     this.lastProgressFlush = now;
     onProgress({ ...this.progress, plan: this.progress.plan ? [...this.progress.plan] : undefined });
+  }
+
+  /** Persist the resume handle before the first potentially long agent turn. */
+  setSessionId(sessionId: string): void {
+    this.progress.sessionId = sessionId;
+    this.flushProgress(true);
   }
 
   /** Push the cumulative transcript to the caller, throttled. */
@@ -726,6 +734,8 @@ export async function runDelegatedTask(
       const session = await connection.newSession({ cwd, mcpServers: [] });
       sessionId = session.sessionId;
     }
+    if (!sessionId) throw new Error(`${label} returned an empty session id.`);
+    handler.setSessionId(sessionId);
 
     phase = `已连接 ${label}，等待响应…`;
     handler.lastActivityAt = Date.now();

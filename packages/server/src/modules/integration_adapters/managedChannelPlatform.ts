@@ -61,6 +61,7 @@ export interface ManagedChannelPlatformStartResult {
 
 export class ManagedChannelPlatformV1 {
   readonly connectors: Readonly<Partial<Record<ChannelProvider, ChannelConnectorV1>>>;
+  private readonly managedConnectors: readonly ManagedChannelConnectorV1[];
 
   constructor(private readonly options: ManagedChannelPlatformOptions) {
     const connectorMap: Partial<Record<ChannelProvider, ManagedChannelConnectorV1>> = {};
@@ -108,6 +109,7 @@ export class ManagedChannelPlatformV1 {
       });
     }
     this.connectors = connectorMap;
+    this.managedConnectors = Object.values(connectorMap);
   }
 
   async startInstalled(): Promise<ManagedChannelPlatformStartResult[]> {
@@ -142,5 +144,6 @@ export class ManagedChannelPlatformV1 {
       }
     }
     await Promise.all(operations);
+    for (const connector of this.managedConnectors) connector.disposePendingPairings();
   }
 }

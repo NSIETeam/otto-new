@@ -1,7 +1,7 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   ChannelCredentialLookup,
   ChannelCredentialVaultV1,
@@ -21,6 +21,8 @@ import {
   type ChannelPairingBrokerV1,
   type ChannelRuntimeAdapterV1,
 } from './managedChannelConnector.js';
+
+afterEach(() => vi.useRealTimers());
 
 function setup() {
   const entries = new Map<string, { installation: ChannelInstallation; credential: string }>();
@@ -222,6 +224,35 @@ describe('ManagedChannelConnectorV1', () => {
       ).toString('base64url'),
     })).rejects.toThrow('credential is unavailable');
     expect(vault.commit).not.toHaveBeenCalled();
+  });
+
+  it('erases abandoned plaintext at expiry without making an idle broker call', async () => {
+    vi.useFakeTimers();
+    const { connector, broker } = setup();
+    const keys = generateKeyPairSync('ed25519');
+    const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const pairing = await connector.beginPairing({
+      provider: 'lark', installationPublicKey: publicKey, requestedScopes: ['im:message'],
+    });
+    await connector.acceptProviderAuthorization({
+      pairingId: pairing.pairingId,
+      nonce: 'single-use-pairing-nonce-with-enough-entropy',
+      plaintextCredential: 'must-be-erased',
+      authorization: {
+        tenantId: 'tenant-1', tenantName: 'Acme', botName: 'Otto', grantedScopes: ['im:message'],
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await expect(connector.completeInstallation(pairing.pairingId, {
+      installationPublicKey: publicKey,
+      signature: sign(
+        null,
+        channelInstallationProofPayload(pairing.pairingId),
+        keys.privateKey,
+      ).toString('base64url'),
+    })).rejects.toThrow('credential is unavailable');
+    expect(broker.cancel).not.toHaveBeenCalled();
   });
 
   it('registers outbound and consumes an authorized broker result without a public local callback', async () => {

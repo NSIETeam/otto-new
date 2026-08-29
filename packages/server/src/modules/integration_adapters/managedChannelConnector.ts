@@ -84,8 +84,15 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
     ChannelBrokerPairingRegistration
   >();
   private readonly lifecycleTails = new Map<string, Promise<unknown>>();
+  private readonly expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly options: ManagedChannelConnectorOptions) {}
+
+  disposePendingPairings(): void {
+    for (const pairingId of this.expiryTimers.keys()) {
+      this.clearLocalPairingState(pairingId);
+    }
+  }
 
   listInstallations(): ChannelInstallation[] {
     return this.options.vault
@@ -109,6 +116,7 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
       throw error;
     }
     this.brokerRegistrations.set(session.pairingId, registration);
+    this.scheduleLocalExpiry(session);
     return session;
   }
 
@@ -134,8 +142,7 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
       }
     }
     if (['expired', 'denied', 'failed', 'revoked', 'connected'].includes(pairing.status)) {
-      this.pendingCredentials.delete(pairingId);
-      this.brokerRegistrations.delete(pairingId);
+      this.clearLocalPairingState(pairingId);
       await this.options.broker.cancel(pairingId).catch(() => undefined);
     }
     return pairing;
@@ -158,8 +165,7 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
 
   async denyPairing(pairingId: string, reason?: string): Promise<PairingSession> {
     const pairing = await this.options.coordinator.deny(pairingId, reason);
-    this.pendingCredentials.delete(pairingId);
-    this.brokerRegistrations.delete(pairingId);
+    this.clearLocalPairingState(pairingId);
     await this.options.broker.cancel(pairingId).catch(() => undefined);
     const installationId = `channel_${this.options.provider}_${pairingId.slice(5)}`;
     const partial = this.options.vault
@@ -187,8 +193,7 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
       ({ installation: pendingInstallation }) =>
         this.options.vault.commit(pendingInstallation, credential),
     );
-    this.pendingCredentials.delete(pairingId);
-    this.brokerRegistrations.delete(pairingId);
+    this.clearLocalPairingState(pairingId);
     await this.options.broker.cancel(pairingId).catch(() => undefined);
     return installation;
   }
@@ -294,6 +299,28 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
     const registration = this.brokerRegistrations.get(pairingId);
     if (!registration) throw new Error('channel broker registration is unavailable');
     return registration.nonce;
+  }
+
+  private scheduleLocalExpiry(pairing: PairingSession): void {
+    const existing = this.expiryTimers.get(pairing.pairingId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      // The provider Broker owns its own TTL. Expiry here only erases local
+      // plaintext and nonce material; it must not create an idle network call.
+      this.pendingCredentials.delete(pairing.pairingId);
+      this.brokerRegistrations.delete(pairing.pairingId);
+      this.expiryTimers.delete(pairing.pairingId);
+    }, Math.max(0, pairing.expiresAtMs - Date.now()));
+    timer.unref?.();
+    this.expiryTimers.set(pairing.pairingId, timer);
+  }
+
+  private clearLocalPairingState(pairingId: string): void {
+    this.pendingCredentials.delete(pairingId);
+    this.brokerRegistrations.delete(pairingId);
+    const timer = this.expiryTimers.get(pairingId);
+    if (timer) clearTimeout(timer);
+    this.expiryTimers.delete(pairingId);
   }
 
   private serializeLifecycle<T>(

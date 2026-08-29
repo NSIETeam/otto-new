@@ -5,6 +5,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { ChannelPairingPublic, ChannelProvider } from '../../../preload/index.js';
 import { createQrMatrix } from '../../lib/qrMatrix.js';
+import { startNonOverlappingPoll } from '../../lib/nonOverlappingPoll.js';
 import { Card, Badge } from './HubUI.js';
 
 const PROVIDER_LABEL: Record<ChannelProvider, string> = {
@@ -63,21 +64,29 @@ export function ChannelPairingCard({ provider }: { provider: ChannelProvider }):
   const [pairing, setPairing] = useState<ChannelPairingPublic | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pairingId = pairing?.pairingId;
+  const pairingStatus = pairing?.status;
 
   useEffect(() => {
-    if (!pairing || TERMINAL.has(pairing.status)) return;
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      const response = await window.otto?.channelPairingStatus(pairing.pairingId);
-      if (cancelled) return;
-      if (response?.ok && response.data) setPairing(response.data);
+    if (!pairingId || !pairingStatus || TERMINAL.has(pairingStatus)) return;
+    return startNonOverlappingPoll(async () => {
+      const response = await window.otto?.channelPairingStatus(pairingId);
+      if (response?.ok && response.data) {
+        setPairing((current) => ({
+          ...response.data!,
+          // The nonce-bearing QR is intentionally returned only once. Keep it
+          // in renderer memory while the same pairing is still waiting_scan.
+          qrPayload: response.data!.status === 'waiting_scan'
+            ? current?.qrPayload ?? ''
+            : response.data!.qrPayload,
+        }));
+      }
       else if (response?.error) setError(response.error);
-    }, 2_000);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [pairing]);
+    }, 2_000, {
+      runImmediately: false,
+      onError: (cause) => setError(cause instanceof Error ? cause.message : '连接状态查询失败。'),
+    });
+  }, [pairingId, pairingStatus]);
 
   const begin = async (): Promise<void> => {
     if (busy) return;

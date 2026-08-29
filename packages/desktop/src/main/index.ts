@@ -74,6 +74,7 @@ import {
   createChannelInstallationProof,
   type ChannelInstallationDeviceKeys,
 } from './channel-installation-proof.js';
+import { EphemeralChannelPairingKeyStore } from './channel-pairing-key-store.js';
 import {
   isChannelInstallationId,
   parseChannelIdentityMutationIpc,
@@ -536,10 +537,7 @@ let enterpriseTrayContacts: EnterpriseTrayContact[] = [];
 /** 用户主动退出标记；关闭窗口时不退出，只有菜单/托盘退出才真正结束进程。 */
 let isQuitting = false;
 /** Ephemeral private keys for in-progress provider pairings; never exposed to renderer. */
-const channelPairingDeviceKeys = new Map<
-  string,
-  ChannelInstallationDeviceKeys
->();
+const channelPairingDeviceKeys = new EphemeralChannelPairingKeyStore<ChannelInstallationDeviceKeys>();
 const desktopRpaAppGrants = new Map<string, 'inspect' | 'interact'>();
 let unregisterDesktopRpaHost: (() => void) | undefined;
 
@@ -4160,7 +4158,7 @@ function registerIpc(): void {
     });
     const pairing = response?.ok ? response.data as ChannelPairingPublic : null;
     if (pairing) {
-      channelPairingDeviceKeys.set(pairing.pairingId, keys);
+      channelPairingDeviceKeys.set(pairing.pairingId, keys, pairing.expiresAtMs);
     }
     return {
       ok: response?.ok === true,

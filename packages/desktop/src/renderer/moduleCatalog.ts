@@ -14,7 +14,13 @@ import {
 } from './modulePackages.js';
 
 export type ModuleAvailability = 'available' | 'disabled' | 'hidden';
-export type ModuleCategory = 'common' | 'park' | 'capability' | 'custom-agent' | 'customer-module';
+export type ModuleCategory =
+  | 'common'
+  | 'park'
+  | 'recruitment'
+  | 'capability'
+  | 'custom-agent'
+  | 'customer-module';
 
 export interface InstalledCustomerModuleSummary {
   id: string;
@@ -40,8 +46,16 @@ export type ParkModuleTarget =
   | 'staff-tasks'
   | 'my-applications';
 
+export type RecruitmentModuleTarget =
+  | 'resume-analysis'
+  | 'candidate-screening'
+  | 'interview-audio'
+  | 'interview-kit'
+  | 'privacy-audit';
+
 export type ModuleActivation =
   | { kind: 'dialog'; dialog: 'park'; target: ParkModuleTarget }
+  | { kind: 'dialog'; dialog: 'recruitment'; target: RecruitmentModuleTarget }
   | { kind: 'dialog'; dialog: 'enterprise-memory' | 'auto-skill' }
   | { kind: 'route'; route: 'skill-zone' }
   | { kind: 'agent'; profileId: string; customAgentId?: string }
@@ -79,6 +93,7 @@ type StaticAvailabilityRule =
   | 'park'
   | 'park-statistics'
   | 'park-staff'
+  | 'recruitment'
   | 'enterprise-memory'
   | 'auto-skill'
   | 'skill-zone';
@@ -149,6 +164,41 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
     availabilityRule: 'park',
   },
   {
+    id: 'recruitment-resume-analysis', label: '简历分析', category: 'recruitment',
+    description: '解析 PDF/DOCX，按岗位要求提取可核验的匹配与缺失证据。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'resume-analysis' },
+    availabilityRule: 'recruitment',
+  },
+  {
+    id: 'recruitment-candidate-screening', label: '人员初步分析', category: 'recruitment',
+    description: '逐条展示简历原文、匹配规则和可信度，由招聘人员最终确认。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'candidate-screening' },
+    availabilityRule: 'recruitment',
+  },
+  {
+    id: 'recruitment-interview-audio', label: '音频面试分析', category: 'recruitment',
+    description: '使用 WhisperX 时间戳与说话人分离结果分析回答内容和证据。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'interview-audio' },
+    availabilityRule: 'recruitment',
+  },
+  {
+    id: 'recruitment-interview-kit', label: '面试材料', category: 'recruitment',
+    description: '根据缺失证据生成结构化问题、追问、记录和候选人对比报告。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'interview-kit' },
+    availabilityRule: 'recruitment',
+  },
+  {
+    id: 'recruitment-privacy-audit', label: '隐私与审计', category: 'recruitment',
+    description: '管理授权、保存期限、模型版本、人工判断和敏感字段隔离。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'privacy-audit' },
+    availabilityRule: 'recruitment',
+  },
+  {
     id: 'enterprise-memory', label: '企业记忆', category: 'capability', icon: 'enterprise-memory',
     activation: { kind: 'dialog', dialog: 'enterprise-memory' },
     availabilityRule: 'enterprise-memory',
@@ -185,6 +235,8 @@ function staticAvailability(
 ): ModuleAvailability {
   if (rule === 'auto-skill') return 'available';
   if (context.edition !== 'enterprise') return 'hidden';
+
+  if (rule === 'recruitment') return 'available';
 
   if (rule === 'enterprise-memory') {
     return context.organizationFeatures?.knowledge ? 'available' : 'hidden';

@@ -61,6 +61,7 @@ import {
 import { ModuleMarketplaceDialog } from './components/ModuleMarketplaceDialog.js';
 import { CustomerModuleRunDialog } from './components/CustomerModuleRunDialog.js';
 import { ModuleGroupCatalogDialog } from './components/ModuleGroupCatalogDialog.js';
+import { RecruitmentWorkbenchDialog } from './components/RecruitmentWorkbenchDialog.js';
 import { ConfirmDialog } from './components/ConfirmDialog.js';
 import {
   AutoSkillDialog,
@@ -1196,7 +1197,7 @@ function OttoWorkspaceApp({
     actions.createSession();
   };
 
-  const handleNewProjectChat = async (workspacePath?: string): Promise<void> => {
+  const handleNewProjectChat = async (workspacePath?: string): Promise<string | null> => {
     let selectedPath = workspacePath?.trim() || '';
     if (!selectedPath) {
       try {
@@ -1205,7 +1206,7 @@ function OttoWorkspaceApp({
         selectedPath = '';
       }
     }
-    if (!selectedPath) return;
+    if (!selectedPath) return null;
     setMainView('chat');
     const empty = state.sessionIds
       .map((id) => state.sessions[id])
@@ -1218,6 +1219,7 @@ function OttoWorkspaceApp({
     if (empty) actions.selectSession(empty.sessionId);
     else actions.createSession(undefined, selectedPath);
     void refreshWorkspaceDirectories();
+    return selectedPath;
   };
 
   const handleClearContext = (): void => {
@@ -1298,6 +1300,8 @@ function OttoWorkspaceApp({
       if (activation.dialog === 'park') {
         setModuleModal({ kind: 'park', target: activation.target });
         openParkServices(activation.target);
+      } else if (activation.dialog === 'recruitment') {
+        openModuleModal({ kind: 'recruitment', target: activation.target });
       } else {
         openModuleModal({ kind: activation.dialog });
       }
@@ -1405,7 +1409,7 @@ function OttoWorkspaceApp({
           actions.selectSession(id);
         }}
         onNewChat={handleNewChat}
-        onNewProjectChat={(workspacePath) => { void handleNewProjectChat(workspacePath); }}
+        onNewProjectChat={handleNewProjectChat}
         defaultWorkspacePath={workspaceDirectories.defaultPath}
         recentWorkspacePaths={workspaceDirectories.recentPaths}
         onOpenHub={() => openHub('prefs')}
@@ -1649,6 +1653,14 @@ function OttoWorkspaceApp({
         key={`${moduleWorkspaceScopeKey}:enterprise-memory`}
         open={moduleModal?.kind === 'enterprise-memory'}
         role={centralIdentity.role}
+        onClose={() => setModuleModal(null)}
+      />
+      <RecruitmentWorkbenchDialog
+        key={`${moduleWorkspaceScopeKey}:recruitment`}
+        open={moduleModal?.kind === 'recruitment'}
+        target={moduleModal?.kind === 'recruitment' ? moduleModal.target : 'resume-analysis'}
+        reviewerId={account.id}
+        organizationName={account.organizationName}
         onClose={() => setModuleModal(null)}
       />
       <AutoSkillDialog

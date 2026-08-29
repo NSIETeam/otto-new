@@ -217,6 +217,20 @@ export interface VoiceResult {
   polished: boolean;
 }
 
+export interface RecruitmentTranscriptResult {
+  backend: 'whisperx';
+  model: string;
+  language: string | null;
+  diarized: boolean;
+  segments: Array<{
+    speaker: string;
+    startSeconds: number;
+    endSeconds: number;
+    text: string;
+  }>;
+  warning?: string;
+}
+
 export interface EnterpriseAccount {
   id: string;
   organizationId: string;
@@ -1162,6 +1176,7 @@ const IPC = {
   selectFolders: 'otto:select-folders',
   selectWorkspaceDirectory: 'otto:select-workspace-directory',
   getWorkspaceDirectories: 'otto:get-workspace-directories',
+  recruitmentTranscribe: 'otto:recruitment-transcribe',
   authorizeWorkspaceDirectory: 'otto:authorize-workspace-directory',
   grantBrowserFile: 'otto:grant-browser-file',
   authorizeMessageFiles: 'otto:authorize-message-files',
@@ -1419,6 +1434,8 @@ export interface OttoBridge {
   getWorkspaceDirectories(): Promise<{ defaultPath: string; recentPaths: string[] }>;
   /** 用原生目录选择器添加一个真实工作目录。 */
   selectWorkspaceDirectory(): Promise<string | null>;
+  /** 使用本地 WhisperX 生成带时间戳的面试转写，并在可用时区分说话人。 */
+  recruitmentTranscribe(filePath: string): Promise<RecruitmentTranscriptResult>;
   /**
    * Electron 32+ 不再提供 File.path；通过 webUtils 恢复用户拖入/浏览器选择文件的
    * 真实本地路径。只接受浏览器 File 对象，不能用任意字符串伪造路径。
@@ -2346,6 +2363,10 @@ const bridge: OttoBridge = {
 
   selectWorkspaceDirectory(): Promise<string | null> {
     return ipcRenderer.invoke(IPC.selectWorkspaceDirectory) as Promise<string | null>;
+  },
+
+  recruitmentTranscribe(filePath: string): Promise<RecruitmentTranscriptResult> {
+    return ipcRenderer.invoke(IPC.recruitmentTranscribe, filePath) as Promise<RecruitmentTranscriptResult>;
   },
 
   getPathForFile(file: File): string {

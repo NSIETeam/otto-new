@@ -2,12 +2,13 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-import type { ParkModuleTarget } from './moduleCatalog.js';
+import type { ParkModuleTarget, RecruitmentModuleTarget } from './moduleCatalog.js';
 
 export type ModuleModalState =
   | { kind: 'marketplace'; groupId: string }
   | { kind: 'group-catalog' }
   | { kind: 'park'; target: ParkModuleTarget }
+  | { kind: 'recruitment'; target: RecruitmentModuleTarget }
   | { kind: 'enterprise-memory' }
   | { kind: 'auto-skill' }
   | { kind: 'custom-expert'; expertId?: string }

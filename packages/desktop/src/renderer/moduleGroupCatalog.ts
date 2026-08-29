@@ -37,6 +37,14 @@ export const HONGCHUANG_PARK_SERVICE_MODULE_IDS = [
   'park-vehicle-visit',
 ] as const;
 
+export const SMART_RECRUITMENT_MODULE_IDS = [
+  'recruitment-resume-analysis',
+  'recruitment-candidate-screening',
+  'recruitment-interview-audio',
+  'recruitment-interview-kit',
+  'recruitment-privacy-audit',
+] as const;
+
 export const OFFICIAL_MODULE_GROUP_TEMPLATES: readonly ModuleGroupTemplateDefinition[] = [
   {
     package: {
@@ -52,6 +60,22 @@ export const OFFICIAL_MODULE_GROUP_TEMPLATES: readonly ModuleGroupTemplateDefini
     editions: ['enterprise'],
     rows: 3,
     moduleIds: HONGCHUANG_PARK_SERVICE_MODULE_IDS,
+    autoInstall: false,
+  },
+  {
+    package: {
+      source: 'official',
+      packageId: 'otto.group.smart-recruitment',
+      publisherId: OTTO_OFFICIAL_PUBLISHER_ID,
+      version: '1.0.0',
+    },
+    groupId: 'smart-recruitment',
+    name: '智能招聘',
+    description: '证据化简历初筛、音频面试分析、结构化面试材料以及隐私审计；所有筛选结论均需人工确认。',
+    icon: 'generated:agent-hr-recruiting',
+    editions: ['enterprise'],
+    rows: 2,
+    moduleIds: SMART_RECRUITMENT_MODULE_IDS,
     autoInstall: false,
   },
   {

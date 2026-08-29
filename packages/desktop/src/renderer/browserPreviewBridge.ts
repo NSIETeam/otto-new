@@ -355,6 +355,9 @@ if (!previewWindow.otto) {
       recentPaths: ['/Users/demo'],
     }),
     selectWorkspaceDirectory: () => Promise.resolve(null),
+    recruitmentTranscribe: () => Promise.reject(
+      new Error('浏览器预览不支持本地 WhisperX 面试转写'),
+    ),
     openExternal: () => Promise.resolve(),
     openPath: () => Promise.resolve(),
     inspectLocalPath: () =>

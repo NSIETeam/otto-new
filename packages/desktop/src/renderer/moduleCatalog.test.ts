@@ -59,6 +59,30 @@ describe('static module catalog', () => {
     ))).toBe(true);
   });
 
+  it('publishes five enterprise recruitment modules and hides them from personal workspaces', () => {
+    const enterprise = buildModuleCatalog(enterpriseContext());
+    const recruitment = enterprise.filter((module) => module.category === 'recruitment');
+    expect(recruitment.map((module) => module.id)).toEqual([
+      'recruitment-resume-analysis',
+      'recruitment-candidate-screening',
+      'recruitment-interview-audio',
+      'recruitment-interview-kit',
+      'recruitment-privacy-audit',
+    ]);
+    expect(recruitment.every((module) => module.availability === 'available')).toBe(true);
+    expect(recruitment.every((module) => (
+      module.activation.kind === 'dialog' && module.activation.dialog === 'recruitment'
+    ))).toBe(true);
+
+    const personal = buildModuleCatalog({
+      edition: 'personal', profiles: BASE_AGENT_PROFILES, organizationFeatures: enabledFeatures,
+      parkAuthorization: { hasParkContext: false, canViewStatistics: false, canViewStaffTasks: false },
+      customAgents: [],
+    });
+    expect(personal.filter((module) => module.category === 'recruitment')
+      .every((module) => module.availability === 'hidden')).toBe(true);
+  });
+
   it('maps each fixed agent from its existing profile instead of duplicating profile data', () => {
     const catalog = buildModuleCatalog(enterpriseContext());
     const ppt = catalog.find((module) => module.id === 'agent-ppt');

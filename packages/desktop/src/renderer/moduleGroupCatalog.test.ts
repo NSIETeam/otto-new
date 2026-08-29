@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getModuleGroupTemplateInstallState,
   HONGCHUANG_PARK_SERVICE_MODULE_IDS,
+  SMART_RECRUITMENT_MODULE_IDS,
   installModuleGroupTemplate,
   listModuleGroupTemplates,
 } from './moduleGroupCatalog.js';
@@ -10,6 +11,9 @@ import type { ModuleWorkspaceLayout } from './moduleWorkspace.js';
 
 const parkTemplate = listModuleGroupTemplates('enterprise').find((template) => (
   template.package.packageId === 'otto.group.hongchuang-park-services'
+))!;
+const recruitmentTemplate = listModuleGroupTemplates('enterprise').find((template) => (
+  template.package.packageId === 'otto.group.smart-recruitment'
 ))!;
 
 describe('official module group catalog', () => {
@@ -27,6 +31,22 @@ describe('official module group catalog', () => {
 
   it('does not expose enterprise-only official groups to a personal workspace', () => {
     expect(listModuleGroupTemplates('personal')).toEqual([]);
+  });
+
+  it('defines intelligent recruitment as one official five-function group', () => {
+    expect(recruitmentTemplate).toMatchObject({
+      name: '智能招聘',
+      groupId: 'smart-recruitment',
+      rows: 2,
+      autoInstall: false,
+      package: {
+        source: 'official',
+        packageId: 'otto.group.smart-recruitment',
+        publisherId: 'otto.official',
+        version: '1.0.0',
+      },
+    });
+    expect(recruitmentTemplate.moduleIds).toEqual(SMART_RECRUITMENT_MODULE_IDS);
   });
 
   it('upgrades a legacy six-module park group in place and moves duplicates atomically', () => {

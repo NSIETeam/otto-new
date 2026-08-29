@@ -172,6 +172,7 @@ describe('session list view preference', () => {
       version: 1,
       mode: 'workspace',
       collapsedWorkspaceKeys: ['workspace:/a', 'workspace:/a', '', 'workspace:/b'],
+      removedProjectPaths: [' /Users/yang/old ', '/Users/yang/old'],
     }, { setItem })).toBe(true);
 
     expect(setItem).toHaveBeenCalledWith(
@@ -180,7 +181,29 @@ describe('session list view preference', () => {
         version: 1,
         mode: 'workspace',
         collapsedWorkspaceKeys: ['workspace:/a', 'workspace:/b'],
+        removedProjectPaths: ['/Users/yang/old'],
       }),
     );
+  });
+
+  it('moves removed projects back to ordinary conversations without dropping their sessions', () => {
+    const now = new Date('2026-08-26T12:00:00+08:00').getTime();
+    const session = makeSession({
+      sessionId: 'kept-history',
+      workspacePath: '/Users/yang/project',
+      updatedAt: now,
+    });
+
+    const groups = groupSessionsForSidebar(
+      [session],
+      'kind',
+      now,
+      '/Users/yang',
+      ['/Users/yang/project'],
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].section).toBe('conversations');
+    expect(groups[0].sessions[0].sessionId).toBe('kept-history');
   });
 });

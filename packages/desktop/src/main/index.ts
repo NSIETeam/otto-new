@@ -155,6 +155,7 @@ import {
   type VoiceConfigInput,
 } from './voiceConfig.js';
 import { transcribeAudio } from './voiceService.js';
+import { transcribeRecruitmentInterview } from './recruitment-transcription.js';
 import {
   EnterpriseSkillLibrary,
   type EnterpriseSkillScope,
@@ -543,6 +544,7 @@ const IPC = {
   selectFolders: 'otto:select-folders',
   selectWorkspaceDirectory: 'otto:select-workspace-directory',
   getWorkspaceDirectories: 'otto:get-workspace-directories',
+  recruitmentTranscribe: 'otto:recruitment-transcribe',
   authorizeWorkspaceDirectory: 'otto:authorize-workspace-directory',
   grantBrowserFile: 'otto:grant-browser-file',
   authorizeMessageFiles: 'otto:authorize-message-files',
@@ -5162,6 +5164,16 @@ function registerIpc(): void {
                 'md',
                 'zip',
                 'log',
+                'wav',
+                'mp3',
+                'm4a',
+                'aac',
+                'flac',
+                'ogg',
+                'opus',
+                'webm',
+                'mp4',
+                'mov',
               ],
             },
           ],
@@ -5192,6 +5204,16 @@ function registerIpc(): void {
                 'md',
                 'zip',
                 'log',
+                'wav',
+                'mp3',
+                'm4a',
+                'aac',
+                'flac',
+                'ogg',
+                'opus',
+                'webm',
+                'mp4',
+                'mov',
               ],
             },
           ],
@@ -5233,6 +5255,14 @@ function registerIpc(): void {
         }));
     if (result.canceled || !result.filePaths[0]) return null;
     return workspaceDirectories.grant(result.filePaths[0]);
+  });
+
+  ipcMain.handle(IPC.recruitmentTranscribe, async (_event, filePath: unknown) => {
+    if (typeof filePath !== 'string' || !filePath.trim()) {
+      throw new Error('面试录音路径无效');
+    }
+    const granted = fileAccessGrants.resolve(filePath, 2 * 1024 * 1024 * 1024);
+    return transcribeRecruitmentInterview(granted.filePath);
   });
 
   ipcMain.handle(IPC.authorizeWorkspaceDirectory, (_event, directory: unknown) => {

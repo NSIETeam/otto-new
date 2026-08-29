@@ -12,6 +12,7 @@ import { ModuleIcon } from './ModuleIcon.js';
 const CATEGORY_LABELS: Readonly<Record<ModuleCategory, string>> = {
   common: '常用',
   park: '园区服务',
+  recruitment: '智能招聘',
   capability: '企业能力',
   'custom-agent': '我的专家',
   'customer-module': '客户模块',
@@ -19,6 +20,7 @@ const CATEGORY_LABELS: Readonly<Record<ModuleCategory, string>> = {
 
 const CATEGORY_ORDER: readonly ModuleCategory[] = [
   'common',
+  'recruitment',
   'capability',
   'custom-agent',
   'customer-module',

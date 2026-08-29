@@ -54,6 +54,7 @@ import {
 const GROUPING_MENU_WIDTH = 218;
 const GROUPING_MENU_VIEWPORT_MARGIN = 12;
 const GROUPING_MENU_TRIGGER_GAP = 4;
+const PROJECT_MENU_WIDTH = 168;
 
 function getGroupingMenuPosition(rect: DOMRect): { top: number; left: number } {
   const maxLeft = Math.max(
@@ -91,7 +92,9 @@ interface SidebarProps {
   onSelect: (id: string) => void;
   onNewChat: () => void;
   /** 选择目录创建项目，或直接在指定项目目录中新建会话。 */
-  onNewProjectChat?: (workspacePath?: string) => void;
+  onNewProjectChat?: (
+    workspacePath?: string,
+  ) => string | null | void | Promise<string | null | void>;
   defaultWorkspacePath?: string;
   recentWorkspacePaths?: string[];
   onOpenHub: () => void;
@@ -139,6 +142,16 @@ export function Sidebar({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [groupingMenuOpen, setGroupingMenuOpen] = useState(false);
   const [groupingMenuPosition, setGroupingMenuPosition] = useState({ top: 0, left: 0 });
+  const [projectMenu, setProjectMenu] = useState<{
+    label: string;
+    workspacePath: string;
+    top: number;
+    left: number;
+  } | null>(null);
+  const [projectToRemove, setProjectToRemove] = useState<{
+    label: string;
+    workspacePath: string;
+  } | null>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const accountMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const accountMenuItemRef = useRef<HTMLButtonElement>(null);
@@ -146,6 +159,7 @@ export function Sidebar({
   const groupingMenuSurfaceRef = useRef<HTMLDivElement>(null);
   const groupingMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const groupingMenuItemRef = useRef<HTMLButtonElement>(null);
+  const projectMenuItemRef = useRef<HTMLButtonElement>(null);
   const workspaceScrollbarHideTimerRef = useRef<number | null>(null);
   const preferenceKey = sessionListPreferenceStorageKey(preferenceScope);
   const [preferenceState, setPreferenceState] = useState<{
@@ -164,6 +178,7 @@ export function Sidebar({
       preference.mode,
       Date.now(),
       defaultWorkspacePath,
+      preference.removedProjectPaths,
     );
     if (preference.mode !== 'kind') return grouped;
     const projectGroups = grouped.filter((group) => group.section === 'projects');
@@ -172,6 +187,9 @@ export function Sidebar({
       .filter((workspacePath) => (
         workspacePath.trim()
         && !sameWorkspacePath(workspacePath, defaultWorkspacePath)
+        && !preference.removedProjectPaths.some((removedPath) => (
+          sameWorkspacePath(workspacePath, removedPath)
+        ))
         && !projectGroups.some((group) => sameWorkspacePath(group.fullPath, workspacePath))
       ))
       .map((workspacePath) => ({
@@ -183,7 +201,7 @@ export function Sidebar({
         sessions: [],
       }));
     return [...projectGroups, ...emptyProjectGroups, ...conversationGroups];
-  }, [defaultWorkspacePath, preference.mode, recentWorkspacePaths, sessions]);
+  }, [defaultWorkspacePath, preference, recentWorkspacePaths, sessions]);
   const sessionCount = sessions.length;
   const collapsedWorkspaceKeys = useMemo(
     () => new Set(preference.collapsedWorkspaceKeys),
@@ -219,6 +237,34 @@ export function Sidebar({
   const commitPreference = (next: SessionListPreference): void => {
     setPreferenceState({ key: preferenceKey, preference: next });
     writeSessionListPreference(preferenceScope, next);
+  };
+
+  const openProject = async (workspacePath?: string): Promise<void> => {
+    const openedPath = await onNewProjectChat(workspacePath);
+    const restoredPath = typeof openedPath === 'string' ? openedPath : workspacePath;
+    if (!restoredPath || !preference.removedProjectPaths.some((removedPath) => (
+      sameWorkspacePath(restoredPath, removedPath)
+    ))) return;
+    commitPreference({
+      ...preference,
+      removedProjectPaths: preference.removedProjectPaths.filter((removedPath) => (
+        !sameWorkspacePath(restoredPath, removedPath)
+      )),
+    });
+  };
+
+  const removeProject = (workspacePath: string): void => {
+    commitPreference({
+      ...preference,
+      collapsedWorkspaceKeys: preference.collapsedWorkspaceKeys.filter((key) => (
+        key !== `workspace:${workspacePath}`
+      )),
+      removedProjectPaths: preference.removedProjectPaths.some((removedPath) => (
+        sameWorkspacePath(removedPath, workspacePath)
+      ))
+        ? preference.removedProjectPaths
+        : [...preference.removedProjectPaths, workspacePath],
+    });
   };
 
   useEffect(() => {
@@ -305,6 +351,27 @@ export function Sidebar({
     };
   }, [groupingMenuOpen]);
 
+  useEffect(() => {
+    if (!projectMenu) return;
+    projectMenuItemRef.current?.focus();
+    const close = (): void => setProjectMenu(null);
+    const onDocumentMouseDown = (event: MouseEvent): void => {
+      const target = event.target as Node;
+      if (!(target instanceof Element) || !target.closest('.otto-project-menu')) close();
+    };
+    const onDocumentKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') close();
+    };
+    document.addEventListener('mousedown', onDocumentMouseDown);
+    document.addEventListener('keydown', onDocumentKeyDown);
+    window.addEventListener('blur', close);
+    return () => {
+      document.removeEventListener('mousedown', onDocumentMouseDown);
+      document.removeEventListener('keydown', onDocumentKeyDown);
+      window.removeEventListener('blur', close);
+    };
+  }, [projectMenu]);
+
   const toggleGroupingMenu = (): void => {
     if (groupingMenuOpen) {
       setGroupingMenuOpen(false);
@@ -343,7 +410,6 @@ export function Sidebar({
         parkTicketUnreadCount={parkTicketUnreadCount}
         unreadSessions={unreadSessions}
         onNewChat={onNewChat}
-        onNewProjectChat={onNewProjectChat}
         onNavigate={onNavigate}
         onOpenAccounts={
           enterpriseAccount?.accountType !== 'personal' && enterpriseAccount?.isAdmin
@@ -442,7 +508,7 @@ export function Sidebar({
                         className="otto-session-section__add"
                         aria-label="打开新项目"
                         title="打开新项目"
-                        onClick={() => onNewProjectChat()}
+                        onClick={() => { void openProject(); }}
                       >
                         <IconFolderOpen size={14} />
                         <span>打开</span>
@@ -472,7 +538,7 @@ export function Sidebar({
                                 className="otto-session-section__add"
                                 aria-label="打开新项目"
                                 title="打开新项目"
-                                onClick={() => onNewProjectChat()}
+                                onClick={() => { void openProject(); }}
                               >
                                 <IconFolderOpen size={14} />
                                 <span>打开</span>
@@ -484,7 +550,31 @@ export function Sidebar({
                         className={`otto-session-group${group.collapsible ? ' otto-session-group--workspace' : ''}`}
                       >
                       {group.collapsible ? (
-                        <div className="otto-workspace-group__row">
+                        <div
+                          className="otto-workspace-group__row"
+                          onContextMenu={preference.mode === 'kind'
+                            && group.section === 'projects'
+                            && group.fullPath
+                            ? (event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                const left = Math.min(
+                                  event.clientX,
+                                  Math.max(12, window.innerWidth - PROJECT_MENU_WIDTH - 12),
+                                );
+                                const top = Math.min(
+                                  event.clientY,
+                                  Math.max(12, window.innerHeight - 52),
+                                );
+                                setProjectMenu({
+                                  label: group.label,
+                                  workspacePath: group.fullPath!,
+                                  top,
+                                  left,
+                                });
+                              }
+                            : undefined}
+                        >
                           <button
                             type="button"
                             className="otto-workspace-group__toggle"
@@ -526,7 +616,7 @@ export function Sidebar({
                               className="otto-workspace-group__add"
                               aria-label={`在 ${group.label} 项目中新建会话`}
                               title="在项目中新建会话"
-                              onClick={() => onNewProjectChat(group.fullPath)}
+                              onClick={() => { void openProject(group.fullPath); }}
                             >
                               <IconSquarePen size={14} />
                             </button>
@@ -661,6 +751,44 @@ export function Sidebar({
           }}
         />
       ) : null}
+      {projectMenu ? createPortal(
+        <div
+          className="otto-project-menu"
+          role="menu"
+          aria-label="项目操作"
+          style={{ top: projectMenu.top, left: projectMenu.left }}
+        >
+          <button
+            ref={projectMenuItemRef}
+            type="button"
+            role="menuitem"
+            className="otto-project-menu__danger"
+            onClick={() => {
+              setProjectToRemove({
+                label: projectMenu.label,
+                workspacePath: projectMenu.workspacePath,
+              });
+              setProjectMenu(null);
+            }}
+          >
+            删除项目
+          </button>
+        </div>,
+        document.body,
+      ) : null}
+      <ConfirmDialog
+        open={projectToRemove !== null}
+        title="删除项目"
+        message={projectToRemove
+          ? `确定从 Otto 中删除项目「${projectToRemove.label}」吗？本地文件夹和历史会话都会保留。`
+          : ''}
+        confirmText="删除项目"
+        onCancel={() => setProjectToRemove(null)}
+        onConfirm={() => {
+          if (projectToRemove) removeProject(projectToRemove.workspacePath);
+          setProjectToRemove(null);
+        }}
+      />
     </aside>
   );
 }
@@ -672,7 +800,6 @@ function NavItems({
   parkTicketUnreadCount,
   unreadSessions,
   onNewChat,
-  onNewProjectChat,
   onNavigate,
   onOpenAccounts,
 }: {
@@ -682,7 +809,6 @@ function NavItems({
   parkTicketUnreadCount: number;
   unreadSessions?: string[];
   onNewChat: () => void;
-  onNewProjectChat: (workspacePath?: string) => void;
   onNavigate?: (view: 'chat' | 'organization' | 'inbox' | 'work' | 'hub') => void;
   onOpenAccounts?: () => void;
 }): React.JSX.Element {
@@ -722,14 +848,6 @@ function NavItems({
       <button type="button" className="otto-sidebar__navitem" onClick={onNewChat}>
         <IconSquarePen size={18} className="otto-sidebar__navicon" />
         <span>新建会话</span>
-      </button>
-      <button
-        type="button"
-        className="otto-sidebar__navitem otto-sidebar__navitem--project"
-        onClick={() => onNewProjectChat()}
-      >
-        <IconFolderOpen size={18} className="otto-sidebar__navicon" />
-        <span>打开项目</span>
       </button>
       {onNavigate ? navItems.map((item) => {
         const isActive = activeView === item.view;

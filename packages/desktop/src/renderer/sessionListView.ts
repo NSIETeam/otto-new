@@ -18,12 +18,15 @@ export interface SessionListPreference {
   version: 1;
   mode: SessionListMode;
   collapsedWorkspaceKeys: string[];
+  /** 用户从项目区移除的目录；只解除项目归类，不删除目录或历史会话。 */
+  removedProjectPaths: string[];
 }
 
 export const DEFAULT_SESSION_LIST_PREFERENCE: SessionListPreference = {
   version: 1,
   mode: 'kind',
   collapsedWorkspaceKeys: [],
+  removedProjectPaths: [],
 };
 
 const STORAGE_PREFIX = 'otto.session-list.v1';
@@ -55,7 +58,14 @@ function normalizePreference(value: unknown): SessionListPreference {
       (key): key is string => typeof key === 'string' && key.trim().length > 0,
     ))]
     : [];
-  return { version: 1, mode: candidate.mode, collapsedWorkspaceKeys };
+  const removedProjectPaths = Array.isArray(candidate.removedProjectPaths)
+    ? [...new Set(candidate.removedProjectPaths.filter(
+      (workspacePath): workspacePath is string => (
+        typeof workspacePath === 'string' && workspacePath.trim().length > 0
+      ),
+    ).map((workspacePath) => workspacePath.trim()))]
+    : [];
+  return { version: 1, mode: candidate.mode, collapsedWorkspaceKeys, removedProjectPaths };
 }
 
 export function readSessionListPreference(
@@ -220,12 +230,19 @@ function groupByKind(
   sessions: readonly SessionSummary[],
   defaultWorkspacePath: string | null | undefined,
   now: number,
+  removedProjectPaths: readonly string[],
 ): SidebarSessionGroup[] {
   const projectSessions = sessions.filter((session) => (
     isProjectSession(session, defaultWorkspacePath)
+    && !removedProjectPaths.some((workspacePath) => (
+      sameWorkspacePath(session.workspacePath, workspacePath)
+    ))
   ));
   const conversationSessions = sessions.filter((session) => (
     !isProjectSession(session, defaultWorkspacePath)
+    || removedProjectPaths.some((workspacePath) => (
+      sameWorkspacePath(session.workspacePath, workspacePath)
+    ))
   ));
   return [
     ...groupByWorkspace(projectSessions).map((group) => ({
@@ -244,7 +261,10 @@ export function groupSessionsForSidebar(
   mode: SessionListMode,
   now = Date.now(),
   defaultWorkspacePath?: string,
+  removedProjectPaths: readonly string[] = [],
 ): SidebarSessionGroup[] {
-  if (mode === 'kind') return groupByKind(sessions, defaultWorkspacePath, now);
+  if (mode === 'kind') {
+    return groupByKind(sessions, defaultWorkspacePath, now, removedProjectPaths);
+  }
   return mode === 'workspace' ? groupByWorkspace(sessions) : groupByTime(sessions, now);
 }

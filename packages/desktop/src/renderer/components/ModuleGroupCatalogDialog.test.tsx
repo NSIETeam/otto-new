@@ -101,6 +101,32 @@ describe('ModuleGroupCatalogDialog', () => {
     }));
   });
 
+  it('shows and atomically installs the official intelligent recruitment group', () => {
+    const { onConfirm } = renderDialog();
+    const dialog = screen.getByRole('dialog', { name: '新增功能组' });
+    const card = within(dialog).getByRole('heading', { name: '智能招聘' }).closest('article');
+    if (!card) throw new Error('missing recruitment template card');
+
+    expect(within(card).getByText('简历分析')).toBeTruthy();
+    expect(within(card).getByText('人员初步分析')).toBeTruthy();
+    expect(within(card).getByText('音频面试分析')).toBeTruthy();
+    expect(within(card).getByText('面试材料')).toBeTruthy();
+    expect(within(card).getByText('隐私与审计')).toBeTruthy();
+    fireEvent.click(within(card).getByRole('button', { name: '添加功能组' }));
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      groups: expect.arrayContaining([expect.objectContaining({
+        id: 'smart-recruitment',
+        moduleIds: [
+          'recruitment-resume-analysis',
+          'recruitment-candidate-screening',
+          'recruitment-interview-audio',
+          'recruitment-interview-kit',
+          'recruitment-privacy-audit',
+        ],
+      })]),
+    }));
+  });
+
   it('does not expose enterprise official templates in personal edition', () => {
     renderDialog({ edition: 'personal' });
 

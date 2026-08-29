@@ -13,11 +13,22 @@ const {
   existsSync,
   mkdirSync,
   readdirSync,
-  statSync,
 } = require('node:fs');
 const path = require('node:path');
 
 const MAX_APP_ASAR_BYTES = 120 * 1024 * 1024;
+const SQLCIPHER_RESOURCE_FILES = Object.freeze([
+  'better_sqlite3.node',
+  'manifest.json',
+  'sbom.cdx.json',
+  'THIRD_PARTY_NOTICES.md',
+]);
+
+function electronBuilderArchName(value) {
+  if (value === 'x64' || value === 1) return 'x64';
+  if (value === 'arm64' || value === 3) return 'arm64';
+  throw new Error(`[after-pack] unsupported SQLCipher architecture: ${value}`);
+}
 
 function packagedResourcesRoot(context) {
   return context.electronPlatformName === 'darwin'
@@ -31,33 +42,17 @@ function packagedResourcesRoot(context) {
 }
 
 function verifyPackagedPayload(context) {
-  const resourcesRoot = packagedResourcesRoot(context);
-  const appAsar = path.join(resourcesRoot, 'app.asar');
-  const size = statSync(appAsar).size;
-  if (size > MAX_APP_ASAR_BYTES) {
-    throw new Error(
-      `[after-pack] app.asar ${(size / 1024 / 1024).toFixed(1)} MiB exceeds the 120 MiB contract`,
-    );
-  }
-
-  const rustBuildOutput = path.join(
-    resourcesRoot,
-    'app.asar.unpacked',
-    'node_modules',
-    '@otto',
-    'native',
-    'target',
+  const archivePath = path.join(packagedResourcesRoot(context), 'app.asar');
+  execFileSync(
+    process.execPath,
+    [
+      path.join(__dirname, 'verify-packaged-content.mjs'),
+      archivePath,
+      '--max-bytes',
+      String(MAX_APP_ASAR_BYTES),
+    ],
+    { stdio: 'inherit' },
   );
-  if (existsSync(rustBuildOutput)) {
-    throw new Error('[after-pack] local @otto/native target output leaked into the application');
-  }
-  console.log(`[after-pack] 应用负载门禁通过：app.asar ${(size / 1024 / 1024).toFixed(1)} MiB`);
-}
-
-function electronBuilderArchName(value) {
-  if (value === 'x64' || value === 1) return 'x64';
-  if (value === 'arm64' || value === 3) return 'arm64';
-  throw new Error(`[after-pack] unsupported SQLCipher architecture: ${value}`);
 }
 
 function copySqlCipherNativeAsset(context) {
@@ -95,12 +90,7 @@ function copySqlCipherNativeAsset(context) {
   const resourcesRoot = packagedResourcesRoot(context);
   const destination = path.join(resourcesRoot, 'sqlcipher');
   mkdirSync(destination, { recursive: true });
-  for (const name of [
-    'better_sqlite3.node',
-    'manifest.json',
-    'sbom.cdx.json',
-    'THIRD_PARTY_NOTICES.md',
-  ]) {
+  for (const name of SQLCIPHER_RESOURCE_FILES) {
     copyFileSync(
       path.join(sourceRoot, target, name),
       path.join(destination, name),
@@ -160,5 +150,6 @@ module.exports.findNestedLibreOfficeBundles = findNestedLibreOfficeBundles;
 module.exports.copySqlCipherNativeAsset = copySqlCipherNativeAsset;
 module.exports.electronBuilderArchName = electronBuilderArchName;
 module.exports.MAX_APP_ASAR_BYTES = MAX_APP_ASAR_BYTES;
+module.exports.SQLCIPHER_RESOURCE_FILES = SQLCIPHER_RESOURCE_FILES;
 module.exports.packagedResourcesRoot = packagedResourcesRoot;
 module.exports.verifyPackagedPayload = verifyPackagedPayload;

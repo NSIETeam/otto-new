@@ -2,12 +2,13 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import asar from '@electron/asar';
+import { verifyPackagedContent } from './verify-packaged-content.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(scriptDir, '..');
@@ -48,6 +49,7 @@ export function verifyPackagedRuntime(
   if (!existsSync(archivePath)) {
     throw new Error(`app.asar not found: ${archivePath}`);
   }
+  verifyPackagedContent(archivePath);
 
   const desktopPackage = readJson(path.join(desktopRoot, 'package.json'));
   const serverPackage = readJson(
@@ -122,6 +124,34 @@ export function verifyPackagedRuntime(
     sqlCipherDirectory,
     'THIRD_PARTY_NOTICES.md',
   );
+  const expectedSqlCipherResourceNames = [
+    'THIRD_PARTY_NOTICES.md',
+    'better_sqlite3.node',
+    'manifest.json',
+    'sbom.cdx.json',
+  ];
+  if (!existsSync(sqlCipherDirectory)) {
+    throw new Error(
+      `packaged SQLCipher resource directory is missing: ${sqlCipherDirectory}`,
+    );
+  }
+  const packagedSqlCipherResources = readdirSync(sqlCipherDirectory, {
+    withFileTypes: true,
+  });
+  if (
+    packagedSqlCipherResources.some((entry) => !entry.isFile()) ||
+    packagedSqlCipherResources
+      .map((entry) => entry.name)
+      .sort()
+      .join('\n') !== expectedSqlCipherResourceNames.join('\n')
+  ) {
+    throw new Error(
+      `packaged SQLCipher resource directory contains unexpected files: ${packagedSqlCipherResources
+        .map((entry) => entry.name)
+        .sort()
+        .join(', ')}`,
+    );
+  }
   for (const required of [
     sqlCipherBinding,
     sqlCipherManifest,

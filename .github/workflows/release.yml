@@ -252,6 +252,13 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           OTTO_ALLOW_UNSIGNED_MAC: ${{ inputs.unsigned_mac_transition && '1' || '0' }}
 
+      - name: Enforce packaged content and installer size budget
+        run: npm run release:gate --workspace=packages/desktop
+        env:
+          OTTO_DESKTOP_BASELINE_INSTALLER_BYTES: '128032671'
+          OTTO_DESKTOP_MAX_INSTALLER_GROWTH_MB: '8'
+          OTTO_DESKTOP_MAX_INSTALLER_MB: '140'
+
       - name: Verify signed macOS disk images
         if: ${{ inputs.unsigned_mac_transition != true }}
         shell: bash

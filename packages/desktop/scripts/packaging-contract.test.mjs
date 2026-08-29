@@ -142,6 +142,23 @@ describe('desktop packaging contract', () => {
     const bundledInputs = resources.map((resource) => resource.from).join('\n');
     expect(bundledInputs).not.toContain('vendor/runtime');
     expect(bundledInputs).not.toContain('resources/video-editor');
+    expect(packageJson.build.mac.extraResources).toEqual([
+      { from: 'build/icon.png', to: 'app-icon.png' },
+      {
+        from: '../../node_modules/@vscode/ripgrep/bin/rg',
+        to: 'ripgrep/rg',
+      },
+    ]);
+    expect(packageJson.build.win.extraResources).toEqual([
+      { from: 'build/icon.png', to: 'app-icon.png' },
+      { from: 'vendor/win/ripgrep/rg.exe', to: 'ripgrep/rg.exe' },
+    ]);
+    expect(afterPack.SQLCIPHER_RESOURCE_FILES).toEqual([
+      'better_sqlite3.node',
+      'manifest.json',
+      'sbom.cdx.json',
+      'THIRD_PARTY_NOTICES.md',
+    ]);
   });
 
   it('never packages local Rust build outputs with the desktop runtime', async () => {
@@ -177,6 +194,50 @@ describe('desktop packaging contract', () => {
       await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
     );
     expect(packageJson.build.files).not.toContain('!**/node_modules/**/src/**');
+  });
+
+  it('excludes known native build trees and duplicate browser payloads without removing runtime binaries', async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+    );
+    const files = packageJson.build.files;
+    for (const exclusion of [
+      '!**/node_modules/@otto/native/target/**',
+      '!**/node_modules/@otto/native/src/**',
+      '!**/node_modules/@otto/native/node_modules/**',
+      '!**/node_modules/better-sqlite3/deps/**',
+      '!**/node_modules/better-sqlite3/src/**',
+      '!**/node_modules/better-sqlite3/build/Release/obj/**',
+      '!**/node_modules/pdf-parse/lib/pdf.js/v1.9.426/**',
+      '!**/node_modules/pdf-parse/lib/pdf.js/v1.10.88/**',
+      '!**/node_modules/pdf-parse/lib/pdf.js/v2.0.550/**',
+      '!**/node_modules/playwright-core/lib/vite/**',
+    ]) {
+      expect(files).toContain(exclusion);
+    }
+    expect(files).not.toContain(
+      '!**/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
+    );
+    expect(packageJson.build.asarUnpack).toEqual([
+      'node_modules/@otto/native/bin/**/*',
+    ]);
+  });
+
+  it('runs the shared app.asar content and size gate on every packaged platform', async () => {
+    const verifier = await readFile(
+      path.join(packageRoot, 'scripts', 'verify-packaged-content.mjs'),
+      'utf8',
+    );
+    const runtimeVerifier = await readFile(
+      path.join(packageRoot, 'scripts', 'verify-packaged-runtime.mjs'),
+      'utf8',
+    );
+    expect(afterPack.MAX_APP_ASAR_BYTES).toBe(120 * 1024 * 1024);
+    expect(afterPack.packagedResourcesRoot).toBeTypeOf('function');
+    expect(afterPack.verifyPackagedPayload).toBeTypeOf('function');
+    expect(verifier).toContain('findForbiddenAsarEntries(entries)');
+    expect(verifier).toContain('app.asar exceeds size budget');
+    expect(runtimeVerifier).toContain('verifyPackagedContent(archivePath)');
   });
 
   it('uses the current dependency collector and verifies the packaged Windows runtime', async () => {
@@ -342,6 +403,37 @@ describe('desktop packaging contract', () => {
     expect(gate).toContain('releaseAssetCandidates.some(existsSync)');
     expect(gate).not.toContain("manifest.assets?.['win-x64']");
     expect(gate).not.toContain('latest.json win-x64 sha256 mismatch');
+  });
+
+  it('enforces the public installer baseline and growth budget after the release build', async () => {
+    const [gate, budget, workflow] = await Promise.all([
+      readFile(
+        path.join(packageRoot, 'scripts', 'release-recovery-gate.mjs'),
+        'utf8',
+      ),
+      readFile(
+        path.join(packageRoot, 'scripts', 'installer-size-budget.mjs'),
+        'utf8',
+      ),
+      readFile(
+        path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+        'utf8',
+      ),
+    ]);
+    expect(budget).toContain(
+      'LAST_PUBLIC_WINDOWS_INSTALLER_BYTES = 128_032_671',
+    );
+    expect(budget).toContain('baselineBytes + growthBytes');
+    expect(budget).toContain('absoluteMaxBytes');
+    expect(gate).toContain('resolveWindowsInstallerBudget()');
+    expect(workflow).toContain(
+      'name: Enforce packaged content and installer size budget',
+    );
+    expect(workflow).toContain(
+      "OTTO_DESKTOP_BASELINE_INSTALLER_BYTES: '128032671'",
+    );
+    expect(workflow).toContain("OTTO_DESKTOP_MAX_INSTALLER_GROWTH_MB: '8'");
+    expect(workflow).toContain("OTTO_DESKTOP_MAX_INSTALLER_MB: '140'");
   });
 
   it('discovers every packaged LibreOffice bundle before signing Otto', async () => {

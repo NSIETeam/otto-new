@@ -64,6 +64,7 @@ export * from './modules/integration_adapters/channelTaskControl.js';
 export * from './modules/integration_adapters/channelCredentialVault.js';
 export * from './modules/integration_adapters/managedChannelConnector.js';
 export * from './modules/integration_adapters/httpChannelPairingBroker.js';
+export * from './modules/integration_adapters/channelOutboundLedger.js';
 export * from './modules/integration_adapters/workflowTaskControlPort.js';
 export * from './modules/integration_adapters/jsonChannelMessageJournal.js';
 export * from './productModules.js';

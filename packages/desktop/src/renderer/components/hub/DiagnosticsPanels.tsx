@@ -266,6 +266,18 @@ function workflowStatusClass(status: string): string {
 
 export function WorkflowsPanel({ data }: { data: UseSettingsData }): React.JSX.Element {
   const { state, actions } = data;
+  const [accessibility, setAccessibility] = React.useState<{
+    platform: string;
+    supported: boolean;
+    trusted: boolean;
+  } | null>(null);
+  const refreshAccessibility = React.useCallback(async (request = false) => {
+    const next = request
+      ? await window.otto.rpaAccessibilityRequest()
+      : await window.otto.rpaAccessibilityStatus();
+    setAccessibility(next);
+  }, []);
+  React.useEffect(() => { void refreshAccessibility(false); }, [refreshAccessibility]);
 
   return (
     <Panel
@@ -277,6 +289,27 @@ export function WorkflowsPanel({ data }: { data: UseSettingsData }): React.JSX.E
         </button>
       }
     >
+      <Card className="otto-hub__card--pad">
+        <div className="otto-hub__workflow-head">
+          <Badge>{accessibility?.trusted ? '已授权' : '未授权'}</Badge>
+          <span className="otto-hub__row-name">macOS 辅助功能控制</span>
+          <span className="otto-hub__row-status">
+            {accessibility?.supported
+              ? accessibility.trusted
+                ? 'Otto 已具备读取语义控件的系统权限'
+                : '未授权时桌面 RPA 会直接拒绝执行'
+              : '当前系统不支持 macOS Accessibility 驱动'}
+          </span>
+          {accessibility?.supported && !accessibility.trusted ? (
+            <button type="button" className="otto-hub__btn" onClick={() => void refreshAccessibility(true)}>
+              打开系统授权
+            </button>
+          ) : null}
+        </div>
+        <div className="otto-hub__field-hint">
+          只允许按应用、窗口、角色和可访问名称定位；坐标、任意脚本、Shell 与密码控件始终禁止。
+        </div>
+      </Card>
       {state.workflows.length === 0 ? (
         <Empty>当前没有运行中或已完成的 workflow。</Empty>
       ) : (

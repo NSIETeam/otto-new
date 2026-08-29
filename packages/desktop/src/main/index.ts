@@ -42,6 +42,7 @@ import {
   screen,
   session,
   shell,
+  systemPreferences,
   Tray,
   type NativeImage,
 } from 'electron';
@@ -562,6 +563,8 @@ const IPC = {
   channelPairingApprove: 'otto:channel-pairing-approve',
   channelPairingInstall: 'otto:channel-pairing-install',
   channelPairingCancel: 'otto:channel-pairing-cancel',
+  rpaAccessibilityStatus: 'otto:rpa-accessibility-status',
+  rpaAccessibilityRequest: 'otto:rpa-accessibility-request',
   parkConfig: 'otto:park-config',
   themeGet: 'otto:theme-get',
   themeSet: 'otto:theme-set',
@@ -4143,6 +4146,20 @@ function registerIpc(): void {
     pairingAction(pairingId, 'POST', '/install'));
   ipcMain.handle(IPC.channelPairingCancel, (_event, pairingId: unknown) =>
     pairingAction(pairingId, 'DELETE'));
+  ipcMain.handle(IPC.rpaAccessibilityStatus, () => ({
+    platform: process.platform,
+    supported: process.platform === 'darwin',
+    trusted: process.platform === 'darwin'
+      ? systemPreferences.isTrustedAccessibilityClient(false)
+      : false,
+  }));
+  ipcMain.handle(IPC.rpaAccessibilityRequest, () => ({
+    platform: process.platform,
+    supported: process.platform === 'darwin',
+    trusted: process.platform === 'darwin'
+      ? systemPreferences.isTrustedAccessibilityClient(true)
+      : false,
+  }));
   // ── 内置视频编辑器 ──────────────────────────────────────────
   ipcMain.handle(IPC.openVideoEditor, () =>
     Promise.resolve(createVideoEditorWindow()),

@@ -18,6 +18,13 @@ const ACTIONS = [
   'web.extract',
   'web.screenshot',
   'web.wait',
+  'desktop.inspect',
+  'desktop.click',
+  'desktop.fill',
+  'desktop.select',
+  'desktop.scroll',
+  'desktop.wait',
+  'desktop.screenshot',
   'checkpoint',
 ] as const;
 const OPERATIONS = ['start', 'run_next', 'recover', 'approve', 'take_over', 'status'] as const;
@@ -86,6 +93,9 @@ interface RpaRuntimeModule {
   ) => RpaRunnerPort;
   RunScopedWebDriver: new (factory: unknown) => unknown;
   PlaywrightWebSessionFactory: new () => unknown;
+  DesktopRpaDriverV1: new (port: unknown) => unknown;
+  CompositeRpaDriver: new (web: unknown, desktop?: unknown) => unknown;
+  getDesktopRpaPortV1(): unknown;
 }
 
 interface RpaRuntime {
@@ -171,6 +181,10 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
       for (const step of workflow.steps) {
         if (!step.id || !ACTIONS.includes(step.action) || !step.args || !['none', 'external'].includes(step.sideEffect)) {
           return 'rpa_run/start: each step requires id, supported action, args, and sideEffect.';
+        }
+        if (['desktop.click', 'desktop.fill', 'desktop.select'].includes(step.action)
+          && (step.sideEffect !== 'external' || step.requiresApproval !== true)) {
+          return `rpa_run/start: ${step.action} requires an external side effect and explicit approval.`;
         }
       }
     } else if (!params.run_id?.trim()) {
@@ -265,11 +279,16 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
       throw new Error(`RPA runtime is unavailable (${detail}). Build/install the optional otto-rpa package before running RPA.`);
     }
     const directory = runDirectory();
+    const webDriver = new module.RunScopedWebDriver(new module.PlaywrightWebSessionFactory());
+    const desktopPort = module.getDesktopRpaPortV1();
     return {
       module,
       store: new module.FileRpaRunStore(path.join(directory, 'runs')),
       artifacts: new module.FileRpaArtifactStore(path.join(directory, 'artifacts')),
-      driver: new module.RunScopedWebDriver(new module.PlaywrightWebSessionFactory()),
+      driver: new module.CompositeRpaDriver(
+        webDriver,
+        desktopPort ? new module.DesktopRpaDriverV1(desktopPort) : undefined,
+      ),
     };
   }
 }

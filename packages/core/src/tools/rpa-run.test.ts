@@ -23,6 +23,35 @@ describe('RpaRunTool', () => {
     })).toContain('secrets');
   });
 
+  it('accepts semantic desktop inspection but requires approval for interaction', () => {
+    expect(tool.validateToolParams({
+      action: 'start',
+      workflow: {
+        id: 'inspect-mail',
+        version: 1,
+        steps: [{
+          id: 'inspect',
+          action: 'desktop.inspect',
+          args: { appId: 'com.apple.mail' },
+          sideEffect: 'none',
+        }],
+      },
+    })).toBeNull();
+    expect(tool.validateToolParams({
+      action: 'start',
+      workflow: {
+        id: 'click-mail',
+        version: 1,
+        steps: [{
+          id: 'click',
+          action: 'desktop.click',
+          args: { appId: 'com.apple.mail', target: { role: 'button', name: '发送' } },
+          sideEffect: 'none',
+        }],
+      },
+    })).toContain('explicit approval');
+  });
+
   it('requires an explicit approval identifier', () => {
     expect(tool.validateToolParams({ action: 'approve', run_id: 'run-1' })).toContain('approval_id');
   });

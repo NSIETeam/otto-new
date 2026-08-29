@@ -19,6 +19,17 @@ export interface DesktopRpaPortV1 {
   screenshot(appId: string): Promise<{ bytes: Uint8Array; redactedSummary: string }>;
 }
 
+let registeredDesktopPort: DesktopRpaPortV1 | undefined;
+
+/** Privileged desktop host registers exactly one semantic accessibility port. */
+export function registerDesktopRpaPortV1(port: DesktopRpaPortV1 | undefined): void {
+  registeredDesktopPort = port;
+}
+
+export function getDesktopRpaPortV1(): DesktopRpaPortV1 | undefined {
+  return registeredDesktopPort;
+}
+
 function requiredText(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string' || !value.trim()) throw new Error(`Desktop RPA ${key} is required.`);

@@ -1285,6 +1285,8 @@ const IPC = {
   channelPairingApprove: 'otto:channel-pairing-approve',
   channelPairingInstall: 'otto:channel-pairing-install',
   channelPairingCancel: 'otto:channel-pairing-cancel',
+  rpaAccessibilityStatus: 'otto:rpa-accessibility-status',
+  rpaAccessibilityRequest: 'otto:rpa-accessibility-request',
   parkConfig: 'otto:park-config',
   themeGet: 'otto:theme-get',
   themeSet: 'otto:theme-set',
@@ -1458,6 +1460,8 @@ export interface OttoBridge {
   channelPairingApprove(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
   channelPairingInstall(pairingId: string): Promise<ChannelPairingActionResult>;
   channelPairingCancel(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
+  rpaAccessibilityStatus(): Promise<{ platform: string; supported: boolean; trusted: boolean }>;
+  rpaAccessibilityRequest(): Promise<{ platform: string; supported: boolean; trusted: boolean }>;
   /** 园区服务企业定制配置；无配置文件时 null（用内置默认）。 */
   parkConfig(): Promise<ParkServicesConfig | null>;
   /** 当前外观主题（'system' 跟随系统 / 'light' / 'dark'）。 */
@@ -2424,6 +2428,12 @@ const bridge: OttoBridge = {
   },
   channelPairingCancel(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>> {
     return ipcRenderer.invoke('otto:channel-pairing-cancel', pairingId) as Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
+  },
+  rpaAccessibilityStatus(): Promise<{ platform: string; supported: boolean; trusted: boolean }> {
+    return ipcRenderer.invoke('otto:rpa-accessibility-status') as Promise<{ platform: string; supported: boolean; trusted: boolean }>;
+  },
+  rpaAccessibilityRequest(): Promise<{ platform: string; supported: boolean; trusted: boolean }> {
+    return ipcRenderer.invoke('otto:rpa-accessibility-request') as Promise<{ platform: string; supported: boolean; trusted: boolean }>;
   },
   parkConfig(): Promise<ParkServicesConfig | null> {
     return ipcRenderer.invoke(

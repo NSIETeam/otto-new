@@ -1724,6 +1724,58 @@ describe('OttoServer runtimeFactory（非 mock 路径）', () => {
     client.close();
   });
 
+  it('首条问题立即显示可读标题，再由 AI 异步精炼', async () => {
+    const store = new InMemorySessionStore();
+    const session = store.createSession();
+    let resolveTitle!: (title: string) => void;
+    const titlePending = new Promise<string>((resolve) => {
+      resolveTitle = resolve;
+    });
+    const generateTitle = vi.fn(() => titlePending);
+    server = new OttoServer({
+      port: 0,
+      mock: false,
+      store,
+      runtimeFactory: async () => ({
+        async run() {},
+        generateTitle,
+        cancel() {},
+        setModel() {},
+        getConfig() { return undefined; },
+        async dispose() {},
+      }),
+    });
+    baseUrl = await startServer(server);
+    const client = await connectWs(baseUrl);
+    await client.waitFor((frame) => frame.type === 'welcome');
+    client.send({ type: 'subscribe', payload: { sessionId: session.sessionId } });
+    await client.waitFor((frame) => frame.type === 'history');
+
+    client.send({
+      type: 'send_user_message',
+      payload: {
+        sessionId: session.sessionId,
+        source: 'local',
+        content: [{ type: 'text', value: '请帮我检查登录故障' }],
+      },
+    });
+
+    await client.waitFor(
+      (frame) => frame.type === 'session_upsert'
+        && frame.payload.session.title === '检查登录故障',
+    );
+    expect(store.getSession(session.sessionId)?.title).toBe('检查登录故障');
+
+    resolveTitle('登录故障排查');
+    await client.waitFor(
+      (frame) => frame.type === 'session_upsert'
+        && frame.payload.session.title === '登录故障排查',
+    );
+    expect(generateTitle).toHaveBeenCalledOnce();
+    expect(store.getSession(session.sessionId)?.title).toBe('登录故障排查');
+    client.close();
+  });
+
   it('附件作为首条消息时也基于文件内容生成标题', async () => {
     const store = new InMemorySessionStore();
     const session = store.createSession();

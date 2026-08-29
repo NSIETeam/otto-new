@@ -34,6 +34,19 @@ describe('desktop visual style contract', () => {
     }
   });
 
+  it('keeps module groups on the shared appearance tokens', async () => {
+    const css = await readFile(
+      path.join(packageRoot, 'src', 'renderer', 'styles', 'app.css'),
+      'utf8',
+    );
+
+    expect(css).toMatch(/\.otto-module-group\s*\{[^}]*background: var\(--otto-surface\);/su);
+    expect(css).toMatch(/\.otto-module-group__header h2\s*\{[^}]*color: var\(--otto-text\);/su);
+    expect(css).toMatch(/\.otto-module-tile\s*\{[^}]*color: var\(--otto-text\);/su);
+    expect(css).not.toContain('var(--surface, #fff)');
+    expect(css).not.toContain('var(--surface-subtle, #f5f7fa)');
+  });
+
   it('keeps both browser previews on the desktop React instance for visual audits', async () => {
     const configs = await Promise.all(
       ['webpack.preview.cjs', 'webpack.live.cjs'].map((file) =>

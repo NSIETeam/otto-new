@@ -12226,9 +12226,9 @@ h6.otto-prose__h {
 
 .otto-module-group {
   min-width: 0;
-  border: 1px solid var(--line, #e5e7eb);
+  border: 1px solid var(--otto-border);
   border-radius: 16px;
-  background: var(--surface, #fff);
+  background: var(--otto-surface);
   padding: 14px;
 }
 
@@ -12244,7 +12244,7 @@ h6.otto-prose__h {
   min-width: 0;
   overflow: hidden;
   margin: 0;
-  color: var(--text, #171717);
+  color: var(--otto-text);
   font-size: 15px;
   font-weight: 650;
   text-overflow: ellipsis;
@@ -12480,7 +12480,7 @@ h6.otto-prose__h {
 }
 
 .otto-module-group__grid:focus-visible {
-  outline: 2px solid var(--accent, #1677ff);
+  outline: 2px solid var(--otto-accent);
   outline-offset: 3px;
   border-radius: 10px;
 }
@@ -12496,7 +12496,7 @@ h6.otto-prose__h {
   border: 1px solid transparent;
   border-radius: 12px;
   background: transparent;
-  color: var(--text, #171717);
+  color: var(--otto-text);
   cursor: pointer;
   transition: background-color 150ms ease;
 }
@@ -12548,11 +12548,11 @@ h6.otto-prose__h {
 }
 
 .otto-module-tile:hover:not(:disabled) {
-  background: var(--surface-subtle, #f5f7fa);
+  background: color-mix(in srgb, var(--otto-text) 6%, var(--otto-surface));
 }
 
 .otto-module-tile:focus-visible {
-  outline: 2px solid var(--accent, #1677ff);
+  outline: 2px solid var(--otto-accent);
   outline-offset: 1px;
 }
 
@@ -12586,10 +12586,10 @@ h6.otto-prose__h {
   flex-direction: column;
   gap: 7px;
   padding: 6px;
-  border: 1px dashed var(--line, #d9dde5);
+  border: 1px dashed var(--otto-border-strong);
   border-radius: 12px;
   background: transparent;
-  color: var(--text-muted, #69707d);
+  color: var(--otto-text-secondary);
   font: 500 12px/1.3 var(--otto-font);
   text-align: center;
   cursor: pointer;
@@ -12603,14 +12603,14 @@ h6.otto-prose__h {
 }
 
 .otto-module-group__add:hover {
-  border-color: var(--accent, #1677ff);
-  background: var(--surface-subtle, #f5f7fa);
-  color: var(--accent, #1677ff);
+  border-color: var(--otto-accent);
+  background: color-mix(in srgb, var(--otto-text) 6%, var(--otto-surface));
+  color: var(--otto-accent);
 }
 
 .otto-module-group__add:focus-visible,
 .otto-module-workspace__add-group:focus-visible {
-  outline: 2px solid var(--accent, #1677ff);
+  outline: 2px solid var(--otto-accent);
   outline-offset: 2px;
 }
 

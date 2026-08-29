@@ -273,6 +273,32 @@ describe('private deployment provisioning bootstrap', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('does not treat an unrelated migrated identity as ready after provisioning fails', async () => {
+    const state = fixture();
+    state.setExistingIdentityReady();
+    state.setApplyImplementation(() => {
+      throw new Error('bootstrap_provisioning_failed');
+    });
+    const coordinator = createPrivateDeploymentBootstrapCoordinator(
+      state.services,
+      config,
+      { fetch: async () => response() },
+    );
+
+    const readiness = await coordinator.prepare();
+
+    expect(readiness.bootstrap.phase).toBe('failed');
+    expect(readiness.state).toBe('blocked');
+    expect(readiness.canAuthenticate).toBe(false);
+    expect(readiness.canUseLicensedFeatures).toBe(false);
+    expect(readiness.steps).toContainEqual(
+      expect.objectContaining({
+        id: 'account_identity',
+        state: 'action_required',
+      }),
+    );
+  });
+
   it('requires a provisioning command even when a migrated identity exists', async () => {
     const state = fixture();
     state.setExistingIdentityReady();

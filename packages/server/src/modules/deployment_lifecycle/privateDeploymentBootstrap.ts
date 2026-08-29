@@ -177,6 +177,9 @@ export function buildPrivateDeploymentReadiness(
     'telemetry',
     license.telemetryAllowed,
   );
+  const provisioningFailed =
+    source.bootstrap.phase === 'failed' &&
+    !source.provisioningIdentityReady;
 
   const steps: PrivateDeploymentReadinessStep[] = [
     step(
@@ -288,11 +291,17 @@ export function buildPrivateDeploymentReadiness(
     ),
     step(
       'account_identity',
-      source.identityReady ? 'ready' : 'waiting_for_user',
+      provisioningFailed
+        ? 'action_required'
+        : source.identityReady
+          ? 'ready'
+          : 'waiting_for_user',
       true,
-      source.identityReady
-        ? '企业与管理员身份已就绪，可直接登录'
-        : '服务器已就绪，请创建首个企业账号或登录身份',
+      provisioningFailed
+        ? '企业开通指令尚未成功应用，已拒绝使用现有身份继续激活'
+        : source.identityReady
+          ? '企业与管理员身份已就绪，可直接登录'
+          : '服务器已就绪，请创建首个企业账号或登录身份',
     ),
   ];
 
@@ -323,7 +332,8 @@ export function buildPrivateDeploymentReadiness(
       licenseUsable &&
       source.databaseReady &&
       source.storageReady &&
-      source.identityReady,
+      source.identityReady &&
+      !provisioningFailed,
     bootstrap: { ...source.bootstrap },
     steps,
   };

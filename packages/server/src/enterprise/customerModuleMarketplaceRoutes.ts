@@ -4,11 +4,13 @@ import { canonicalCustomerModuleManifest, encodeCustomerModulePackageV1 } from '
 import {
   CustomerModuleMarketplace,
   handleCustomerModuleMarketplaceRequest,
-  SqliteCustomerModuleMarketplaceStore,
   submitCustomerModulePackage,
 } from '../modules/tool_skill_platform/index.js';
 import type { AccountView } from './db.js';
-import { getDB, getOrganizationFeatures } from './db.js';
+import {
+  createCustomerModuleMarketplaceFacade,
+  getOrganizationFeatures,
+} from './db.js';
 import type { AdminPrincipal } from './enterpriseRouteDispatcher.js';
 
 function platformSigner(market: CustomerModuleMarketplace) {
@@ -58,8 +60,7 @@ export async function handleCustomerModuleMarketplaceRoute(input: {
       ? { accountId: 'platform', isPlatformReviewer: true }
       : null;
   const body = input.method === 'POST' ? await input.readBody(input.req, 24_000_000) : {};
-  const store = new SqliteCustomerModuleMarketplaceStore(getDB());
-  const market = new CustomerModuleMarketplace(undefined, store);
+  const { market, store } = createCustomerModuleMarketplaceFacade();
   const packageMatch = input.path.match(/^\/enterprise\/customer-modules\/([a-z0-9.-]+)\/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\/package$/u);
   if (packageMatch && input.method === 'GET') {
     const [, moduleId, version] = packageMatch;

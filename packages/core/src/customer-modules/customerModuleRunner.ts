@@ -226,7 +226,7 @@ export class CustomerModuleRunner {
           } else finish({ status: 'completed', exitCode: message.exitCode ?? 0, output });
         } else finish({ status: 'crashed', exitCode: null, output: '', error: message.error ?? 'worker crashed' });
       });
-      worker.once('error', (error) => finish({ status: 'crashed', exitCode: null, output: '', error: error.message }));
+      worker.once('error', (error) => finish({ status: 'crashed', exitCode: null, output: '', error: error instanceof Error ? error.message : String(error) }));
       worker.once('exit', (code) => {
         if (!settled && code !== 0) finish({ status: 'crashed', exitCode: code, output: '', error: `worker exited with code ${code}` });
       });

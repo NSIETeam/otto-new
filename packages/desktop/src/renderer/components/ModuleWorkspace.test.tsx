@@ -65,6 +65,7 @@ function renderWorkspace(
   layout: ModuleWorkspaceLayout = enterpriseLayout,
 ) {
   const onActivate = vi.fn();
+  const onUnavailableModule = vi.fn();
   const onOpenMarketplace = vi.fn();
   const onLayoutChange = vi.fn();
   const view = render(
@@ -73,11 +74,12 @@ function renderWorkspace(
       layout={layout}
       modules={modules}
       onActivate={onActivate}
+      onUnavailableModule={onUnavailableModule}
       onOpenMarketplace={onOpenMarketplace}
       onLayoutChange={onLayoutChange}
     />,
   );
-  return { ...view, onActivate, onOpenMarketplace, onLayoutChange };
+  return { ...view, onActivate, onUnavailableModule, onOpenMarketplace, onLayoutChange };
 }
 
 function ControlledWorkspace({ scopeKey = 'scope-a' }: { scopeKey?: string }) {
@@ -126,6 +128,41 @@ describe('ModuleWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '向园区服务添加模块' }));
     expect(onOpenMarketplace).toHaveBeenCalledWith('park-services');
+  });
+
+  it('keeps unavailable modules selectable for an explanation without activating them', () => {
+    const unavailableModules = modules.map((module) => module.id === 'park-announcement'
+      ? {
+        ...module,
+        availability: 'disabled' as const,
+        disabledReason: '当前服务器尚未授权园区服务模块',
+      }
+      : module);
+    const onActivate = vi.fn();
+    const onUnavailableModule = vi.fn();
+    render(
+      <ModuleWorkspace
+        presentation="panel"
+        layout={enterpriseLayout}
+        modules={unavailableModules}
+        onActivate={onActivate}
+        onUnavailableModule={onUnavailableModule}
+        onOpenMarketplace={vi.fn()}
+        onLayoutChange={vi.fn()}
+      />,
+    );
+
+    const announcement = screen.getByRole('button', { name: '打开 园区公告' });
+    expect(announcement.getAttribute('aria-disabled')).toBeNull();
+    expect(announcement.getAttribute('aria-haspopup')).toBe('dialog');
+    expect((announcement as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(announcement);
+
+    expect(onActivate).not.toHaveBeenCalled();
+    expect(onUnavailableModule).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'park-announcement',
+      disabledReason: '当前服务器尚未授权园区服务模块',
+    }));
   });
 
   it('renders module addition as the next grid tile and group addition after all groups', () => {
@@ -208,8 +245,8 @@ describe('ModuleWorkspace', () => {
     expect(container.querySelector('.otto-module-workspace__floating-scrollbar')).toBeNull();
   });
 
-  it('uses a focusable internal scroller for overflowing groups', () => {
-    const overflowModules = Array.from({ length: 9 }, (_, index): ModuleDefinition => ({
+  it('keeps a full nine-module group fixed and moves add-module outside the grid', () => {
+    const fullModules = Array.from({ length: 9 }, (_, index): ModuleDefinition => ({
       id: `module-${index}`,
       label: `模块 ${index + 1}`,
       category: 'common',
@@ -223,22 +260,31 @@ describe('ModuleWorkspace', () => {
         layout={{
           version: 1,
           groups: [{
-            id: 'overflow',
-            name: '超出容量',
+            id: 'full-group',
+            name: '完整九项',
             rows: 2,
-            moduleIds: overflowModules.map((module) => module.id),
+            moduleIds: fullModules.map((module) => module.id),
           }],
         }}
-        modules={overflowModules}
+        modules={fullModules}
         onActivate={vi.fn()}
         onOpenMarketplace={vi.fn()}
         onLayoutChange={vi.fn()}
       />,
     );
 
-    const grid = container.querySelector('.otto-module-group__grid');
-    expect(grid?.classList.contains('is-overflowing')).toBe(true);
-    expect(grid?.getAttribute('tabindex')).toBe('0');
+    const grid = container.querySelector<HTMLElement>('.otto-module-group__grid');
+    const addModule = screen.getByRole('button', { name: '向完整九项添加模块' });
+    expect(grid?.classList.contains('is-overflowing')).toBe(false);
+    expect(grid?.getAttribute('tabindex')).toBeNull();
+    expect(grid?.children).toHaveLength(9);
+    expect(grid?.contains(addModule)).toBe(false);
+    expect(addModule.classList.contains('otto-module-group__add--compact')).toBe(true);
+
+    if (!grid) throw new Error('missing full module grid');
+    Object.defineProperty(grid, 'scrollTop', { configurable: true, writable: true, value: 24 });
+    fireEvent.pointerMove(grid, { clientY: 999 });
+    expect(grid.scrollTop).toBe(24);
   });
 
   it('places add module in the seventh slot and expands a full two-row group to three rows', () => {

@@ -17,7 +17,9 @@ export interface RightPanelProps {
   layout: ModuleWorkspaceLayout;
   modules: readonly ModuleDefinition[];
   onActivate(module: ModuleDefinition): void;
+  onUnavailableModule?(module: ModuleDefinition): void;
   onOpenMarketplace(groupId: string): void;
+  onAddGroup?(): void;
   onLayoutChange(next: ModuleWorkspaceLayout): void;
 }
 
@@ -32,7 +34,9 @@ export function RightPanel({
   layout,
   modules,
   onActivate,
+  onUnavailableModule,
   onOpenMarketplace,
+  onAddGroup,
   onLayoutChange,
 }: RightPanelProps): React.JSX.Element {
   const hidden = presentation === 'panel' && collapsed;
@@ -50,7 +54,9 @@ export function RightPanel({
           layout={layout}
           modules={modules}
           onActivate={onActivate}
+          onUnavailableModule={onUnavailableModule}
           onOpenMarketplace={onOpenMarketplace}
+          onAddGroup={onAddGroup}
           onLayoutChange={onLayoutChange}
         />
       ) : readiness === 'failed' ? (

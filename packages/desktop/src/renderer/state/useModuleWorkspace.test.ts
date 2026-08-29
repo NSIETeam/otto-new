@@ -173,14 +173,14 @@ describe('useModuleWorkspace', () => {
 
     view.rerender({ scope: scopeB, capabilities: enterpriseCapabilities });
     await waitFor(() => {
-      expect(view.result.current.layout.groups[0].name).toBe('园区服务');
+      expect(view.result.current.layout.groups[0].name).toBe('日常办公');
     });
     expect(window.localStorage.getItem(getModuleWorkspaceStorageKey(scopeB))).toBeNull();
   });
 
   it('keeps hidden modules in stored layout while filtering the visible view model', () => {
     const stored = createDefaultModuleWorkspace(enterpriseCapabilities);
-    stored.groups[1].moduleIds.push('future-hidden-module');
+    stored.groups[0].moduleIds.push('future-hidden-module');
     window.localStorage.setItem(getModuleWorkspaceStorageKey(accountA), JSON.stringify(stored));
 
     const visibleModuleIds = enterpriseCapabilities.availableModuleIds.filter(
@@ -197,15 +197,15 @@ describe('useModuleWorkspace', () => {
       },
     );
 
-    expect(view.result.current.layout.groups[1].moduleIds).toContain('enterprise-memory');
-    expect(view.result.current.layout.groups[1].moduleIds).toContain('future-hidden-module');
-    expect(view.result.current.visibleLayout.groups[1].moduleIds).not.toContain('enterprise-memory');
-    expect(view.result.current.visibleLayout.groups[1].moduleIds).not.toContain('future-hidden-module');
+    expect(view.result.current.layout.groups[0].moduleIds).toContain('enterprise-memory');
+    expect(view.result.current.layout.groups[0].moduleIds).toContain('future-hidden-module');
+    expect(view.result.current.visibleLayout.groups[0].moduleIds).not.toContain('enterprise-memory');
+    expect(view.result.current.visibleLayout.groups[0].moduleIds).not.toContain('future-hidden-module');
   });
 
   it('merges visible layout edits without deleting temporarily hidden module ids', () => {
     const stored = createDefaultModuleWorkspace(enterpriseCapabilities);
-    stored.groups[1].moduleIds.splice(1, 0, 'future-hidden-module');
+    stored.groups[0].moduleIds.splice(1, 0, 'future-hidden-module');
     window.localStorage.setItem(getModuleWorkspaceStorageKey(accountA), JSON.stringify(stored));
     const visibleModuleIds = enterpriseCapabilities.availableModuleIds;
     const view = renderHook(
@@ -226,8 +226,8 @@ describe('useModuleWorkspace', () => {
     act(() => view.result.current.setVisibleLayout(editedVisible));
 
     const saved = JSON.parse(window.localStorage.getItem(getModuleWorkspaceStorageKey(accountA))!);
-    expect(saved.groups[1].moduleIds).toContain('future-hidden-module');
-    expect(saved.groups[1].moduleIds).toEqual([
+    expect(saved.groups[0].moduleIds).toContain('future-hidden-module');
+    expect(saved.groups[0].moduleIds).toEqual([
       'agent-ppt',
       'future-hidden-module',
       'agent-enterprise-work',

@@ -52,6 +52,11 @@ describe('static module catalog', () => {
       && module.icon
     ))).toBe(true);
     expect(ids.some((id) => /organization|contact|friend/i.test(id))).toBe(false);
+    expect(buildModuleCatalog(enterpriseContext()).every((module) => (
+      module.package?.packageId
+      && module.package.publisherId
+      && module.package.version
+    ))).toBe(true);
   });
 
   it('maps each fixed agent from its existing profile instead of duplicating profile data', () => {
@@ -72,7 +77,10 @@ describe('capability-driven availability', () => {
 
     expect(catalog.find((module) => module.id === 'enterprise-memory')?.availability).toBe('hidden');
     expect(catalog.find((module) => module.id === 'skill-zone')?.availability).toBe('hidden');
-    expect(catalog.find((module) => module.id === 'park-announcement')?.availability).toBe('hidden');
+    expect(catalog.find((module) => module.id === 'park-announcement')).toMatchObject({
+      availability: 'disabled',
+      disabledReason: '当前企业尚未启用园区服务',
+    });
     expect(catalog.find((module) => module.id === 'agent-ppt')?.availability).toBe('available');
   });
 

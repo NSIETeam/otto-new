@@ -7,6 +7,11 @@ import type { AgentProfile } from './agents/departmentAgents.js';
 import type { CustomAgentDefinition } from './customAgents.js';
 import { customAgentIconToModuleIcon } from './customAgentIcons.js';
 import type { ModuleIconKey, ModuleIconSource } from './components/ModuleIcon.js';
+import {
+  LOCAL_USER_PUBLISHER_ID,
+  OTTO_OFFICIAL_PUBLISHER_ID,
+  type ComponentPackageReference,
+} from './modulePackages.js';
 
 export type ModuleAvailability = 'available' | 'disabled' | 'hidden';
 export type ModuleCategory = 'common' | 'park' | 'capability' | 'custom-agent';
@@ -35,6 +40,7 @@ export interface ParkModuleAuthorization {
   hasParkContext: boolean;
   canViewStatistics: boolean;
   canViewStaffTasks: boolean;
+  disabledReason?: string;
 }
 
 export interface ModuleCatalogContext {
@@ -54,6 +60,7 @@ export interface ModuleDefinition {
   activation: ModuleActivation;
   availability: ModuleAvailability;
   disabledReason?: string;
+  package?: ComponentPackageReference;
 }
 
 type StaticAvailabilityRule =
@@ -64,7 +71,7 @@ type StaticAvailabilityRule =
   | 'auto-skill'
   | 'skill-zone';
 
-interface StaticModuleSpec extends Omit<ModuleDefinition, 'availability' | 'disabledReason'> {
+interface StaticModuleSpec extends Omit<ModuleDefinition, 'availability' | 'disabledReason' | 'package'> {
   availabilityRule: StaticAvailabilityRule;
 }
 
@@ -174,7 +181,7 @@ function staticAvailability(
     return context.organizationFeatures?.skill_market ? 'available' : 'hidden';
   }
   if (!context.organizationFeatures?.park_service || !context.parkAuthorization.hasParkContext) {
-    return 'hidden';
+    return rule === 'park' ? 'disabled' : 'hidden';
   }
   if (rule === 'park-statistics' && !context.parkAuthorization.canViewStatistics) {
     return 'hidden';
@@ -183,6 +190,18 @@ function staticAvailability(
     return 'hidden';
   }
   return 'available';
+}
+
+function staticDisabledReason(
+  rule: StaticAvailabilityRule,
+  context: ModuleCatalogContext,
+): string | undefined {
+  if (rule !== 'park' || context.edition !== 'enterprise') return undefined;
+  if (!context.organizationFeatures?.park_service) return '当前企业尚未启用园区服务';
+  if (!context.parkAuthorization.hasParkContext) {
+    return context.parkAuthorization.disabledReason ?? '当前企业尚未绑定园区服务空间';
+  }
+  return undefined;
 }
 
 function profileIcon(profile: AgentProfile): ModuleIconKey {
@@ -211,6 +230,12 @@ function agentModules(context: ModuleCatalogContext): ModuleDefinition[] {
         icon: profileIcon(profile),
         activation: { kind: 'agent' as const, profileId: profile.id },
         availability: 'available' as const,
+        package: {
+          source: 'official' as const,
+          packageId: `otto.module.${moduleId}`,
+          publisherId: OTTO_OFFICIAL_PUBLISHER_ID,
+          version: '1.0.0',
+        },
       }];
     });
 }
@@ -231,6 +256,12 @@ function customAgentModules(context: ModuleCatalogContext): ModuleDefinition[] {
       customAgentId: agent.id,
     },
     availability: 'available',
+    package: {
+      source: 'user',
+      packageId: `user.module.agent.${agent.id}`,
+      publisherId: LOCAL_USER_PUBLISHER_ID,
+      version: '1.0.0',
+    },
   }));
 }
 
@@ -238,6 +269,13 @@ export function buildModuleCatalog(context: ModuleCatalogContext): ModuleDefinit
   const staticModules = STATIC_MODULE_SPECS.map(({ availabilityRule, ...module }) => ({
     ...module,
     availability: staticAvailability(availabilityRule, context),
+    disabledReason: staticDisabledReason(availabilityRule, context),
+    package: {
+      source: 'official' as const,
+      packageId: `otto.module.${module.id}`,
+      publisherId: OTTO_OFFICIAL_PUBLISHER_ID,
+      version: '1.0.0',
+    },
   }));
   const result = [...staticModules, ...agentModules(context), ...customAgentModules(context)];
   const seen = new Set<string>();

@@ -92,21 +92,6 @@ function mergeVisibleModuleOrder(
   ));
 }
 
-function autoScrollAtPointer(
-  element: HTMLElement,
-  clientY: number,
-  threshold = 40,
-  step = 18,
-): void {
-  if (element.scrollHeight <= element.clientHeight) return;
-  const rect = element.getBoundingClientRect();
-  if (clientY >= rect.bottom - threshold) {
-    element.scrollTop += step;
-  } else if (clientY <= rect.top + threshold) {
-    element.scrollTop -= step;
-  }
-}
-
 const FLOATING_SCROLLBAR_INSET = 4;
 const FLOATING_SCROLLBAR_MIN_THUMB = 28;
 const FLOATING_SCROLLBAR_HIDE_DELAY_MS = 800;
@@ -129,7 +114,9 @@ export interface ModuleWorkspaceProps {
   layout: ModuleWorkspaceLayout;
   modules: readonly ModuleDefinition[];
   onActivate(module: ModuleDefinition): void;
+  onUnavailableModule?(module: ModuleDefinition): void;
   onOpenMarketplace(groupId: string): void;
+  onAddGroup?(): void;
   onLayoutChange(next: ModuleWorkspaceLayout): void;
 }
 
@@ -141,7 +128,9 @@ export function ModuleWorkspace({
   layout,
   modules,
   onActivate,
+  onUnavailableModule,
   onOpenMarketplace,
+  onAddGroup,
   onLayoutChange,
 }: ModuleWorkspaceProps): React.JSX.Element {
   const [openPopover, setOpenPopover] = useState<WorkspacePopover>(null);
@@ -383,10 +372,6 @@ export function ModuleWorkspace({
         }`}
         data-presentation={presentation}
         data-reorder-group="groups"
-        onPointerMove={(event: React.PointerEvent<HTMLDivElement>) => {
-          const viewport = scrollViewportRef.current;
-          if (viewport) autoScrollAtPointer(viewport, event.clientY);
-        }}
       >
         {transientLayout.groups.map((group, groupIndex) => {
         const groupModules = group.moduleIds
@@ -397,7 +382,8 @@ export function ModuleWorkspace({
           Math.max(group.rows, Math.ceil((groupModules.length + 1) / 3)),
         );
         const capacity = displayRows * 3;
-        const overflowing = groupModules.length + 1 > capacity;
+        const addTileFits = groupModules.length < capacity;
+        const overflowing = groupModules.length > capacity;
         return (
           <DraggableItem
             key={group.id}
@@ -541,9 +527,6 @@ export function ModuleWorkspace({
               layoutScroll={overflowing}
               tabIndex={overflowing ? 0 : undefined}
               aria-label={`${group.name}模块`}
-              onPointerMove={(event: React.PointerEvent<HTMLDivElement>) => (
-                autoScrollAtPointer(event.currentTarget, event.clientY)
-              )}
             >
               {groupModules.map((module, moduleIndex) => {
                 const disabled = module.availability !== 'available';
@@ -567,12 +550,14 @@ export function ModuleWorkspace({
                   >
                     <button
                       type="button"
-                      className="otto-module-tile"
+                      className={`otto-module-tile${disabled ? ' is-unavailable' : ''}`}
                       aria-label={`打开 ${module.label}`}
-                      disabled={disabled}
+                      aria-haspopup={disabled ? 'dialog' : undefined}
                       title={disabled ? module.disabledReason : editing ? '拖动调整模块顺序' : module.description}
                       onClick={() => {
-                        if (!editing) onActivate(module);
+                        if (editing) return;
+                        if (disabled) onUnavailableModule?.(module);
+                        else onActivate(module);
                       }}
                       onKeyDown={(event) => {
                         if (!editing) return;
@@ -615,7 +600,7 @@ export function ModuleWorkspace({
                   </DraggableItem>
                 );
               })}
-              <button
+              {addTileFits ? <button
                 type="button"
                 className="otto-module-group__add"
                 aria-label={`向${group.name}添加模块`}
@@ -623,8 +608,19 @@ export function ModuleWorkspace({
               >
                 <span className="otto-module-group__add-icon" aria-hidden>＋</span>
                 <span>添加模块</span>
-              </button>
+              </button> : null}
             </Reorder.Group>
+            {!addTileFits ? (
+              <button
+                type="button"
+                className="otto-module-group__add otto-module-group__add--compact"
+                aria-label={`向${group.name}添加模块`}
+                onClick={() => onOpenMarketplace(group.id)}
+              >
+                <span className="otto-module-group__add-icon" aria-hidden>＋</span>
+                <span>添加模块</span>
+              </button>
+            ) : null}
           </article>
             )}
           </DraggableItem>
@@ -636,7 +632,10 @@ export function ModuleWorkspace({
           type="button"
           className="otto-module-workspace__add-group"
           aria-label="添加功能组"
-          onClick={() => commitLayout(createModuleGroup(layout))}
+          onClick={() => {
+            if (onAddGroup) onAddGroup();
+            else commitLayout(createModuleGroup(layout));
+          }}
         >
           <span aria-hidden>＋</span>
           添加功能组

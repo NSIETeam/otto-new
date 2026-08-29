@@ -59,6 +59,8 @@ import {
   openParkServices,
 } from './components/ParkServicesPlugin.js';
 import { ModuleMarketplaceDialog } from './components/ModuleMarketplaceDialog.js';
+import { ModuleGroupCatalogDialog } from './components/ModuleGroupCatalogDialog.js';
+import { ConfirmDialog } from './components/ConfirmDialog.js';
 import {
   AutoSkillDialog,
   CustomAgentManagerDialog,
@@ -304,6 +306,7 @@ function OttoWorkspaceApp({
     ready: moduleCapabilities.ready,
   });
   const [moduleModal, setModuleModal] = useState<ModuleModalState>(null);
+  const [unavailableModule, setUnavailableModule] = useState<ModuleDefinition | null>(null);
   const [pendingAgent, setPendingAgent] = useState<PendingAgentSelection | null>(null);
   const { cancelPendingAgentLaunches } = actions;
   const openModuleModal = useCallback((next: Exclude<ModuleModalState, null>): void => {
@@ -325,6 +328,7 @@ function OttoWorkspaceApp({
     closeParkServices();
     cancelPendingAgentLaunches();
     setModuleModal(null);
+    setUnavailableModule(null);
     setPendingAgent(null);
   }, [cancelPendingAgentLaunches, moduleWorkspaceScopeKey]);
   useEffect(() => setPendingAgent(null), [state.activeSessionId]);
@@ -1381,7 +1385,9 @@ function OttoWorkspaceApp({
             layout={moduleWorkspace.visibleLayout}
             modules={moduleCapabilities.modules}
             onActivate={activateModule}
+            onUnavailableModule={setUnavailableModule}
             onOpenMarketplace={(groupId) => openModuleModal({ kind: 'marketplace', groupId })}
+            onAddGroup={() => openModuleModal({ kind: 'group-catalog' })}
             onLayoutChange={moduleWorkspace.setVisibleLayout}
           />
         </section>
@@ -1458,7 +1464,9 @@ function OttoWorkspaceApp({
               layout={moduleWorkspace.visibleLayout}
               modules={moduleCapabilities.modules}
               onActivate={activateModule}
+              onUnavailableModule={setUnavailableModule}
               onOpenMarketplace={(groupId) => openModuleModal({ kind: 'marketplace', groupId })}
+              onAddGroup={() => openModuleModal({ kind: 'group-catalog' })}
               onLayoutChange={moduleWorkspace.setVisibleLayout}
             />
           ) : null}
@@ -1474,6 +1482,28 @@ function OttoWorkspaceApp({
         onConfirm={(next) => { moduleWorkspace.setLayout(next); setModuleModal(null); }}
         onClose={() => setModuleModal(null)}
         onManageExperts={() => openModuleModal({ kind: 'custom-expert' })}
+      />
+      <ModuleGroupCatalogDialog
+        key={`${moduleWorkspaceScopeKey}:group-catalog`}
+        open={moduleModal?.kind === 'group-catalog'}
+        edition={edition}
+        layout={moduleWorkspace.layout}
+        modules={moduleCapabilities.modules}
+        onConfirm={(next) => { moduleWorkspace.setLayout(next); setModuleModal(null); }}
+        onClose={() => setModuleModal(null)}
+      />
+      <ConfirmDialog
+        open={Boolean(unavailableModule)}
+        title={`${unavailableModule?.label ?? '该功能'}暂不可用`}
+        message={`${unavailableModule?.disabledReason ?? '当前企业尚未启用该功能'}。你可以重新检测服务器授权与企业配置。`}
+        cancelText="关闭"
+        confirmText="重新检测"
+        danger={false}
+        onCancel={() => setUnavailableModule(null)}
+        onConfirm={() => {
+          setUnavailableModule(null);
+          moduleCapabilities.retry();
+        }}
       />
       <EnterpriseMemoryDialog
         key={`${moduleWorkspaceScopeKey}:enterprise-memory`}
@@ -1564,8 +1594,6 @@ function OttoWorkspaceApp({
               product={product}
               models={state.models}
               enterpriseAccount={account}
-              uiMode={uiMode}
-              onUiModeChange={selectUiMode}
               onManageAccounts={account.isAdmin ? () => setMainView('accounts') : undefined}
             />
           </div>

@@ -174,7 +174,7 @@ describe('ModuleWorkspace drag reorder contract', () => {
     expect(screen.getByRole('button', { name: '移除 园区公告' })).toBeTruthy();
   });
 
-  it('auto-scrolls the workspace viewport when dragging a group near its edge', () => {
+  it('does not make the workspace follow ordinary pointer movement near an edge', () => {
     const { container } = render(
       <ModuleWorkspace
         presentation="panel"
@@ -198,10 +198,10 @@ describe('ModuleWorkspace drag reorder contract', () => {
     const bottomMove = new Event('pointermove', { bubbles: true });
     Object.defineProperty(bottomMove, 'clientY', { value: 295 });
     fireEvent(groupList, bottomMove);
-    expect(viewport.scrollTop).toBeGreaterThan(100);
+    expect(viewport.scrollTop).toBe(100);
     const topMove = new Event('pointermove', { bubbles: true });
     Object.defineProperty(topMove, 'clientY', { value: 2 });
     fireEvent(groupList, topMove);
-    expect(viewport.scrollTop).toBeLessThan(120);
+    expect(viewport.scrollTop).toBe(100);
   });
 });

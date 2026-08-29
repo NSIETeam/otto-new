@@ -20,7 +20,12 @@ export const ENTERPRISE_JOIN_REAUTH_REQUIRED_MESSAGE =
   '企业已成功加入，但本机身份同步失败，请重新登录以完成企业切换';
 
 type EnterpriseLogoutClient = Pick<EnterpriseClient, 'logout'> &
-  Partial<Pick<EnterpriseClient, 'getOrganizationView'>>;
+  Partial<
+    Pick<
+      EnterpriseClient,
+      'getOrganizationView' | 'getManagedModelGatewayAccess'
+    >
+  >;
 export type EnterpriseIdentitySynchronizer = (
   account: AuthenticatedEnterpriseAccountInput | null,
 ) => Promise<void>;
@@ -116,6 +121,18 @@ async function localAccount(
       // 当前账号来自已认证会话，仍可同步；目录不可达时保持未知，绝不伪造同事。
     }
   }
+  let managedModelGateway:
+    | Awaited<ReturnType<EnterpriseClient['getManagedModelGatewayAccess']>>
+    | undefined;
+  if (client.getManagedModelGatewayAccess) {
+    try {
+      managedModelGateway = await client.getManagedModelGatewayAccess();
+    } catch {
+      // Login remains valid when an old server or Control is unavailable.
+      // Any session explicitly selecting otto:* fails closed in the local runtime;
+      // it is never redirected to a personal BYOK key.
+    }
+  }
   return {
     id: account.id,
     organizationId: account.organizationId,
@@ -128,6 +145,7 @@ async function localAccount(
     positionId: account.positionId,
     positionTitle: account.positionTitle,
     ...(organizationMembers ? { organizationMembers } : {}),
+    ...(managedModelGateway ? { managedModelGateway } : {}),
     leaseExpiresAt: new Date(Date.now() + ENTERPRISE_IDENTITY_LEASE_MS).toISOString(),
   };
 }

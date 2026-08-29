@@ -3,7 +3,10 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import type { EnterpriseLegalDocumentReference } from '../../preload/index.js';
+import type {
+  EnterpriseLegalDocumentReference,
+  EnterpriseServerPreparationResult,
+} from '../../preload/index.js';
 import { OttoPetStage } from './OttoPetStage.js';
 
 type LoginMode = 'login' | 'register' | 'join';
@@ -53,6 +56,10 @@ export function sanitizeOrganizationInviteCode(value: string): string {
   return compact.length > 4 ? `${compact.slice(0, 4)}-${compact.slice(4)}` : compact;
 }
 
+export function isCompleteOrganizationInviteCode(value: string): boolean {
+  return sanitizeOrganizationInviteCode(value).replaceAll('-', '').length === 12;
+}
+
 export function isAcceptableRegistrationPassword(password: string): boolean {
   if (password.length < 8 || password.length > 128) return false;
   if (/[^\x20-\x7E]/.test(password)) return false;
@@ -74,8 +81,7 @@ export function isRegistrationReady(input: {
   legalConsent: boolean;
   legalDocuments: EnterpriseLegalDocumentReference[];
 }): boolean {
-  return (!input.inviteRequired
-    || input.inviteCode.replace(/[^A-HJ-NP-Za-km-z2-9]/g, '').length === 12)
+  return (!input.inviteRequired || isCompleteOrganizationInviteCode(input.inviteCode))
     && Boolean(input.name.trim())
     && isAcceptableRegistrationPassword(input.password)
     && input.password === input.confirmPassword
@@ -150,11 +156,17 @@ export function EnterpriseLoginPage({
   onRequestRegistrationCode,
   onRegister,
   onClearError,
+  preparation,
+  onPrepareServer,
 }: {
   initialServerUrl: string;
   initialInviteCode?: string;
   busy: boolean;
   error: string | null;
+  preparation?: EnterpriseServerPreparationResult | null;
+  onPrepareServer?: (input: {
+    serverUrl: string;
+  }) => Promise<EnterpriseServerPreparationResult>;
   onPasswordLogin: (input: { serverUrl: string; identifier: string; password: string }) => Promise<void>;
   onRequestLoginCode?: (input: { serverUrl: string; phone: string }) => Promise<{
     challengeId: string;
@@ -209,10 +221,43 @@ export function EnterpriseLoginPage({
   const [requesting, setRequesting] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [preparingServer, setPreparingServer] = useState(false);
   const requestEpochRef = useRef(0);
+  const preparationAttemptRef = useRef('');
   const submitLockedRef = useRef(false);
   const formPending = busy || submitting;
   const legalUrl = enterpriseLegalUrl(serverUrl);
+  const normalizedServerUrl = serverUrl.trim().replace(/\/+$/u, '');
+  const preparationMatches = preparation?.serverUrl === normalizedServerUrl;
+  // Tests and browser-only development hosts may not provide the preparation bridge.
+  // Packaged Desktop always does, so authentication remains closed until the target
+  // deployment reports that identity is ready (or identifies itself as a legacy server).
+  const serverReady = !onPrepareServer || Boolean(
+    preparationMatches
+      && (preparation?.legacy || preparation?.readiness?.canAuthenticate),
+  );
+
+  useEffect(() => {
+    if (
+      !onPrepareServer
+      || !normalizedServerUrl
+      || preparationMatches
+      || preparationAttemptRef.current === normalizedServerUrl
+    ) return undefined;
+    let cancelled = false;
+    preparationAttemptRef.current = normalizedServerUrl;
+    setPreparingServer(true);
+    void onPrepareServer({ serverUrl: normalizedServerUrl })
+      .catch(() => {
+        // useEnterpriseAuth owns the user-facing error.
+      })
+      .finally(() => {
+        if (!cancelled) setPreparingServer(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedServerUrl, onPrepareServer, preparationMatches]);
 
   useEffect(() => {
     if (!initialInviteCode) return;
@@ -245,7 +290,7 @@ export function EnterpriseLoginPage({
   }, [loginCountdown]);
 
   const requestCode = async (): Promise<void> => {
-    if (formPending || requesting || countdown > 0) return;
+    if (!serverReady || formPending || requesting || countdown > 0) return;
     const requestEpoch = requestEpochRef.current + 1;
     requestEpochRef.current = requestEpoch;
     setRequesting(true);
@@ -280,6 +325,7 @@ export function EnterpriseLoginPage({
   const requestSmsLoginCode = async (): Promise<void> => {
     if (
       formPending
+      || !serverReady
       || loginRequesting
       || loginCountdown > 0
       || !onRequestLoginCode
@@ -329,7 +375,7 @@ export function EnterpriseLoginPage({
 
   const submitAuth = async (): Promise<void> => {
     if (formPending || requesting || loginRequesting || submitLockedRef.current) return;
-    if (!serverUrl.trim()) return;
+    if (!serverUrl.trim() || !serverReady) return;
     if ((mode === 'register' || mode === 'join') && !isRegistrationReady({
       inviteCode,
       inviteRequired: mode === 'join',
@@ -430,6 +476,44 @@ export function EnterpriseLoginPage({
               ? '此设备将安全保持登录'
               : mode === 'join' ? '企业成员加入' : '创建个人 Otto 账号'}
           </div>
+
+          {onPrepareServer ? (
+            <div
+              className="otto-auth-readiness"
+              data-state={preparationMatches
+                ? (preparation?.legacy ? 'legacy' : preparation?.readiness?.state)
+                : 'connecting'}
+              role="status"
+            >
+              <strong>
+                {preparingServer
+                  ? '正在连接企业服务…'
+                  : serverReady
+                    ? (preparation?.legacy ? '已连接兼容版企业服务' : '企业服务已就绪')
+                    : '企业服务尚未就绪'}
+              </strong>
+              {preparationMatches && preparation?.readiness?.steps.map((item) => (
+                <span key={item.id} data-step-state={item.state}>
+                  <i aria-hidden />{item.message}
+                </span>
+              ))}
+              {!preparingServer && !serverReady ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    preparationAttemptRef.current = '';
+                    setPreparingServer(true);
+                    void onPrepareServer({ serverUrl: normalizedServerUrl })
+                      .catch(() => {})
+                      .finally(() => setPreparingServer(false));
+                  }}
+                  disabled={!normalizedServerUrl || formPending}
+                >
+                  重新连接
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           {mode === 'register' || mode === 'join' ? (
             <>
@@ -559,10 +643,9 @@ export function EnterpriseLoginPage({
                   <button
                     type="button"
                     onClick={() => void requestCode()}
-                    disabled={formPending || requesting || countdown > 0
+                    disabled={!serverReady || formPending || requesting || countdown > 0
                       || phone.replace(/\D/g, '').length !== 11
-                      || (mode === 'join'
-                        && inviteCode.replace(/[^A-Z2-9]/g, '').length !== 8)}
+                      || (mode === 'join' && !isCompleteOrganizationInviteCode(inviteCode))}
                   >
                     {requesting ? '发送中…' : countdown > 0 ? `${countdown}s 后重试` : '获取验证码'}
                   </button>
@@ -705,7 +788,7 @@ export function EnterpriseLoginPage({
                       <button
                         type="button"
                         onClick={() => void requestSmsLoginCode()}
-                        disabled={formPending || loginRequesting || loginCountdown > 0
+                        disabled={!serverReady || formPending || loginRequesting || loginCountdown > 0
                           || loginPhone.replace(/\D/g, '').length !== 11
                           || !onRequestLoginCode}
                       >
@@ -725,7 +808,7 @@ export function EnterpriseLoginPage({
           <button
             className="otto-auth-submit"
             type="submit"
-            disabled={formPending || requesting || loginRequesting
+            disabled={!serverReady || formPending || requesting || loginRequesting
               || (mode === 'login' && (
                 loginMethod === 'password'
                   ? (!identifier.trim() || !loginPassword)

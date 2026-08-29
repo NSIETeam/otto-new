@@ -572,4 +572,52 @@ describe('enterprise auth identity synchronization', () => {
     expect(synchronize).toHaveBeenCalledWith(null);
     expect(persist).toHaveBeenCalledOnce();
   });
+
+  it('syncs the enterprise-issued short-lived Edge grant into the trusted local control plane', async () => {
+    const gateway = {
+      baseUrl: 'https://edge.otto.test/v1',
+      accessToken: 'edge-short-token-at-least-thirty-two-characters',
+      expiresAt: '2099-01-01T00:05:00.000Z',
+      allowedModels: ['otto:deepseek'],
+    };
+    const synchronize = vi.fn(
+      async (_account: AuthenticatedEnterpriseAccountInput | null) => undefined,
+    );
+
+    await authenticateAndSyncEnterpriseAccount(
+      async () => ({ account: ACCOUNT }),
+      {
+        logout: vi.fn(async () => undefined),
+        getManagedModelGatewayAccess: vi.fn(async () => gateway),
+      },
+      synchronize,
+      vi.fn(),
+    );
+
+    expect(synchronize).toHaveBeenCalledWith({
+      ...LOCAL_ACCOUNT,
+      managedModelGateway: gateway,
+      leaseExpiresAt: expect.any(String),
+    });
+  });
+
+  it('keeps login valid but does not invent a grant when an old server lacks managed models', async () => {
+    const synchronize = vi.fn(
+      async (_account: AuthenticatedEnterpriseAccountInput | null) => undefined,
+    );
+
+    await authenticateAndSyncEnterpriseAccount(
+      async () => ({ account: ACCOUNT }),
+      {
+        logout: vi.fn(async () => undefined),
+        getManagedModelGatewayAccess: vi.fn(async () => {
+          throw new Error('服务器未提供 managed_model_gateway_v1');
+        }),
+      },
+      synchronize,
+      vi.fn(),
+    );
+
+    expect(synchronize.mock.calls[0]?.[0]).not.toHaveProperty('managedModelGateway');
+  });
 });

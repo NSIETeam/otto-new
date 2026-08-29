@@ -15,6 +15,14 @@ export interface AuthenticatedEnterpriseOrganizationMemberInput {
   status: 'active' | 'disabled';
 }
 
+/** Runtime-only account-bound Edge grant; never persist or expose to renderer. */
+export interface AuthenticatedManagedModelGatewayInput {
+  baseUrl: string;
+  accessToken: string;
+  expiresAt: string;
+  allowedModels: string[];
+}
+
 /** Electron main 传给本机 OttoServer 可信控制面的最小中心账号形状。 */
 export interface AuthenticatedEnterpriseAccountInput {
   id: string;
@@ -31,4 +39,5 @@ export interface AuthenticatedEnterpriseAccountInput {
   organizationMembers?: AuthenticatedEnterpriseOrganizationMemberInput[];
   /** 中心身份短租约；本机 server 到期后必须 fail closed。 */
   leaseExpiresAt: string;
+  managedModelGateway?: AuthenticatedManagedModelGatewayInput;
 }

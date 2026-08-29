@@ -7,6 +7,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
   advanceTypewriterFrame,
   EnterpriseLoginPage,
+  isCompleteOrganizationInviteCode,
   isRegistrationReady,
   sanitizeOrganizationInviteCode,
   sanitizeSmsCode,
@@ -30,6 +31,8 @@ describe('企业首次注册输入规则', () => {
   it('普通注册不需要邀请码，加入企业时才校验邀请码', () => {
     expect(sanitizeSmsCode('04a27 319')).toBe('042731');
     expect(sanitizeOrganizationInviteCode('ab3D k9Pq z7xY<script>')).toBe('ab3D-k9Pq-z7xY');
+    expect(isCompleteOrganizationInviteCode('Ab3D-k9Pq-Z7xY')).toBe(true);
+    expect(isCompleteOrganizationInviteCode('ABCD-EFGH')).toBe(false);
     expect(isRegistrationReady({ inviteCode: '', name: '小明', password: 'password-1', confirmPassword: 'password-1', challengeId: 'sms_1', code: '042731', legalConsent: true, legalDocuments: LEGAL_DOCUMENTS })).toBe(true);
     expect(isRegistrationReady({ inviteCode: '', name: '小明', password: 'password-1', confirmPassword: 'password-1', challengeId: 'sms_1', code: '042731', legalConsent: false, legalDocuments: LEGAL_DOCUMENTS })).toBe(false);
     expect(isRegistrationReady({ inviteCode: '', inviteRequired: true, name: '小明', password: 'password-1', confirmPassword: 'password-1', challengeId: 'sms_1', code: '042731', legalConsent: true, legalDocuments: LEGAL_DOCUMENTS })).toBe(false);
@@ -447,5 +450,50 @@ describe('专业登录入口', () => {
     expect((screen.getByLabelText('设置登录密码') as HTMLInputElement).value).toBe('');
     expect((screen.getByLabelText('确认登录密码') as HTMLInputElement).value).toBe('');
     expect((screen.getByLabelText('短信验证码') as HTMLInputElement).value).toBe('');
+  });
+
+  it('packaged Desktop prepares the configured server without exposing its address', async () => {
+    const preparation = {
+      serverUrl: 'https://enterprise.otto.test',
+      legacy: false,
+      readiness: {
+        state: 'ready_for_identity' as const,
+        canAuthenticate: true,
+        canUseLicensedFeatures: true,
+        bootstrap: {
+          phase: 'activated' as const,
+          lastAttemptAt: '2026-08-29T00:00:00.000Z',
+          lastSuccessAt: '2026-08-29T00:00:00.000Z',
+          errorCode: null,
+        },
+        steps: [],
+      },
+    };
+    const onPrepareServer = vi.fn(async () => preparation);
+    const common = {
+      initialServerUrl: 'https://enterprise.otto.test',
+      busy: false,
+      error: null,
+      onPrepareServer,
+      onPasswordLogin: async () => undefined,
+      onRequestRegistrationCode: async () => ({
+        challengeId: 'unused',
+        message: 'unused',
+        retryAfterSeconds: 60,
+        organization: null,
+        legalDocuments: LEGAL_DOCUMENTS,
+      }),
+      onRegister: async () => undefined,
+      onClearError: () => undefined,
+    };
+    const view = render(<EnterpriseLoginPage {...common} preparation={null} />);
+
+    await waitFor(() => expect(onPrepareServer).toHaveBeenCalledWith({
+      serverUrl: 'https://enterprise.otto.test',
+    }));
+    expect(screen.queryByLabelText('企业服务器地址')).toBeNull();
+
+    view.rerender(<EnterpriseLoginPage {...common} preparation={preparation} />);
+    expect(await screen.findByText('企业服务已就绪')).toBeTruthy();
   });
 });

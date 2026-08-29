@@ -3014,4 +3014,122 @@ describe('EnterpriseClient', () => {
     );
     expect(e2ee.decryptAttachment).not.toHaveBeenCalled();
   });
+
+  it('prepares a bootstrap-capable enterprise server before authentication', async () => {
+    const readiness = {
+      state: 'ready_for_identity',
+      canAuthenticate: true,
+      canUseLicensedFeatures: true,
+      bootstrap: {
+        phase: 'activated',
+        lastAttemptAt: '2026-08-29T00:00:00.000Z',
+        lastSuccessAt: '2026-08-29T00:00:00.000Z',
+        errorCode: null,
+      },
+      steps: [],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, {
+        ...API_V2_HEALTH,
+        capabilities: [...API_V2_HEALTH.capabilities, 'private_deployment_bootstrap_v1'],
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, { readiness }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+
+    await expect(client.prepareServer('https://enterprise.otto.test/root/'))
+      .resolves.toEqual({
+        serverUrl: 'https://enterprise.otto.test/root',
+        legacy: false,
+        readiness,
+      });
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      'https://enterprise.otto.test/root/enterprise/health',
+      'https://enterprise.otto.test/root/enterprise/bootstrap/prepare',
+    ]);
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).body).toBe('{}');
+  });
+
+  it('treats a compatible v1.9.13 server without bootstrap capability as legacy-ready', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, API_V2_HEALTH));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+
+    await expect(client.prepareServer('https://enterprise.otto.test')).resolves.toEqual({
+      serverUrl: 'https://enterprise.otto.test',
+      legacy: true,
+      readiness: null,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('only returns an account-bound short-lived managed model grant to the trusted main process', async () => {
+    const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, {
+        ...API_V2_HEALTH,
+        capabilities: [...API_V2_HEALTH.capabilities, 'managed_model_gateway_v1'],
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        account: ACCOUNT,
+        token: 'session-token',
+        expiresAt: '2099-01-01',
+      }))
+      .mockResolvedValueOnce(jsonResponse(201, {
+        gateway: {
+          baseUrl: 'https://edge.otto.test/v1/',
+          accessToken: 'edge-short-token-at-least-thirty-two-characters',
+          expiresAt,
+          allowedModels: ['otto:deepseek', 'otto:qwen'],
+        },
+      }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    await client.loginWithPassword(
+      'https://enterprise.otto.test',
+      'staff01',
+      'password',
+    );
+
+    await expect(client.getManagedModelGatewayAccess()).resolves.toEqual({
+      baseUrl: 'https://edge.otto.test/v1',
+      accessToken: 'edge-short-token-at-least-thirty-two-characters',
+      expiresAt,
+      allowedModels: ['otto:deepseek', 'otto:qwen'],
+    });
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      'https://enterprise.otto.test/enterprise/model-gateway/access-token',
+    );
+    expect((fetchMock.mock.calls[2]?.[1] as RequestInit).headers).toMatchObject({
+      authorization: 'Bearer session-token',
+    });
+  });
+
+  it('rejects an insecure managed model gateway even when the enterprise server returns it', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, {
+        ...API_V2_HEALTH,
+        capabilities: [...API_V2_HEALTH.capabilities, 'managed_model_gateway_v1'],
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        account: ACCOUNT,
+        token: 'session-token',
+        expiresAt: '2099-01-01',
+      }))
+      .mockResolvedValueOnce(jsonResponse(201, {
+        gateway: {
+          baseUrl: 'http://edge.otto.test/v1',
+          accessToken: 'edge-short-token-at-least-thirty-two-characters',
+          expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+          allowedModels: ['otto:deepseek'],
+        },
+      }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    await client.loginWithPassword(
+      'https://enterprise.otto.test',
+      'staff01',
+      'password',
+    );
+
+    await expect(client.getManagedModelGatewayAccess()).rejects.toThrow(/安全要求/);
+  });
 });

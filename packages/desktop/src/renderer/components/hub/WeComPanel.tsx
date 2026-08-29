@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { IconExternalLink } from '../icons.js';
 import { Card, Panel } from './HubUI.js';
 import { ChannelPairingCard } from './ChannelPairingCard.js';
+import { ChannelInstallationList } from './ChannelInstallationList.js';
 
 export const WECOM_ADMIN_URL = 'https://work.weixin.qq.com/wework_admin/frame#apps';
 export const WECOM_API_GUIDE_URL = 'https://developer.work.weixin.qq.com/document/path/90665';
@@ -46,6 +47,7 @@ export function WeComPanel(): React.JSX.Element {
       desc="从 Otto 直接进入企业微信管理后台，创建自建应用并准备 Corp ID、AgentId 和 Secret。"
     >
       <ChannelPairingCard provider="wecom" />
+      <ChannelInstallationList provider="wecom" />
 
       <div className="otto-hub__section-title">高级配置与兼容模式</div>
       <Card className="otto-hub__card--pad">

@@ -30,6 +30,7 @@ import { GeneratedIcon } from '../GeneratedIcon.js';
 import { IconExternalLink } from '../icons.js';
 import { Panel, Card, Badge, Empty } from './HubUI.js';
 import { ChannelPairingCard } from './ChannelPairingCard.js';
+import { ChannelInstallationList } from './ChannelInstallationList.js';
 
 /** 状态轮询周期：面板打开时用户正在等连接结果，比常驻徽标（5s）稍勤。 */
 const POLL_INTERVAL_MS = 3_000;
@@ -182,6 +183,7 @@ export function FeishuPanel(): React.JSX.Element {
       }
     >
       <ChannelPairingCard provider={domain} />
+      <ChannelInstallationList provider={domain} />
 
       {/* 连接状态：与徽标同一套推导（诚实：重连中/锁冲突/离线各是各）。 */}
       <Card className="otto-hub__card--pad">

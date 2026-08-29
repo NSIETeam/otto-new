@@ -609,6 +609,8 @@ const IPC = {
   channelPairingStatus: 'otto:channel-pairing-status',
   channelPairingInstall: 'otto:channel-pairing-install',
   channelPairingCancel: 'otto:channel-pairing-cancel',
+  channelInstallations: 'otto:channel-installations',
+  channelInstallationAction: 'otto:channel-installation-action',
   rpaAccessibilityStatus: 'otto:rpa-accessibility-status',
   rpaAccessibilityRequest: 'otto:rpa-accessibility-request',
   parkConfig: 'otto:park-config',
@@ -4198,6 +4200,29 @@ function registerIpc(): void {
     pairingAction(pairingId, 'POST', '/install'));
   ipcMain.handle(IPC.channelPairingCancel, (_event, pairingId: unknown) =>
     pairingAction(pairingId, 'DELETE'));
+  ipcMain.handle(IPC.channelInstallations, async () => {
+    const response = await requestChannelPairing('GET', '/channels/installations');
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  });
+  ipcMain.handle(
+    IPC.channelInstallationAction,
+    async (_event, installationId: unknown, action: unknown) => {
+      if (
+        typeof installationId !== 'string' ||
+        !/^channel_(feishu|lark|wecom)_[a-f0-9]{24}$/.test(installationId)
+      ) {
+        return { ok: false, data: null, error: '安装编号不合法。' };
+      }
+      if (!['health', 'start', 'stop', 'revoke'].includes(String(action))) {
+        return { ok: false, data: null, error: '安装操作不合法。' };
+      }
+      const response = await requestChannelPairing(
+        action === 'revoke' ? 'DELETE' : action === 'health' ? 'GET' : 'POST',
+        `/channels/installations/${installationId}${action === 'revoke' ? '' : `/${String(action)}`}`,
+      );
+      return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+    },
+  );
   ipcMain.handle(IPC.rpaAccessibilityStatus, () => ({
     platform: process.platform,
     supported: process.platform === 'darwin',

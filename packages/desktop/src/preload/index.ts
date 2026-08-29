@@ -29,6 +29,8 @@ import type {
   FeishuConfigSaveRequest,
   ChannelPairingPublic,
   ChannelProvider,
+  ChannelInstallation,
+  ChannelHealth,
   HealthInfo,
   ServerEndpoint,
   ServerToClient,
@@ -58,6 +60,7 @@ export interface FeishuConfigResult {
 }
 export type { FeishuConfigPublic, FeishuConfigSaveRequest };
 export type { ChannelPairingPublic, ChannelProvider };
+export type { ChannelInstallation, ChannelHealth };
 
 export interface ChannelPairingResult {
   ok: boolean;
@@ -1458,6 +1461,11 @@ export interface OttoBridge {
   channelPairingStatus(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
   channelPairingInstall(pairingId: string): Promise<ChannelPairingActionResult>;
   channelPairingCancel(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
+  channelInstallations(): Promise<ChannelPairingActionResult<ChannelInstallation[]>>;
+  channelInstallationAction(
+    installationId: string,
+    action: 'health' | 'start' | 'stop' | 'revoke',
+  ): Promise<ChannelPairingActionResult<ChannelHealth | { revoked: true }>>;
   rpaAccessibilityStatus(): Promise<{ platform: string; supported: boolean; trusted: boolean }>;
   rpaAccessibilityRequest(): Promise<{ platform: string; supported: boolean; trusted: boolean }>;
   /** 园区服务企业定制配置；无配置文件时 null（用内置默认）。 */
@@ -2423,6 +2431,15 @@ const bridge: OttoBridge = {
   },
   channelPairingCancel(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>> {
     return ipcRenderer.invoke('otto:channel-pairing-cancel', pairingId) as Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
+  },
+  channelInstallations(): Promise<ChannelPairingActionResult<ChannelInstallation[]>> {
+    return ipcRenderer.invoke('otto:channel-installations') as Promise<ChannelPairingActionResult<ChannelInstallation[]>>;
+  },
+  channelInstallationAction(
+    installationId: string,
+    action: 'health' | 'start' | 'stop' | 'revoke',
+  ): Promise<ChannelPairingActionResult<ChannelHealth | { revoked: true }>> {
+    return ipcRenderer.invoke('otto:channel-installation-action', installationId, action) as Promise<ChannelPairingActionResult<ChannelHealth | { revoked: true }>>;
   },
   rpaAccessibilityStatus(): Promise<{ platform: string; supported: boolean; trusted: boolean }> {
     return ipcRenderer.invoke('otto:rpa-accessibility-status') as Promise<{ platform: string; supported: boolean; trusted: boolean }>;

@@ -49,7 +49,6 @@ import {
 import { fileURLToPath } from 'node:url';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
-import { generateKeyPairSync } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type {
@@ -70,6 +69,11 @@ import {
 import { WorkspaceDirectoryStore } from './workspace-directory-store.js';
 import { MainWindowPresentationController } from './main-window-presentation.js';
 import { askWindowCloseChoice } from './window-close-policy.js';
+import {
+  createChannelInstallationDeviceKeys,
+  createChannelInstallationProof,
+  type ChannelInstallationDeviceKeys,
+} from './channel-installation-proof.js';
 import { cancelDurableWorkflowsForQuit } from './durable-workflow-quit.js';
 
 function ignoreBrokenPipe(stream: NodeJS.WriteStream): void {
@@ -528,7 +532,10 @@ let enterpriseTrayContacts: EnterpriseTrayContact[] = [];
 /** 用户主动退出标记；关闭窗口时不退出，只有菜单/托盘退出才真正结束进程。 */
 let isQuitting = false;
 /** Ephemeral private keys for in-progress provider pairings; never exposed to renderer. */
-const channelPairingPrivateKeys = new Map<string, string>();
+const channelPairingDeviceKeys = new Map<
+  string,
+  ChannelInstallationDeviceKeys
+>();
 const desktopRpaAppGrants = new Map<string, 'inspect' | 'interact'>();
 let unregisterDesktopRpaHost: (() => void) | undefined;
 
@@ -4137,16 +4144,17 @@ function registerIpc(): void {
     if (provider !== 'feishu' && provider !== 'lark' && provider !== 'wecom') {
       return { ok: false, pairing: null, error: '不支持的连接类型。' };
     }
-    const keys = generateKeyPairSync('x25519');
-    const installationPublicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
-    const privateKey = keys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const keys = createChannelInstallationDeviceKeys();
+    const installationPublicKey = keys.publicKey;
     const response = await requestChannelPairing('POST', '/channels/pairings', {
       provider,
       installationPublicKey,
       requestedScopes: channelScopes[provider],
     });
     const pairing = response?.ok ? response.data as ChannelPairingPublic : null;
-    if (pairing) channelPairingPrivateKeys.set(pairing.pairingId, privateKey);
+    if (pairing) {
+      channelPairingDeviceKeys.set(pairing.pairingId, keys);
+    }
     return {
       ok: response?.ok === true,
       pairing,
@@ -4161,9 +4169,16 @@ function registerIpc(): void {
     if (typeof pairingId !== 'string' || !/^pair_[a-f0-9]{24}$/.test(pairingId)) {
       return { ok: false, data: null, error: '配对编号不合法。' };
     }
+    const deviceKeys = channelPairingDeviceKeys.get(pairingId);
+    if (suffix === '/install' && !deviceKeys) {
+      return { ok: false, data: null, error: '本机配对密钥已丢失，请重新扫码。' };
+    }
     const response = await requestChannelPairing(
       method,
       `/channels/pairings/${pairingId}${suffix}`,
+      suffix === '/install' && deviceKeys
+        ? createChannelInstallationProof(pairingId, deviceKeys)
+        : undefined,
     );
     const status = response?.ok && response.data && typeof response.data === 'object'
       && 'status' in response.data
@@ -4171,10 +4186,10 @@ function registerIpc(): void {
       : undefined;
     if (
       method === 'DELETE'
-      || suffix === '/install'
+      || (suffix === '/install' && response?.ok === true)
       || (status !== undefined && ['connected', 'expired', 'denied', 'failed', 'revoked'].includes(status))
     ) {
-      channelPairingPrivateKeys.delete(pairingId);
+      channelPairingDeviceKeys.delete(pairingId);
     }
     return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
   };
@@ -5230,7 +5245,7 @@ if (!gotLock) {
     stopEnterpriseModuleUpdatePolling();
     stopEnterpriseSkillUsageReporting();
     desktopRecurringTasks.stopAll();
-    channelPairingPrivateKeys.clear();
+    channelPairingDeviceKeys.clear();
     desktopRpaAppGrants.clear();
     unregisterDesktopRpaHost?.();
     unregisterDesktopRpaHost = undefined;

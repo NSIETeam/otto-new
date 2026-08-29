@@ -44,7 +44,10 @@ export * from './modules/data_platform/index.js';
 export * from './modules/authorization/index.js';
 export * from './modules/identity_organization/index.js';
 export * from './modules/data_governance/index.js';
-export { ChannelPairingCoordinator } from './modules/integration_adapters/channelConnector.js';
+export {
+  ChannelPairingCoordinator,
+  channelInstallationProofPayload,
+} from './modules/integration_adapters/channelConnector.js';
 export type {
   BeginPairingInput,
   PairingSession,
@@ -54,6 +57,7 @@ export type {
   PairingAuthorization,
   ChannelPairingAuditEvent,
   ChannelPairingCoordinatorOptions,
+  ChannelInstallationProof,
 } from './modules/integration_adapters/channelConnector.js';
 export * from './modules/integration_adapters/channelTaskControl.js';
 export * from './modules/integration_adapters/workflowTaskControlPort.js';

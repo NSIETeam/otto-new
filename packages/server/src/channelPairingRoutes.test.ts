@@ -118,7 +118,6 @@ describe('channel pairing REST routes', () => {
     for (const [suffix, method] of [
       ['', 'GET'],
       ['/approve', 'POST'],
-      ['/install', 'POST'],
       ['', 'DELETE'],
     ] as const) {
       const response = await fetch(`${baseUrl}/channels/pairings/${pairing.pairingId}${suffix}`, {
@@ -127,9 +126,25 @@ describe('channel pairing REST routes', () => {
       });
       expect(response.status).toBe(200);
     }
+    const installed = await fetch(
+      `${baseUrl}/channels/pairings/${pairing.pairingId}/install`,
+      {
+        method: 'POST',
+        headers: { ...auth, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          installationPublicKey: 'public-key',
+          signature: 'A'.repeat(86),
+        }),
+      },
+    );
+    expect(installed.status).toBe(200);
     expect(connector.getPairingStatus).toHaveBeenCalledOnce();
     expect(connector.approveAdmin).toHaveBeenCalledOnce();
     expect(connector.completeInstallation).toHaveBeenCalledOnce();
+    expect(connector.completeInstallation).toHaveBeenCalledWith(
+      pairing.pairingId,
+      { installationPublicKey: 'public-key', signature: 'A'.repeat(86) },
+    );
     expect(connector.denyPairing).toHaveBeenCalledOnce();
   });
 });

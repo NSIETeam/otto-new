@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { generateKeyPairSync, sign } from 'node:crypto';
 
 import {
   ChannelPairingCoordinator,
+  channelInstallationProofPayload,
   type ChannelPairingAuditEvent,
 } from './channelConnector.js';
 
@@ -27,9 +29,13 @@ function setup(now = 1_000_000): {
 describe('ChannelPairingCoordinator', () => {
   it('creates a short-lived QR payload and completes a single-use installation', async () => {
     const { coordinator, events } = setup();
+    const keys = generateKeyPairSync('ed25519');
+    const installationPublicKey = keys.publicKey
+      .export({ type: 'spki', format: 'pem' })
+      .toString();
     const pairing = await coordinator.begin({
       provider: 'lark',
-      installationPublicKey: 'device-public-key',
+      installationPublicKey,
       requestedScopes: ['im:message', 'im:message', 'contact:user:read'],
     });
 
@@ -50,12 +56,31 @@ describe('ChannelPairingCoordinator', () => {
     expect(authorized.qrPayload).toBe('');
 
     await expect(
-      coordinator.complete(pairing.pairingId, 'another-device-public-key'),
+      coordinator.complete(pairing.pairingId, {
+        installationPublicKey: generateKeyPairSync('ed25519').publicKey
+          .export({ type: 'spki', format: 'pem' })
+          .toString(),
+        signature: 'invalid',
+      }),
     ).rejects.toThrow('installation public key does not match');
+
+    const signature = sign(
+      null,
+      channelInstallationProofPayload(pairing.pairingId),
+      keys.privateKey,
+    ).toString('base64url');
+    const tamperedSignature = Buffer.from(signature, 'base64url');
+    tamperedSignature[0] ^= 1;
+    await expect(
+      coordinator.complete(pairing.pairingId, {
+        installationPublicKey,
+        signature: tamperedSignature.toString('base64url'),
+      }),
+    ).rejects.toThrow('invalid channel installation device proof');
 
     const installation = await coordinator.complete(
       pairing.pairingId,
-      'device-public-key',
+      { installationPublicKey, signature },
     );
     expect(installation).toMatchObject({
       provider: 'lark', tenantId: 'tenant-1', tenantName: 'Acme', botName: 'Otto',
@@ -89,7 +114,10 @@ describe('ChannelPairingCoordinator', () => {
     );
     expect(waiting.status).toBe('waiting_admin');
     await expect(
-      coordinator.complete(pairing.pairingId, 'device-public-key'),
+      coordinator.complete(pairing.pairingId, {
+        installationPublicKey: 'device-public-key',
+        signature: 'invalid',
+      }),
     ).rejects.toThrow('waiting_admin');
     expect((await coordinator.approveAdmin(pairing.pairingId)).status).toBe('user_authorized');
   });

@@ -6,7 +6,13 @@
  * stay in their individual integration adapters.
  */
 
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import {
+  createHash,
+  createPublicKey,
+  randomBytes,
+  timingSafeEqual,
+  verify,
+} from 'node:crypto';
 
 export type ChannelProvider = 'feishu' | 'lark' | 'wecom';
 export type PairingStatus =
@@ -58,12 +64,28 @@ export interface ChannelHealth {
   message?: string;
 }
 
+export interface ChannelInstallationProof {
+  installationPublicKey: string;
+  /** Ed25519 signature encoded as base64url. */
+  signature: string;
+}
+
+export function channelInstallationProofPayload(pairingId: string): Buffer {
+  if (!PAIRING_ID_PATTERN.test(pairingId)) {
+    throw new Error('invalid channel pairing id');
+  }
+  return Buffer.from(`otto-channel-install-v1:${pairingId}`, 'utf8');
+}
+
 export interface ChannelConnectorV1 {
   beginPairing(input: BeginPairingInput): Promise<PairingSession>;
   getPairingStatus(pairingId: string): Promise<PairingSession>;
   approveAdmin(pairingId: string): Promise<PairingSession>;
   denyPairing(pairingId: string, reason?: string): Promise<PairingSession>;
-  completeInstallation(pairingId: string): Promise<ChannelInstallation>;
+  completeInstallation(
+    pairingId: string,
+    proof: ChannelInstallationProof,
+  ): Promise<ChannelInstallation>;
   start(installationId: string): Promise<ChannelHealth>;
   stop(installationId: string): Promise<ChannelHealth>;
   revoke(installationId: string): Promise<void>;
@@ -229,17 +251,34 @@ export class ChannelPairingCoordinator {
 
   async complete(
     pairingId: string,
-    installationPublicKey: string,
+    proof: ChannelInstallationProof,
   ): Promise<ChannelInstallation> {
     const pairing = this.requirePairing(pairingId);
     await this.expireIfNeeded(pairing);
     this.assertStatus(pairing, 'user_authorized');
-    const installationKey = installationPublicKey.trim();
+    const installationKey = proof.installationPublicKey.trim();
     if (
       !installationKey ||
       pairing.installationKeyHash !== digest(installationKey).toString('hex')
     ) {
       throw new Error('installation public key does not match channel pairing');
+    }
+    let signature: Buffer;
+    try {
+      signature = Buffer.from(proof.signature, 'base64url');
+      if (
+        signature.length !== 64 ||
+        !verify(
+          null,
+          channelInstallationProofPayload(pairingId),
+          createPublicKey(installationKey),
+          signature,
+        )
+      ) {
+        throw new Error('invalid signature');
+      }
+    } catch {
+      throw new Error('invalid channel installation device proof');
     }
     const authorization = pairing.authorization;
     if (!authorization) throw new Error('channel pairing authorization is missing');

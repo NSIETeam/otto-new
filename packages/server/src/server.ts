@@ -2560,7 +2560,9 @@ export class OttoServer {
       } else if (req.method === 'POST' && action === 'approve') {
         operation = connector.approveAdmin(pairingId);
       } else if (req.method === 'POST' && action === 'install') {
-        operation = connector.completeInstallation(pairingId);
+        operation = readJsonBody(req)
+          .then((body) => parseChannelInstallationProof(body))
+          .then((proof) => connector.completeInstallation(pairingId, proof));
       } else if (req.method === 'DELETE' && !action) {
         operation = connector.denyPairing(pairingId, 'cancelled by local user');
       } else {
@@ -5047,6 +5049,29 @@ function parseChannelPairingBeginRequest(body: unknown): ChannelPairingBeginRequ
     throw new Error('channel scope request is empty or too large');
   }
   return { provider, installationPublicKey, requestedScopes };
+}
+
+function parseChannelInstallationProof(body: unknown): {
+  installationPublicKey: string;
+  signature: string;
+} {
+  if (typeof body !== 'object' || body === null) {
+    throw new Error('channel installation proof must be a JSON object');
+  }
+  const input = body as Record<string, unknown>;
+  const installationPublicKey =
+    typeof input.installationPublicKey === 'string'
+      ? input.installationPublicKey.trim()
+      : '';
+  const signature =
+    typeof input.signature === 'string' ? input.signature.trim() : '';
+  if (!installationPublicKey || installationPublicKey.length > 16_384) {
+    throw new Error('installation public key is required');
+  }
+  if (!/^[A-Za-z0-9_-]{80,100}$/.test(signature)) {
+    throw new Error('channel installation signature is invalid');
+  }
+  return { installationPublicKey, signature };
 }
 /** core WorkflowAgentRecord → 协议 WorkflowAgentSummary（裁掉 prompt/recentToolCalls 等大字段）。 */
 function toWorkflowAgentSummary(a: WorkflowAgentRecord): WorkflowAgentSummary {

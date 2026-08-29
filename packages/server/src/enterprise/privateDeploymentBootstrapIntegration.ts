@@ -139,6 +139,19 @@ export function consumePrivateDeploymentBootstrapSecretFile(
   delete environment.OTTO_DEPLOYMENT_BOOTSTRAP_SECRET_FILE;
 }
 
+export function consumePrivateDeploymentBootstrapSecret(
+  environment: NodeJS.ProcessEnv = process.env,
+): void {
+  try {
+    consumePrivateDeploymentBootstrapSecretFile(environment);
+  } finally {
+    // Environment injection is supported for compatibility, but successful
+    // activation must not leave the one-time bearer secret available to later
+    // child processes or unrelated in-process diagnostics.
+    delete environment.OTTO_DEPLOYMENT_BOOTSTRAP_SECRET;
+  }
+}
+
 export function privateDeploymentBootstrapConfigFromEnvironment(input: {
   appVersion: string;
   buildCommit: string;
@@ -244,7 +257,7 @@ export function createEnterprisePrivateDeploymentBootstrap(input: {
     async prepare() {
       const result = await coordinator.prepare();
       if (canConsumePrivateDeploymentBootstrapSecret(result)) {
-        consumePrivateDeploymentBootstrapSecretFile(environment);
+        consumePrivateDeploymentBootstrapSecret(environment);
       }
       return result;
     },

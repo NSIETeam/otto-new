@@ -10,6 +10,7 @@ import path from 'node:path';
 import type { PrivateDeploymentReadiness } from '../modules/deployment_lifecycle/index.js';
 import {
   canConsumePrivateDeploymentBootstrapSecret,
+  consumePrivateDeploymentBootstrapSecret,
   consumePrivateDeploymentBootstrapSecretFile,
   privateDeploymentBootstrapConfigFromEnvironment,
 } from './privateDeploymentBootstrapIntegration.js';
@@ -116,6 +117,17 @@ describe('private deployment bootstrap environment', () => {
       consumePrivateDeploymentBootstrapSecretFile(environment),
     ).not.toThrow();
   });
+
+  it('removes a successful one-time secret injected directly in the environment', () => {
+    const environment: NodeJS.ProcessEnv = {
+      OTTO_DEPLOYMENT_BOOTSTRAP_SECRET: 'x'.repeat(48),
+    };
+
+    consumePrivateDeploymentBootstrapSecret(environment);
+
+    expect(environment.OTTO_DEPLOYMENT_BOOTSTRAP_SECRET).toBeUndefined();
+  });
+
   it('does not configure Control when either endpoint or secret is absent', () => {
     expect(privateDeploymentBootstrapConfigFromEnvironment({
       appVersion: '1.10.2',

@@ -11,6 +11,7 @@ const roots: string[] = [];
 const workflow: RpaWorkflowV1 = {
   id: 'download-report',
   version: 1,
+  allowedHosts: ['example.com'],
   steps: [{ id: 'download', action: 'web.click', args: { selector: '#download' }, sideEffect: 'external' }],
 };
 

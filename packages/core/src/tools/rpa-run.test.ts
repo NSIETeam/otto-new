@@ -9,6 +9,7 @@ describe('RpaRunTool', () => {
   const workflow = {
     id: 'invoice-check',
     version: 1 as const,
+    allowedHosts: ['example.com'],
     steps: [{ id: 'open', action: 'web.navigate' as const, args: { url: 'https://example.com' }, sideEffect: 'none' as const }],
   };
 
@@ -21,6 +22,13 @@ describe('RpaRunTool', () => {
       action: 'start',
       workflow: { ...workflow, steps: [{ ...workflow.steps[0], args: { password: 'never-store-me' } }] },
     })).toContain('secrets');
+  });
+
+  it('rejects navigation to a host absent from the workflow declaration', () => {
+    expect(tool.validateToolParams({
+      action: 'start',
+      workflow: { ...workflow, steps: [{ ...workflow.steps[0], args: { url: 'https://internal.example' } }] },
+    })).toContain('not declared');
   });
 
   it('requires an explicit approval identifier', () => {

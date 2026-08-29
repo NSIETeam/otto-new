@@ -73,7 +73,7 @@ import {
   PARK_STATISTICS_SCHEMA_CONTRIBUTOR,
 } from '../modules/park_services/index.js';
 import {
-  CustomerModuleMarketplace,
+  createCustomerModuleMarketplaceFacade,
   CUSTOMER_MODULE_SCHEMA_CONTRIBUTOR,
   SqliteCustomerModuleMarketplaceStore,
 } from '../modules/tool_skill_platform/index.js';
@@ -410,18 +410,10 @@ export function closeEnterpriseDatabase(): void {
 }
 
 export const getDB = dataPlatform.getDatabase;
-
-/**
- * Creates the customer-module marketplace facade for the current enterprise
- * database. HTTP routes use this facade instead of reaching through the
- * enterprise storage boundary themselves.
- */
-export function createCustomerModuleMarketplaceFacade() {
-  const store = new SqliteCustomerModuleMarketplaceStore(getDB());
-  return {
-    market: new CustomerModuleMarketplace(undefined, store),
-    store,
-  };
+export function getCustomerModuleMarketplace() {
+  return createCustomerModuleMarketplaceFacade(
+    new SqliteCustomerModuleMarketplaceStore(getDB()),
+  );
 }
 
 /** Credential-free storage topology for diagnostics and readiness output. */

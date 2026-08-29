@@ -18,9 +18,14 @@ const ACTIONS = [
   'web.extract',
   'web.screenshot',
   'web.wait',
+  'desktop.launch',
+  'desktop.type_text',
+  'desktop.hotkey',
+  'desktop.click',
+  'desktop.screenshot',
   'checkpoint',
 ] as const;
-const OPERATIONS = ['start', 'run_next', 'recover', 'approve', 'take_over', 'status'] as const;
+const OPERATIONS = ['start', 'run_next', 'run_all', 'pause', 'resume', 'recover', 'approve', 'take_over', 'cancel', 'status'] as const;
 type RpaAction = (typeof ACTIONS)[number];
 type RpaOperation = (typeof OPERATIONS)[number];
 
@@ -35,6 +40,7 @@ interface RpaStepInput {
 interface RpaWorkflowInput {
   id: string;
   version: 1;
+  allowedHosts: string[];
   steps: RpaStepInput[];
 }
 
@@ -68,10 +74,14 @@ interface RpaRunSummarySource {
 
 interface RpaRunnerPort {
   start(workflowId: string, version?: number): Promise<RpaRunSummarySource>;
-  runNext(runId: string): Promise<RpaRunSummarySource | null>;
+  runNext(runId: string, signal?: AbortSignal): Promise<RpaRunSummarySource | null>;
+  runUntilBlocked(runId: string, signal?: AbortSignal): Promise<RpaRunSummarySource | null>;
+  pause(runId: string, note?: string): Promise<RpaRunSummarySource | null>;
+  resume(runId: string): Promise<RpaRunSummarySource | null>;
   recover(runId: string): Promise<RpaRunSummarySource | null>;
   approve(runId: string, approvalId: string): Promise<RpaRunSummarySource | null>;
   takeOver(runId: string, note: string): Promise<RpaRunSummarySource | null>;
+  cancel(runId: string): Promise<RpaRunSummarySource | null>;
 }
 
 interface RpaRuntimeModule {
@@ -86,6 +96,18 @@ interface RpaRuntimeModule {
   ) => RpaRunnerPort;
   RunScopedWebDriver: new (factory: unknown) => unknown;
   PlaywrightWebSessionFactory: new () => unknown;
+}
+
+interface RuntimeDriverInput {
+  run: RpaRunSummarySource;
+  step: RpaStepInput;
+  idempotencyKey: string;
+  signal?: AbortSignal;
+}
+
+interface RuntimeDriver {
+  execute(input: RuntimeDriverInput): Promise<{ output?: unknown; artifacts?: ReadonlyArray<{ mediaType: string; bytes: Uint8Array; redactedSummary: string }> }>;
+  closeRun?(runId: string): Promise<void>;
 }
 
 interface RpaRuntime {
@@ -134,9 +156,9 @@ function summarize(run: RpaRunSummarySource | null): Record<string, unknown> {
 export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
   static readonly Name = 'rpa_run';
   private runtimePromise: Promise<RpaRuntime> | undefined;
+  private readonly config: Config;
 
-  constructor(_config: Config) {
-    void _config;
+  constructor(config: Config) {
     super(
       RpaRunTool.Name,
       'RPA Run',
@@ -158,19 +180,32 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
       false,
       false,
     );
+    this.config = config;
   }
 
   validateToolParams(params: RpaRunToolParams): string | null {
     if (!OPERATIONS.includes(params.action)) return 'rpa_run: unsupported action.';
     if (params.action === 'start') {
       const workflow = params.workflow;
-      if (!workflow || !workflow.id || workflow.version !== 1 || !Array.isArray(workflow.steps) || workflow.steps.length === 0) {
-        return 'rpa_run/start: workflow with id, version 1, and at least one step is required.';
+      if (!workflow || !workflow.id || workflow.version !== 1 || !Array.isArray(workflow.allowedHosts) || !Array.isArray(workflow.steps) || workflow.steps.length === 0) {
+        return 'rpa_run/start: workflow with id, version 1, declared allowedHosts, and at least one step is required.';
       }
       if (containsSecret(workflow)) return 'rpa_run/start: secrets must not be embedded in workflow arguments.';
       for (const step of workflow.steps) {
         if (!step.id || !ACTIONS.includes(step.action) || !step.args || !['none', 'external'].includes(step.sideEffect)) {
           return 'rpa_run/start: each step requires id, supported action, args, and sideEffect.';
+        }
+        if (step.action.startsWith('desktop.') && step.action !== 'desktop.screenshot' && step.sideEffect !== 'external') {
+          return `rpa_run/start: ${step.action} must be declared as an external side effect.`;
+        }
+        if (step.action === 'web.navigate' && typeof step.args['url'] === 'string') {
+          try {
+            const hostname = new URL(step.args['url']).hostname.toLowerCase();
+            const declared = workflow.allowedHosts.some((entry) => entry.toLowerCase() === hostname || (entry.startsWith('*.') && hostname.endsWith(entry.slice(1))));
+            if (!declared) return `rpa_run/start: navigation domain is not declared: ${hostname}`;
+          } catch {
+            return 'rpa_run/start: web.navigate requires a valid declared URL.';
+          }
         }
       }
     } else if (!params.run_id?.trim()) {
@@ -196,7 +231,7 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
     };
   }
 
-  async execute(params: RpaRunToolParams, _signal: AbortSignal): Promise<ToolResult> {
+  async execute(params: RpaRunToolParams, signal: AbortSignal): Promise<ToolResult> {
     const error = this.validateToolParams(params);
     if (error) return { llmContent: error, returnDisplay: error };
     try {
@@ -207,7 +242,16 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
           run = await runner.start(params.workflow!.id, params.workflow!.version);
           break;
         case 'run_next':
-          run = await runner.runNext(params.run_id!);
+          run = await runner.runNext(params.run_id!, signal);
+          break;
+        case 'run_all':
+          run = await runner.runUntilBlocked(params.run_id!, signal);
+          break;
+        case 'pause':
+          run = await runner.pause(params.run_id!, params.takeover_note);
+          break;
+        case 'resume':
+          run = await runner.resume(params.run_id!);
           break;
         case 'recover':
           run = await runner.recover(params.run_id!);
@@ -217,6 +261,9 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
           break;
         case 'take_over':
           run = await runner.takeOver(params.run_id!, params.takeover_note!);
+          break;
+        case 'cancel':
+          run = await runner.cancel(params.run_id!);
           break;
         case 'status':
           run = await this.status(params.run_id!);
@@ -269,7 +316,36 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
       module,
       store: new module.FileRpaRunStore(path.join(directory, 'runs')),
       artifacts: new module.FileRpaArtifactStore(path.join(directory, 'artifacts')),
-      driver: new module.RunScopedWebDriver(new module.PlaywrightWebSessionFactory()),
+      driver: await this.createDriver(module),
+    };
+  }
+
+  private async createDriver(module: RpaRuntimeModule): Promise<RuntimeDriver> {
+    const web = new module.RunScopedWebDriver(new module.PlaywrightWebSessionFactory()) as RuntimeDriver;
+    const { DesktopAutomationTool } = await import('./desktop-automation.js');
+    const desktop = new DesktopAutomationTool(this.config);
+    return {
+      async execute(input): Promise<{ output?: unknown; artifacts?: ReadonlyArray<{ mediaType: string; bytes: Uint8Array; redactedSummary: string }> }> {
+        if (!input.step.action.startsWith('desktop.')) return web.execute(input);
+        const args = input.step.args;
+        const action = input.step.action;
+        const parameters = action === 'desktop.launch'
+          ? { action: 'launch_app' as const, app_name: String(args['appName'] ?? '') }
+          : action === 'desktop.type_text'
+            ? { action: 'type_text' as const, text: String(args['text'] ?? '') }
+            : action === 'desktop.hotkey'
+              ? { action: 'hotkey' as const, keys: String(args['keys'] ?? '') }
+              : action === 'desktop.click'
+                ? { action: 'mouse' as const, x: Number(args['x']), y: Number(args['y']), button: 'left' as const, click_type: 'single' as const }
+                : { action: 'screenshot' as const, output_path: typeof args['outputPath'] === 'string' ? args['outputPath'] : undefined };
+        const result = await desktop.execute(parameters, input.signal ?? new AbortController().signal);
+        const message = String(result.llmContent);
+        if (message.includes(' FAIL: ')) throw new Error(message);
+        return { output: { result: message, idempotencyKey: input.idempotencyKey } };
+      },
+      async closeRun(runId): Promise<void> {
+        await web.closeRun?.(runId);
+      },
     };
   }
 }

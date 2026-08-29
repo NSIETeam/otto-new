@@ -20,7 +20,7 @@ function createReceipt(runId: string, step: RpaStepDefinition): RpaRun['receipts
 export class FileRpaRunStore implements RpaRunStore {
   constructor(private readonly rootDir: string) {}
 
-  async create(workflow: { id: string; version: 1; steps: readonly RpaStepDefinition[] }): Promise<RpaRun> {
+  async create(workflow: { id: string; version: 1; allowedHosts: readonly string[]; steps: readonly RpaStepDefinition[] }): Promise<RpaRun> {
     if (!/^[a-z0-9][a-z0-9_.-]{0,63}$/u.test(workflow.id) || workflow.steps.length === 0) {
       throw new Error('RPA workflow is invalid.');
     }

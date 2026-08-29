@@ -6522,6 +6522,15 @@ body[data-otto-surface='desktop-pet'] #root {
   justify-content: center;
   animation: otto-setup-fade var(--otto-dur-fast) var(--otto-ease);
 }
+
+/* 园区服务使用产品的中性工作区语言，不继承旧版蓝色强调色。 */
+.otto-park-surface-theme {
+  display: contents;
+  --otto-accent: var(--otto-text);
+  --otto-accent-hover: var(--otto-text);
+  --otto-accent-soft: color-mix(in srgb, var(--otto-text) 7%, transparent);
+  --otto-shadow-focus: 0 0 0 2px color-mix(in srgb, var(--otto-text) 16%, transparent);
+}
 .otto-park-overlay.is-maximized {
   align-items: stretch;
   justify-content: stretch;
@@ -12525,9 +12534,9 @@ body[data-otto-surface='desktop-pet'] #root {
 
 .otto-module-group {
   min-width: 0;
-  border: 1px solid var(--line, #e5e7eb);
+  border: 1px solid var(--otto-border);
   border-radius: 16px;
-  background: var(--surface, #fff);
+  background: var(--otto-surface);
   padding: 14px;
 }
 
@@ -12543,7 +12552,7 @@ body[data-otto-surface='desktop-pet'] #root {
   min-width: 0;
   overflow: hidden;
   margin: 0;
-  color: var(--text, #171717);
+  color: var(--otto-text);
   font-size: 15px;
   font-weight: 650;
   text-overflow: ellipsis;
@@ -12779,7 +12788,7 @@ body[data-otto-surface='desktop-pet'] #root {
 }
 
 .otto-module-group__grid:focus-visible {
-  outline: 2px solid var(--accent, #1677ff);
+  outline: 2px solid var(--otto-text);
   outline-offset: 3px;
   border-radius: 10px;
 }
@@ -12795,7 +12804,7 @@ body[data-otto-surface='desktop-pet'] #root {
   border: 1px solid transparent;
   border-radius: 12px;
   background: transparent;
-  color: var(--text, #171717);
+  color: var(--otto-text);
   cursor: pointer;
   transition: background-color 150ms ease;
 }
@@ -12846,8 +12855,8 @@ body[data-otto-surface='desktop-pet'] #root {
   to { transform: rotate(0.45deg); }
 }
 
-.otto-module-tile:hover:not(.is-unavailable) {
-  background: var(--surface-subtle, #f5f7fa);
+.otto-module-tile:hover:not(:disabled):not(.is-unavailable) {
+  background: var(--otto-surface-hover);
 }
 
 .otto-module-tile.is-unavailable {
@@ -12862,7 +12871,7 @@ body[data-otto-surface='desktop-pet'] #root {
 }
 
 .otto-module-tile:focus-visible {
-  outline: 2px solid var(--accent, #1677ff);
+  outline: 2px solid var(--otto-text);
   outline-offset: 1px;
 }
 
@@ -12876,8 +12885,9 @@ body[data-otto-surface='desktop-pet'] #root {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  font-size: 12px;
-  line-height: 1.3;
+  font-size: 11.5px;
+  font-weight: 550;
+  line-height: 1.35;
   text-align: center;
   word-break: break-word;
 }
@@ -12896,10 +12906,10 @@ body[data-otto-surface='desktop-pet'] #root {
   flex-direction: column;
   gap: 7px;
   padding: 6px;
-  border: 1px dashed var(--line, #d9dde5);
+  border: 1px dashed var(--otto-border-strong);
   border-radius: 12px;
   background: transparent;
-  color: var(--text-muted, #69707d);
+  color: var(--otto-text-secondary);
   font: 500 12px/1.3 var(--otto-font);
   text-align: center;
   cursor: pointer;
@@ -12932,14 +12942,14 @@ body[data-otto-surface='desktop-pet'] #root {
 }
 
 .otto-module-group__add:hover {
-  border-color: var(--accent, #1677ff);
-  background: var(--surface-subtle, #f5f7fa);
-  color: var(--accent, #1677ff);
+  border-color: var(--otto-text-secondary);
+  background: var(--otto-surface-hover);
+  color: var(--otto-text);
 }
 
 .otto-module-group__add:focus-visible,
 .otto-module-workspace__add-group:focus-visible {
-  outline: 2px solid var(--accent, #1677ff);
+  outline: 2px solid var(--otto-text);
   outline-offset: 2px;
 }
 
@@ -12951,6 +12961,22 @@ body[data-otto-surface='desktop-pet'] #root {
 
 .otto-module-workspace--panel .otto-module-group__add-icon {
   font-size: 22px;
+}
+
+.otto-module-tile > .otto-module-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--otto-text) 5%, transparent);
+  color: var(--otto-text);
+}
+
+.otto-module-tile .otto-generated-icon {
+  filter: grayscale(1) contrast(1.05);
+  opacity: 0.9;
 }
 
 .otto-module-workspace__footer {

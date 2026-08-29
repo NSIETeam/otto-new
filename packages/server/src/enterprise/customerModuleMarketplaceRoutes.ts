@@ -2,15 +2,12 @@ import { createPrivateKey, sign } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { canonicalCustomerModuleManifest, encodeCustomerModulePackageV1 } from 'otto-core';
 import {
-  CustomerModuleMarketplace,
-  handleCustomerModuleMarketplaceRequest,
-  submitCustomerModulePackage,
-  type CustomerModuleMarketplaceStore,
+  type CustomerModuleMarketplaceFacade,
 } from '../modules/tool_skill_platform/index.js';
 import type { AccountView } from './db.js';
 import type { AdminPrincipal } from './enterpriseRouteDispatcher.js';
 
-function platformSigner(market: CustomerModuleMarketplace) {
+function platformSigner(market: CustomerModuleMarketplaceFacade) {
   const encodedKey = process.env.OTTO_CUSTOMER_MODULE_SIGNING_PRIVATE_KEY?.trim();
   const keyId = process.env.OTTO_CUSTOMER_MODULE_SIGNING_KEY_ID?.trim();
   if (!encodedKey || !keyId) return undefined;
@@ -42,7 +39,7 @@ export async function handleCustomerModuleMarketplaceRoute(input: {
   res: ServerResponse;
   memberAccount: AccountView | null;
   adminPrincipal: AdminPrincipal | null;
-  store: CustomerModuleMarketplaceStore;
+  market: CustomerModuleMarketplaceFacade;
   isSkillMarketEnabled(organizationId: string): boolean;
   readBody(req: IncomingMessage, maxLength?: number): Promise<Record<string, unknown>>;
   sendJSON(res: ServerResponse, status: number, data: unknown): void;
@@ -59,8 +56,7 @@ export async function handleCustomerModuleMarketplaceRoute(input: {
       ? { accountId: 'platform', isPlatformReviewer: true }
       : null;
   const body = input.method === 'POST' ? await input.readBody(input.req, 24_000_000) : {};
-  const store = input.store;
-  const market = new CustomerModuleMarketplace(undefined, store);
+  const market = input.market;
   const packageMatch = input.path.match(/^\/enterprise\/customer-modules\/([a-z0-9.-]+)\/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\/package$/u);
   if (packageMatch && input.method === 'GET') {
     const [, moduleId, version] = packageMatch;
@@ -70,7 +66,7 @@ export async function handleCustomerModuleMarketplaceRoute(input: {
       return true;
     }
     const files = Object.fromEntries(
-      [...store.getArtifacts(moduleId, version)].map(([path, body]) => [path, Buffer.from(body).toString('base64')]),
+      [...market.getArtifacts(moduleId, version)].map(([path, body]) => [path, Buffer.from(body).toString('base64')]),
     );
     const archive = Buffer.from(encodeCustomerModulePackageV1({ manifest: record.manifest, files })).toString('base64');
     input.sendJSON(input.res, 200, { archive });
@@ -97,12 +93,10 @@ export async function handleCustomerModuleMarketplaceRoute(input: {
         }
         files.set(path, Uint8Array.from(Buffer.from(encoded, 'base64')));
       }
-      const module = await submitCustomerModulePackage({
+      const module = await market.submit({
         publisherId: input.memberAccount.id,
         manifest: body.manifest,
         files,
-        market,
-        store,
       });
       input.sendJSON(input.res, 201, { module });
     } catch (error) {
@@ -110,8 +104,7 @@ export async function handleCustomerModuleMarketplaceRoute(input: {
     }
     return true;
   }
-  const response = handleCustomerModuleMarketplaceRequest(
-    market,
+  const response = market.handle(
     { method: input.method, path: input.path, actor, body },
     { signApprovedVersion: platformSigner(market) },
   );

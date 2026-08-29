@@ -144,6 +144,34 @@ describe('desktop packaging contract', () => {
     expect(bundledInputs).not.toContain('resources/video-editor');
   });
 
+  it('never packages local Rust build outputs with the desktop runtime', async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+    );
+    const files = packageJson.build.files;
+
+    expect(files).toContain('!**/node_modules/@otto/native/target/**');
+    expect(files).toContain('!**/node_modules/@otto/native/src/**');
+    expect(files).toContain('!**/node_modules/@otto/native/node_modules/**');
+    expect(files).toContain('!**/node_modules/@otto/native/Cargo.*');
+    expect(packageJson.build.asarUnpack).toEqual([
+      'node_modules/@otto/native/bin/**/*',
+    ]);
+    expect(packageJson.build.files).toContain(
+      '!**/node_modules/pdf-parse/lib/pdf.js/v1.9.426/**',
+    );
+    expect(packageJson.build.files).toContain(
+      '!**/node_modules/better-sqlite3/deps/**',
+    );
+    expect(packageJson.build.files).toContain(
+      '!**/node_modules/better-sqlite3/build/Release/obj/**',
+    );
+    expect(packageJson.build.files).toContain(
+      '!**/node_modules/playwright-core/lib/vite/**',
+    );
+    expect(afterPack.MAX_APP_ASAR_BYTES).toBe(120 * 1024 * 1024);
+  });
+
   it('does not exclude runtime build/src modules required by ESM dependencies', async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
@@ -212,6 +240,17 @@ describe('desktop packaging contract', () => {
     expect(workflow).toContain(
       "OTTO_ALLOW_UNSIGNED_MAC: ${{ inputs.unsigned_mac_transition && '1' || '0' }}",
     );
+  });
+
+  it('runs packaged Electron smoke tests only for the runner native architecture', async () => {
+    const script = await readFile(
+      path.join(packageRoot, 'scripts', 'make-delivery-zip.mjs'),
+      'utf8',
+    );
+    expect(script).toContain("smokeNativeMacArtifact('arm64')");
+    expect(script).toContain("smokeNativeMacArtifact('x64')");
+    expect(script).toContain('process.arch !== artifactArch');
+    expect(script).toContain('跳过 Mac ${artifactArch} 跨架构动态验收');
   });
 
   it('publishes releases only after the update mirror and enterprise deploy pass', async () => {

@@ -2583,7 +2583,7 @@ export class OttoServer {
       return sendJson(res, 200, ok(installations));
     }
     const channelInstallationMatch = path.match(
-      /^\/channels\/installations\/(channel_(feishu|lark|wecom)_[a-f0-9]{24})(?:\/(start|stop|health))?$/,
+      /^\/channels\/installations\/(channel_(feishu|lark|wecom)_[a-f0-9]{24})(?:\/(start|stop|health|send))?$/,
     );
     if (channelInstallationMatch) {
       if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
@@ -2607,6 +2607,10 @@ export class OttoServer {
         operation = connector.start(installationId);
       } else if (req.method === 'POST' && action === 'stop') {
         operation = connector.stop(installationId);
+      } else if (req.method === 'POST' && action === 'send') {
+        operation = readJsonBody(req)
+          .then((body) => parseChannelSendInput(body))
+          .then((input) => connector.send(installationId, input));
       } else if (req.method === 'DELETE' && !action) {
         operation = connector.revoke(installationId).then(() => ({ revoked: true }));
       } else {
@@ -5116,6 +5120,27 @@ function parseChannelInstallationProof(body: unknown): {
     throw new Error('channel installation signature is invalid');
   }
   return { installationPublicKey, signature };
+}
+
+function parseChannelSendInput(body: unknown): {
+  target: string;
+  text: string;
+  idempotencyKey: string;
+} {
+  if (typeof body !== 'object' || body === null) {
+    throw new Error('channel message body must be a JSON object');
+  }
+  const input = body as Record<string, unknown>;
+  const target = typeof input.target === 'string' ? input.target.trim() : '';
+  const text = typeof input.text === 'string' ? input.text.trim() : '';
+  const idempotencyKey =
+    typeof input.idempotencyKey === 'string' ? input.idempotencyKey.trim() : '';
+  if (!target || target.length > 500) throw new Error('channel message target is invalid');
+  if (!text || text.length > 20_000) throw new Error('channel message text is invalid');
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)) {
+    throw new Error('channel message idempotency key is invalid');
+  }
+  return { target, text, idempotencyKey };
 }
 /** core WorkflowAgentRecord → 协议 WorkflowAgentSummary（裁掉 prompt/recentToolCalls 等大字段）。 */
 function toWorkflowAgentSummary(a: WorkflowAgentRecord): WorkflowAgentSummary {

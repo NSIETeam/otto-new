@@ -6,6 +6,10 @@ import type {
   ChannelCredentialLookup,
   ChannelCredentialVaultV1,
 } from './channelCredentialVault.js';
+import type {
+  ChannelOutboundLedgerV1,
+  ChannelOutboundRecord,
+} from './channelOutboundLedger.js';
 import {
   channelInstallationProofPayload,
   ChannelPairingCoordinator,
@@ -59,6 +63,40 @@ function setup() {
       reconnectCount: 0,
     })),
     revoke: vi.fn(async () => undefined),
+    send: vi.fn(async () => ({ providerMessageId: 'provider-message-1' })),
+  };
+  const outboundRecords = new Map<string, ChannelOutboundRecord>();
+  const outboundLedger: ChannelOutboundLedgerV1 = {
+    prepare: vi.fn(async (input) => {
+      const existing = outboundRecords.get(input.idempotencyKey);
+      if (existing?.state === 'committed') return existing;
+      const record: ChannelOutboundRecord = existing
+        ? { ...existing, state: 'prepared', attempts: existing.attempts + 1 }
+        : { ...input, state: 'prepared', attempts: 1, updatedAtMs: 1 };
+      outboundRecords.set(input.idempotencyKey, record);
+      return record;
+    }),
+    commit: vi.fn(async (idempotencyKey, requestHash, providerMessageId) => {
+      const record = outboundRecords.get(idempotencyKey)!;
+      const committed: ChannelOutboundRecord = {
+        ...record,
+        requestHash,
+        state: 'committed',
+        receipt: { idempotencyKey, providerMessageId, committedAtMs: 2 },
+      };
+      outboundRecords.set(idempotencyKey, committed);
+      return committed;
+    }),
+    fail: vi.fn(async (idempotencyKey, requestHash, failureCode) => {
+      const failed: ChannelOutboundRecord = {
+        ...outboundRecords.get(idempotencyKey)!,
+        requestHash,
+        state: 'failed',
+        failureCode,
+      };
+      outboundRecords.set(idempotencyKey, failed);
+      return failed;
+    }),
   };
   const coordinator = new ChannelPairingCoordinator({
     publicPairingOrigin: 'https://connect.otto.example',
@@ -75,6 +113,7 @@ function setup() {
     vault,
     runtime,
     broker,
+    outboundLedger,
     setBrokerStatus(status: ChannelPairingBrokerStatus) {
       brokerStatus = status;
     },
@@ -84,6 +123,7 @@ function setup() {
       vault,
       runtime,
       broker,
+      outboundLedger,
     }),
   };
 }
@@ -283,5 +323,43 @@ describe('ManagedChannelConnectorV1', () => {
     expect((await connector.getPairingStatus(pairing.pairingId)).status)
       .toBe('user_authorized');
     expect(broker.poll).toHaveBeenCalledTimes(3);
+  });
+
+  it('recovers message delivery with the same provider idempotency key', async () => {
+    const { connector, runtime, vault, outboundLedger } = setup();
+    const installation = {
+      installationId: 'channel_lark_0123456789abcdef01234567',
+      provider: 'lark' as const,
+      tenantId: 'tenant-1',
+      tenantName: 'Acme',
+      botName: 'Otto',
+      grantedScopes: ['im:message'],
+      connectedAtMs: 100,
+    };
+    await vault.commit(installation, 'credential');
+    const sendMock = vi.mocked(runtime.send);
+    sendMock.mockRejectedValueOnce(new Error('provider timeout'));
+    const input = {
+      target: 'chat-1',
+      text: 'long task completed',
+      idempotencyKey: 'msg:0123456789abcdef',
+    };
+
+    await expect(connector.send(installation.installationId, input))
+      .rejects.toThrow('provider timeout');
+    await expect(connector.send(installation.installationId, input))
+      .resolves.toMatchObject({
+        idempotencyKey: input.idempotencyKey,
+        providerMessageId: 'provider-message-1',
+      });
+    await expect(connector.send(installation.installationId, input))
+      .resolves.toMatchObject({ providerMessageId: 'provider-message-1' });
+    expect(sendMock).toHaveBeenCalledTimes(2);
+    expect(sendMock).toHaveBeenLastCalledWith(
+      installation,
+      'credential',
+      input,
+    );
+    expect(outboundLedger.fail).toHaveBeenCalledOnce();
   });
 });

@@ -24,19 +24,31 @@ export interface ChannelCliDependencies {
   sleep?: (milliseconds: number) => Promise<void>;
 }
 
-type ChannelCliAction = 'login' | 'list' | 'status' | 'start' | 'stop' | 'logout';
+type ChannelCliAction = 'login' | 'list' | 'status' | 'start' | 'stop' | 'send' | 'logout';
 
 function parseArguments(args: readonly string[]): {
   action: ChannelCliAction;
   installationId?: string;
+  target?: string;
+  text?: string;
+  idempotencyKey?: string;
 } {
   const action = (args[0] ?? 'status') as ChannelCliAction;
-  if (!['login', 'list', 'status', 'start', 'stop', 'logout'].includes(action)) {
-    throw new Error('用法: otto <feishu|lark|wecom> <login|list|status|start|stop|logout> [installation-id]');
+  if (!['login', 'list', 'status', 'start', 'stop', 'send', 'logout'].includes(action)) {
+    throw new Error('用法: otto <feishu|lark|wecom> <login|list|status|start|stop|send|logout> ...');
   }
   const installationId = args[1];
   if (installationId && !/^channel_(feishu|lark|wecom)_[a-f0-9]{24}$/.test(installationId)) {
     throw new Error('installation id 不合法');
+  }
+  if (action === 'send') {
+    const target = args[2]?.trim();
+    const text = args[3]?.trim();
+    const idempotencyKey = args[4]?.trim();
+    if (!installationId || !target || !text || !idempotencyKey) {
+      throw new Error('用法: otto <provider> send <installation-id> <target> <text> <idempotency-key>');
+    }
+    return { action, installationId, target, text, idempotencyKey };
   }
   return { action, ...(installationId ? { installationId } : {}) };
 }
@@ -172,6 +184,22 @@ export async function runChannelCli(
     if (input.action === 'logout') {
       await request(`/channels/installations/${installation.installationId}`, 'DELETE');
       stdout(`${provider}: 已注销 ${installation.tenantName}`);
+      return 0;
+    }
+    if (input.action === 'send') {
+      const receipt = (await request(
+        `/channels/installations/${installation.installationId}/send`,
+        'POST',
+        {
+          target: input.target,
+          text: input.text,
+          idempotencyKey: input.idempotencyKey,
+        },
+      )) as { idempotencyKey: string; providerMessageId: string };
+      stdout(
+        `${provider}: committed providerMessageId=${receipt.providerMessageId} ` +
+        `idempotencyKey=${receipt.idempotencyKey}`,
+      );
       return 0;
     }
     const action = input.action === 'status' ? 'health' : input.action;

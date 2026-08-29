@@ -13,6 +13,7 @@ import {
   timingSafeEqual,
   verify,
 } from 'node:crypto';
+import type { ChannelOutboundReceipt } from './channelOutboundLedger.js';
 
 export type ChannelProvider = 'feishu' | 'lark' | 'wecom';
 export type PairingStatus =
@@ -74,6 +75,12 @@ export interface ChannelHealth {
   message?: string;
 }
 
+export interface ChannelSendInput {
+  target: string;
+  text: string;
+  idempotencyKey: string;
+}
+
 export interface ChannelInstallationProof {
   installationPublicKey: string;
   /** Ed25519 signature encoded as base64url. */
@@ -107,6 +114,10 @@ export interface ChannelConnectorV1 {
   stop(installationId: string): Promise<ChannelHealth>;
   revoke(installationId: string): Promise<void>;
   health(installationId: string): Promise<ChannelHealth>;
+  send(
+    installationId: string,
+    input: ChannelSendInput,
+  ): Promise<ChannelOutboundReceipt>;
 }
 
 export interface PairingAuthorization {

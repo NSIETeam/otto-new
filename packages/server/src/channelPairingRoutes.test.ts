@@ -44,6 +44,11 @@ function fakeConnector(): ChannelConnectorV1 {
     stop: vi.fn(async () => ({ installationId: 'install-1', running: false, state: 'stopped', reconnectCount: 0 })),
     revoke: vi.fn(async () => undefined),
     health: vi.fn(async () => ({ installationId: 'install-1', running: true, state: 'connected', reconnectCount: 0 })),
+    send: vi.fn(async (_installationId, input) => ({
+      idempotencyKey: input.idempotencyKey,
+      providerMessageId: 'provider-message-1',
+      committedAtMs: Date.now(),
+    })),
   };
 }
 
@@ -183,5 +188,40 @@ describe('channel pairing REST routes', () => {
     expect(connector.start).toHaveBeenCalledWith(installationId);
     expect(connector.stop).toHaveBeenCalledWith(installationId);
     expect(connector.revoke).toHaveBeenCalledWith(installationId);
+  });
+
+  it('requires an explicit idempotency key for external channel writes', async () => {
+    const connector = fakeConnector();
+    const { baseUrl, token } = await start({ feishu: connector });
+    const installationId = connector.listInstallations()[0].installationId;
+    const url = `${baseUrl}/channels/installations/${installationId}/send`;
+    const headers = {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    };
+    const invalid = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ target: 'chat-1', text: 'hello' }),
+    });
+    expect(invalid.status).toBe(409);
+    expect(connector.send).not.toHaveBeenCalled();
+
+    const input = {
+      target: 'chat-1',
+      text: 'hello',
+      idempotencyKey: 'msg:0123456789abcdef',
+    };
+    const sent = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(input),
+    });
+    expect(sent.status).toBe(200);
+    expect(await sent.json()).toMatchObject({
+      ok: true,
+      data: { idempotencyKey: input.idempotencyKey, providerMessageId: 'provider-message-1' },
+    });
+    expect(connector.send).toHaveBeenCalledWith(installationId, input);
   });
 });

@@ -7,6 +7,11 @@
  */
 
 import type { ChannelCredentialVaultV1 } from './channelCredentialVault.js';
+import { createHash } from 'node:crypto';
+import type {
+  ChannelOutboundLedgerV1,
+  ChannelOutboundReceipt,
+} from './channelOutboundLedger.js';
 import {
   type BeginPairingInput,
   type ChannelConnectorV1,
@@ -16,6 +21,7 @@ import {
   type ChannelInstallationProof,
   ChannelPairingCoordinator,
   type ChannelProvider,
+  type ChannelSendInput,
   type PairingAuthorization,
   type PairingSession,
 } from './channelConnector.js';
@@ -31,6 +37,11 @@ export interface ChannelRuntimeAdapterV1 {
     installation: Readonly<ChannelInstallation>,
     plaintextCredential: string,
   ): Promise<void>;
+  send(
+    installation: Readonly<ChannelInstallation>,
+    plaintextCredential: string,
+    input: Readonly<ChannelSendInput>,
+  ): Promise<{ providerMessageId: string }>;
 }
 
 export interface ManagedProviderAuthorization {
@@ -63,6 +74,7 @@ export interface ManagedChannelConnectorOptions {
   vault: ChannelCredentialVaultV1;
   runtime: ChannelRuntimeAdapterV1;
   broker: ChannelPairingBrokerV1;
+  outboundLedger: ChannelOutboundLedgerV1;
 }
 
 export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
@@ -221,6 +233,55 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
   health(installationId: string): Promise<ChannelHealth> {
     this.requireInstallation(installationId);
     return this.options.runtime.health(installationId);
+  }
+
+  send(
+    installationId: string,
+    input: ChannelSendInput,
+  ): Promise<ChannelOutboundReceipt> {
+    return this.serializeLifecycle(installationId, async () => {
+      const target = input.target.trim();
+      const text = input.text.trim();
+      if (!target || target.length > 500) throw new Error('channel message target is invalid');
+      if (!text || text.length > 20_000) throw new Error('channel message text is invalid');
+      const installation = this.requireInstallation(installationId);
+      const requestHash = createHash('sha256')
+        .update(JSON.stringify({ installationId, target, text }), 'utf8')
+        .digest('hex');
+      const prepared = await this.options.outboundLedger.prepare({
+        idempotencyKey: input.idempotencyKey,
+        installationId,
+        provider: installation.provider,
+        requestHash,
+      });
+      if (prepared.state === 'committed' && prepared.receipt) return prepared.receipt;
+      const credential = await this.options.vault.loadCredential({
+        installationId,
+        provider: installation.provider,
+        tenantId: installation.tenantId,
+      });
+      try {
+        const result = await this.options.runtime.send(
+          installation,
+          credential,
+          { target, text, idempotencyKey: input.idempotencyKey },
+        );
+        const committed = await this.options.outboundLedger.commit(
+          input.idempotencyKey,
+          requestHash,
+          result.providerMessageId,
+        );
+        if (!committed.receipt) throw new Error('channel outbound receipt is missing');
+        return committed.receipt;
+      } catch (error) {
+        await this.options.outboundLedger.fail(
+          input.idempotencyKey,
+          requestHash,
+          error instanceof Error ? error.name : 'unknown',
+        ).catch(() => undefined);
+        throw error;
+      }
+    });
   }
 
   private requireInstallation(installationId: string): ChannelInstallation {

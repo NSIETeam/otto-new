@@ -137,6 +137,35 @@ describe('runChannelCli', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it('sends through the shared idempotent write path', async () => {
+    const output: string[] = [];
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json([installation]))
+      .mockResolvedValueOnce(json({
+        idempotencyKey: 'msg:0123456789abcdef',
+        providerMessageId: 'om_message_1',
+        committedAtMs: 1,
+      }));
+    const result = await runChannelCli('lark', [
+      'send',
+      installation.installationId,
+      'chat-1',
+      'long task completed',
+      'msg:0123456789abcdef',
+    ], {
+      readEndpointRecord: () => endpoint,
+      fetchImpl,
+      stdout: (text) => output.push(text),
+    });
+    expect(result).toBe(0);
+    expect(JSON.parse(String(fetchImpl.mock.calls[1][1]?.body))).toEqual({
+      target: 'chat-1',
+      text: 'long task completed',
+      idempotencyKey: 'msg:0123456789abcdef',
+    });
+    expect(output[0]).toContain('committed providerMessageId=om_message_1');
+  });
+
   it('rejects missing control tokens and non-loopback endpoint records', async () => {
     const errors: string[] = [];
     expect(await runChannelCli('wecom', ['status'], {

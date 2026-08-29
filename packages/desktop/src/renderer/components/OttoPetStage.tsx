@@ -220,6 +220,22 @@ export function OttoPetStage({
     height: displayHeight,
     overflow: 'hidden',
   };
+  // A large translated <img> can disappear entirely in a transparent
+  // layered BrowserWindow on Windows. Keep the standalone desktop pet on the
+  // original CSS background-sprite path so Chromium only composites the
+  // visible frame. Login and in-app widgets can continue using the <img>
+  // atlas, where normal opaque-window composition is reliable.
+  const desktopSpriteStyle: React.CSSProperties = {
+    ...spriteStyle,
+    backgroundImage: `url(${ottoPetAtlasUrl})`,
+    backgroundRepeat: 'no-repeat',
+    backgroundSize: `${CELL_WIDTH * ATLAS_COLUMNS * displayScale}px ${
+      CELL_HEIGHT * ATLAS_ROWS * displayScale
+    }px`,
+    backgroundPosition: `${-frameIndex * CELL_WIDTH * displayScale}px ${
+      -animation.row * CELL_HEIGHT * displayScale
+    }px`,
+  };
   const atlasStyle: React.CSSProperties = {
     width: CELL_WIDTH * ATLAS_COLUMNS * displayScale,
     height: CELL_HEIGHT * ATLAS_ROWS * displayScale,
@@ -253,15 +269,11 @@ export function OttoPetStage({
           data-frame={frameIndex}
           data-reduced-motion={reducedMotion ? 'true' : 'false'}
         >
-          <div className="otto-pet-stage__sprite" style={spriteStyle}>
-            <img
-              className="otto-pet-stage__atlas"
-              src={ottoPetAtlasUrl}
-              alt=""
-              draggable={false}
-              style={atlasStyle}
-            />
-          </div>
+          <div
+            className="otto-pet-stage__sprite"
+            style={desktopSpriteStyle}
+            aria-hidden="true"
+          />
         </div>
       </aside>
     );

@@ -5,8 +5,10 @@
 export interface RecurringTaskDefinition {
   name: string;
   source: string;
+  definitionVersion?: number;
   intervalMs: number;
   initialDelayMs?: number;
+  missedRunPolicy?: 'skip' | 'run-once';
   estimatedCostUsdPerRun: number;
   getInputVersion: () => string | undefined;
   run: () => void | Promise<void>;
@@ -15,12 +17,14 @@ export interface RecurringTaskDefinition {
 export interface RegisteredRecurringTask {
   name: string;
   source: string;
+  definitionVersion: number;
   intervalMs: number;
   estimatedCostUsdPerRun: number;
   paid: boolean;
   inputVersion?: string;
   lastCompletedInputVersion?: string;
   running: boolean;
+  nextRunAtMs?: number;
   stop: () => void;
 }
 
@@ -28,6 +32,36 @@ export interface RecurringTaskRegistryOptions {
   /** Paid background work is opt-in. Personal/default installations leave this false. */
   allowPaidBackground?: boolean;
   onError?: (taskName: string, error: unknown) => void;
+  stateStore?: RecurringTaskStateStore;
+  now?: () => number;
+}
+
+export interface RecurringTaskState {
+  name: string;
+  source: string;
+  definitionVersion: number;
+  lastCompletedInputVersion?: string;
+  nextRunAtMs: number;
+  updatedAtMs: number;
+}
+
+/** Persistence is injected so Core owns the lifecycle contract, not storage. */
+export interface RecurringTaskStateStore {
+  get(name: string): RecurringTaskState | undefined;
+  put(state: RecurringTaskState): void;
+}
+
+export class InMemoryRecurringTaskStateStore implements RecurringTaskStateStore {
+  private readonly states = new Map<string, RecurringTaskState>();
+
+  get(name: string): RecurringTaskState | undefined {
+    const state = this.states.get(name);
+    return state ? { ...state } : undefined;
+  }
+
+  put(state: RecurringTaskState): void {
+    this.states.set(state.name, { ...state });
+  }
 }
 
 /**
@@ -38,14 +72,20 @@ export class RecurringTaskRegistry {
   private readonly tasks = new Map<string, RegisteredRecurringTask>();
   private readonly allowPaidBackground: boolean;
   private readonly onError: (taskName: string, error: unknown) => void;
+  private readonly stateStore?: RecurringTaskStateStore;
+  private readonly now: () => number;
 
   constructor(options: RecurringTaskRegistryOptions = {}) {
     this.allowPaidBackground = options.allowPaidBackground === true;
     this.onError = options.onError ?? (() => undefined);
+    this.stateStore = options.stateStore;
+    this.now = options.now ?? Date.now;
   }
 
   register(definition: RecurringTaskDefinition): (() => void) | undefined {
     if (!definition.name.trim() || !definition.source.trim()) throw new Error('recurring task name and source are required');
+    const definitionVersion = definition.definitionVersion ?? 1;
+    if (!Number.isSafeInteger(definitionVersion) || definitionVersion <= 0) throw new Error('recurring task definition version must be a positive integer');
     if (!Number.isFinite(definition.intervalMs) || definition.intervalMs <= 0) throw new Error('recurring task interval must be positive');
     if (!Number.isFinite(definition.estimatedCostUsdPerRun) || definition.estimatedCostUsdPerRun < 0) throw new Error('recurring task cost must be non-negative');
     if (this.tasks.has(definition.name)) throw new Error(`recurring task already registered: ${definition.name}`);
@@ -54,13 +94,20 @@ export class RecurringTaskRegistry {
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
+    const restored = this.stateStore?.get(definition.name);
+    const compatibleState = restored?.source === definition.source
+      && restored.definitionVersion === definitionVersion
+      ? restored
+      : undefined;
     const task: RegisteredRecurringTask = {
       name: definition.name,
       source: definition.source,
+      definitionVersion,
       intervalMs: definition.intervalMs,
       estimatedCostUsdPerRun: definition.estimatedCostUsdPerRun,
       paid,
       inputVersion: definition.getInputVersion(),
+      lastCompletedInputVersion: compatibleState?.lastCompletedInputVersion,
       running: false,
       stop: () => {
         stopped = true;
@@ -68,8 +115,23 @@ export class RecurringTaskRegistry {
         this.tasks.delete(definition.name);
       },
     };
-    const schedule = () => {
-      timer = setTimeout(() => void tick(), definition.intervalMs);
+    const persist = (nextRunAtMs: number) => {
+      task.nextRunAtMs = nextRunAtMs;
+      this.stateStore?.put({
+        name: task.name,
+        source: task.source,
+        definitionVersion: task.definitionVersion,
+        ...(task.lastCompletedInputVersion === undefined
+          ? {}
+          : { lastCompletedInputVersion: task.lastCompletedInputVersion }),
+        nextRunAtMs,
+        updatedAtMs: this.now(),
+      });
+    };
+    const schedule = (delayMs = definition.intervalMs) => {
+      const safeDelayMs = Math.max(0, delayMs);
+      persist(this.now() + safeDelayMs);
+      timer = setTimeout(() => void tick(), safeDelayMs);
       timer.unref?.();
     };
     const tick = async () => {
@@ -92,7 +154,15 @@ export class RecurringTaskRegistry {
       }
     };
     this.tasks.set(definition.name, task);
-    timer = setTimeout(() => void tick(), definition.initialDelayMs ?? definition.intervalMs);
+    const configuredInitialDelay = definition.initialDelayMs ?? definition.intervalMs;
+    const restoredDelay = compatibleState
+      ? compatibleState.nextRunAtMs - this.now()
+      : configuredInitialDelay;
+    const initialDelay = restoredDelay > 0
+      ? restoredDelay
+      : definition.missedRunPolicy === 'run-once' ? 0 : definition.intervalMs;
+    persist(this.now() + initialDelay);
+    timer = setTimeout(() => void tick(), initialDelay);
     timer.unref?.();
     return task.stop;
   }

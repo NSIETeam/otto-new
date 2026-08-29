@@ -152,6 +152,8 @@ import {
   AutoSkillRealtimeWatcher,
   setRealtimeWatcher,
   getHabitAnalyzer,
+  RecurringTaskRegistry,
+  type RecurringTaskStateStore,
   type WorkflowAgentRecord,
   type SkillCandidate,
   type Config as CoreConfig,
@@ -165,6 +167,7 @@ import {
   getWebSearchDiagnostics,
 } from 'otto-core';
 import type { CustomModelConfig } from 'otto-core';
+import { JsonRecurringTaskStateStore } from './recurringTaskStateStore.js';
 
 /** server 版本（实装时可从 package.json 注入）。 */
 const SERVER_VERSION = '0.1.0';
@@ -364,6 +367,8 @@ export interface OttoServerOptions {
   chatFileCacheDir?: string;
   /** 后台标题生成超时；测试可缩短，生产默认 15 秒。 */
   sessionTitleTimeoutMs?: number;
+  /** Durable scheduler state; tests inject memory storage to avoid user files. */
+  recurringTaskStateStore?: RecurringTaskStateStore;
 }
 
 /** 飞书凭证存取接口（可注入；默认实现走 feishu/vendor/credentials.ts）。 */
@@ -467,6 +472,9 @@ export class OttoServer {
   private readonly productWorkspace: ProductWorkspaceStore;
   private readonly chatFileCacheDir?: string;
   private readonly sessionTitleTimeoutMs: number;
+  private readonly recurringTaskRegistry: RecurringTaskRegistry;
+  private stopMemoryMaintenance?: () => void;
+  private stopAutoCompression?: () => void;
 
   constructor(opts: OttoServerOptions = {}) {
     this.host = opts.host ?? DEFAULT_HOST;
@@ -493,6 +501,14 @@ export class OttoServer {
     this.chatFileCacheDir = opts.chatFileCacheDir;
     this.sessionTitleTimeoutMs =
       opts.sessionTitleTimeoutMs ?? DEFAULT_SESSION_TITLE_TIMEOUT_MS;
+    this.recurringTaskRegistry = new RecurringTaskRegistry({
+      allowPaidBackground: true,
+      stateStore: opts.recurringTaskStateStore ?? new JsonRecurringTaskStateStore(),
+      onError: (taskName, error) => {
+        console.warn(`[ResidentTask] ${taskName} failed:`, error);
+      },
+    });
+    getHabitAnalyzer().setTaskRegistry(this.recurringTaskRegistry);
     this.globalAuthorizationMode =
       loadUserSettingsSubset().authorizationMode ?? 'manual';
   }
@@ -562,33 +578,11 @@ export class OttoServer {
       console.warn('[Server] OttoSessionManager init failed (non-fatal):', e);
     }
 
-    // 启动后台自动维护（每 10 分钟运行一次）
-    //   - 记忆自动合并/压缩/清理 (AutoMemoryEngine)
-    //   - 上下文自动压缩 (idle 会话的 LLM 上下文摘要)
-    const maintenanceTimer = setInterval(() => {
-      // 记忆引擎维护
-      try {
-        const engine = getAutoMemoryEngine();
-        engine
-          .runMaintenanceCycle()
-          .catch((e: unknown) =>
-            console.warn('[Server] AutoMemory maintenance failed:', e),
-          );
-      } catch {
-        // engine 未初始化则跳过
-      }
-      // 上下文自动压缩
-      this.runAutoCompressionCycle().catch((e: unknown) =>
-        console.warn('[Server] Auto compression cycle failed:', e),
-      );
-    }, MAINTENANCE_INTERVAL_MS);
-
-    // 确保 stop() 时清理定时器
-    const origStop = this.stop.bind(this);
-    this.stop = async () => {
-      clearInterval(maintenanceTimer);
-      await origStop();
-    };
+    // 无付费的本地记忆维护与可能调用模型的上下文压缩必须分开登记。
+    // 新安装只会注册前者；后者严格跟随用户的显式后台模型开关。
+    this.startResidentMaintenanceTasks(
+      loadUserSettingsSubset().backgroundModelTasksEnabled === true,
+    );
 
     // 自动 Skill 只分析本地工作日志并暂存“待确认候选”，不会直接写 SKILL.md。
     // 延迟首扫 15 秒，避免与桌面首屏初始化争抢磁盘；定时器 unref，不阻塞进程退出。
@@ -709,6 +703,12 @@ export class OttoServer {
 
   /** 停止服务（取消并释放所有活跃 runtime，再关 WS、HTTP、飞书）。 */
   async stop(): Promise<void> {
+    this.stopMemoryMaintenance?.();
+    this.stopMemoryMaintenance = undefined;
+    this.stopAutoCompression?.();
+    this.stopAutoCompression = undefined;
+    getHabitAnalyzer().stop();
+    this.recurringTaskRegistry.stopAll();
     this.sessionEvictUnsub?.();
     this.sessionEvictUnsub = undefined;
     this.pendingSessionTitles.clear();
@@ -787,6 +787,22 @@ export class OttoServer {
       port: this.port,
       clientToken: this.localClientToken,
     };
+  }
+
+  /** User-visible scheduler inventory; never exposes executable stop handles. */
+  residentTasks(): Array<{
+    name: string;
+    source: string;
+    definitionVersion: number;
+    intervalMs: number;
+    estimatedCostUsdPerRun: number;
+    paid: boolean;
+    running: boolean;
+    inputVersion?: string;
+    lastCompletedInputVersion?: string;
+    nextRunAtMs?: number;
+  }> {
+    return this.recurringTaskRegistry.list().map(({ stop: _stop, ...task }) => ({ ...task }));
   }
 
   /** 供 Electron main / CLI 端点文件写入；renderer 和 WS 客户端不应获得。 */
@@ -1526,6 +1542,7 @@ export class OttoServer {
         }
         patchUserSettings({ backgroundModelTasksEnabled: value });
         getHabitAnalyzer().setBackgroundModelCallsEnabled(value);
+        this.setAutoCompressionEnabled(value);
       } else if (key === 'preferredLanguage') {
         if (typeof value !== 'string') {
           throw new Error('preferredLanguage 的值必须是字符串');
@@ -2060,6 +2077,52 @@ export class OttoServer {
         },
       });
     }
+  }
+
+  private startResidentMaintenanceTasks(backgroundModelTasksEnabled: boolean): void {
+    if (!this.stopMemoryMaintenance) {
+      this.stopMemoryMaintenance = this.recurringTaskRegistry.register({
+        name: 'server-local-memory-maintenance',
+        source: 'packages/server/src/server.ts#memory-maintenance',
+        definitionVersion: 1,
+        intervalMs: MAINTENANCE_INTERVAL_MS,
+        estimatedCostUsdPerRun: 0,
+        missedRunPolicy: 'skip',
+        // Maintenance includes time-based expiry, so each cadence bucket is a
+        // real deterministic input even when user content did not change.
+        getInputVersion: () => `bucket:${Math.floor(Date.now() / MAINTENANCE_INTERVAL_MS)}`,
+        run: () => getAutoMemoryEngine().runMaintenanceCycle(),
+      });
+    }
+    this.setAutoCompressionEnabled(backgroundModelTasksEnabled);
+  }
+
+  private setAutoCompressionEnabled(enabled: boolean): void {
+    if (!enabled) {
+      this.stopAutoCompression?.();
+      this.stopAutoCompression = undefined;
+      return;
+    }
+    if (this.stopAutoCompression) return;
+    this.stopAutoCompression = this.recurringTaskRegistry.register({
+      name: 'server-background-context-compression',
+      source: 'packages/server/src/server.ts#auto-compression',
+      definitionVersion: 1,
+      intervalMs: MAINTENANCE_INTERVAL_MS,
+      estimatedCostUsdPerRun: 0.01,
+      missedRunPolicy: 'skip',
+      getInputVersion: () => {
+        const candidates = this.store.listSessions()
+          .filter((session) => (
+            session.status === 'idle'
+            && session.messageCount >= AUTO_COMPRESS_MIN_MESSAGES
+          ))
+          .map((session) => `${session.sessionId}:${session.messageCount}`)
+          .sort();
+        return candidates.length > 0 ? candidates.join('|') : undefined;
+      },
+      run: () => this.runAutoCompressionCycle(),
+    });
   }
 
   /**

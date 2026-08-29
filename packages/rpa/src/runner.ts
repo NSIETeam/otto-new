@@ -27,7 +27,10 @@ export class RpaRunner {
     private readonly driver: RpaDriver,
     private readonly artifacts: RpaArtifactStore,
   ) {
-    for (const workflow of workflows) this.workflows.set(`${workflow.id}@${workflow.version}`, workflow);
+    for (const workflow of workflows) {
+      validateWorkflow(workflow);
+      this.workflows.set(`${workflow.id}@${workflow.version}`, workflow);
+    }
   }
 
   async start(workflowId: string, version = 1): Promise<RpaRun> {
@@ -163,4 +166,41 @@ export class RpaRunner {
     }
     return run.workflow;
   }
+}
+
+const FORBIDDEN_DESKTOP_ARGUMENTS = new Set([
+  'x', 'y', 'coordinate', 'coordinates', 'script', 'javascript', 'shell',
+  'command', 'password', 'secret', 'token',
+]);
+
+function validateWorkflow(workflow: RpaWorkflowV1): void {
+  const ids = new Set<string>();
+  for (const step of workflow.steps) {
+    if (!step.id.trim() || ids.has(step.id)) throw new Error('RPA step ids must be unique and non-empty.');
+    ids.add(step.id);
+    if (!step.action.startsWith('desktop.')) continue;
+    const forbidden = findForbiddenDesktopArgument(step.args);
+    if (forbidden) throw new Error(`Desktop RPA argument is forbidden: ${forbidden}`);
+    if (step.sideEffect === 'external' && step.requiresApproval !== true) {
+      throw new Error(`External desktop RPA step must require approval: ${step.id}`);
+    }
+  }
+}
+
+function findForbiddenDesktopArgument(value: unknown, path = ''): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const nested = findForbiddenDesktopArgument(value[index], `${path}[${index}]`);
+      if (nested) return nested;
+    }
+    return undefined;
+  }
+  for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+    const nestedPath = path ? `${path}.${key}` : key;
+    if (FORBIDDEN_DESKTOP_ARGUMENTS.has(key.toLowerCase())) return nestedPath;
+    const nested = findForbiddenDesktopArgument(nestedValue, nestedPath);
+    if (nested) return nested;
+  }
+  return undefined;
 }

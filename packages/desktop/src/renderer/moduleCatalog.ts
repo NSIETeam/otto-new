@@ -197,11 +197,28 @@ function staticAvailability(
   return 'available';
 }
 
-function profileIcon(profile: AgentProfile): ModuleIconKey {
-  if (profile.icon) return `generated:${profile.icon}`;
+const PROFILE_LINE_ICONS: Readonly<Record<string, ModuleIconKey>> = {
+  'otto-enterprise-work': 'office-work',
+  ppt: 'office-presentation',
+  meeting: 'office-meeting',
+  doc: 'office-document',
+  sheet: 'office-spreadsheet',
+  pdf: 'office-pdf',
+  dataviz: 'office-dataviz',
+  research: 'office-research',
+  copy: 'office-copywriting',
+};
+
+/**
+ * Workspace modules deliberately use one theme-aware line-icon family.
+ * Rich generated artwork remains available in galleries and custom-agent
+ * pickers, but mixing it into the compact right rail causes inconsistent
+ * optical weight and cannot follow system appearance reliably.
+ */
+export function profileModuleIcon(profile: AgentProfile): ModuleIconKey {
   if (profile.id === 'otto-personal') return 'otto-avatar';
   if (profile.id === 'self-development') return 'self-development';
-  return 'agent';
+  return PROFILE_LINE_ICONS[profile.id] ?? 'agent';
 }
 
 function profileIsAllowed(profile: AgentProfile, edition: ModuleCatalogContext['edition']): boolean {
@@ -220,7 +237,7 @@ function agentModules(context: ModuleCatalogContext): ModuleDefinition[] {
         label: profile.name,
         description: profile.tagline,
         category: 'common' as const,
-        icon: profileIcon(profile),
+        icon: profileModuleIcon(profile),
         activation: { kind: 'agent' as const, profileId: profile.id },
         availability: 'available' as const,
       }];

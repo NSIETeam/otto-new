@@ -46,7 +46,7 @@ export class HabitAnalyzer {
   private readonly maxOps: number;
   private readonly analysisIntervalMs: number;
   private backgroundModelCallsEnabled: boolean;
-  private readonly taskRegistry: RecurringTaskRegistry;
+  private taskRegistry: RecurringTaskRegistry;
   private stopScheduledAnalysis: (() => void) | undefined;
   private onInsights?: (insights: HabitInsight[]) => void;
   private analysisInFlight = false;
@@ -102,6 +102,18 @@ export class HabitAnalyzer {
   stop(): void {
     this.stopScheduledAnalysis?.();
     this.stopScheduledAnalysis = undefined;
+  }
+
+  /**
+   * Replace the scheduler boundary before (or while restarting) the analyzer.
+   * Server uses this to attach durable storage without moving persistence into
+   * the runtime kernel. Active work is stopped before ownership changes.
+   */
+  setTaskRegistry(taskRegistry: RecurringTaskRegistry, restart = false): void {
+    if (taskRegistry === this.taskRegistry) return;
+    this.stop();
+    this.taskRegistry = taskRegistry;
+    if (restart && this.backgroundModelCallsEnabled) this.start();
   }
 
   /** Apply an explicit user preference at runtime; omitted/false stays inert. */

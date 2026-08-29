@@ -47,6 +47,18 @@ describe('desktop visual style contract', () => {
     expect(css).not.toContain('var(--surface-subtle, #f5f7fa)');
   });
 
+  it('keeps built-in workspace modules on the shared line-icon family', async () => {
+    const catalog = await readFile(
+      path.join(packageRoot, 'src', 'renderer', 'moduleCatalog.ts'),
+      'utf8',
+    );
+
+    expect(catalog).toContain("ppt: 'office-presentation'");
+    expect(catalog).toContain("meeting: 'office-meeting'");
+    expect(catalog).toContain("copy: 'office-copywriting'");
+    expect(catalog).not.toContain('if (profile.icon) return `generated:${profile.icon}`');
+  });
+
   it('keeps both browser previews on the desktop React instance for visual audits', async () => {
     const configs = await Promise.all(
       ['webpack.preview.cjs', 'webpack.live.cjs'].map((file) =>

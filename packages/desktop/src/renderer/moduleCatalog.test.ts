@@ -60,6 +60,7 @@ describe('static module catalog', () => {
 
     expect(ppt).toMatchObject({
       label: COMMON_EXPERT_PROFILES.find((profile) => profile.id === 'ppt')?.name,
+      icon: 'office-presentation',
       activation: { kind: 'agent', profileId: 'ppt' },
       availability: 'available',
     });

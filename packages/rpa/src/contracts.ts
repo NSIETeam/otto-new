@@ -7,7 +7,22 @@ export type RpaActionKind =
   | 'web.extract'
   | 'web.screenshot'
   | 'web.wait'
+  | 'desktop.inspect'
+  | 'desktop.click'
+  | 'desktop.fill'
+  | 'desktop.select'
+  | 'desktop.scroll'
+  | 'desktop.wait'
+  | 'desktop.screenshot'
   | 'checkpoint';
+
+export interface DesktopRpaTargetV1 {
+  /** Semantic accessibility role, for example button or text-field. */
+  role: string;
+  /** Accessible name; exact matching is the default. */
+  name: string;
+  windowTitle?: string;
+}
 export type RpaRunState =
   | 'pending'
   | 'running'

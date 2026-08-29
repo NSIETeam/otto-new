@@ -39,6 +39,7 @@ function renderDialog(overrides: Partial<React.ComponentProps<typeof ModuleGroup
       edition="enterprise"
       layout={layout}
       modules={modules}
+      parkIdentity={{ name: '北控宏创科技园', slug: 'hongchuang-park', status: 'active' }}
       onConfirm={onConfirm}
       onClose={onClose}
       {...overrides}
@@ -99,6 +100,25 @@ describe('ModuleGroupCatalogDialog', () => {
         }),
       ]),
     }));
+  });
+
+  it('blocks the Hongchuang group for enterprises outside the park without blocking other groups', () => {
+    const { onConfirm, onClose } = renderDialog({
+      parkIdentity: { name: '其他产业园', slug: 'another-park', status: 'active' },
+    });
+    const dialog = screen.getByRole('dialog', { name: '新增功能组' });
+    const parkCard = within(dialog).getByRole('heading', { name: '宏创园区服务' }).closest('article');
+    const recruitmentCard = within(dialog).getByRole('heading', { name: '智能招聘' }).closest('article');
+    if (!parkCard || !recruitmentCard) throw new Error('missing official template card');
+
+    expect(within(parkCard).getByText(/仅北控宏创科技园企业可添加/)).toBeTruthy();
+    const parkButton = within(parkCard).getByRole('button', { name: '仅园区企业可添加' }) as HTMLButtonElement;
+    expect(parkButton.disabled).toBe(true);
+    fireEvent.click(parkButton);
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect((within(recruitmentCard).getByRole('button', { name: '添加功能组' }) as HTMLButtonElement).disabled)
+      .toBe(false);
   });
 
   it('shows and atomically installs the official intelligent recruitment group', () => {

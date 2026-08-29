@@ -1633,6 +1633,7 @@ function OttoWorkspaceApp({
         edition={edition}
         layout={moduleWorkspace.layout}
         modules={moduleCapabilities.modules}
+        parkIdentity={moduleCapabilities.parkIdentity}
         onConfirm={(next) => { moduleWorkspace.setLayout(next); setModuleModal(null); }}
         onClose={() => setModuleModal(null)}
       />

@@ -20,7 +20,9 @@ beforeEach(() => {
   Object.assign(window.otto, {
     enterpriseOrganizationFeaturesGet: vi.fn(async () => enabledFeatures),
     enterpriseParkView: vi.fn(async () => ({
-      status: 'active', brandName: '测试园区', isAdminOrganization: false,
+      id: 'park-hongchuang', name: '北控宏创科技园', slug: 'hongchuang-park',
+      status: 'active', brandName: '北控宏创科技园', isAdminOrganization: false,
+      adminOrganizationId: 'park-admin', createdAt: '', updatedAt: '',
     })),
     enterpriseTicketList: vi.fn(async () => []),
   });
@@ -44,6 +46,7 @@ describe('useModuleWorkspaceCapabilities', () => {
       .toBe('available');
     expect(view.result.current.modules.find((module) => module.id === 'skill-zone')?.availability)
       .toBe('available');
+    expect(view.result.current.parkIdentity).toMatchObject({ slug: 'hongchuang-park' });
     expect(getFeatures).not.toHaveBeenCalled();
     expect(getPark).not.toHaveBeenCalled();
   });
@@ -78,6 +81,7 @@ describe('useModuleWorkspaceCapabilities', () => {
       .filter((module) => module.availability === 'available')
       .every((module) => !module.id.startsWith('park-'))).toBe(true);
     expect(getFeatures).not.toHaveBeenCalled();
+    expect(view.result.current.parkIdentity).toBeNull();
   });
 
   it('does not grant park administration modules to a tenant organization administrator', async () => {

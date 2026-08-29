@@ -4,9 +4,11 @@ import React, { useEffect, useId, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import {
+  getModuleGroupTemplateAccess,
   getModuleGroupTemplateInstallState,
   installModuleGroupTemplate,
   listModuleGroupTemplates,
+  type ModuleGroupParkIdentity,
 } from '../moduleGroupCatalog.js';
 import type { ModuleDefinition } from '../moduleCatalog.js';
 import { createModuleGroup, type ModuleWorkspaceEdition, type ModuleWorkspaceLayout } from '../moduleWorkspace.js';
@@ -17,6 +19,7 @@ export interface ModuleGroupCatalogDialogProps {
   edition: ModuleWorkspaceEdition;
   layout: ModuleWorkspaceLayout;
   modules: readonly ModuleDefinition[];
+  parkIdentity: ModuleGroupParkIdentity | null;
   onConfirm(next: ModuleWorkspaceLayout): void;
   onClose(): void;
 }
@@ -32,6 +35,7 @@ export function ModuleGroupCatalogDialog({
   edition,
   layout,
   modules,
+  parkIdentity,
   onConfirm,
   onClose,
 }: ModuleGroupCatalogDialogProps): React.JSX.Element | null {
@@ -116,6 +120,8 @@ export function ModuleGroupCatalogDialog({
             <div className="otto-module-group-catalog__templates">
               {templates.map((template) => {
                 const installState = getModuleGroupTemplateInstallState(layout, template);
+                const accessContext = { park: parkIdentity };
+                const access = getModuleGroupTemplateAccess(template, accessContext);
                 const templateModules = template.moduleIds.map((moduleId) => modulesById.get(moduleId));
                 const unavailableCount = templateModules.filter((module) => (
                   module?.availability !== 'available'
@@ -145,22 +151,26 @@ export function ModuleGroupCatalogDialog({
                     </div>
                     <div className="otto-module-group-template__footer">
                       <small>
-                        {template.moduleIds.length} 个功能
-                        {unavailableCount > 0 ? ` · ${unavailableCount} 个将在企业启用对应服务后可用` : ' · 当前均可用'}
+                        {access.allowed
+                          ? `${template.moduleIds.length} 个功能${unavailableCount > 0 ? ` · ${unavailableCount} 个将在企业启用对应服务后可用` : ' · 当前均可用'}`
+                          : access.reason}
                       </small>
                       <button
                         type="button"
-                        disabled={installState === 'installed'}
+                        disabled={installState === 'installed' || !access.allowed}
+                        title={access.reason}
                         onClick={() => {
-                          onConfirm(installModuleGroupTemplate(layout, template));
+                          onConfirm(installModuleGroupTemplate(layout, template, accessContext));
                           onClose();
                         }}
                       >
                         {installState === 'installed'
                           ? '已添加'
-                          : installState === 'update'
-                            ? '升级功能组'
-                            : '添加功能组'}
+                          : !access.allowed
+                            ? '仅园区企业可添加'
+                            : installState === 'update'
+                              ? '升级功能组'
+                              : '添加功能组'}
                       </button>
                     </div>
                   </article>

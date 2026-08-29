@@ -21,9 +21,33 @@ export interface ModuleGroupTemplateDefinition {
   rows: 2 | 3;
   moduleIds: readonly string[];
   autoInstall: boolean;
+  access: 'all-enterprises' | 'hongchuang-park-members';
 }
 
 export type ModuleGroupTemplateInstallState = 'available' | 'update' | 'installed';
+
+export interface ModuleGroupParkIdentity {
+  name: string;
+  slug: string;
+  status: 'active' | 'disabled';
+}
+
+export interface ModuleGroupCatalogAccessContext {
+  park: ModuleGroupParkIdentity | null;
+}
+
+export interface ModuleGroupTemplateAccess {
+  allowed: boolean;
+  reason?: string;
+}
+
+const HONGCHUANG_PARK_NAMES = new Set(['北控宏创科技园']);
+const HONGCHUANG_PARK_SLUGS = new Set([
+  'hongchuang',
+  'hongchuang-park',
+  'beikong-hongchuang',
+  'beikong-hongchuang-technology-park',
+]);
 
 export const HONGCHUANG_PARK_SERVICE_MODULE_IDS = [
   'park-announcement',
@@ -62,6 +86,7 @@ export const OFFICIAL_MODULE_GROUP_TEMPLATES: readonly ModuleGroupTemplateDefini
     rows: 3,
     moduleIds: HONGCHUANG_PARK_SERVICE_MODULE_IDS,
     autoInstall: false,
+    access: 'hongchuang-park-members',
   },
   {
     package: {
@@ -78,6 +103,7 @@ export const OFFICIAL_MODULE_GROUP_TEMPLATES: readonly ModuleGroupTemplateDefini
     rows: 2,
     moduleIds: SMART_RECRUITMENT_MODULE_IDS,
     autoInstall: false,
+    access: 'all-enterprises',
   },
   {
     package: {
@@ -101,6 +127,7 @@ export const OFFICIAL_MODULE_GROUP_TEMPLATES: readonly ModuleGroupTemplateDefini
       'enterprise-memory',
     ],
     autoInstall: true,
+    access: 'all-enterprises',
   },
 ] as const;
 
@@ -110,6 +137,37 @@ export function listModuleGroupTemplates(
   return OFFICIAL_MODULE_GROUP_TEMPLATES.filter((template) => (
     template.editions.includes(edition)
   ));
+}
+
+function normalizeParkIdentity(value: string): string {
+  return value.trim().toLocaleLowerCase('zh-CN');
+}
+
+/**
+ * Decide whether the current server-authenticated enterprise may install a
+ * template. Park identity comes from enterpriseParkView(), never local input.
+ */
+export function getModuleGroupTemplateAccess(
+  template: ModuleGroupTemplateDefinition,
+  context?: ModuleGroupCatalogAccessContext,
+): ModuleGroupTemplateAccess {
+  if (template.access === 'all-enterprises') return { allowed: true };
+  const park = context?.park;
+  if (!park || park.status !== 'active') {
+    return {
+      allowed: false,
+      reason: '仅加入北控宏创科技园的企业可添加',
+    };
+  }
+  const name = normalizeParkIdentity(park.name);
+  const slug = normalizeParkIdentity(park.slug);
+  const allowed = HONGCHUANG_PARK_NAMES.has(name) || HONGCHUANG_PARK_SLUGS.has(slug);
+  return allowed
+    ? { allowed: true }
+    : {
+      allowed: false,
+      reason: `当前企业属于“${park.name || '其他园区'}”，仅北控宏创科技园企业可添加`,
+    };
 }
 
 function findInstalledGroup(
@@ -153,7 +211,9 @@ function uniqueName(base: string, existing: Set<string>): string {
 export function installModuleGroupTemplate(
   layout: ModuleWorkspaceLayout,
   template: ModuleGroupTemplateDefinition,
+  accessContext?: ModuleGroupCatalogAccessContext,
 ): ModuleWorkspaceLayout {
+  if (!getModuleGroupTemplateAccess(template, accessContext).allowed) return layout;
   const existing = findInstalledGroup(layout, template);
   if (getModuleGroupTemplateInstallState(layout, template) === 'installed') return layout;
   const moving = new Set(template.moduleIds);

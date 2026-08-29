@@ -241,6 +241,9 @@ jobs:
             packages/server/src/server.test.ts \
             packages/server/src/enterprise/server.test.ts
 
+      - name: Verify V1.9.13 to V1.9.14 upgrade acceptance
+        run: npm run release:upgrade:verify
+
       - name: Build desktop release artifacts
         run: node scripts/make-delivery-zip.mjs --build
         working-directory: packages/desktop

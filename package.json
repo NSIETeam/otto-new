@@ -88,6 +88,7 @@
     "prepare:package": "node scripts/prepare-package.js",
     "postinstall": "node -e \"const fs = require('fs'); const path = 'bundle/fix-binary-permissions.js'; if (fs.existsSync(path)) { require('child_process').execSync('node ' + path + ' --all', {stdio: 'inherit'}); } else { console.log('⏭️  Skipping binary permissions fix (bundle not built yet)'); }\"",
     "release:version": "node scripts/version.js",
+    "release:upgrade:verify": "vitest run packages/desktop/src/main/update-sources.test.ts && vitest run packages/server/src/enterprise/db.upgrade-1.9.13.test.ts --config packages/server/vitest.config.ts && vitest run scripts/tests/enterprise-oneclick-installer.test.js --config scripts/tests/vitest.config.ts",
     "telemetry": "node scripts/telemetry.js",
     "clean": "node scripts/clean.js",
     "env:production": "./scripts/switch-env.sh production",

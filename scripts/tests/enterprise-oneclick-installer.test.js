@@ -640,6 +640,39 @@ describe('enterprise one-click schema contract', () => {
     );
     expect(upgrader).toContain('UPGRADE_SUCCEEDED=1');
   });
+
+  it('restores the exact snapshot and health-checks the old release after a failed cutover', () => {
+    const upgrader = readFileSync(UPGRADE_SH, 'utf8');
+    const cleanupStart = upgrader.indexOf('cleanup() {');
+    const cleanupEnd = upgrader.indexOf('\n}\ntrap cleanup EXIT', cleanupStart);
+    const cleanup = upgrader.slice(cleanupStart, cleanupEnd);
+    const rollbackArmed = upgrader.indexOf('ROLLBACK_NEEDED=1');
+    const replaceLiveData = upgrader.indexOf(
+      '"${CANARY_DIR}/data.db" "${DATA_DIR}/data.db"',
+    );
+    const replaceCurrent = upgrader.indexOf(
+      'mv -Tf "${INSTALL_ROOT}/current.next" "${INSTALL_ROOT}/current"',
+    );
+
+    expect(rollbackArmed).toBeGreaterThan(-1);
+    expect(rollbackArmed).toBeLessThan(replaceLiveData);
+    expect(rollbackArmed).toBeLessThan(replaceCurrent);
+    expect(cleanup).toContain(
+      'install -o otto-enterprise -g otto-enterprise -m 0600',
+    );
+    expect(cleanup).toContain('"$OLD_DATA_BACKUP" "${DATA_DIR}/data.db"');
+    expect(cleanup).toContain(
+      'mv -Tf "${INSTALL_ROOT}/current.rollback" "${INSTALL_ROOT}/current"',
+    );
+    expect(cleanup).toContain(
+      'OTTO_ALLOW_SMS_DISABLED="$OTTO_ALLOW_SMS_DISABLED"',
+    );
+    expect(cleanup).toContain('"${INSTALL_ROOT}/deploy/verify.sh"');
+    expect(cleanup).toContain('保留事务证据：${TXN_DIR}');
+    expect(cleanup.indexOf('systemctl start otto-enterprise')).toBeLessThan(
+      cleanup.indexOf('"${INSTALL_ROOT}/deploy/verify.sh"'),
+    );
+  });
 });
 
 describe('enterprise one-click runtime configuration contract', () => {

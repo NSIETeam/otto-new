@@ -1,0 +1,19 @@
+{
+  "format": "otto-enterprise-v1.9.13-schema23-fixture-v1",
+  "sourceVersion": "1.9.13",
+  "sourceCommit": "82b5e0c101a44358efbb900b0c2be62455c2412b",
+  "schemaVersion": 23,
+  "parkOrganizationId": "org_v1913_park",
+  "parkAdminAccountId": "acc_7d65bc9e-82ab-4bb8-a2f1-ee4b4c3ff2cb",
+  "parkId": "park_2bbc4c5d-4d9a-4347-8b9f-81692d02de0a",
+  "tenantOrganizationId": "org_v1913_tenant",
+  "tenantAdminAccountId": "acc_d143b1ec-4c6f-4d6d-bd7f-980a662f5400",
+  "tenantAdminUsername": "v1913.tenant.admin",
+  "departmentId": "dept_aa0255613e5c4ee3e38c",
+  "positionId": "pos_cd0a488f5eeb987df15b",
+  "employeeId": "emp_v1913_owner",
+  "knowledgeSourceId": "v1913-upgrade-knowledge",
+  "ticketId": "ticket_50f3c328-f2ca-4836-8457-09ed6e118154",
+  "dataDbSha256": "0b8efb3671870b53869d3831cb05e6521c3a89766a34b64b5a3d8bc1069555cf",
+  "syntheticDataOnly": true
+}

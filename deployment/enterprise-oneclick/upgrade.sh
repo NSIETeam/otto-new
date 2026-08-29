@@ -109,6 +109,8 @@ SERVICE_STOPPED=0
 UPGRADE_SUCCEEDED=0
 
 cleanup() {
+  local rollback_ok=1
+  local preserve_transaction=0
   if [ -n "$CANARY_PID" ] && kill -0 "$CANARY_PID" >/dev/null 2>&1; then
     kill -TERM "$CANARY_PID" >/dev/null 2>&1 || true
     wait "$CANARY_PID" || true
@@ -117,24 +119,52 @@ cleanup() {
     if [ "$ROLLBACK_NEEDED" -eq 1 ]; then
       otto_warn "升级失败，开始回滚旧 release"
       systemctl stop otto-enterprise >/dev/null 2>&1 || true
-      ln -sfn "$CURRENT_REAL" "${INSTALL_ROOT}/current.rollback"
-      mv -Tf "${INSTALL_ROOT}/current.rollback" "${INSTALL_ROOT}/current" || true
+      if ! ln -sfn "$CURRENT_REAL" "${INSTALL_ROOT}/current.rollback" \
+        || ! mv -Tf "${INSTALL_ROOT}/current.rollback" "${INSTALL_ROOT}/current"; then
+        rollback_ok=0
+      fi
       if [ -f "$OLD_DATA_BACKUP" ]; then
-        install -o otto-enterprise -g otto-enterprise -m 0600 "$OLD_DATA_BACKUP" "${DATA_DIR}/data.db" || true
+        install -o otto-enterprise -g otto-enterprise -m 0600 \
+          "$OLD_DATA_BACKUP" "${DATA_DIR}/data.db" || rollback_ok=0
+      else
+        rollback_ok=0
       fi
       if [ -d "$OLD_DEPLOY_BACKUP" ]; then
-        rm -rf "${INSTALL_ROOT}/deploy.rollback"
-        cp -a "$OLD_DEPLOY_BACKUP" "${INSTALL_ROOT}/deploy.rollback" || true
-        rm -rf "${INSTALL_ROOT}/deploy"
-        mv "${INSTALL_ROOT}/deploy.rollback" "${INSTALL_ROOT}/deploy" || true
+        if rm -rf "${INSTALL_ROOT}/deploy.rollback" \
+          && cp -a "$OLD_DEPLOY_BACKUP" "${INSTALL_ROOT}/deploy.rollback" \
+          && rm -rf "${INSTALL_ROOT}/deploy" \
+          && mv "${INSTALL_ROOT}/deploy.rollback" "${INSTALL_ROOT}/deploy"; then
+          :
+        else
+          rollback_ok=0
+        fi
+      else
+        rollback_ok=0
       fi
     fi
     if [ "$SERVICE_STOPPED" -eq 1 ]; then
-      systemctl daemon-reload >/dev/null 2>&1 || true
-      systemctl start otto-enterprise >/dev/null 2>&1 || true
+      systemctl daemon-reload >/dev/null 2>&1 || rollback_ok=0
+      systemctl start otto-enterprise >/dev/null 2>&1 || rollback_ok=0
+      if [ "$rollback_ok" -eq 1 ] \
+        && [ -x "${INSTALL_ROOT}/deploy/verify.sh" ]; then
+        if OTTO_ALLOW_SMS_DISABLED="$OTTO_ALLOW_SMS_DISABLED" \
+          "${INSTALL_ROOT}/deploy/verify.sh" >/dev/null 2>&1; then
+          otto_log "旧 release、数据和服务已回滚并通过健康验收"
+        else
+          rollback_ok=0
+        fi
+      else
+        rollback_ok=0
+      fi
+    fi
+    if [ "$rollback_ok" -eq 0 ]; then
+      preserve_transaction=1
+      otto_warn "自动回滚未通过健康验收；保留事务证据：${TXN_DIR}"
     fi
   fi
-  rm -rf "$TXN_DIR"
+  if [ "$preserve_transaction" -eq 0 ]; then
+    rm -rf "$TXN_DIR" || otto_warn "无法清理升级事务目录：${TXN_DIR}"
+  fi
 }
 trap cleanup EXIT
 

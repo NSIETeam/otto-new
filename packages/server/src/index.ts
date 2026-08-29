@@ -61,6 +61,7 @@ export type {
   ChannelInstallationCommitContext,
 } from './modules/integration_adapters/channelConnector.js';
 export * from './modules/integration_adapters/channelTaskControl.js';
+export * from './modules/integration_adapters/channelCredentialVault.js';
 export * from './modules/integration_adapters/workflowTaskControlPort.js';
 export * from './modules/integration_adapters/jsonChannelMessageJournal.js';
 export * from './productModules.js';

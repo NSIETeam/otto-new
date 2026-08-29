@@ -23,6 +23,7 @@ import type {
   PostgresEnterpriseAccountView,
   PostgresEnterpriseCoreRepository,
 } from './postgresCoreRepository.js';
+import type { PostgresBusinessRecord } from './postgresBusinessRepository.js';
 
 const account: PostgresEnterpriseAccountView = {
   id: 'acc_admin',
@@ -832,6 +833,180 @@ describe('clustered PostgreSQL enterprise server', () => {
         ownerAccountId: 'acc_admin',
       }),
     );
+  });
+
+  it('hides expired clustered knowledge and restores it through audited revalidation', async () => {
+    let knowledgeRecord: PostgresBusinessRecord<Record<string, unknown>> = {
+      organizationId: account.organizationId,
+      domain: 'knowledge',
+      resourceType: 'entry',
+      resourceId: 'knowledge-expired',
+      ownerAccountId: account.id,
+      status: 'active',
+      version: 2,
+      payload: {
+        title: 'Expired runbook',
+        department: null,
+        category: 'runbook',
+        content: 'Restore from the verified backup.',
+        tags: [],
+        contributor: account.name,
+        contributorAccountId: account.id,
+        confidence: 0.9,
+        sourceType: 'manual',
+        sourceId: null,
+        sourceLabel: null,
+        reviewedBy: account.name,
+        reviewedAt: '2025-01-01T00:00:00.000Z',
+        reviewNote: null,
+        reviewDueAt: '2025-06-30T00:00:00.000Z',
+        expiresAt: '2025-12-31T00:00:00.000Z',
+      },
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    };
+    const baseRepo = repository();
+    const repo = {
+      ...baseRepo,
+      listBusinessRecords: vi.fn(async () => [knowledgeRecord]),
+      getBusinessRecord: vi.fn(async (input: {
+        domain: string;
+        resourceType: string;
+        resourceId: string;
+      }) => {
+        if (input.domain === 'commercial_control' && input.resourceId === 'current') {
+          return activeLicenseRecord();
+        }
+        if (input.domain === 'knowledge' && input.resourceId === knowledgeRecord.resourceId) {
+          return knowledgeRecord;
+        }
+        return null;
+      }),
+      updateBusinessRecord: vi.fn(async (input: {
+        expectedVersion: number;
+        status: string;
+        payload: Record<string, unknown>;
+      }) => {
+        if (input.expectedVersion !== knowledgeRecord.version) return null;
+        knowledgeRecord = {
+          ...knowledgeRecord,
+          status: input.status,
+          version: knowledgeRecord.version + 1,
+          payload: input.payload,
+          updatedAt: new Date().toISOString(),
+        };
+        return knowledgeRecord;
+      }),
+    } as unknown as PostgresEnterpriseCoreRepository;
+    const { baseUrl } = await listen(repo);
+
+    const memberList = await fetch(`${baseUrl}/enterprise/knowledge`, {
+      headers: { authorization: 'Bearer peer-session-token' },
+    });
+    expect(memberList.status).toBe(200);
+    await expect(memberList.json()).resolves.toEqual({ knowledge: [] });
+
+    const adminReviewList = await fetch(
+      `${baseUrl}/enterprise/knowledge?includeReview=true`,
+      { headers: { authorization: 'Bearer clustered-session-token' } },
+    );
+    expect(adminReviewList.status).toBe(200);
+    await expect(adminReviewList.json()).resolves.toMatchObject({
+      knowledge: [{ id: 'knowledge-expired', expiresAt: '2025-12-31T00:00:00.000Z' }],
+    });
+
+    const revalidation = await fetch(
+      `${baseUrl}/enterprise/knowledge/knowledge-expired/revalidate`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer clustered-session-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          rationale: '已核对当前备份制度和最近恢复演练，确认该知识继续有效。',
+          validForDays: 180,
+        }),
+      },
+    );
+    expect(revalidation.status).toBe(200);
+    const revalidatedPayload = await revalidation.json() as {
+      knowledge: { reviewDueAt: string; expiresAt: string };
+    };
+    expect(Date.parse(revalidatedPayload.knowledge.reviewDueAt)).toBeGreaterThan(Date.now());
+    expect(Date.parse(revalidatedPayload.knowledge.expiresAt))
+      .toBeGreaterThan(Date.parse(revalidatedPayload.knowledge.reviewDueAt));
+    expect(repo.appendBusinessEvent).toHaveBeenCalledWith(expect.objectContaining({
+      organizationId: account.organizationId,
+      eventType: 'revalidated',
+      payload: expect.objectContaining({ validForDays: 180 }),
+    }));
+
+    const restoredList = await fetch(`${baseUrl}/enterprise/knowledge`, {
+      headers: { authorization: 'Bearer peer-session-token' },
+    });
+    await expect(restoredList.json()).resolves.toMatchObject({
+      knowledge: [{ id: 'knowledge-expired' }],
+    });
+  });
+
+  it('keeps the administrator evidence endpoint compatible until clustered evidence is retained', async () => {
+    const repo = {
+      ...repository(),
+      getBusinessRecord: vi.fn(async (input: {
+        domain: string;
+        resourceType: string;
+        resourceId: string;
+      }) => {
+        if (input.domain === 'commercial_control' && input.resourceId === 'current') {
+          return activeLicenseRecord();
+        }
+        if (input.domain === 'knowledge' && input.resourceId === 'knowledge-1') {
+          return {
+            organizationId: account.organizationId,
+            domain: 'knowledge',
+            resourceType: 'entry',
+            resourceId: 'knowledge-1',
+            ownerAccountId: account.id,
+            status: 'active',
+            version: 1,
+            payload: {
+              title: 'Runbook',
+              department: null,
+              category: 'runbook',
+              content: 'Restore from PITR.',
+              tags: [],
+              contributor: account.name,
+              contributorAccountId: account.id,
+              confidence: 0.9,
+              sourceType: 'manual',
+              sourceId: null,
+              sourceLabel: null,
+              reviewedBy: account.name,
+              reviewedAt: '2026-08-01T00:00:00.000Z',
+              reviewNote: null,
+            },
+            createdAt: '2026-08-01T00:00:00.000Z',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+          };
+        }
+        return null;
+      }),
+    } as unknown as PostgresEnterpriseCoreRepository;
+    const { baseUrl } = await listen(repo);
+
+    const evidence = await fetch(
+      `${baseUrl}/enterprise/knowledge/knowledge-1/evidence`,
+      { headers: { authorization: 'Bearer clustered-session-token' } },
+    );
+    expect(evidence.status).toBe(200);
+    await expect(evidence.json()).resolves.toEqual({ evidence: [] });
+
+    const memberEvidence = await fetch(
+      `${baseUrl}/enterprise/knowledge/knowledge-1/evidence`,
+      { headers: { authorization: 'Bearer peer-session-token' } },
+    );
+    expect(memberEvidence.status).toBe(403);
   });
 
   it('accepts the desktop feature PATCH contract for migrated domains', async () => {

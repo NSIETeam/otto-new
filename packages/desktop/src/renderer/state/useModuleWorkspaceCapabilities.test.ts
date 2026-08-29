@@ -112,7 +112,7 @@ describe('useModuleWorkspaceCapabilities', () => {
 
   it('isolates park capability loading failures from non-park modules', async () => {
     Object.assign(window.otto, {
-      enterpriseParkView: vi.fn(async () => { throw new Error('park unavailable'); }),
+      enterpriseParkView: vi.fn(async () => { throw new Error('commercial module is not entitled'); }),
       enterpriseTicketList: vi.fn(async () => []),
     });
     const view = renderHook(() => useModuleWorkspaceCapabilities({
@@ -123,7 +123,13 @@ describe('useModuleWorkspaceCapabilities', () => {
 
     await waitFor(() => expect(view.result.current.status).toBe('ready'));
     expect(view.result.current.modules.every((module) => !module.id.startsWith('park-')
-      || module.availability === 'hidden')).toBe(true);
+      || module.availability === 'hidden'
+      || module.availability === 'disabled')).toBe(true);
+    expect(view.result.current.modules.find((module) => module.id === 'park-announcement'))
+      .toMatchObject({
+        availability: 'disabled',
+        disabledReason: '当前服务器尚未授权园区服务模块',
+      });
     expect(view.result.current.modules.find((module) => module.id === 'enterprise-memory')?.availability)
       .toBe('available');
     expect(view.result.current.modules.find((module) => module.id === 'skill-zone')?.availability)

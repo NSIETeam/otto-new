@@ -18,8 +18,10 @@ beforeEach(() => {
     enterpriseKnowledgeList: vi.fn(async () => []),
     enterpriseKnowledgeRecord: vi.fn(async () => ({ status: 'added', added: true })),
     enterpriseKnowledgeRevise: vi.fn(async () => ({ status: 'updated' })),
+    enterpriseKnowledgeRevalidate: vi.fn(async () => ({ status: 'active' })),
     enterpriseKnowledgeReview: vi.fn(async () => ({ status: 'approved' })),
     enterpriseKnowledgeRevisions: vi.fn(async () => []),
+    enterpriseKnowledgeEvidence: vi.fn(async () => []),
     workLogRecent: vi.fn(async () => []),
   });
   vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -105,6 +107,88 @@ describe('WorkspaceDialogs', () => {
     fireEvent.click(screen.getByRole('tab', { name: '记忆沿革' }));
     await screen.findByText('初版流程');
     expect(screen.getByText(/管理员 · 形成知识/)).toBeTruthy();
+  });
+
+  it('杨锦航新版企业记忆界面保留生命周期展示和管理员复核', async () => {
+    Object.assign(window.otto, {
+      enterpriseKnowledgeList: vi.fn(async () => [{
+        id: 'knowledge-lifecycle', organizationId: 'org-a', sourceId: 'manual-1',
+        sourceLabel: '管理员录入', sourceType: 'manual', title: '合同审批规则',
+        department: '法务部', category: '制度', content: '合同签署前必须完成法务复核。',
+        contributor: '管理员', confidence: 0.98, status: 'active', version: 3,
+        reviewDueAt: '2026-09-30T00:00:00.000Z', expiresAt: '2027-08-27T00:00:00.000Z',
+        createdAt: '2026-08-20T00:00:00.000Z',
+      }]),
+    });
+    render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
+
+    await screen.findByText('合同审批规则');
+    expect(screen.getByText(/复核日期/)).toBeTruthy();
+    expect(screen.getByText(/有效期至/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '复核有效' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '复核依据' }), {
+      target: { value: '已核对最新合同制度原文并由法务负责人确认有效' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: '知识有效期' }), {
+      target: { value: '180' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认复核' }));
+
+    await waitFor(() => expect(window.otto.enterpriseKnowledgeRevalidate).toHaveBeenCalledWith(
+      'knowledge-lifecycle',
+      { rationale: '已核对最新合同制度原文并由法务负责人确认有效', validForDays: 180 },
+    ));
+  });
+
+  it('冲突知识必须在新版界面完成证据取舍后才可形成裁决版本', async () => {
+    Object.assign(window.otto, {
+      enterpriseKnowledgeList: vi.fn(async () => [{
+        id: 'knowledge-conflict', organizationId: 'org-a', sourceId: 'auto-1',
+        sourceLabel: '自动提炼 · 证据存在冲突', sourceType: 'auto_capture', title: '退款审批规则',
+        department: '财务部', category: '流程', content: '退款审批规则存在冲突，等待管理员判断。',
+        contributor: null, confidence: 0.74, status: 'pending_review', version: 1,
+        evidenceCount: 2, createdAt: '2026-08-27T00:00:00.000Z',
+      }]),
+      enterpriseKnowledgeEvidence: vi.fn(async () => [{
+        id: 'evidence-accept', knowledgeId: 'knowledge-conflict', sourceId: 'session-1',
+        content: '最新版制度要求财务经理审批。', tags: ['正式制度'], contributor: '财务主管',
+        confidence: 0.96, verified: true, impactScore: 0.9, impactReasons: ['多人确认'],
+        observedAt: '2026-08-27T08:00:00.000Z', stance: 'affirmative', contested: true,
+      }, {
+        id: 'evidence-reject', knowledgeId: 'knowledge-conflict', sourceId: 'session-2',
+        content: '旧流程称无需财务经理审批。', tags: ['旧流程'], contributor: '历史会话',
+        confidence: 0.61, verified: false, impactScore: 0.5, impactReasons: [],
+        observedAt: '2026-08-20T08:00:00.000Z', stance: 'negative', contested: true,
+      }]),
+    });
+    render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
+
+    await screen.findByText('退款审批规则');
+    expect((screen.getByRole('button', { name: '先裁决冲突' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '证据' }));
+    await screen.findByText('最新版制度要求财务经理审批。');
+    fireEvent.click(screen.getAllByRole('button', { name: '采纳' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: '排除' })[1]);
+    fireEvent.change(screen.getByRole('textbox', { name: '裁决依据' }), {
+      target: { value: '以最新版正式制度和财务负责人书面确认为准' },
+    });
+    await waitFor(() => expect(
+      (screen.getByRole('button', { name: '审查并裁决' }) as HTMLButtonElement).disabled,
+    ).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: '审查并裁决' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存裁决版本' }));
+
+    await waitFor(() => expect(window.otto.enterpriseKnowledgeRevise).toHaveBeenCalledWith(
+      'knowledge-conflict',
+      expect.objectContaining({
+        resolveConflict: true,
+        adjudication: {
+          acceptedEvidenceIds: ['evidence-accept'],
+          rejectedEvidenceIds: ['evidence-reject'],
+          rationale: '以最新版正式制度和财务负责人书面确认为准',
+        },
+      }),
+    ));
   });
 
   it('有未保存的企业知识草稿时，关闭前需要确认', async () => {

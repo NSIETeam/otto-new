@@ -107,16 +107,9 @@ describe('PrefsPanel 外观与回复', () => {
       healthyUse: false,
       preferredLanguage: '中文',
     });
-    const onUiModeChange = vi.fn();
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-    const view = render(
-      <PrefsPanel
-        data={value}
-        uiMode="work"
-        onUiModeChange={onUiModeChange}
-      />,
-    );
+    const view = render(<PrefsPanel data={value} />);
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '深色' }).className).toContain('is-active');
@@ -124,10 +117,9 @@ describe('PrefsPanel 外观与回复', () => {
     fireEvent.click(screen.getByRole('button', { name: '恢复默认设置' }));
 
     expect(confirm).toHaveBeenCalledWith(
-      '恢复外观与回复的默认设置？\n\n这会重置本页面的界面、主题和回复偏好，不会影响账号、工作目录或其他设置。',
+      '恢复外观与回复的默认设置？\n\n这会重置本页面的主题和回复偏好，不会影响账号、工作目录或其他设置。',
     );
     await waitFor(() => {
-      expect(onUiModeChange).toHaveBeenCalledWith('conversational');
       expect(themeSet).toHaveBeenCalledWith('system');
       expect(setSetting).toHaveBeenCalledWith('agentStyle', 'default');
       expect(setSetting).toHaveBeenCalledWith('healthyUse', true);
@@ -140,13 +132,7 @@ describe('PrefsPanel 外观与回复', () => {
       healthyUse: true,
       preferredLanguage: '',
     }, setSetting);
-    view.rerender(
-      <PrefsPanel
-        data={restored}
-        uiMode="conversational"
-        onUiModeChange={onUiModeChange}
-      />,
-    );
+    view.rerender(<PrefsPanel data={restored} />);
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '已恢复' })).toBeTruthy();
     });
@@ -154,20 +140,12 @@ describe('PrefsPanel 外观与回复', () => {
 
   it('取消确认时不修改任何设置', async () => {
     const { value, setSetting } = settingsData('cursor');
-    const onUiModeChange = vi.fn();
     vi.spyOn(window, 'confirm').mockReturnValue(false);
-    render(
-      <PrefsPanel
-        data={value}
-        uiMode="work"
-        onUiModeChange={onUiModeChange}
-      />,
-    );
+    render(<PrefsPanel data={value} />);
 
     fireEvent.click(screen.getByRole('button', { name: '恢复默认设置' }));
 
     expect(setSetting).not.toHaveBeenCalled();
-    expect(onUiModeChange).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '恢复默认设置' })).toBeTruthy();
   });
 
@@ -233,7 +211,7 @@ describe('PrefsPanel 外观与回复', () => {
 
   it('所有项目均为默认值时禁用恢复按钮', async () => {
     const { value } = settingsData('default', { healthyUse: true });
-    render(<PrefsPanel data={value} uiMode="conversational" />);
+    render(<PrefsPanel data={value} />);
 
     await waitFor(() => {
       expect(
@@ -253,21 +231,13 @@ describe('PrefsPanel 外观与回复', () => {
   });
 });
 
-describe('PrefsPanel UI mode selection', () => {
-  it('shows the two official UI modes and switches without changing business settings', () => {
-    const { value, setSetting } = settingsData();
-    const onUiModeChange = vi.fn();
-    render(
-      <PrefsPanel
-        data={value}
-        uiMode="work"
-        onUiModeChange={onUiModeChange}
-      />,
-    );
+describe('PrefsPanel 界面模式入口', () => {
+  it('不再显示界面模式切换', () => {
+    const { value } = settingsData();
+    render(<PrefsPanel data={value} />);
 
-    expect(screen.getByRole('radio', { name: /工作式 UI/ }).getAttribute('aria-checked')).toBe('true');
-    fireEvent.click(screen.getByRole('radio', { name: /对话式 UI/ }));
-    expect(onUiModeChange).toHaveBeenCalledWith('conversational');
-    expect(setSetting).not.toHaveBeenCalled();
+    expect(screen.queryByRole('radiogroup', { name: '界面模式' })).toBeNull();
+    expect(screen.queryByText('对话式 UI')).toBeNull();
+    expect(screen.queryByText('工作式 UI')).toBeNull();
   });
 });

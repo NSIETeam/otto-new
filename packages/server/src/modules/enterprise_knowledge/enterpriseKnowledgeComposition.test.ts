@@ -103,7 +103,7 @@ describe('enterprise knowledge composition', () => {
     const knowledge = createComposition(database);
 
     try {
-      const observed = knowledge.observeKnowledge({
+      const first = knowledge.observeKnowledge({
         organizationId: 'org-a',
         category: 'solution',
         content: '重大生产事故的根因是租户缓存未隔离，加入企业编号后验证通过。',
@@ -112,6 +112,18 @@ describe('enterprise knowledge composition', () => {
         sourceId: 'session-a:solution',
         sourceSessionId: 'session-a',
         confidence: 0.95,
+        verified: true,
+      });
+      expect(first.promoted).toBe(false);
+      const observed = knowledge.observeKnowledge({
+        organizationId: 'org-a',
+        category: 'solution',
+        content: '复测确认重大生产事故源于租户缓存未隔离，加入企业编号后验证通过。',
+        contributor: '另一名研发成员',
+        contributorAccountId: 'account-b',
+        sourceId: 'session-b:solution',
+        sourceSessionId: 'session-b',
+        confidence: 0.93,
         verified: true,
       });
       expect(observed.promoted).toBe(true);
@@ -123,9 +135,10 @@ describe('enterprise knowledge composition', () => {
       });
 
       expect(knowledge.getKnowledge()[0]).toMatchObject({
-        evidence_count: 1,
-        distinct_session_count: 1,
-        distinct_contributor_count: 1,
+        evidence_count: 2,
+        distinct_session_count: 2,
+        distinct_contributor_count: 2,
+        verified_evidence_count: 2,
       });
     } finally {
       database.close();

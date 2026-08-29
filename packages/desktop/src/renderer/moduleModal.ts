@@ -6,6 +6,7 @@ import type { ParkModuleTarget } from './moduleCatalog.js';
 
 export type ModuleModalState =
   | { kind: 'marketplace'; groupId: string }
+  | { kind: 'group-catalog' }
   | { kind: 'park'; target: ParkModuleTarget }
   | { kind: 'enterprise-memory' }
   | { kind: 'auto-skill' }

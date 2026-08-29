@@ -86,6 +86,47 @@ describe('KnowledgeCapture ingest result', () => {
     expect(candidate.impactScore).toBeGreaterThanOrEqual(0.6);
   });
 
+  it('does not use an unrelated successful tool from an earlier turn to verify a later claim', () => {
+    const capture = new KnowledgeCapture(new LocalKnowledgeStore(root));
+    const messages = [
+      { role: 'user' as const, text: '请读取项目说明文件。' },
+      { role: 'tool' as const, text: 'README loaded', toolName: 'read_file', toolSuccess: true },
+      { role: 'assistant' as const, text: '项目说明文件已经读取完成。' },
+      { role: 'user' as const, text: '另一个生产事故的根因是什么？' },
+      {
+        role: 'assistant' as const,
+        text: '重大生产事故的根因是缓存键缺少企业编号，加入 organizationId 后隔离测试验证通过。',
+      },
+    ];
+
+    const solution = capture.extractCandidates(messages, 'session-local-proof')
+      .find((candidate) => candidate.category === 'solution');
+    expect(solution).toBeDefined();
+    expect(solution?.verified).toBe(false);
+    expect(solution?.significanceSignals).not.toContain('successful_tool_result');
+  });
+
+  it('does not treat a same-turn file read as validation of a claimed production fix', () => {
+    const capture = new KnowledgeCapture(new LocalKnowledgeStore(root));
+    const messages = [
+      { role: 'user' as const, text: '请判断生产事故是否已经修好。' },
+      {
+        role: 'tool' as const,
+        text: 'README loaded successfully',
+        toolName: 'read_file',
+        toolSuccess: true,
+      },
+      {
+        role: 'assistant' as const,
+        text: '重大生产事故的根因是缓存键缺少企业编号，加入 organizationId 后隔离测试验证通过。',
+      },
+    ];
+
+    const solution = capture.extractCandidates(messages, 'session-read-only')
+      .find((candidate) => candidate.category === 'solution');
+    expect(solution?.verified).toBe(false);
+  });
+
   it('captures a short but verified high-impact conclusion without requiring a tool call', () => {
     const capture = new KnowledgeCapture(new LocalKnowledgeStore(root));
     const messages = [

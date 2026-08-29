@@ -228,18 +228,7 @@ vi.mock('./components/UiModeGuide.js', () => ({
 }));
 
 vi.mock('./components/SettingsHubPage.js', () => ({
-  SettingsHubPage: ({
-    uiMode,
-    onUiModeChange,
-  }: {
-    uiMode: 'conversational' | 'work';
-    onUiModeChange: (mode: 'conversational' | 'work') => void;
-  }) => (
-    <section data-testid="settings-hub" data-ui-mode={uiMode}>
-      <button type="button" onClick={() => onUiModeChange('conversational')}>settings-conversational</button>
-      <button type="button" onClick={() => onUiModeChange('work')}>settings-work</button>
-    </section>
-  ),
+  SettingsHubPage: () => <section data-testid="settings-hub">settings-content</section>,
 }));
 
 vi.mock('./components/WhatsNewDialog.js', () => ({
@@ -362,19 +351,17 @@ describe('App UI mode integration', () => {
     expect(localStorage.getItem(preferenceKey(accountA))).toBe('work');
   });
 
-  it('restores work UI and switches back from settings without touching account scope', () => {
+  it('restores work UI and keeps the selected layout while settings are open', () => {
     localStorage.setItem(preferenceKey(accountA), 'work');
     render(<App />);
 
     expect(screen.getByTestId('work-panel')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'open-preferences' }));
-    expect(screen.getByTestId('settings-hub').dataset.uiMode).toBe('work');
+    expect(screen.getByTestId('settings-hub')).toBeTruthy();
     expect(screen.getByTestId('work-panel').dataset.collapsed).toBe('false');
-
-    fireEvent.click(screen.getByRole('button', { name: 'settings-conversational' }));
-    expect(screen.queryByTestId('work-panel')).toBeNull();
-    expect(screen.queryByRole('button', { name: /右侧栏/ })).toBeNull();
-    expect(localStorage.getItem(preferenceKey(accountA))).toBe('conversational');
+    expect(screen.queryByRole('button', { name: 'settings-conversational' })).toBeNull();
+    expect(screen.getByTestId('work-panel')).toBeTruthy();
+    expect(localStorage.getItem(preferenceKey(accountA))).toBe('work');
   });
 
   it('toggles the right panel from the chat header and persists the account preference', () => {

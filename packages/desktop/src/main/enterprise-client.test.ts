@@ -1343,6 +1343,7 @@ describe('EnterpriseClient', () => {
           content: '合同审查先核对违约条款。',
           contributor: '员工一号',
           confidence: 0.9,
+          supersedes_id: 7,
           created_at: '2026-07-20T04:00:00.000Z',
         }],
       }));
@@ -1363,6 +1364,7 @@ describe('EnterpriseClient', () => {
       sourceLabel: null,
       status: 'active',
       version: 1,
+      supersedesId: '7',
       reviewedBy: null,
       reviewedAt: null,
       createdAt: '2026-07-20T04:00:00.000Z',
@@ -1410,7 +1412,42 @@ describe('EnterpriseClient', () => {
           changed_by: '管理员',
           change_note: '补充监控',
           created_at: '2026-07-20T05:00:00.000Z',
+          adjudication: {
+            id: 7,
+            knowledgeId: 12,
+            revisionVersion: 2,
+            acceptedEvidenceIds: [41],
+            rejectedEvidenceIds: [42],
+            rationale: '依据正式上线制度裁决。',
+            adjudicatedBy: '管理员',
+            createdAt: '2026-07-20T05:00:00.000Z',
+          },
         }],
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        evidence: [{
+          id: 41,
+          knowledgeId: 12,
+          sourceId: 'delivery-review-1',
+          content: '上线前必须检查备份和回滚。',
+          tags: ['上线'],
+          contributor: '交付负责人',
+          confidence: 0.93,
+          verified: true,
+          impactScore: 0.88,
+          impactReasons: ['明确制度或最终决策'],
+          observedAt: '2026-07-19T05:00:00.000Z',
+          stance: 'affirmative',
+          contested: false,
+        }],
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        knowledge: {
+          ...knowledgeRow,
+          version: 4,
+          review_due_at: '2026-10-20T04:00:00.000Z',
+          expires_at: '2027-01-20T04:00:00.000Z',
+        },
       }));
     const client = new EnterpriseClient(fetchMock as typeof fetch);
     await client.loginWithPassword('https://enterprise.otto.test', 'staff01', 'password');
@@ -1420,10 +1457,23 @@ describe('EnterpriseClient', () => {
       category: '流程',
       content: '检查备份、监控和回滚。',
       changeNote: '补充回滚',
+      resolveConflict: true,
+      adjudication: {
+        acceptedEvidenceIds: ['41'],
+        rejectedEvidenceIds: ['42'],
+        rationale: '依据正式上线制度裁决。',
+      },
     })).resolves.toMatchObject({ id: '12', version: 3, content: knowledgeRow.content });
     expect(fetchMock.mock.calls[2]?.[0])
       .toBe('https://enterprise.otto.test/enterprise/knowledge/12');
     expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: 'PATCH' });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      adjudication: {
+        acceptedEvidenceIds: [41],
+        rejectedEvidenceIds: [42],
+        rationale: '依据正式上线制度裁决。',
+      },
+    });
 
     await expect(client.listKnowledgeRevisions('12')).resolves.toEqual([
       expect.objectContaining({
@@ -1431,10 +1481,52 @@ describe('EnterpriseClient', () => {
         knowledgeId: '12',
         version: 2,
         changeNote: '补充监控',
+        adjudication: {
+          id: '7',
+          acceptedEvidenceIds: ['41'],
+          rejectedEvidenceIds: ['42'],
+          rationale: '依据正式上线制度裁决。',
+          adjudicatedBy: '管理员',
+        },
       }),
     ]);
     expect(fetchMock.mock.calls[3]?.[0])
       .toBe('https://enterprise.otto.test/enterprise/knowledge/12/revisions');
+
+    await expect(client.listKnowledgeEvidence('12')).resolves.toEqual([{
+      id: '41',
+      knowledgeId: '12',
+      sourceId: 'delivery-review-1',
+      content: '上线前必须检查备份和回滚。',
+      tags: ['上线'],
+      contributor: '交付负责人',
+      confidence: 0.93,
+      verified: true,
+      impactScore: 0.88,
+      impactReasons: ['明确制度或最终决策'],
+      observedAt: '2026-07-19T05:00:00.000Z',
+      stance: 'affirmative',
+      contested: false,
+    }]);
+    expect(fetchMock.mock.calls[4]?.[0])
+      .toBe('https://enterprise.otto.test/enterprise/knowledge/12/evidence');
+
+    await expect(client.revalidateKnowledge('12', {
+      rationale: '已核对现行制度和审批记录，确认继续有效。',
+      validForDays: 180,
+    })).resolves.toMatchObject({
+      id: '12',
+      version: 4,
+      reviewDueAt: '2026-10-20T04:00:00.000Z',
+      expiresAt: '2027-01-20T04:00:00.000Z',
+    });
+    expect(fetchMock.mock.calls[5]?.[0])
+      .toBe('https://enterprise.otto.test/enterprise/knowledge/12/revalidate');
+    expect(fetchMock.mock.calls[5]?.[1]).toMatchObject({ method: 'POST' });
+    expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toEqual({
+      rationale: '已核对现行制度和审批记录，确认继续有效。',
+      validForDays: 180,
+    });
   });
 
   it('登录成员通过 main 内的会话令牌读取完整组织架构', async () => {

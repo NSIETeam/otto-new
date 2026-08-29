@@ -17,10 +17,7 @@ import { Reorder, useDragControls, useReducedMotion } from 'motion/react';
 import type { ModuleDefinition } from '../moduleCatalog.js';
 import {
   createModuleGroup,
-  createParkServicesModuleGroup,
   deleteModuleGroup,
-  PARK_SERVICES_GROUP_ID,
-  PARK_SERVICES_GROUP_MODULE_IDS,
   removeModuleFromGroup,
   renameModuleGroup,
   reorderModuleGroups,
@@ -96,21 +93,6 @@ function mergeVisibleModuleOrder(
   ));
 }
 
-function autoScrollAtPointer(
-  element: HTMLElement,
-  clientY: number,
-  threshold = 40,
-  step = 18,
-): void {
-  if (element.scrollHeight <= element.clientHeight) return;
-  const rect = element.getBoundingClientRect();
-  if (clientY >= rect.bottom - threshold) {
-    element.scrollTop += step;
-  } else if (clientY <= rect.top + threshold) {
-    element.scrollTop -= step;
-  }
-}
-
 const FLOATING_SCROLLBAR_INSET = 4;
 const FLOATING_SCROLLBAR_MIN_THUMB = 28;
 const FLOATING_SCROLLBAR_HIDE_DELAY_MS = 800;
@@ -133,11 +115,13 @@ export interface ModuleWorkspaceProps {
   layout: ModuleWorkspaceLayout;
   modules: readonly ModuleDefinition[];
   onActivate(module: ModuleDefinition): void;
+  onUnavailableModule?(module: ModuleDefinition): void;
   onOpenMarketplace(groupId: string): void;
+  onAddGroup?(): void;
   onLayoutChange(next: ModuleWorkspaceLayout): void;
 }
 
-type WorkspacePopover = { kind: 'group'; id: string } | { kind: 'add-group' } | null;
+type WorkspacePopover = { kind: 'group'; id: string } | null;
 
 export function ModuleWorkspace({
   presentation,
@@ -145,7 +129,9 @@ export function ModuleWorkspace({
   layout,
   modules,
   onActivate,
+  onUnavailableModule,
   onOpenMarketplace,
+  onAddGroup,
   onLayoutChange,
 }: ModuleWorkspaceProps): React.JSX.Element {
   const [openPopover, setOpenPopover] = useState<WorkspacePopover>(null);
@@ -175,7 +161,6 @@ export function ModuleWorkspace({
   const workspaceShellRef = useRef<HTMLElement>(null);
   const transientLayoutRef = useRef(layout);
   const previousScopeRef = useRef(scopeKey);
-  const pendingGroupRevealRef = useRef<string | null>(null);
   const [scrollbarMetrics, setScrollbarMetrics] = useState<FloatingScrollbarMetrics>(
     EMPTY_SCROLLBAR_METRICS,
   );
@@ -185,13 +170,6 @@ export function ModuleWorkspace({
   const modulesById = useMemo(
     () => new Map(modules.map((module) => [module.id, module])),
     [modules],
-  );
-  const availableParkServicesModuleIds = useMemo(
-    () => PARK_SERVICES_GROUP_MODULE_IDS.filter((moduleId) => {
-      const module = modulesById.get(moduleId);
-      return module !== undefined && module.availability !== 'hidden';
-    }),
-    [modulesById],
   );
   const density = presentation !== 'panel' || transientLayout.groups.length <= 2
     ? 'comfortable'
@@ -333,14 +311,6 @@ export function ModuleWorkspace({
     ));
   }, [layout]);
 
-  useLayoutEffect(() => {
-    const groupId = pendingGroupRevealRef.current;
-    if (!groupId || !layout.groups.some((group) => group.id === groupId)) return;
-    const group = scrollViewportRef.current?.querySelector<HTMLElement>(`[data-group-id="${groupId}"]`);
-    group?.scrollIntoView?.({ block: 'nearest', behavior: reducedMotion ? 'auto' : 'smooth' });
-    pendingGroupRevealRef.current = null;
-  }, [layout, reducedMotion]);
-
   useEffect(() => {
     if (!undoState || JSON.stringify(layout) === undoState.appliedSignature) return;
     setUndoState(null);
@@ -437,10 +407,6 @@ export function ModuleWorkspace({
         data-presentation={presentation}
         data-grid-columns={gridColumns}
         data-reorder-group="groups"
-        onPointerMove={(event: React.PointerEvent<HTMLDivElement>) => {
-          const viewport = scrollViewportRef.current;
-          if (viewport) autoScrollAtPointer(viewport, event.clientY);
-        }}
       >
         {transientLayout.groups.map((group, groupIndex) => {
         const groupModules = group.moduleIds
@@ -451,7 +417,8 @@ export function ModuleWorkspace({
           Math.max(group.rows, Math.ceil((groupModules.length + 1) / gridColumns)),
         );
         const capacity = displayRows * gridColumns;
-        const overflowing = groupModules.length + 1 > capacity;
+        const addTileFits = groupModules.length < capacity;
+        const overflowing = groupModules.length > capacity;
         const condensed = presentation === 'panel' && density === 'condensed';
         const collapsed = condensed && activeCondensedGroupId !== group.id;
         return (
@@ -609,9 +576,6 @@ export function ModuleWorkspace({
               layoutScroll={overflowing}
               tabIndex={overflowing ? 0 : undefined}
               aria-label={`${group.name}模块`}
-              onPointerMove={(event: React.PointerEvent<HTMLDivElement>) => (
-                autoScrollAtPointer(event.currentTarget, event.clientY)
-              )}
             >
               {groupModules.map((module, moduleIndex) => {
                 const disabled = module.availability !== 'available';
@@ -635,12 +599,14 @@ export function ModuleWorkspace({
                   >
                     <button
                       type="button"
-                      className="otto-module-tile"
+                      className={`otto-module-tile${disabled ? ' is-unavailable' : ''}`}
                       aria-label={`打开 ${module.label}`}
-                      disabled={disabled}
+                      aria-haspopup={disabled ? 'dialog' : undefined}
                       title={disabled ? module.disabledReason : editing ? '拖动调整模块顺序' : module.description}
                       onClick={() => {
-                        if (!editing) onActivate(module);
+                        if (editing) return;
+                        if (disabled) onUnavailableModule?.(module);
+                        else onActivate(module);
                       }}
                       onKeyDown={(event) => {
                         if (!editing) return;
@@ -683,7 +649,7 @@ export function ModuleWorkspace({
                   </DraggableItem>
                 );
               })}
-              <button
+              {addTileFits ? <button
                 type="button"
                 className="otto-module-group__add"
                 aria-label={`管理“${group.name}”中的模块`}
@@ -691,8 +657,19 @@ export function ModuleWorkspace({
               >
                 <span className="otto-module-group__add-icon" aria-hidden>＋</span>
                 <span>管理模块</span>
-              </button>
+              </button> : null}
             </Reorder.Group>
+            {!addTileFits ? (
+              <button
+                type="button"
+                className="otto-module-group__add otto-module-group__add--compact"
+                aria-label={`向${group.name}添加模块`}
+                onClick={() => onOpenMarketplace(group.id)}
+              >
+                <span className="otto-module-group__add-icon" aria-hidden>＋</span>
+                <span>添加模块</span>
+              </button>
+            ) : null}
           </article>
             )}
           </DraggableItem>
@@ -700,82 +677,18 @@ export function ModuleWorkspace({
         })}
       </Reorder.Group>
       <div className="otto-module-workspace__footer">
-        <div
-          className="otto-module-workspace__add-group-wrap"
-          ref={openPopover?.kind === 'add-group' ? menuRef : undefined}
+        <button
+          type="button"
+          className="otto-module-workspace__add-group"
+          aria-label="添加功能组"
+          onClick={() => {
+            if (onAddGroup) onAddGroup();
+            else commitLayout(createModuleGroup(layout));
+          }}
         >
-          <button
-            type="button"
-            className="otto-module-workspace__add-group"
-            aria-label="添加功能组"
-            aria-haspopup="menu"
-            aria-expanded={openPopover?.kind === 'add-group'}
-            onClick={(event) => {
-              popoverTriggerRef.current = event.currentTarget;
-              setOpenPopover((current) => current?.kind === 'add-group'
-                ? null
-                : { kind: 'add-group' });
-            }}
-          >
-            <span aria-hidden>＋</span>
-            添加功能组
-          </button>
-          {openPopover?.kind === 'add-group' ? (
-            <div
-              className="otto-module-workspace__add-group-menu"
-              role="menu"
-              aria-label="选择功能组类型"
-            >
-              {availableParkServicesModuleIds.length > 0 ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  aria-label="园区服务整合包"
-                  disabled={layout.groups.some((group) => group.id === PARK_SERVICES_GROUP_ID)}
-                  onClick={() => {
-                    const next = createParkServicesModuleGroup(
-                      layout,
-                      availableParkServicesModuleIds,
-                    );
-                    const created = next.groups.find((group) => group.id === PARK_SERVICES_GROUP_ID);
-                    if (created) {
-                      pendingGroupRevealRef.current = created.id;
-                      setActiveCondensedGroupId(created.id);
-                    }
-                    setOpenPopover(null);
-                    commitLayout(next);
-                  }}
-                >
-                  <strong>园区服务</strong>
-                  <small>
-                    {layout.groups.some((group) => group.id === PARK_SERVICES_GROUP_ID)
-                      ? '已添加完整功能组'
-                      : `一次添加 ${availableParkServicesModuleIds.length} 个园区服务入口`}
-                  </small>
-                </button>
-              ) : null}
-              <button
-                type="button"
-                role="menuitem"
-                aria-label="空白功能组"
-                onClick={() => {
-                  const next = createModuleGroup(layout);
-                  const created = next.groups.at(-1);
-                  if (created) {
-                    pendingGroupRevealRef.current = created.id;
-                    setActiveCondensedGroupId(created.id);
-                    setRenameDraft({ groupId: created.id, value: created.name, error: null });
-                  }
-                  setOpenPopover(null);
-                  commitLayout(next);
-                }}
-              >
-                <strong>空白功能组</strong>
-                <small>创建后自行命名并添加常用模块</small>
-              </button>
-            </div>
-          ) : null}
-        </div>
+          <span aria-hidden>＋</span>
+          添加功能组
+        </button>
       </div>
       {undoState ? (
         <div className="otto-module-workspace__undo" role="status">

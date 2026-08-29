@@ -90,7 +90,10 @@ export function useModuleWorkspaceCapabilities(input: {
       return () => { cancelled = true; };
     }
     void getEnterpriseOrganizationFeatures(organizationId, { force: true }).then(async (features) => {
-      let parkAuthorization = NO_PARK;
+      let parkAuthorization: ParkModuleAuthorization = {
+        ...NO_PARK,
+        disabledReason: '当前企业尚未绑定园区服务空间',
+      };
       try {
         const park = await window.otto.enterpriseParkView();
         const hasParkContext = Boolean(park && park.status === 'active');
@@ -107,8 +110,16 @@ export function useModuleWorkspaceCapabilities(input: {
           hasParkContext,
           canViewStatistics: hasParkContext && Boolean(park?.isAdminOrganization),
           canViewStaffTasks,
+          disabledReason: hasParkContext ? undefined : '当前企业尚未绑定园区服务空间',
         };
-      } catch {
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        parkAuthorization = {
+          ...NO_PARK,
+          disabledReason: /commercial module is not entitled|not entitled|未授权/i.test(message)
+            ? '当前服务器尚未授权园区服务模块'
+            : '园区服务状态读取失败，请重新检测',
+        };
         // 园区服务不可用时按模块 fail-closed，不影响 Agent、Skill 等独立能力。
       }
       if (cancelled) return;

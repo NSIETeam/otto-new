@@ -102,6 +102,25 @@ describe('desktop SQLCipher runtime custody', () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
+
+  it('uses the verified development binding when packaged resources are absent', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'otto-desktop-dev-binding-'));
+    const developmentBinding = path.join(root, 'native', 'better_sqlite3.node');
+    const environment: NodeJS.ProcessEnv = { OTTO_USER_DIR: path.join(root, 'user') };
+    try {
+      await fs.mkdir(path.dirname(developmentBinding), { recursive: true });
+      await fs.writeFile(developmentBinding, 'verified-development-binding');
+
+      expect(prepareDesktopSqlCipherRuntime(environment, {
+        homeDirectory: root,
+        resourcesPath: path.join(root, 'missing-resources'),
+        developmentBindingPath: developmentBinding,
+      }).nativeBindingPath).toBe(path.resolve(developmentBinding));
+      expect(environment.OTTO_SQLCIPHER_NATIVE_BINDING).toBe(path.resolve(developmentBinding));
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 function discoveredMainModule() {

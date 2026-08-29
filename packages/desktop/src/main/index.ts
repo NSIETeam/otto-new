@@ -62,6 +62,13 @@ import {
 import { WorkspaceDirectoryStore } from './workspace-directory-store.js';
 import { MainWindowPresentationController } from './main-window-presentation.js';
 import { askWindowCloseChoice } from './window-close-policy.js';
+import {
+  advanceDesktopPetDrag,
+  clampDesktopPetToWorkArea,
+  createDesktopPetDragState,
+  rebaseDesktopPetDrag,
+  type DesktopPetDragState,
+} from './desktop-pet-drag.js';
 
 function ignoreBrokenPipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
@@ -508,6 +515,20 @@ let enterpriseTrayContacts: EnterpriseTrayContact[] = [];
 let isQuitting = false;
 /** 视频编辑器窗口（OpenReel）。 */
 let videoEditorWindow: BrowserWindow | undefined;
+/** 可脱离主窗口、在桌面任意拖动的小宠物窗口。 */
+let desktopPetWindow: BrowserWindow | undefined;
+let desktopPetEnabled = false;
+let desktopPetMoveSaveTimer: ReturnType<typeof setTimeout> | undefined;
+let desktopPetDragTimer: ReturnType<typeof setInterval> | undefined;
+let desktopPetDragState: DesktopPetDragState | undefined;
+let desktopPetDragMoved = false;
+let desktopPetNativeReleaseMoved: boolean | undefined;
+let desktopPetOuterSize: { width: number; height: number } | undefined;
+let desktopPetState = {
+  running: false,
+  workLabel: '等待你的下一项工作',
+  sessionId: null as string | null,
+};
 
 // ── IPC channel 名（与 preload 对齐）──
 const IPC = {
@@ -540,6 +561,17 @@ const IPC = {
   parkConfig: 'otto:park-config',
   themeGet: 'otto:theme-get',
   themeSet: 'otto:theme-set',
+  desktopPetSetEnabled: 'otto:desktop-pet-set-enabled',
+  desktopPetUpdateState: 'otto:desktop-pet-update-state',
+  desktopPetGetState: 'otto:desktop-pet-get-state',
+  desktopPetStateChanged: 'otto:desktop-pet-state-changed',
+  desktopPetOpenMain: 'otto:desktop-pet-open-main',
+  desktopPetSetInteractive: 'otto:desktop-pet-set-interactive',
+  desktopPetDragStart: 'otto:desktop-pet-drag-start',
+  desktopPetDragEnd: 'otto:desktop-pet-drag-end',
+  desktopPetNativeDragEnded: 'otto:desktop-pet-native-drag-ended',
+  desktopPetShowMenu: 'otto:desktop-pet-show-menu',
+  desktopPetReactionRequested: 'otto:desktop-pet-reaction-requested',
   skillLeaderboard: 'otto:skill-leaderboard',
   workLogToday: 'otto:worklog-today',
   workLogRecent: 'otto:worklog-recent',
@@ -608,7 +640,9 @@ const IPC = {
   enterpriseKnowledgeList: 'otto:enterprise-knowledge-list',
   enterpriseKnowledgeReview: 'otto:enterprise-knowledge-review',
   enterpriseKnowledgeRevise: 'otto:enterprise-knowledge-revise',
+  enterpriseKnowledgeRevalidate: 'otto:enterprise-knowledge-revalidate',
   enterpriseKnowledgeRevisions: 'otto:enterprise-knowledge-revisions',
+  enterpriseKnowledgeEvidence: 'otto:enterprise-knowledge-evidence',
   enterpriseOrganizationView: 'otto:enterprise-organization-view',
   enterprisePresenceHeartbeat: 'otto:enterprise-presence-heartbeat',
   enterpriseOrganizationFeaturesGet:
@@ -2107,6 +2141,290 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+const DESKTOP_PET_WINDOW_WIDTH = 176;
+const DESKTOP_PET_WINDOW_HEIGHT = 184;
+/** Windows client-area left-button release. Used because Chromium can lose
+ * pointerup when a transparent BrowserWindow is relocated during capture. */
+const WM_LBUTTONUP = 0x0202;
+
+function desktopPetPositionFilePath(): string {
+  return path.join(app.getPath('userData'), 'desktop-pet-position.json');
+}
+
+function readDesktopPetPosition(): { x: number; y: number } | null {
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(desktopPetPositionFilePath(), 'utf8'),
+    ) as { x?: unknown; y?: unknown };
+    if (
+      typeof parsed.x === 'number' &&
+      Number.isFinite(parsed.x) &&
+      typeof parsed.y === 'number' &&
+      Number.isFinite(parsed.y)
+    ) {
+      return { x: Math.round(parsed.x), y: Math.round(parsed.y) };
+    }
+  } catch {
+    // 首次开启或位置文件损坏时使用当前主屏幕右下角。
+  }
+  return null;
+}
+
+function clampDesktopPetPosition(
+  candidate: { x: number; y: number },
+  windowSize: { width: number; height: number } = {
+    width: DESKTOP_PET_WINDOW_WIDTH,
+    height: DESKTOP_PET_WINDOW_HEIGHT,
+  },
+  anchor?: { x: number; y: number },
+): {
+  x: number;
+  y: number;
+} {
+  const width = Number.isFinite(windowSize.width) && windowSize.width > 0
+    ? Math.round(windowSize.width)
+    : DESKTOP_PET_WINDOW_WIDTH;
+  const height = Number.isFinite(windowSize.height) && windowSize.height > 0
+    ? Math.round(windowSize.height)
+    : DESKTOP_PET_WINDOW_HEIGHT;
+  const displayAnchor = anchor ?? {
+    x: candidate.x + width / 2,
+    y: candidate.y + height / 2,
+  };
+  const workArea = screen.getDisplayNearestPoint(displayAnchor).workArea;
+  return clampDesktopPetToWorkArea(candidate, { width, height }, workArea);
+}
+
+function resolveDesktopPetPosition(): { x: number; y: number } {
+  const saved = readDesktopPetPosition();
+  const primaryWorkArea = screen.getPrimaryDisplay().workArea;
+  return clampDesktopPetPosition(saved ?? {
+    x: primaryWorkArea.x + primaryWorkArea.width - DESKTOP_PET_WINDOW_WIDTH - 24,
+    y: primaryWorkArea.y + primaryWorkArea.height - DESKTOP_PET_WINDOW_HEIGHT - 24,
+  });
+}
+
+function saveDesktopPetPosition(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  const [x, y] = win.getPosition();
+  try {
+    fs.writeFileSync(
+      desktopPetPositionFilePath(),
+      JSON.stringify({ x, y }),
+      'utf8',
+    );
+  } catch {
+    // 位置记忆失败不影响本次拖动。
+  }
+}
+
+function stopDesktopPetDragTracking(): void {
+  if (!desktopPetDragTimer) return;
+  clearInterval(desktopPetDragTimer);
+  desktopPetDragTimer = undefined;
+}
+
+function updateDesktopPetDragPosition(): void {
+  if (
+    !desktopPetWindow ||
+    desktopPetWindow.isDestroyed() ||
+    !desktopPetDragState
+  ) {
+    stopDesktopPetDragTracking();
+    return;
+  }
+  const cursor = screen.getCursorScreenPoint();
+  const [currentX, currentY] = desktopPetWindow.getPosition();
+  const step = advanceDesktopPetDrag(desktopPetDragState, cursor);
+  const liveBounds = desktopPetWindow.getBounds();
+  const windowSize = desktopPetOuterSize ?? {
+    width: liveBounds.width,
+    height: liveBounds.height,
+  };
+  const next = clampDesktopPetPosition(step.position, windowSize, cursor);
+  if (next.x !== step.position.x || next.y !== step.position.y) {
+    // The cursor reached a work-area edge. Re-anchor at the actual clamped
+    // position so reversing by one pixel moves the pet immediately instead of
+    // paying back an invisible out-of-bounds offset.
+    desktopPetDragState = rebaseDesktopPetDrag(next, cursor);
+  }
+  if (next.x === currentX && next.y === currentY) return;
+  desktopPetDragMoved = true;
+  const fixedSize = desktopPetOuterSize ?? liveBounds;
+  desktopPetWindow.setBounds({
+    x: next.x,
+    y: next.y,
+    width: fixedSize.width,
+    height: fixedSize.height,
+  }, false);
+}
+
+function finishDesktopPetDrag(): boolean {
+  if (desktopPetDragState) updateDesktopPetDragPosition();
+  const moved = desktopPetDragMoved;
+  stopDesktopPetDragTracking();
+  desktopPetDragState = undefined;
+  desktopPetDragMoved = false;
+  if (desktopPetWindow && !desktopPetWindow.isDestroyed()) {
+    saveDesktopPetPosition(desktopPetWindow);
+  }
+  return moved;
+}
+
+function cancelDesktopPetDrag(): void {
+  stopDesktopPetDragTracking();
+  desktopPetDragState = undefined;
+  desktopPetDragMoved = false;
+  desktopPetNativeReleaseMoved = undefined;
+}
+
+function pushDesktopPetState(): void {
+  if (!desktopPetWindow || desktopPetWindow.isDestroyed()) return;
+  desktopPetWindow.webContents.send(
+    IPC.desktopPetStateChanged,
+    desktopPetState,
+  );
+}
+
+function ensureDesktopPetWindow(): BrowserWindow {
+  if (desktopPetWindow && !desktopPetWindow.isDestroyed()) {
+    return desktopPetWindow;
+  }
+  const position = resolveDesktopPetPosition();
+  const win = new BrowserWindow({
+    ...position,
+    width: DESKTOP_PET_WINDOW_WIDTH,
+    height: DESKTOP_PET_WINDOW_HEIGHT,
+    useContentSize: true,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    hasShadow: false,
+    title: 'Otto 桌面小宠物',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webviewTag: false,
+      preload: path.join(__dirname, '../preload/index.js'),
+    },
+  });
+  desktopPetWindow = win;
+  // Only the visible pet body should intercept desktop input. Forwarded mouse
+  // movement lets the renderer report when the cursor enters the hit target;
+  // the surrounding transparent pixels remain click-through.
+  win.setIgnoreMouseEvents(true, { forward: true });
+  if (process.platform === 'win32') {
+    // Renderer pointer capture is not a reliable release signal for a moving
+    // layered window. Hook the native mouse-up message so polling can never
+    // survive after the physical left button is released and pin the pet to a
+    // screen edge.
+    win.hookWindowMessage(WM_LBUTTONUP, () => {
+      if (!desktopPetDragState) return;
+      desktopPetNativeReleaseMoved = finishDesktopPetDrag();
+      if (desktopPetNativeReleaseMoved) {
+        win.webContents.send(
+          IPC.desktopPetNativeDragEnded,
+          desktopPetNativeReleaseMoved,
+        );
+      }
+    });
+  }
+  win.setAlwaysOnTop(true, 'floating');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  hardenWebContents(win);
+  const revealDesktopPet = (): void => {
+    if (win.isDestroyed()) return;
+    win.setContentSize(
+      DESKTOP_PET_WINDOW_WIDTH,
+      DESKTOP_PET_WINDOW_HEIGHT,
+      false,
+    );
+    const normalizedBounds = win.getBounds();
+    desktopPetOuterSize = {
+      width: normalizedBounds.width,
+      height: normalizedBounds.height,
+    };
+    // Electron 43 on Windows can add the DPI-scaled non-client margin on the
+    // first later setBounds call. Apply the canonical outer size before the
+    // window is shown so drag frames never mutate the hit-test rectangle.
+    win.setBounds(normalizedBounds, false);
+    pushDesktopPetState();
+    if (!desktopPetEnabled) return;
+    const [currentX, currentY] = win.getPosition();
+    const visiblePosition = clampDesktopPetPosition({
+      x: currentX,
+      y: currentY,
+    }, desktopPetOuterSize);
+    if (visiblePosition.x !== currentX || visiblePosition.y !== currentY) {
+      win.setPosition(visiblePosition.x, visiblePosition.y, false);
+    }
+    win.showInactive();
+    // Windows layered/transparent windows can be visible while their first GPU
+    // frame is still fully transparent. Force a repaint immediately and once
+    // more after the atlas image has had time to decode.
+    win.webContents.invalidate();
+    for (const delay of [60, 240]) {
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.webContents.invalidate();
+      }, delay);
+    }
+  };
+  win.once('ready-to-show', revealDesktopPet);
+  // Transparent frameless windows do not reliably emit ready-to-show on every
+  // Windows/GPU combination. did-finish-load is the deterministic fallback so
+  // the pet cannot remain alive but permanently hidden with show:false.
+  win.webContents.once('did-finish-load', revealDesktopPet);
+  win.on('move', () => {
+    if (desktopPetMoveSaveTimer) clearTimeout(desktopPetMoveSaveTimer);
+    desktopPetMoveSaveTimer = setTimeout(
+      () => saveDesktopPetPosition(win),
+      160,
+    );
+  });
+  win.on('closed', () => {
+    if (desktopPetMoveSaveTimer) clearTimeout(desktopPetMoveSaveTimer);
+    desktopPetMoveSaveTimer = undefined;
+    cancelDesktopPetDrag();
+    desktopPetOuterSize = undefined;
+    desktopPetWindow = undefined;
+  });
+  void win.loadFile(path.join(RENDERER_DIR, 'index.html'), {
+    query: { surface: 'desktop-pet' },
+  });
+  return win;
+}
+
+function setDesktopPetEnabled(enabled: boolean): boolean {
+  desktopPetEnabled = enabled;
+  if (!enabled) {
+    cancelDesktopPetDrag();
+    desktopPetWindow?.hide();
+    return false;
+  }
+  const win = ensureDesktopPetWindow();
+  if (!win.isDestroyed() && !win.webContents.isLoading()) {
+    pushDesktopPetState();
+    win.showInactive();
+  }
+  return true;
+}
+
+function isDesktopPetSender(sender: Electron.WebContents): boolean {
+  return Boolean(
+    desktopPetWindow &&
+      !desktopPetWindow.isDestroyed() &&
+      desktopPetWindow.webContents === sender,
+  );
+}
+
 /** 创建内置视频编辑器窗口（OpenReel）。 */
 function createVideoEditorWindow(): { ok: boolean; error?: string } {
   if (videoEditorWindow && !videoEditorWindow.isDestroyed()) {
@@ -2913,6 +3231,18 @@ function registerIpc(): void {
     ) {
       throw new Error('知识修订字段不完整');
     }
+    const adjudication = revision.adjudication && typeof revision.adjudication === 'object'
+      ? revision.adjudication as Record<string, unknown>
+      : null;
+    if (adjudication && (
+      !Array.isArray(adjudication.acceptedEvidenceIds)
+      || !adjudication.acceptedEvidenceIds.every((id) => typeof id === 'string' && /^\d+$/u.test(id))
+      || !Array.isArray(adjudication.rejectedEvidenceIds)
+      || !adjudication.rejectedEvidenceIds.every((id) => typeof id === 'string' && /^\d+$/u.test(id))
+      || typeof adjudication.rationale !== 'string'
+    )) {
+      throw new Error('知识裁决字段不正确');
+    }
     return enterpriseClient.reviseKnowledge(body.id, {
       title: revision.title,
       category: revision.category,
@@ -2925,6 +3255,37 @@ function registerIpc(): void {
         typeof revision.changeNote === 'string'
           ? revision.changeNote
           : undefined,
+      resolveConflict: revision.resolveConflict === true,
+      adjudication: adjudication
+        ? {
+          acceptedEvidenceIds: adjudication.acceptedEvidenceIds as string[],
+          rejectedEvidenceIds: adjudication.rejectedEvidenceIds as string[],
+          rationale: adjudication.rationale as string,
+        }
+        : undefined,
+    });
+  });
+  ipcMain.handle(IPC.enterpriseKnowledgeRevalidate, async (_e, input: unknown) => {
+    loadEnterpriseSession();
+    const body = input && typeof input === 'object'
+      ? input as Record<string, unknown>
+      : {};
+    if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
+      throw new Error('知识复核参数不正确');
+    }
+    const revalidation = body.input && typeof body.input === 'object'
+      ? body.input as Record<string, unknown>
+      : {};
+    if (typeof revalidation.rationale !== 'string'
+      || revalidation.rationale.trim().length < 12
+      || !Number.isSafeInteger(revalidation.validForDays)
+      || Number(revalidation.validForDays) < 30
+      || Number(revalidation.validForDays) > 365) {
+      throw new Error('知识复核字段不完整');
+    }
+    return enterpriseClient.revalidateKnowledge(body.id, {
+      rationale: revalidation.rationale.trim(),
+      validForDays: Number(revalidation.validForDays),
     });
   });
   ipcMain.handle(
@@ -2939,6 +3300,19 @@ function registerIpc(): void {
         throw new Error('知识版本参数不正确');
       }
       return enterpriseClient.listKnowledgeRevisions(body.id);
+    },
+  );
+  ipcMain.handle(
+    IPC.enterpriseKnowledgeEvidence,
+    async (_e, input: unknown) => {
+      loadEnterpriseSession();
+      const body = input && typeof input === 'object'
+        ? input as Record<string, unknown>
+        : {};
+      if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
+        throw new Error('知识证据参数不正确');
+      }
+      return enterpriseClient.listKnowledgeEvidence(body.id);
     },
   );
   ipcMain.handle(
@@ -3984,6 +4358,101 @@ function registerIpc(): void {
       /* 写盘失败只影响下次启动的记忆，本次已生效 */
     }
     return nativeTheme.themeSource;
+  });
+  ipcMain.handle(IPC.desktopPetSetEnabled, (_event, enabled: unknown) =>
+    setDesktopPetEnabled(enabled === true),
+  );
+  ipcMain.handle(IPC.desktopPetGetState, () => desktopPetState);
+  ipcMain.handle(IPC.desktopPetUpdateState, (_event, state: unknown) => {
+    if (!state || typeof state !== 'object') return;
+    const candidate = state as {
+      running?: unknown;
+      workLabel?: unknown;
+      sessionId?: unknown;
+    };
+    if (
+      typeof candidate.running !== 'boolean' ||
+      typeof candidate.workLabel !== 'string' ||
+      (candidate.sessionId !== null && typeof candidate.sessionId !== 'string')
+    ) {
+      return;
+    }
+    const completedCurrentTask = Boolean(
+      desktopPetState.running &&
+        !candidate.running &&
+        desktopPetState.sessionId &&
+        desktopPetState.sessionId === candidate.sessionId,
+    );
+    desktopPetState = {
+      running: candidate.running,
+      workLabel:
+        candidate.workLabel.trim().slice(0, 80) || '等待你的下一项工作',
+      sessionId: candidate.sessionId,
+    };
+    pushDesktopPetState();
+    if (completedCurrentTask) {
+      desktopPetWindow?.webContents.send(
+        IPC.desktopPetReactionRequested,
+        'task-completed',
+      );
+    }
+  });
+  ipcMain.handle(IPC.desktopPetOpenMain, (event) => {
+    if (!isDesktopPetSender(event.sender)) return;
+    showMainWindow();
+  });
+  ipcMain.on(IPC.desktopPetSetInteractive, (event, interactive: unknown) => {
+    if (
+      !isDesktopPetSender(event.sender) ||
+      !desktopPetWindow ||
+      desktopPetWindow.isDestroyed() ||
+      desktopPetDragState
+    ) return;
+    if (interactive === true) {
+      desktopPetWindow.setIgnoreMouseEvents(false);
+    } else {
+      desktopPetWindow.setIgnoreMouseEvents(true, { forward: true });
+    }
+  });
+  ipcMain.handle(IPC.desktopPetDragStart, (event) => {
+    if (!isDesktopPetSender(event.sender) || !desktopPetWindow) return;
+    stopDesktopPetDragTracking();
+    desktopPetWindow.setIgnoreMouseEvents(false);
+    desktopPetNativeReleaseMoved = undefined;
+    const [windowX, windowY] = desktopPetWindow.getPosition();
+    const cursor = screen.getCursorScreenPoint();
+    desktopPetDragState = createDesktopPetDragState(
+      { x: windowX, y: windowY },
+      cursor,
+    );
+    desktopPetDragMoved = false;
+    // Poll the native cursor while the button is held. Renderer pointer events
+    // can pause when a transparent BrowserWindow crosses its old bounds; native
+    // polling keeps the pet attached to the cursor across the whole work area.
+    desktopPetDragTimer = setInterval(updateDesktopPetDragPosition, 16);
+  });
+  ipcMain.handle(IPC.desktopPetDragEnd, (event) => {
+    if (!isDesktopPetSender(event.sender)) return false;
+    if (desktopPetDragState) return finishDesktopPetDrag();
+    const moved = desktopPetNativeReleaseMoved ?? false;
+    desktopPetNativeReleaseMoved = undefined;
+    return moved;
+  });
+  ipcMain.handle(IPC.desktopPetShowMenu, (event) => {
+    if (!isDesktopPetSender(event.sender) || !desktopPetWindow) return;
+    const menu = Menu.buildFromTemplate([
+      { label: '打开 Otto', click: showMainWindow },
+      {
+        label: '逗一逗',
+        click: () => {
+          desktopPetWindow?.webContents.send(
+            IPC.desktopPetReactionRequested,
+            'pet-clicked',
+          );
+        },
+      },
+    ]);
+    menu.popup({ window: desktopPetWindow });
   });
 
   ipcMain.handle(

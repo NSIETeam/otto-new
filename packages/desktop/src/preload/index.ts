@@ -474,14 +474,20 @@ export interface EnterpriseKnowledgeRecordResult {
     promoted: boolean;
     reason:
       | 'incubating'
+      | 'transient'
+      | 'contested'
       | 'long_term_recurrence'
       | 'cross_member_corroboration'
+      | 'governed_decision'
       | 'high_impact_verified';
     evidenceCount: number;
     distinctSessionCount: number;
     distinctContributorCount: number;
     spanDays: number;
+    contradictoryEvidenceCount?: number;
+    verifiedEvidenceCount?: number;
     impactScore: number;
+    reliabilityScore: number;
   };
 }
 
@@ -505,13 +511,17 @@ export interface EnterpriseKnowledgeItem {
   sourceLabel?: string | null;
   status?: 'pending_review' | 'active' | 'archived';
   version?: number;
+  supersedesId?: string | null;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
+  reviewDueAt?: string | null;
+  expiresAt?: string | null;
   createdAt: string;
   updatedAt?: string;
   evidenceCount?: number;
   distinctSessionCount?: number;
   distinctContributorCount?: number;
+  verifiedEvidenceCount?: number;
   firstObservedAt?: string | null;
   lastObservedAt?: string | null;
 }
@@ -527,6 +537,31 @@ export interface EnterpriseKnowledgeRevision {
   changedBy: string | null;
   changeNote: string | null;
   createdAt: string;
+  adjudication?: EnterpriseKnowledgeAdjudication;
+}
+
+export interface EnterpriseKnowledgeAdjudication {
+  id: string;
+  acceptedEvidenceIds: string[];
+  rejectedEvidenceIds: string[];
+  rationale: string;
+  adjudicatedBy: string;
+}
+
+export interface EnterpriseKnowledgeEvidence {
+  id: string;
+  knowledgeId: string;
+  sourceId: string;
+  content: string;
+  tags: string[];
+  contributor: string | null;
+  confidence: number;
+  verified: boolean;
+  impactScore: number;
+  impactReasons: string[];
+  observedAt: string;
+  stance: 'affirmative' | 'negative' | 'neutral';
+  contested: boolean;
 }
 
 export type EnterpriseSkillVisibility = 'department' | 'company';
@@ -1183,7 +1218,9 @@ const IPC = {
   enterpriseKnowledgeList: 'otto:enterprise-knowledge-list',
   enterpriseKnowledgeReview: 'otto:enterprise-knowledge-review',
   enterpriseKnowledgeRevise: 'otto:enterprise-knowledge-revise',
+  enterpriseKnowledgeRevalidate: 'otto:enterprise-knowledge-revalidate',
   enterpriseKnowledgeRevisions: 'otto:enterprise-knowledge-revisions',
+  enterpriseKnowledgeEvidence: 'otto:enterprise-knowledge-evidence',
   enterpriseOrganizationView: 'otto:enterprise-organization-view',
   enterprisePresenceHeartbeat: 'otto:enterprise-presence-heartbeat',
   enterpriseOrganizationFeaturesGet:
@@ -1268,6 +1305,17 @@ const IPC = {
   parkConfig: 'otto:park-config',
   themeGet: 'otto:theme-get',
   themeSet: 'otto:theme-set',
+  desktopPetSetEnabled: 'otto:desktop-pet-set-enabled',
+  desktopPetUpdateState: 'otto:desktop-pet-update-state',
+  desktopPetGetState: 'otto:desktop-pet-get-state',
+  desktopPetStateChanged: 'otto:desktop-pet-state-changed',
+  desktopPetOpenMain: 'otto:desktop-pet-open-main',
+  desktopPetSetInteractive: 'otto:desktop-pet-set-interactive',
+  desktopPetDragStart: 'otto:desktop-pet-drag-start',
+  desktopPetDragEnd: 'otto:desktop-pet-drag-end',
+  desktopPetNativeDragEnded: 'otto:desktop-pet-native-drag-ended',
+  desktopPetShowMenu: 'otto:desktop-pet-show-menu',
+  desktopPetReactionRequested: 'otto:desktop-pet-reaction-requested',
   skillLeaderboard: 'otto:skill-leaderboard',
   workLogToday: 'otto:worklog-today',
   workLogRecent: 'otto:worklog-recent',
@@ -1314,6 +1362,17 @@ type ExternalInboundNotificationFrame = {
 type ConnectionHandler = (connected: boolean) => void;
 /** 应用菜单动作回调（'new-chat' | 'open-settings'）。 */
 type MenuHandler = (action: string) => void;
+
+export interface DesktopPetState {
+  running: boolean;
+  workLabel: string;
+  sessionId: string | null;
+}
+
+export type DesktopPetBehaviorEvent =
+  | 'task-completed'
+  | 'pet-clicked'
+  | 'open-main';
 
 /** preload 暴露给 renderer 的 API 形状（renderer 据此声明 window.otto 类型）。 */
 export interface OttoBridge {
@@ -1442,6 +1501,27 @@ export interface OttoBridge {
   themeSet(
     v: 'system' | 'light' | 'dark',
   ): Promise<'system' | 'light' | 'dark'>;
+  /** 显示或隐藏可在桌面任意拖动的小宠物窗口。 */
+  desktopPetSetEnabled(enabled: boolean): Promise<boolean>;
+  /** 把当前对话工作状态同步到独立小宠物窗口。 */
+  desktopPetUpdateState(state: DesktopPetState): Promise<void>;
+  /** 读取独立小宠物窗口当前展示状态。 */
+  desktopPetGetState(): Promise<DesktopPetState>;
+  /** 订阅独立小宠物窗口状态变化。 */
+  onDesktopPetState(handler: (state: DesktopPetState) => void): () => void;
+  /** 双击宠物时唤回并聚焦 Otto 主窗口。 */
+  desktopPetOpenMain(): Promise<void>;
+  /** 仅让宠物可见本体拦截鼠标，透明窗口区域继续点击穿透。 */
+  desktopPetSetInteractive(interactive: boolean): void;
+  /** 自定义无边框窗口拖动协议。 */
+  desktopPetDragStart(): Promise<void>;
+  desktopPetDragEnd(): Promise<boolean>;
+  /** 原生窗口捕获到 renderer 丢失的拖拽释放时恢复界面状态。 */
+  onDesktopPetNativeDragEnd(handler: (moved: boolean) => void): () => void;
+  /** 打开宠物原生右键菜单。 */
+  desktopPetShowMenu(): Promise<void>;
+  /** 订阅右键菜单触发的“换个动作”。 */
+  onDesktopPetReaction(handler: (event: DesktopPetBehaviorEvent) => void): () => void;
   /** Skill 排行榜 + 贡献明星榜（krx 企业面板；数据读 .otto/org/skill-shares.json）。 */
   skillLeaderboard(teamId?: string): Promise<{
     leaderboard: string;
@@ -1720,11 +1800,24 @@ export interface OttoBridge {
       content: string;
       confidence?: number;
       changeNote?: string;
+      resolveConflict?: boolean;
+      adjudication?: {
+        acceptedEvidenceIds: string[];
+        rejectedEvidenceIds: string[];
+        rationale: string;
+      };
     },
+  ): Promise<EnterpriseKnowledgeItem>;
+  enterpriseKnowledgeRevalidate(
+    id: string,
+    input: { rationale: string; validForDays: number },
   ): Promise<EnterpriseKnowledgeItem>;
   enterpriseKnowledgeRevisions(
     id: string,
   ): Promise<EnterpriseKnowledgeRevision[]>;
+  enterpriseKnowledgeEvidence(
+    id: string,
+  ): Promise<EnterpriseKnowledgeEvidence[]>;
   enterpriseOrganizationView(
     organizationId?: string,
   ): Promise<EnterpriseOrganizationView>;
@@ -2408,6 +2501,57 @@ const bridge: OttoBridge = {
       'system' | 'light' | 'dark'
     >;
   },
+  desktopPetSetEnabled(enabled: boolean): Promise<boolean> {
+    return ipcRenderer.invoke(IPC.desktopPetSetEnabled, enabled) as Promise<boolean>;
+  },
+  desktopPetUpdateState(state: DesktopPetState): Promise<void> {
+    return ipcRenderer.invoke(IPC.desktopPetUpdateState, state) as Promise<void>;
+  },
+  desktopPetGetState(): Promise<DesktopPetState> {
+    return ipcRenderer.invoke(IPC.desktopPetGetState) as Promise<DesktopPetState>;
+  },
+  onDesktopPetState(handler: (state: DesktopPetState) => void): () => void {
+    const listener = (_event: Electron.IpcRendererEvent, state: DesktopPetState): void => {
+      handler(state);
+    };
+    ipcRenderer.on(IPC.desktopPetStateChanged, listener);
+    return () => ipcRenderer.removeListener(IPC.desktopPetStateChanged, listener);
+  },
+  desktopPetOpenMain(): Promise<void> {
+    return ipcRenderer.invoke(IPC.desktopPetOpenMain) as Promise<void>;
+  },
+  desktopPetSetInteractive(interactive: boolean): void {
+    ipcRenderer.send(IPC.desktopPetSetInteractive, interactive);
+  },
+  desktopPetDragStart(): Promise<void> {
+    return ipcRenderer.invoke(IPC.desktopPetDragStart) as Promise<void>;
+  },
+  desktopPetDragEnd(): Promise<boolean> {
+    return ipcRenderer.invoke(IPC.desktopPetDragEnd) as Promise<boolean>;
+  },
+  onDesktopPetNativeDragEnd(
+    handler: (moved: boolean) => void,
+  ): () => void {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      moved: boolean,
+    ): void => handler(moved === true);
+    ipcRenderer.on(IPC.desktopPetNativeDragEnded, listener);
+    return () => ipcRenderer.removeListener(IPC.desktopPetNativeDragEnded, listener);
+  },
+  desktopPetShowMenu(): Promise<void> {
+    return ipcRenderer.invoke(IPC.desktopPetShowMenu) as Promise<void>;
+  },
+  onDesktopPetReaction(
+    handler: (event: DesktopPetBehaviorEvent) => void,
+  ): () => void {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      behavior: DesktopPetBehaviorEvent,
+    ): void => handler(behavior);
+    ipcRenderer.on(IPC.desktopPetReactionRequested, listener);
+    return () => ipcRenderer.removeListener(IPC.desktopPetReactionRequested, listener);
+  },
   skillLeaderboard(teamId?: string): Promise<{
     leaderboard: string;
     starBoard: string;
@@ -2937,10 +3081,21 @@ const bridge: OttoBridge = {
       input,
     }) as Promise<EnterpriseKnowledgeItem>;
   },
+  enterpriseKnowledgeRevalidate(id, input) {
+    return ipcRenderer.invoke(IPC.enterpriseKnowledgeRevalidate, {
+      id,
+      input,
+    }) as Promise<EnterpriseKnowledgeItem>;
+  },
   enterpriseKnowledgeRevisions(id) {
     return ipcRenderer.invoke(IPC.enterpriseKnowledgeRevisions, {
       id,
     }) as Promise<EnterpriseKnowledgeRevision[]>;
+  },
+  enterpriseKnowledgeEvidence(id) {
+    return ipcRenderer.invoke(IPC.enterpriseKnowledgeEvidence, {
+      id,
+    }) as Promise<EnterpriseKnowledgeEvidence[]>;
   },
   enterpriseOrganizationView(
     organizationId?: string,

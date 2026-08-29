@@ -64,23 +64,10 @@ const sampleLayout = (): ModuleWorkspaceLayout => ({
 });
 
 describe('module workspace defaults', () => {
-  it('creates the enterprise two-group 2x3 defaults', () => {
+  it('auto-installs only the official daily-office group for a new enterprise workspace', () => {
     expect(createDefaultModuleWorkspace(enterpriseCapabilities)).toEqual({
       version: 1,
       groups: [
-        {
-          id: 'park-services',
-          name: '园区服务',
-          rows: 2,
-          moduleIds: [
-            'park-announcement',
-            'park-satisfaction',
-            'park-renovation',
-            'park-parking',
-            'park-network-phone',
-            'park-meeting-room',
-          ],
-        },
         {
           id: 'daily-office',
           name: '日常办公',
@@ -93,6 +80,12 @@ describe('module workspace defaults', () => {
             'agent-excel',
             'enterprise-memory',
           ],
+          package: {
+            source: 'official',
+            packageId: 'otto.group.daily-office',
+            publisherId: 'otto.official',
+            version: '1.0.0',
+          },
         },
       ],
     });
@@ -206,11 +199,13 @@ describe('module workspace layout operations', () => {
     const first = createModuleGroup(sampleLayout());
     const second = createModuleGroup(first);
 
-    expect(first.groups.at(-1)).toEqual({
+    expect(first.groups.at(-1)).toMatchObject({
       id: 'custom-group', name: '新功能组', rows: 2, moduleIds: [],
+      package: { source: 'user', packageId: 'user.group.custom-group' },
     });
-    expect(second.groups.at(-1)).toEqual({
+    expect(second.groups.at(-1)).toMatchObject({
       id: 'custom-group-2', name: '新功能组 2', rows: 2, moduleIds: [],
+      package: { source: 'user', packageId: 'user.group.custom-group-2' },
     });
   });
 

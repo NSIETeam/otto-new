@@ -5,3 +5,4 @@ export * from './store.js';
 export * from './file-workflow-store.js';
 export * from './runtime.js';
 export * from './trace.js';
+export * from './resident-supervisor.js';

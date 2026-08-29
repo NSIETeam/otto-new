@@ -1,7 +1,7 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   WorkflowConflictError,
@@ -66,11 +66,26 @@ export class FileWorkflowStore implements WorkflowStore {
     }
   }
 
+  async listRuns(): Promise<WorkflowRun[]> {
+    let names: string[];
+    try {
+      names = await readdir(this.rootDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+    const runs: WorkflowRun[] = [];
+    for (const name of names.filter((entry) => /^wf-[0-9a-f-]{36}\.json$/u.test(entry)).sort()) {
+      runs.push(cloneRun(await this.readRun(name.slice(0, -5))));
+    }
+    return runs;
+  }
+
   async claimNextStep(runId: string, expectedRevision: number): Promise<ClaimedWorkflowStep | null> {
     return this.withLease(runId, async () => {
       const run = await this.readRun(runId);
       this.assertRevision(run, expectedRevision);
-      if (run.status === 'unknown_outcome' || run.status === 'cancelled' || run.status === 'failed') return null;
+      if (run.status !== 'queued') return null;
       const step = nextQueuedStep(run);
       if (!step) return null;
 
@@ -94,7 +109,17 @@ export class FileWorkflowStore implements WorkflowStore {
   }): Promise<WorkflowRun> {
     return this.withLease(input.runId, async () => {
       const run = await this.readRun(input.runId);
-      this.assertRevision(run, input.expectedRevision);
+      // Pause/cancel requests may advance the run revision while the claimed
+      // step is executing. The running step identity remains the completion
+      // lease; a duplicate completion is rejected by its status below.
+      const revisionAdvancedOnlyByControl =
+        input.expectedRevision < run.revision
+        && Boolean(run.pauseRequestedAt || run.cancelRequestedAt);
+      if (input.expectedRevision !== run.revision && !revisionAdvancedOnlyByControl) {
+        throw new WorkflowConflictError(
+          `Workflow revision conflict: expected ${input.expectedRevision}, found ${run.revision}.`,
+        );
+      }
       const step = run.steps.find((candidate) => candidate.stepId === input.stepId);
       if (!step || step.status !== 'running') {
         throw new WorkflowConflictError(`Workflow step is not running: ${input.stepId}`);
@@ -103,7 +128,22 @@ export class FileWorkflowStore implements WorkflowStore {
       step.output = input.output === undefined ? undefined : structuredClone(input.output);
       step.error = input.error;
       step.completedAt = now();
-      run.status = input.error ? 'failed' : nextQueuedStep(run) ? 'queued' : 'succeeded';
+      if (input.error) {
+        run.status = 'failed';
+      } else if (run.cancelRequestedAt) {
+        for (const candidate of run.steps) {
+          if (candidate.status === 'queued' || candidate.status === 'waiting_approval') {
+            candidate.status = 'cancelled';
+            candidate.completedAt = now();
+          }
+        }
+        run.status = 'cancelled';
+      } else if (run.pauseRequestedAt && nextQueuedStep(run)) {
+        run.status = 'paused';
+        run.pauseRequestedAt = undefined;
+      } else {
+        run.status = nextQueuedStep(run) ? 'queued' : 'succeeded';
+      }
       return cloneRun(await this.saveRevision(run));
     });
   }
@@ -113,7 +153,7 @@ export class FileWorkflowStore implements WorkflowStore {
       const run = await this.readRun(input.runId);
       this.assertRevision(run, input.expectedRevision);
       const step = run.steps.find((candidate) => candidate.stepId === input.stepId);
-      if (!step || step.status !== 'waiting_approval' || step.approvalId !== input.approvalId) {
+      if (run.status !== 'waiting_approval' || !step || step.status !== 'waiting_approval' || step.approvalId !== input.approvalId) {
         throw new WorkflowConflictError(`Workflow step is not waiting for this approval: ${input.stepId}`);
       }
       step.status = 'queued';
@@ -156,6 +196,64 @@ export class FileWorkflowStore implements WorkflowStore {
       active.error = `Human takeover: ${input.note.trim().slice(0, 500) || 'reconciliation required'}`;
       active.completedAt = now();
       run.status = 'cancelled';
+      return cloneRun(await this.saveRevision(run));
+    });
+  }
+
+  async pauseRun(runId: string, expectedRevision: number): Promise<WorkflowRun> {
+    return this.withLease(runId, async () => {
+      const run = await this.readRun(runId);
+      this.assertRevision(run, expectedRevision);
+      if (run.status === 'paused') return cloneRun(run);
+      if (run.status === 'running') {
+        run.pauseRequestedAt = now();
+        return cloneRun(await this.saveRevision(run));
+      }
+      if (run.status !== 'queued' && run.status !== 'waiting_approval') {
+        throw new WorkflowConflictError(`Workflow run cannot be paused from ${run.status}.`);
+      }
+      run.status = 'paused';
+      return cloneRun(await this.saveRevision(run));
+    });
+  }
+
+  async resumeRun(runId: string, expectedRevision: number): Promise<WorkflowRun> {
+    return this.withLease(runId, async () => {
+      const run = await this.readRun(runId);
+      this.assertRevision(run, expectedRevision);
+      if (run.status !== 'paused') {
+        throw new WorkflowConflictError(`Workflow run cannot be resumed from ${run.status}.`);
+      }
+      run.pauseRequestedAt = undefined;
+      run.status = run.steps.some((step) => step.status === 'waiting_approval')
+        ? 'waiting_approval'
+        : 'queued';
+      return cloneRun(await this.saveRevision(run));
+    });
+  }
+
+  async cancelRun(runId: string, expectedRevision: number): Promise<WorkflowRun> {
+    return this.withLease(runId, async () => {
+      const run = await this.readRun(runId);
+      this.assertRevision(run, expectedRevision);
+      if (run.status === 'cancelled') return cloneRun(run);
+      if (run.status === 'running') {
+        run.cancelRequestedAt = now();
+        run.pauseRequestedAt = undefined;
+        return cloneRun(await this.saveRevision(run));
+      }
+      if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'unknown_outcome') {
+        throw new WorkflowConflictError(`Workflow run cannot be cancelled from ${run.status}.`);
+      }
+      for (const step of run.steps) {
+        if (step.status === 'queued' || step.status === 'waiting_approval') {
+          step.status = 'cancelled';
+          step.completedAt = now();
+        }
+      }
+      run.status = 'cancelled';
+      run.pauseRequestedAt = undefined;
+      run.cancelRequestedAt = now();
       return cloneRun(await this.saveRevision(run));
     });
   }

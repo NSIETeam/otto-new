@@ -102,4 +102,28 @@ export class WorkflowRuntime {
     await this.trace?.append({ runId, kind: 'human_takeover', status: takenOver.status, summary: 'Human takeover recorded; workflow cancelled without replay.' });
     return takenOver;
   }
+
+  async pause(runId: string): Promise<WorkflowRun | null> {
+    const current = await this.store.getRun(runId);
+    if (!current) return null;
+    const paused = await this.store.pauseRun(runId, current.revision);
+    await this.trace?.append({ runId, kind: 'run_paused', status: paused.status, summary: paused.pauseRequestedAt ? 'Pause requested after the active step' : 'Workflow paused' });
+    return paused;
+  }
+
+  async resume(runId: string): Promise<WorkflowRun | null> {
+    const current = await this.store.getRun(runId);
+    if (!current) return null;
+    const resumed = await this.store.resumeRun(runId, current.revision);
+    await this.trace?.append({ runId, kind: 'run_resumed', status: resumed.status, summary: 'Workflow resumed' });
+    return resumed;
+  }
+
+  async cancel(runId: string): Promise<WorkflowRun | null> {
+    const current = await this.store.getRun(runId);
+    if (!current) return null;
+    const cancelled = await this.store.cancelRun(runId, current.revision);
+    await this.trace?.append({ runId, kind: 'run_cancelled', status: cancelled.status, summary: cancelled.status === 'running' ? 'Cancellation requested after the active step' : 'Workflow cancelled' });
+    return cancelled;
+  }
 }

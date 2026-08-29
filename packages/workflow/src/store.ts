@@ -5,6 +5,7 @@ import type { ClaimedWorkflowStep, WorkflowDefinition, WorkflowRun, WorkflowStep
 export interface WorkflowStore {
   createRun(definition: WorkflowDefinition): Promise<WorkflowRun>;
   getRun(runId: string): Promise<WorkflowRun | null>;
+  listRuns(): Promise<WorkflowRun[]>;
   claimNextStep(runId: string, expectedRevision: number): Promise<ClaimedWorkflowStep | null>;
   completeStep(input: {
     runId: string;
@@ -16,6 +17,9 @@ export interface WorkflowStore {
   approveStep(input: { runId: string; stepId: string; approvalId: string; expectedRevision: number }): Promise<WorkflowRun>;
   recoverInterruptedRun(runId: string, expectedRevision: number): Promise<WorkflowRun>;
   takeOverUnknownRun(input: { runId: string; note: string; expectedRevision: number }): Promise<WorkflowRun>;
+  pauseRun(runId: string, expectedRevision: number): Promise<WorkflowRun>;
+  resumeRun(runId: string, expectedRevision: number): Promise<WorkflowRun>;
+  cancelRun(runId: string, expectedRevision: number): Promise<WorkflowRun>;
 }
 
 export function cloneRun(run: WorkflowRun): WorkflowRun {

@@ -70,6 +70,7 @@ import {
 import { WorkspaceDirectoryStore } from './workspace-directory-store.js';
 import { MainWindowPresentationController } from './main-window-presentation.js';
 import { askWindowCloseChoice } from './window-close-policy.js';
+import { cancelDurableWorkflowsForQuit } from './durable-workflow-quit.js';
 
 function ignoreBrokenPipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
@@ -5247,6 +5248,12 @@ if (!gotLock) {
     // 关窗不杀：server + 飞书守护继续运行。
     void flushEnterpriseAccountDataSync(3_000)
       .catch(logAccountDataSyncFailure)
+      .then(() => cancelDurableWorkflowsForQuit())
+      .then((report) => {
+        if (report.failed.length > 0) {
+          console.warn('[otto-desktop] some durable workflow cancellations could not be persisted:', report.failed);
+        }
+      })
       .then(() => enterpriseMlsOutboxRetry.stop())
       .then(() => enterpriseMlsInboundPoll.stop())
       .then(() => enterpriseMls.close())

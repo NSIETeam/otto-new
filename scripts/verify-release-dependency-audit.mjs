@@ -312,11 +312,19 @@ export function findDirectImageSizeReferences(files) {
 }
 
 function trackedSourceFiles(root) {
-  const result = spawnSync('git', ['ls-files', '-z'], {
-    cwd: root,
-    encoding: 'utf8',
-    shell: false,
-  });
+  // CI and local release verification may run under a different OS account
+  // from the account that created the isolated worktree. Scope the ownership
+  // exception to this exact read-only command instead of mutating global Git
+  // configuration.
+  const result = spawnSync(
+    'git',
+    ['-c', `safe.directory=${root.replaceAll('\\', '/')}`, 'ls-files', '-z'],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      shell: false,
+    },
+  );
   assert(
     !result.error && result.status === 0,
     `cannot enumerate tracked source files: ${result.stderr || result.error}`,
@@ -516,10 +524,23 @@ export function verifyReleaseDependencyAudit({
 }
 
 function runNpmAudit(root) {
-  const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  // npm exposes the exact CLI entrypoint while running an npm script. Invoke
+  // that JavaScript file through the current Node binary so Windows does not
+  // have to execute npm.cmd (which spawnSync rejects with EINVAL when
+  // shell:false on supported Node 24 builds). This also keeps the audited
+  // command free from shell parsing.
+  const npmCli = process.env.npm_execpath?.trim();
+  const npmExecutable = npmCli
+    ? process.env.npm_node_execpath?.trim() || process.execPath
+    : process.platform === 'win32'
+      ? 'npm.cmd'
+      : 'npm';
+  const npmArguments = npmCli
+    ? [npmCli, 'audit', '--json', '--registry=https://registry.npmjs.org/']
+    : ['audit', '--json', '--registry=https://registry.npmjs.org/'];
   const result = spawnSync(
     npmExecutable,
-    ['audit', '--json', '--registry=https://registry.npmjs.org/'],
+    npmArguments,
     {
       cwd: root,
       encoding: 'utf8',

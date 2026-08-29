@@ -169,7 +169,9 @@ export function getProjectHash(projectRoot: string): string {
  */
 export function getProjectTempDir(projectRoot: string): string {
   const hash = getProjectHash(projectRoot);
-  return path.join(os.homedir(), OTTO_DIR, TMP_DIR_NAME, hash);
+  const configuredUserDir = process.env.OTTO_USER_DIR?.trim();
+  const userDir = configuredUserDir || path.join(os.homedir(), OTTO_DIR);
+  return path.join(userDir, TMP_DIR_NAME, hash);
 }
 
 /**

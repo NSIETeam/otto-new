@@ -15,10 +15,13 @@ describe('HealthyUseReminderState', () => {
   let testProjectRoot: string;
   let testTempDir: string;
   let reminderState: HealthyUseReminderState;
+  let previousUserDir: string | undefined;
 
   beforeEach(() => {
     // 创建临时测试目录
+    previousUserDir = process.env.OTTO_USER_DIR;
     testProjectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'healthy-use-test-'));
+    process.env.OTTO_USER_DIR = path.join(testProjectRoot, '.otto-user');
     reminderState = new HealthyUseReminderState(testProjectRoot);
 
     // 获取状态文件实际存储路径（通过 getProjectTempDir 计算）
@@ -33,6 +36,11 @@ describe('HealthyUseReminderState', () => {
     }
     if (fs.existsSync(testTempDir)) {
       fs.rmSync(testTempDir, { recursive: true, force: true });
+    }
+    if (previousUserDir === undefined) {
+      delete process.env.OTTO_USER_DIR;
+    } else {
+      process.env.OTTO_USER_DIR = previousUserDir;
     }
     vi.restoreAllMocks();
   });

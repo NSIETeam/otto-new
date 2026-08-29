@@ -7,15 +7,19 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'fs';
+import os from 'os';
 import path from 'path';
 import { SessionManager } from './sessionManager.js';
 
 describe('SessionManager', () => {
   let sessionManager: SessionManager;
   let testRoot: string;
+  let previousUserDir: string | undefined;
 
   beforeEach(async () => {
-    testRoot = path.join(process.cwd(), 'test-sessions-' + Date.now());
+    previousUserDir = process.env.OTTO_USER_DIR;
+    testRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'otto-session-manager-'));
+    process.env.OTTO_USER_DIR = path.join(testRoot, '.otto-user');
     sessionManager = new SessionManager(testRoot);
   });
 
@@ -24,6 +28,11 @@ describe('SessionManager', () => {
       await fs.rm(testRoot, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
+    }
+    if (previousUserDir === undefined) {
+      delete process.env.OTTO_USER_DIR;
+    } else {
+      process.env.OTTO_USER_DIR = previousUserDir;
     }
   });
 

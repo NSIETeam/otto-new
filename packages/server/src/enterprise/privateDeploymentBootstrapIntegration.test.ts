@@ -66,7 +66,7 @@ describe('private deployment bootstrap environment', () => {
     ).toBeNull();
   });
 
-  it('only permits secret consumption after activation and account identity readiness', () => {
+  it('consumes after activation and identity even if unrelated storage readiness is degraded', () => {
     const ready: PrivateDeploymentReadiness = {
       state: 'ready',
       canAuthenticate: true,
@@ -93,7 +93,7 @@ describe('private deployment bootstrap environment', () => {
     expect(canConsumePrivateDeploymentBootstrapSecret({
       ...ready,
       canUseLicensedFeatures: false,
-    })).toBe(false);
+    })).toBe(true);
     expect(canConsumePrivateDeploymentBootstrapSecret({
       ...ready,
       steps: [{ ...ready.steps[0], state: 'waiting_for_user' }],

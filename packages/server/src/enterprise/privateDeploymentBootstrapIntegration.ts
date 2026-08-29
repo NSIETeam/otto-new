@@ -94,7 +94,6 @@ export function canConsumePrivateDeploymentBootstrapSecret(
 ): boolean {
   return (
     readiness.bootstrap.phase === 'activated' &&
-    readiness.canUseLicensedFeatures &&
     readiness.steps.some(
       (step) => step.id === 'account_identity' && step.state === 'ready',
     )

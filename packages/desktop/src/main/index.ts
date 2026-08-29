@@ -527,6 +527,44 @@ const desktopRecurringTasks = new RecurringTaskRegistry({
     console.warn(`[otto-desktop] 后台任务 ${taskName} 失败:`, error);
   },
 });
+const desktopRpaAppGrants = new Map<string, 'inspect' | 'interact'>();
+let unregisterDesktopRpaHost: (() => void) | undefined;
+
+async function registerMacOsDesktopRpaHost(): Promise<void> {
+  if (process.platform !== 'darwin') return;
+  const rpa = (await import('otto-rpa')) as unknown as {
+    MacOsAccessibilityPortV1: new (options: {
+      authorizeApp(input: { appId: string; action: 'inspect' | 'interact' }): Promise<boolean>;
+    }) => unknown;
+    registerDesktopRpaPortV1(port: unknown): void;
+  };
+  const port = new rpa.MacOsAccessibilityPortV1({
+    authorizeApp: async ({ appId, action }) => {
+      if (!systemPreferences.isTrustedAccessibilityClient(false)) return false;
+      const current = desktopRpaAppGrants.get(appId);
+      if (current === 'interact' || current === action) return true;
+      const result = mainWindow && !mainWindow.isDestroyed()
+        ? await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: '允许 Otto 控制应用？',
+            message: action === 'interact'
+              ? `允许 Otto 在本次运行期间操作 ${appId} 的可访问控件？`
+              : `允许 Otto 在本次运行期间读取 ${appId} 的可访问控件结构？`,
+            detail: '仅允许语义控件定位；坐标、任意脚本、Shell、密码字段和未脱敏截图均被禁止。',
+            buttons: ['允许本次运行', '拒绝'],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true,
+          })
+        : { response: 1 };
+      if (result.response !== 0) return false;
+      desktopRpaAppGrants.set(appId, action);
+      return true;
+    },
+  });
+  rpa.registerDesktopRpaPortV1(port);
+  unregisterDesktopRpaHost = () => rpa.registerDesktopRpaPortV1(undefined);
+}
 /** 视频编辑器窗口（OpenReel）。 */
 let videoEditorWindow: BrowserWindow | undefined;
 
@@ -5150,6 +5188,9 @@ if (!gotLock) {
       mainWindowPresentations.get(mainWindow)?.requestShow({ focus: true });
     }
     applyCsp();
+    await registerMacOsDesktopRpaHost().catch((error) => {
+      console.warn('[otto-desktop] macOS Accessibility RPA host unavailable:', error);
+    });
     await ensureEndpoint();
     startEnterpriseIdentityRefresh();
     startEnterpriseModuleUpdatePolling();
@@ -5188,6 +5229,9 @@ if (!gotLock) {
     stopEnterpriseSkillUsageReporting();
     desktopRecurringTasks.stopAll();
     channelPairingPrivateKeys.clear();
+    desktopRpaAppGrants.clear();
+    unregisterDesktopRpaHost?.();
+    unregisterDesktopRpaHost = undefined;
     if (quitCleanupFinished) return;
     event.preventDefault();
     if (quitCleanupStarted) return;

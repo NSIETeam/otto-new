@@ -8,8 +8,51 @@
  */
 
 const { execFileSync } = require('node:child_process');
-const { copyFileSync, existsSync, mkdirSync, readdirSync } = require('node:fs');
+const {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+} = require('node:fs');
 const path = require('node:path');
+
+const MAX_APP_ASAR_BYTES = 120 * 1024 * 1024;
+
+function packagedResourcesRoot(context) {
+  return context.electronPlatformName === 'darwin'
+    ? path.join(
+        context.appOutDir,
+        `${context.packager.appInfo.productFilename}.app`,
+        'Contents',
+        'Resources',
+      )
+    : path.join(context.appOutDir, 'resources');
+}
+
+function verifyPackagedPayload(context) {
+  const resourcesRoot = packagedResourcesRoot(context);
+  const appAsar = path.join(resourcesRoot, 'app.asar');
+  const size = statSync(appAsar).size;
+  if (size > MAX_APP_ASAR_BYTES) {
+    throw new Error(
+      `[after-pack] app.asar ${(size / 1024 / 1024).toFixed(1)} MiB exceeds the 120 MiB contract`,
+    );
+  }
+
+  const rustBuildOutput = path.join(
+    resourcesRoot,
+    'app.asar.unpacked',
+    'node_modules',
+    '@otto',
+    'native',
+    'target',
+  );
+  if (existsSync(rustBuildOutput)) {
+    throw new Error('[after-pack] local @otto/native target output leaked into the application');
+  }
+  console.log(`[after-pack] 应用负载门禁通过：app.asar ${(size / 1024 / 1024).toFixed(1)} MiB`);
+}
 
 function electronBuilderArchName(value) {
   if (value === 'x64' || value === 1) return 'x64';
@@ -49,15 +92,7 @@ function copySqlCipherNativeAsset(context) {
     );
   }
   execFileSync(process.execPath, verifyArguments, { stdio: 'inherit' });
-  const resourcesRoot =
-    platform === 'darwin'
-      ? path.join(
-          context.appOutDir,
-          `${context.packager.appInfo.productFilename}.app`,
-          'Contents',
-          'Resources',
-        )
-      : path.join(context.appOutDir, 'resources');
+  const resourcesRoot = packagedResourcesRoot(context);
   const destination = path.join(resourcesRoot, 'sqlcipher');
   mkdirSync(destination, { recursive: true });
   for (const name of [
@@ -88,6 +123,7 @@ function findNestedLibreOfficeBundles(appPath) {
 }
 
 async function afterPack(context) {
+  verifyPackagedPayload(context);
   copySqlCipherNativeAsset(context);
   if (context.electronPlatformName !== 'darwin') return;
 
@@ -123,3 +159,6 @@ module.exports = afterPack;
 module.exports.findNestedLibreOfficeBundles = findNestedLibreOfficeBundles;
 module.exports.copySqlCipherNativeAsset = copySqlCipherNativeAsset;
 module.exports.electronBuilderArchName = electronBuilderArchName;
+module.exports.MAX_APP_ASAR_BYTES = MAX_APP_ASAR_BYTES;
+module.exports.packagedResourcesRoot = packagedResourcesRoot;
+module.exports.verifyPackagedPayload = verifyPackagedPayload;

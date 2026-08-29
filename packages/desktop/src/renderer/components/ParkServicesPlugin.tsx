@@ -2089,7 +2089,7 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
 
   if (parkEnabled !== true) return <></>;
 
-  return <>
+  return <div className="otto-park-surface-theme">
   {open && windowMode === 'minimized' ? (
     <button
       type="button"
@@ -2340,5 +2340,5 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
     ))}
     {backgroundPublication ? <button type="button" className="otto-park-toast" onClick={openBackgroundPublication} aria-label="打开园区通知"><span>{backgroundPublication.kind === 'announcement' ? '园区公告' : '满意度调查'}</span><strong>{backgroundPublication.title}</strong><em>点击查看</em></button> : null}
   </div> : null}
-  </>;
+  </div>;
 }

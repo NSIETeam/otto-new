@@ -1081,6 +1081,176 @@ describe('受保护 vs 公开路由边界', () => {
     });
   }, 60_000);
 
+  it('binds commercial admission to durable bootstrap provisioning across restart', async () => {
+    process.env.OTTO_LICENSE_ENFORCE = 'true';
+    process.env.OTTO_LICENSE_PUBLIC_KEY = LICENSE_PUBLIC_KEY;
+    const first = await startIsolated(ADMIN_TOKEN);
+    const database = await import('./db.js');
+    const oldAdmin = database.createAccount({
+      username: 'pre-bootstrap-admin',
+      password: 'pre-bootstrap-admin-password',
+      name: 'Pre-bootstrap Admin',
+      isAdmin: true,
+    });
+    const token = database.createAuthSession(oldAdmin.id).token;
+    const payload = {
+      id: 'lic_partial_bootstrap',
+      deploymentId: database.getDeploymentId(),
+      organizationId: database.DEFAULT_ORGANIZATION_ID,
+      machineFingerprint: database.getMachineFingerprint(),
+      customerName: 'Partial Bootstrap Customer',
+      plan: 'enterprise',
+      expiresAtMs: Date.now() + 90 * 24 * 60 * 60 * 1000,
+      seatLimit: 100,
+      modules: ['knowledge'],
+      offline: true,
+      telemetryAllowed: false,
+      issuedAtMs: Date.now(),
+    };
+    database.importDeploymentLicense({
+      license: payload,
+      signature: signLicensePayload(payload),
+    });
+    database.savePrivateDeploymentRuntimeConfiguration({
+      controlOrigin: 'https://control.otto.example',
+      capabilities: {
+        billing: false,
+        telemetry: false,
+        federation: false,
+        updates: false,
+        modelGateway: false,
+        storage: true,
+      },
+      federationGatewayUrl: null,
+      modelGatewayUrl: null,
+      telemetryEndpoint: null,
+      updateDistributionId: null,
+      activatedAt: new Date().toISOString(),
+    });
+
+    const requestProtectedRoute = (base: string) =>
+      fetch(`${base}/enterprise/knowledge`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+    const denied = await requestProtectedRoute(first.base);
+    expect(denied.status).toBe(503);
+    await expect(denied.json()).resolves.toMatchObject({
+      code: 'private_deployment_provisioning_incomplete',
+      feature: 'knowledge',
+    });
+
+    await new Promise<void>((resolve) => first.server.close(() => resolve()));
+    servers = servers.filter((server) => server !== first.server);
+    closeDatabases.pop()?.();
+    const restarted = await startIsolated(ADMIN_TOKEN);
+    const deniedAfterRestart = await requestProtectedRoute(restarted.base);
+    expect(deniedAfterRestart.status).toBe(503);
+    await expect(deniedAfterRestart.json()).resolves.toMatchObject({
+      code: 'private_deployment_provisioning_incomplete',
+    });
+  }, 60_000);
+
+  it('admits only the durably provisioned License tenant', async () => {
+    process.env.OTTO_LICENSE_ENFORCE = 'true';
+    process.env.OTTO_LICENSE_PUBLIC_KEY = LICENSE_PUBLIC_KEY;
+    const { base } = await startIsolated(ADMIN_TOKEN);
+    const database = await import('./db.js');
+    const organizationId = 'org_bootstrap_admitted';
+    const payload = {
+      id: 'lic_complete_bootstrap',
+      deploymentId: database.getDeploymentId(),
+      organizationId,
+      machineFingerprint: database.getMachineFingerprint(),
+      customerName: 'Complete Bootstrap Customer',
+      plan: 'enterprise',
+      expiresAtMs: Date.now() + 90 * 24 * 60 * 60 * 1000,
+      seatLimit: 100,
+      modules: ['knowledge'],
+      offline: true,
+      telemetryAllowed: false,
+      issuedAtMs: Date.now(),
+    };
+    database.importDeploymentLicense(
+      {
+        license: payload,
+        signature: signLicensePayload(payload),
+      },
+      { allowMissingOrganization: true },
+    );
+    database.savePrivateDeploymentRuntimeConfiguration({
+      controlOrigin: 'https://control.otto.example',
+      capabilities: {
+        billing: false,
+        telemetry: false,
+        federation: false,
+        updates: false,
+        modelGateway: false,
+        storage: true,
+      },
+      federationGatewayUrl: null,
+      modelGatewayUrl: null,
+      telemetryEndpoint: null,
+      updateDistributionId: null,
+      activatedAt: new Date().toISOString(),
+    });
+    const provisioned = database.provisionBootstrapEnterprise({
+      deploymentId: payload.deploymentId,
+      commandId: 'cmd_bootstrap_admitted',
+      idempotencyKey: 'bootstrap-admitted-v1',
+      payloadDigest: 'a'.repeat(64),
+      organization: {
+        id: organizationId,
+        name: 'Bootstrap Admitted',
+        slug: 'bootstrap-admitted',
+      },
+      ceo: {
+        username: 'bootstrap-ceo',
+        name: 'Bootstrap CEO',
+        phone: '+8613800138123',
+      },
+      defaultDepartmentName: 'Management',
+    });
+    const admittedToken = database.createAuthSession(
+      provisioned.ceoAccountId,
+    ).token;
+    const admitted = await fetch(`${base}/enterprise/knowledge`, {
+      headers: { authorization: `Bearer ${admittedToken}` },
+    });
+    expect(admitted.status).toBe(200);
+
+    const activeServer = servers.at(-1);
+    expect(activeServer).toBeDefined();
+    await new Promise<void>((resolve) => activeServer!.close(() => resolve()));
+    servers = servers.filter((server) => server !== activeServer);
+    closeDatabases.pop()?.();
+    const restarted = await startIsolated(ADMIN_TOKEN);
+    const admittedAfterRestart = await fetch(
+      `${restarted.base}/enterprise/knowledge`,
+      { headers: { authorization: `Bearer ${admittedToken}` } },
+    );
+    expect(admittedAfterRestart.status).toBe(200);
+
+    const otherOrganization = database.createOrganization({
+      name: 'Other Tenant',
+      slug: 'other-bootstrap-tenant',
+    });
+    const otherAccount = database.createAccount({
+      organizationId: otherOrganization.id,
+      username: 'other-bootstrap-member',
+      password: 'other-bootstrap-member-password',
+      name: 'Other Bootstrap Member',
+    });
+    const isolated = await fetch(`${restarted.base}/enterprise/knowledge`, {
+      headers: {
+        authorization: `Bearer ${database.createAuthSession(otherAccount.id).token}`,
+      },
+    });
+    expect(isolated.status).toBe(503);
+    await expect(isolated.json()).resolves.toMatchObject({
+      code: 'private_deployment_provisioning_incomplete',
+    });
+  }, 60_000);
+
   it('enforces Control credit admission before a paid mutation and finalizes it once', async () => {
     process.env.OTTO_LICENSE_ENFORCE = 'true';
     process.env.OTTO_LICENSE_PUBLIC_KEY = LICENSE_PUBLIC_KEY;

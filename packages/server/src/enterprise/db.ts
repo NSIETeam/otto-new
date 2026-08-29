@@ -1002,6 +1002,25 @@ export function hasBootstrapEnterpriseIdentity(
   );
 }
 
+/**
+ * A persisted bootstrap runtime configuration means Control enrollment has
+ * started. From that point on, commercial admission requires the matching
+ * durable provisioning receipt; an unrelated pre-existing tenant must never
+ * satisfy the boundary. Legacy/manual deployments without that marker retain
+ * their existing signed-License behavior.
+ */
+export function isPrivateDeploymentProvisioningCompleteForOrganization(
+  organizationId: string | null | undefined,
+): boolean {
+  if (!getPrivateDeploymentRuntimeConfiguration()) return true;
+  if (!organizationId) return false;
+  const license = getDeploymentLicense();
+  return (
+    license.organizationId === organizationId &&
+    hasBootstrapEnterpriseIdentity(license.deploymentId, organizationId)
+  );
+}
+
 export const {
   ensureDirectMessageContentEncrypted,
   getDirectMessageAttachment,

@@ -381,6 +381,13 @@ describe('clustered PostgreSQL enterprise server', () => {
       },
       {
         repository: repository(
+          activeLicenseRecord({ organizationId: 'org_other_tenant' }),
+        ),
+        path: '/enterprise/knowledge',
+        code: 'deployment_license_inactive',
+      },
+      {
+        repository: repository(
           activeLicenseRecord({ modules: ['enterprise_tree'] }),
         ),
         path: '/enterprise/skills',
@@ -422,6 +429,25 @@ describe('clustered PostgreSQL enterprise server', () => {
       headers: { authorization },
     });
     expect(exported.status).toBe(200);
+  });
+
+  it('does not advertise or execute SQLite Control bootstrap in clustered mode', async () => {
+    const { baseUrl } = await listen();
+    const health = await fetch(`${baseUrl}/enterprise/health`);
+    const snapshot = (await health.json()) as { capabilities: string[] };
+    expect(snapshot.capabilities).not.toContain(
+      'private_deployment_bootstrap_v1',
+    );
+
+    const prepare = await fetch(`${baseUrl}/enterprise/bootstrap/prepare`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer clustered-session-token' },
+    });
+    expect(prepare.status).toBe(503);
+    await expect(prepare.json()).resolves.toMatchObject({
+      code: 'POSTGRES_ROUTE_NOT_MIGRATED',
+      path: '/enterprise/bootstrap/prepare',
+    });
   });
 
   it('reports expanded entitlements with the same capability rule used by clustered route admission', async () => {

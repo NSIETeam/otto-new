@@ -243,6 +243,68 @@ describe('private deployment provisioning bootstrap', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('persists the fail-closed enrollment marker before importing a License', async () => {
+    const state = fixture();
+    const calls: string[] = [];
+    const saveRuntimeConfiguration = state.services.saveRuntimeConfiguration;
+    const importDeploymentLicense = state.services.importDeploymentLicense;
+    state.services.saveRuntimeConfiguration = (configuration) => {
+      calls.push('runtime-configuration');
+      return saveRuntimeConfiguration(configuration);
+    };
+    state.services.importDeploymentLicense = (envelope, options) => {
+      calls.push('license');
+      return importDeploymentLicense(envelope, options);
+    };
+    const coordinator = createPrivateDeploymentBootstrapCoordinator(
+      state.services,
+      config,
+      { fetch: async () => response() },
+    );
+
+    const readiness = await coordinator.prepare();
+
+    expect(readiness.state).toBe('ready');
+    expect(calls).toEqual(['runtime-configuration', 'license']);
+  });
+
+  it('recovers on retry when License import fails after the marker is persisted', async () => {
+    const state = fixture();
+    const importDeploymentLicense = state.services.importDeploymentLicense;
+    let importAttempts = 0;
+    state.services.importDeploymentLicense = (envelope, options) => {
+      importAttempts += 1;
+      if (importAttempts === 1) throw new Error('license_import_failed');
+      return importDeploymentLicense(envelope, options);
+    };
+    let now = 1_000_000;
+    const coordinator = createPrivateDeploymentBootstrapCoordinator(
+      state.services,
+      config,
+      {
+        fetch: async () => response(),
+        now: () => now,
+        retryAfterMs: 5_000,
+      },
+    );
+
+    const failed = await coordinator.prepare();
+    expect(failed.bootstrap).toMatchObject({
+      phase: 'failed',
+      errorCode: 'license_import_failed',
+    });
+    expect(
+      state.services.getReadinessSource(coordinator.snapshot())
+        .runtimeConfiguration,
+    ).not.toBeNull();
+
+    now += 6_000;
+    const recovered = await coordinator.prepare();
+    expect(recovered.state).toBe('ready');
+    expect(recovered.bootstrap.phase).toBe('activated');
+    expect(importAttempts).toBe(2);
+  });
+
   it('keeps the secret retry path alive when provisioning fails', async () => {
     const state = fixture();
     let attempts = 0;

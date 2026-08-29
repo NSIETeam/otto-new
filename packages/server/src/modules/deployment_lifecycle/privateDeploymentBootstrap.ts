@@ -599,10 +599,14 @@ export function createPrivateDeploymentBootstrapCoordinator(
         attemptedAt,
         activeConfig.allowInsecureLoopback,
       );
+      // Persist the Control-enrollment marker before importing the License.
+      // If any later step fails, route admission can still fail closed across
+      // process restarts instead of treating the partially imported License as
+      // a legacy/manual deployment.
+      services.saveRuntimeConfiguration(normalized.configuration);
       services.importDeploymentLicense(normalized.response.licenseEnvelope, {
         allowMissingOrganization: true,
       });
-      services.saveRuntimeConfiguration(normalized.configuration);
       const license = services.getReadinessSource(current).deployment.license;
       if (license.lease.required) {
         const lease = await services.refreshDeploymentLicenseLease();

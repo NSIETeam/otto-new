@@ -494,6 +494,23 @@ function makeHandler(
         : true;
       if (
         commercialFeature &&
+        !db.isPrivateDeploymentProvisioningCompleteForOrganization(
+          commercialOrganizationId,
+        )
+      ) {
+        auditCommercialDecision('commercial_provisioning_denied', {
+          code: 'private_deployment_provisioning_incomplete',
+          feature: commercialFeature,
+        });
+        sendJSON(res, 503, {
+          error: 'private deployment provisioning is incomplete',
+          code: 'private_deployment_provisioning_incomplete',
+          feature: commercialFeature,
+        });
+        return;
+      }
+      if (
+        commercialFeature &&
         !db.isLicenseUsableForOrganizationFeature(
           commercialFeature,
           commercialOrganizationId,

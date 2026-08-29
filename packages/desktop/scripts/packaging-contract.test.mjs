@@ -378,6 +378,18 @@ describe('desktop packaging contract', () => {
     expect(workflow).toContain(
       "OTTO_ALLOW_UNSIGNED_MAC: ${{ inputs.unsigned_mac_transition && '1' || '0' }}",
     );
+    expect(workflow).toContain(
+      'Build unsigned Windows and macOS transition test artifacts',
+    );
+    expect(workflow).toContain(
+      'This draft/prerelease contains unsigned Windows and macOS test artifacts.',
+    );
+    expect(workflow).toContain(
+      'It is not a production release and is not offered through automatic update.',
+    );
+    expect(workflow).toContain(
+      'The production update mirror and enterprise server remain on the previously published stable version.',
+    );
   });
 
   it('runs packaged Electron smoke tests only for the runner native architecture', async () => {
@@ -449,6 +461,10 @@ describe('desktop packaging contract', () => {
     expect(workflow).not.toContain("['macArm64', 'macX64', 'winX64']");
     expect(workflow).not.toContain("const crypto = require('node:crypto');");
     expect(workflow).toContain('PAYLOAD_MANIFEST_SHA256');
+    expect(workflow).toContain('CHECKSUMS="$DESKTOP_RELEASE/SHA256SUMS"');
+    expect(workflow).toContain('Attest desktop release candidate provenance');
+    expect(workflow).toContain('Attest enterprise release candidate provenance');
+    expect(workflow).toContain('gh attestation verify "$artifact"');
     expect(publishMirrorScript).toContain('sha256sum -c -- SHA256SUMS');
     expect(publishMirrorScript).toContain('latest_next=');
     expect(publishMirrorScript).toContain('previous-latest.json');

@@ -18,7 +18,7 @@ on:
         type: boolean
         default: false
       unsigned_mac_transition:
-        description: 'Build unsigned macOS transition artifacts when Apple signing is unavailable.'
+        description: 'Build unsigned Windows and macOS transition test artifacts when signing is unavailable.'
         required: false
         type: boolean
         default: false
@@ -38,6 +38,7 @@ permissions:
   contents: write
   id-token: write
   attestations: write
+  artifact-metadata: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -463,37 +464,96 @@ jobs:
               "$ENTERPRISE_ARCHIVE" "$ENTERPRISE_SIGNATURE"
             FILES+=("$ENTERPRISE_ARCHIVE" "$ENTERPRISE_SHA" "$ENTERPRISE_SIGNATURE")
           fi
+          CHECKSUMS="$DESKTOP_RELEASE/SHA256SUMS"
+          : > "$CHECKSUMS"
+          for artifact in "${FILES[@]}"; do
+            printf '%s  %s\n' \
+              "$(shasum -a 256 "$artifact" | awk '{print $1}')" \
+              "$(basename "$artifact")" >> "$CHECKSUMS"
+          done
+          FILES+=("$CHECKSUMS")
+          FILE_LIST="$RUNNER_TEMP/otto-v${VERSION}-release-files.txt"
+          printf '%s\n' "${FILES[@]}" > "$FILE_LIST"
           {
             echo "files<<EOF"
             printf '%s\n' "${FILES[@]}"
             echo "EOF"
+            echo "file_list=$FILE_LIST"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Generate release notes with no-proxy download
+      - name: Attest desktop release candidate provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            packages/desktop/release/Otto-${{ steps.version.outputs.version }}-arm64.dmg
+            packages/desktop/release/Otto-${{ steps.version.outputs.version }}-arm64.dmg.blockmap
+            packages/desktop/release/Otto-${{ steps.version.outputs.version }}-x64.dmg
+            packages/desktop/release/Otto-${{ steps.version.outputs.version }}-x64.dmg.blockmap
+            packages/desktop/release/Otto-Setup-${{ steps.version.outputs.version }}-win-x64.exe
+            packages/desktop/release/Otto-Setup-${{ steps.version.outputs.version }}-win-x64.exe.blockmap
+            packages/desktop/release/latest.json
+            packages/desktop/release/SHA256SUMS
+
+      - name: Attest enterprise release candidate provenance
+        if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            deliverables/otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz
+            deliverables/otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz.sha256
+            deliverables/otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz.sig
+
+      - name: Verify final release candidate provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r artifact; do
+            gh attestation verify "$artifact" --repo "$GITHUB_REPOSITORY"
+          done < "${{ steps.artifacts.outputs.file_list }}"
+
+      - name: Generate release notes
         id: release_notes
         shell: bash
+        env:
+          DESKTOP_TEST_BUILD: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           INSTALLER="packages/desktop/release/Otto-Setup-${VERSION}-win-x64.exe"
           INSTALLER_SHA="$(shasum -a 256 "$INSTALLER" | awk '{print $1}')"
           NOTES_FILE="$RUNNER_TEMP/otto-v${VERSION}-release-notes.md"
-          {
-            echo "## Otto v${VERSION}"
-            echo
-            echo "Source commit: \`${{ steps.source.outputs.commit }}\`"
-            echo
-            echo "### Windows no-proxy download"
-            echo
-            echo "[Download Windows x64 installer from the Otto mirror](${UPDATE_MIRROR_ASSET_BASE_URL}/Otto-Setup-${VERSION}-win-x64.exe)"
-            echo
-            echo "SHA256: \`${INSTALLER_SHA}\`"
-            echo
-            echo "Windows Authenticode and macOS Developer ID/notarization are mandatory release gates."
-            echo "The release workflow also verifies SHA-256 checksums, SQLCipher provenance and SBOMs, the desktop update manifest, the enterprise Ed25519 package signature, and the License public-key trust anchor."
-            echo
-            echo "Desktop installers, update manifest, and enterprise one-click package are attached to this release."
-          } > "$NOTES_FILE"
+          if [ "$DESKTOP_TEST_BUILD" = "1" ]; then
+            {
+              echo "## Otto v${VERSION} unsigned transition test candidate"
+              echo
+              echo "Source commit: \`${{ steps.source.outputs.commit }}\`"
+              echo
+              echo "This draft/prerelease contains unsigned Windows and macOS test artifacts. It is not a production release and is not offered through automatic update."
+              echo "The production update mirror and enterprise server remain on the previously published stable version. No enterprise server package is attached."
+              echo
+              echo "Windows installer SHA256: \`${INSTALLER_SHA}\`"
+              echo "Verify every attached artifact against \`SHA256SUMS\` and its GitHub build-provenance attestation before testing."
+            } > "$NOTES_FILE"
+          else
+            {
+              echo "## Otto v${VERSION}"
+              echo
+              echo "Source commit: \`${{ steps.source.outputs.commit }}\`"
+              echo
+              echo "### Windows no-proxy download"
+              echo
+              echo "[Download Windows x64 installer from the Otto mirror](${UPDATE_MIRROR_ASSET_BASE_URL}/Otto-Setup-${VERSION}-win-x64.exe)"
+              echo
+              echo "SHA256: \`${INSTALLER_SHA}\`"
+              echo
+              echo "Windows Authenticode and macOS Developer ID/notarization are mandatory release gates."
+              echo "The release workflow also verifies SHA-256 checksums, build provenance, SQLCipher provenance and SBOMs, the desktop update manifest, the enterprise Ed25519 package signature, and the License public-key trust anchor."
+              echo
+              echo "Desktop installers, update manifest, and enterprise one-click package are attached to this release."
+            } > "$NOTES_FILE"
+          fi
           echo "path=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifacts

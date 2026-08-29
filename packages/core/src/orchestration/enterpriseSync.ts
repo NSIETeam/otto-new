@@ -19,6 +19,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { homedir } from 'os';
 import { OrgMemoryStore } from '../memory/orgMemoryStore.js';
+import { RecurringTaskRegistry } from '../services/recurringTaskRegistry.js';
 import type {
   CompanyRecord,
   TeamRecord,
@@ -133,7 +134,7 @@ export class EnterpriseSync {
   private keyPath: string;
   private static readonly GCM_PREFIX = 'gcm:';
   private static readonly GCM_IV_BYTES = 12;
-  private syncTimer: ReturnType<typeof setInterval> | null = null;
+  private stopSyncTask?: () => void;
 
   /** 获取飞书 API 域名（国内默认 open.feishu.cn，国际版 open.larksuite.com） */
   private getApiDomain(): string {
@@ -463,10 +464,25 @@ export class EnterpriseSync {
   /**
    * 启动定时增量同步（每小时一次）。
    */
-  startAutoSync(): void {
-    if (this.syncTimer) return;
-    this.syncTimer = setInterval(async () => {
-      try {
+  startAutoSync(taskRegistry = new RecurringTaskRegistry({
+    onError: (_taskName, error) => {
+      console.warn(`[EnterpriseSync] 定时同步失败: ${error instanceof Error ? error.message : String(error)}`);
+    },
+  })): void {
+    if (this.stopSyncTask) return;
+    const intervalMs = 60 * 60 * 1000;
+    this.stopSyncTask = taskRegistry.register({
+      name: 'enterprise-organization-sync',
+      source: 'packages/core/src/orchestration/enterpriseSync.ts#auto-sync',
+      definitionVersion: 1,
+      intervalMs,
+      initialDelayMs: intervalMs,
+      missedRunPolicy: 'skip',
+      estimatedCostUsdPerRun: 0,
+      // The upstream directory has no local change signal, so one hourly
+      // poll bucket is the declared input version.
+      getInputVersion: () => `hour:${Math.floor(Date.now() / intervalMs)}`,
+      run: async () => {
         // 首次或距上次全量超过24小时 → 全量同步
         const config = this.enterpriseConfig || await this.loadConfig();
         const lastSync = config?.lastSyncAt ? new Date(config.lastSyncAt).getTime() : 0;
@@ -480,10 +496,8 @@ export class EnterpriseSync {
           await this.syncIncremental();
           console.log('[EnterpriseSync] 增量同步完成');
         }
-      } catch (err) {
-        console.warn(`[EnterpriseSync] 定时同步失败: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }, 60 * 60 * 1000); // 1小时
+      },
+    });
     console.log('[EnterpriseSync] 自动同步已启动 (1h interval, full sync every 24h)');
   }
 
@@ -630,9 +644,9 @@ export class EnterpriseSync {
 
   /** 停止自动同步 */
   stopAutoSync(): void {
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer);
-      this.syncTimer = null;
+    if (this.stopSyncTask) {
+      this.stopSyncTask();
+      this.stopSyncTask = undefined;
       console.log('[EnterpriseSync] 自动同步已停止');
     }
   }

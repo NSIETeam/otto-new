@@ -15,10 +15,20 @@ const enabledFeatures = {
   skill_market: true,
 };
 
+const featureState = (
+  configured = enabledFeatures,
+  effective = enabledFeatures,
+) => ({
+  configured,
+  entitled: effective,
+  effective,
+});
+
 beforeEach(() => {
   clearEnterpriseOrganizationFeaturesCache();
   Object.assign(window.otto, {
     enterpriseOrganizationFeaturesGet: vi.fn(async () => enabledFeatures),
+    enterpriseOrganizationFeatureStateGet: vi.fn(async () => featureState()),
     enterpriseParkView: vi.fn(async () => ({
       id: 'park-hongchuang', name: '北控宏创科技园', slug: 'hongchuang-park',
       status: 'active', brandName: '北控宏创科技园', isAdminOrganization: false,
@@ -54,8 +64,8 @@ describe('useModuleWorkspaceCapabilities', () => {
   it('企业能力尚未解析时保持 loading，失败后可显式重试恢复', async () => {
     const getFeatures = vi.fn()
       .mockRejectedValueOnce(new Error('temporary'))
-      .mockResolvedValueOnce(enabledFeatures);
-    Object.assign(window.otto, { enterpriseOrganizationFeaturesGet: getFeatures });
+      .mockResolvedValueOnce(featureState());
+    Object.assign(window.otto, { enterpriseOrganizationFeatureStateGet: getFeatures });
     const view = renderHook(() => useModuleWorkspaceCapabilities({
       edition: 'enterprise', serverUrl: 'https://enterprise.example.com',
       organizationId: 'org-a', accountId: 'account-a', accountIsAdmin: false,
@@ -140,6 +150,31 @@ describe('useModuleWorkspaceCapabilities', () => {
       .toBe('available');
   });
 
+  it('does not request protected park endpoints when the effective feature is disabled', async () => {
+    const parkView = vi.fn(async () => { throw new Error('commercial module is not entitled'); });
+    Object.assign(window.otto, {
+      enterpriseOrganizationFeaturesGet: vi.fn(async () => ({
+        ...enabledFeatures,
+        park_service: false,
+      })),
+      enterpriseOrganizationFeatureStateGet: vi.fn(async () => {
+        const effective = { ...enabledFeatures, park_service: false };
+        return featureState(effective, effective);
+      }),
+      enterpriseParkView: parkView,
+    });
+    const view = renderHook(() => useModuleWorkspaceCapabilities({
+      edition: 'enterprise', serverUrl: 'https://enterprise.example.com',
+      organizationId: 'org-unlicensed', accountId: 'account-a', accountIsAdmin: true,
+      profiles: BASE_AGENT_PROFILES, customAgents: [],
+    }));
+
+    await waitFor(() => expect(view.result.current.status).toBe('ready'));
+    expect(parkView).not.toHaveBeenCalled();
+    expect(view.result.current.modules.find((module) => module.id === 'park-announcement'))
+      .toMatchObject({ availability: 'disabled', disabledReason: '当前企业尚未启用园区服务' });
+  });
+
   it('isolates park ticket loading failures from non-park modules', async () => {
     Object.assign(window.otto, {
       enterpriseTicketList: vi.fn(async () => { throw new Error('tickets unavailable'); }),
@@ -181,5 +216,40 @@ describe('useModuleWorkspaceCapabilities', () => {
     expect(view.result.current.status).toBe('loading');
     expect(view.result.current.modules.find((module) => module.id === 'park-overview')?.availability)
       .toBe('hidden');
+    await waitFor(() => expect(view.result.current.status).toBe('ready'));
+  });
+
+  it('separates configured baseline collaboration from commercial Federation entitlement', async () => {
+    const effective = { ...enabledFeatures, direct_messages: false };
+    Object.assign(window.otto, {
+      enterpriseOrganizationFeatureStateGet: vi.fn(async () =>
+        featureState(enabledFeatures, effective)),
+    });
+    const view = renderHook(() => useModuleWorkspaceCapabilities({
+      edition: 'enterprise', serverUrl: 'https://enterprise.example.com',
+      organizationId: 'org-baseline', accountId: 'account-a', accountIsAdmin: false,
+      profiles: BASE_AGENT_PROFILES, customAgents: [],
+    }));
+
+    await waitFor(() => expect(view.result.current.status).toBe('ready'));
+    expect(view.result.current.organizationFeatures?.direct_messages).toBe(false);
+    expect(view.result.current.baselineDirectMessagesAvailable).toBe(true);
+    expect(view.result.current.baselineEnterpriseTreeAvailable).toBe(true);
+  });
+
+  it('fails closed when the three-layer feature-state bridge is unavailable', async () => {
+    Object.assign(window.otto, { enterpriseOrganizationFeatureStateGet: undefined });
+    const view = renderHook(() => useModuleWorkspaceCapabilities({
+      edition: 'enterprise', serverUrl: 'https://legacy.example.com',
+      organizationId: 'org-legacy', accountId: 'account-a', accountIsAdmin: false,
+      profiles: BASE_AGENT_PROFILES, customAgents: [],
+    }));
+
+    await waitFor(() => expect(view.result.current.status).toBe('failed'));
+    expect(view.result.current.organizationFeatures).toBeNull();
+    expect(view.result.current.baselineDirectMessagesAvailable).toBe(false);
+    expect(view.result.current.baselineEnterpriseTreeAvailable).toBe(false);
+    expect(window.otto.enterpriseOrganizationFeaturesGet).not.toHaveBeenCalled();
+    expect(window.otto.enterpriseParkView).not.toHaveBeenCalled();
   });
 });

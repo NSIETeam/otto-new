@@ -22,6 +22,8 @@ export interface OttoAuthResult {
   error?: string;
 }
 
+export type OttoAuthStateConsumer = (state: string | null) => boolean;
+
 /**
  * Otto统一认证处理器
  */
@@ -35,28 +37,49 @@ export class OttoAuthHandler {
   /**
    * 构建Otto认证URL
    */
-  buildAuthUrl(): string {
+  buildAuthUrl(state: string): string {
     // BYO-key: 未配置认证服务地址时该登录流不可用，抛错由调用方 catch 优雅处理，
     // 避免生成以 '?redirect_to=' 开头的无效 URL。
     if (!this.config.authUrl) {
       throw new Error('未配置认证服务地址（OTTO_AUTH_URL），账号登录不可用');
     }
-    // 直接构建完整的认证URL，避免重定向问题
-    const authUrl = `${this.config.authUrl}?redirect_to=${encodeURIComponent(this.config.redirectUri)}&redirect_mode=same_window`;
-    console.log('🔗 Otto认证URL:', authUrl);
+    if (!/^[A-Za-z0-9_-]{32,256}$/.test(state)) {
+      throw new Error('Otto OAuth state 格式无效');
+    }
 
-    return authUrl;
+    // state 同时放入标准 OAuth 参数和 redirect_to。后者保证旧版
+    // Otto 认证服务即使不主动回传 state，也会通过原始回调地址带回。
+    const redirectUrl = new URL(this.config.redirectUri);
+    redirectUrl.searchParams.set('state', state);
+    const authUrl = new URL(this.config.authUrl);
+    authUrl.searchParams.set('redirect_to', redirectUrl.toString());
+    authUrl.searchParams.set('redirect_mode', 'same_window');
+    authUrl.searchParams.set('state', state);
+    console.log('🔗 Otto认证地址已生成');
+
+    return authUrl.toString();
   }
 
   /**
    * 处理Otto认证回调
    */
-  handleCallback(url: URL): OttoAuthResult {
+  handleCallback(url: URL, consumeState: OttoAuthStateConsumer): OttoAuthResult {
     console.log('🔄 [Otto Auth] 处理Otto认证回调');
-    console.log('🔄 [Otto Auth] 回调URL:', url.toString());
 
-    const allParams = Object.fromEntries(url.searchParams.entries());
-    console.log('🔄 [Otto Auth] 回调参数:', allParams);
+    const callbackState = url.searchParams.get('state');
+    let stateAccepted = false;
+    try {
+      stateAccepted = consumeState(callbackState) === true;
+    } catch {
+      stateAccepted = false;
+    }
+    if (!stateAccepted) {
+      console.error('❌ [Otto Auth] 认证请求已失效或state不匹配');
+      return {
+        success: false,
+        error: 'Otto登录请求已失效，请重新发起登录'
+      };
+    }
 
     // 提取token和user_id参数
     const token = url.searchParams.get('token');
@@ -64,7 +87,7 @@ export class OttoAuthHandler {
     const error = url.searchParams.get('error');
 
     if (error) {
-      console.error('❌ [Otto Auth] 认证错误:', error);
+      console.error('❌ [Otto Auth] 认证回调返回错误');
       return {
         success: false,
         error: `Otto认证失败: ${error}`
@@ -86,10 +109,6 @@ export class OttoAuthHandler {
         error: 'Otto认证回调中缺少user_id参数'
       };
     }
-
-    // 打印token和user_id（按要求）
-    console.log('🎉 [Otto Auth] 获取到JWT Token:', token);
-    console.log('🎉 [Otto Auth] 获取到User ID:', user_id);
 
     console.log('✅ [Otto Auth] Otto认证成功');
     return {

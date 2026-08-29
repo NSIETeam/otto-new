@@ -62,6 +62,14 @@ function FederationVerificationQr({ payload }: { payload: string }): React.JSX.E
 
 export interface InboxPageProps {
   enterpriseAccount?: EnterpriseAccount;
+  /** Commercial Federation entitlement. Undefined is deliberately fail-closed. */
+  effectiveDirectMessages?: boolean;
+  /** Same-organization messaging baseline after authoritative feature-state loading. */
+  baselineDirectMessagesAvailable?: boolean;
+  /** Same-organization directory baseline after authoritative feature-state loading. */
+  baselineEnterpriseTreeAvailable?: boolean;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveAtoa?: boolean;
   enterpriseUnreadCounts?: Record<string, number>;
   onOpenDirectChat?: (peerAccountId: string) => void;
   /** 打开某会话后将该 peer 标记为已读（联动导航未读角标）。 */
@@ -84,6 +92,10 @@ export interface ConversationItem {
 
 export function InboxPage({
   enterpriseAccount,
+  effectiveDirectMessages = false,
+  baselineDirectMessagesAvailable,
+  baselineEnterpriseTreeAvailable,
+  effectiveAtoa = false,
   enterpriseUnreadCounts = {},
   onOpenDirectChat: _onOpenDirectChat,
   onMessageRead,
@@ -116,39 +128,45 @@ export function InboxPage({
   // 已读会话也要留在列表里：记录拉取过消息的 peer 及其最后一条消息
   const [historyPeers, setHistoryPeers] = useState<Record<string, { lastMessage: string; lastMessageAt: string }>>({});
   const hasAuth = isAuthenticatedEnterpriseAccount(enterpriseAccount);
+  const canUseBaselineMessages =
+    baselineDirectMessagesAvailable ?? effectiveDirectMessages;
+  const canUseFederationMessages = effectiveDirectMessages === true;
+  const canUseOwnOrganizationDirectory =
+    baselineEnterpriseTreeAvailable ?? canUseBaselineMessages;
+  const canUseAtoa = effectiveAtoa === true;
 
   // —— 加载未读通知 ——
   const refreshNotifications = useCallback(async (): Promise<void> => {
-    if (!hasAuth) return;
+    if (!hasAuth || !canUseBaselineMessages) return;
     try {
       const data = await window.otto.enterpriseMessagesUnread();
       setNotifications(Array.isArray(data) ? data : []);
     } catch { /* 网络错误不清空已有数据 */ }
-  }, [hasAuth]);
+  }, [canUseBaselineMessages, hasAuth]);
 
   const refreshFederationContacts = useCallback(async (): Promise<void> => {
-    if (!hasAuth) return;
+    if (!hasAuth || !canUseFederationMessages) return;
     try {
       const contacts = await window.otto.enterpriseFederationContacts();
       setFederationContacts(Array.isArray(contacts) ? contacts : []);
     } catch {
       // Federation is optional. Keep the local inbox available when it is not licensed.
     }
-  }, [hasAuth]);
+  }, [canUseFederationMessages, hasAuth]);
 
   // —— 加载组织成员 ——
   useEffect(() => {
-    if (!hasAuth) return;
+    if (!hasAuth || !canUseBaselineMessages || !canUseOwnOrganizationDirectory) return;
     let cancelled = false;
     void window.otto.enterpriseOrganizationView().then((view) => {
       if (!cancelled && view?.members) setOrgMembers(view.members);
     }).catch(() => { /* 忽略 */ });
     return () => { cancelled = true; };
-  }, [hasAuth, enterpriseAccount?.organizationId]);
+  }, [canUseBaselineMessages, canUseOwnOrganizationDirectory, hasAuth, enterpriseAccount?.organizationId]);
 
   // —— 定时刷新 ——
   useEffect(() => {
-    if (!hasAuth) return;
+    if (!hasAuth || (!canUseBaselineMessages && !canUseFederationMessages)) return;
     setLoading(true);
     void Promise.all([
       refreshNotifications(),
@@ -159,7 +177,33 @@ export function InboxPage({
       void refreshFederationContacts();
     }, INBOX_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [hasAuth, refreshFederationContacts, refreshNotifications]);
+  }, [canUseBaselineMessages, canUseFederationMessages, hasAuth, refreshFederationContacts, refreshNotifications]);
+
+  useEffect(() => {
+    if (canUseBaselineMessages || canUseFederationMessages) return;
+    setNotifications([]);
+    setOrgMembers([]);
+    setFederationContacts([]);
+    setSelectedPeer(null);
+    setSelectedFederationContactId(null);
+    setMessages([]);
+    setFederationAttachments([]);
+    setFederationVerification(null);
+    setFederationSetupOpen(false);
+    setFederationError('');
+    setLoading(false);
+    setMessagesLoading(false);
+  }, [canUseBaselineMessages, canUseFederationMessages]);
+
+  useEffect(() => {
+    if (canUseFederationMessages) return;
+    setFederationContacts([]);
+    setSelectedFederationContactId(null);
+    setFederationAttachments([]);
+    setFederationVerification(null);
+    setFederationSetupOpen(false);
+    setFederationError('');
+  }, [canUseFederationMessages]);
 
   // —— 构建会话列表 ——
   const conversations = useMemo<ConversationItem[]>(() => {
@@ -250,7 +294,7 @@ export function InboxPage({
 
   // —— 加载选中会话的消息，并标记该 peer 已读 ——
   useEffect(() => {
-    if (!selectedPeer || selectedFederationContactId) return;
+    if (!canUseBaselineMessages || !selectedPeer || selectedFederationContactId) return;
     let cancelled = false;
     setMessagesLoading(true);
     void window.otto.enterpriseMessagesList(selectedPeer).then((msgs) => {
@@ -276,10 +320,10 @@ export function InboxPage({
       if (!cancelled) setMessagesLoading(false);
     });
     return () => { cancelled = true; };
-  }, [selectedFederationContactId, selectedPeer, onMessageRead]);
+  }, [canUseBaselineMessages, selectedFederationContactId, selectedPeer, onMessageRead]);
 
   useEffect(() => {
-    if (!selectedFederationContactId) return;
+    if (!canUseFederationMessages || !selectedFederationContactId) return;
     let cancelled = false;
     setMessagesLoading(true);
     setFederationError('');
@@ -307,7 +351,7 @@ export function InboxPage({
       if (!cancelled) setFederationVerification(null);
     });
     return () => { cancelled = true; };
-  }, [onFederationMessageRead, selectedFederationContactId]);
+  }, [canUseFederationMessages, onFederationMessageRead, selectedFederationContactId]);
 
   const selectedMember = useMemo(
     () => orgMembers.find((m) => m.id === selectedPeer) ?? null,
@@ -327,13 +371,17 @@ export function InboxPage({
 
   useEffect(() => {
     const contactId = federationContactOpenRequest?.contactId;
-    if (!contactId || !federationContacts.some((contact) => contact.id === contactId)) {
+    if (
+      !canUseFederationMessages ||
+      !contactId ||
+      !federationContacts.some((contact) => contact.id === contactId)
+    ) {
       return;
     }
     setSelectedPeer(null);
     setSelectedFederationContactId(contactId);
     setReplyInput('');
-  }, [federationContactOpenRequest, federationContacts]);
+  }, [canUseFederationMessages, federationContactOpenRequest, federationContacts]);
 
   const handleSendReply = async (): Promise<void> => {
     const text = replyInput.trim();
@@ -341,6 +389,9 @@ export function InboxPage({
       (!text && federationAttachments.length === 0) ||
       (!selectedPeer && !selectedFederationContactId) || sending
     ) return;
+    if (selectedFederationContactId ? !canUseFederationMessages : !canUseBaselineMessages) {
+      return;
+    }
     setSending(true);
     try {
       const msg = selectedFederationContactId
@@ -373,6 +424,8 @@ export function InboxPage({
   const askFederationPeerOtto = async (): Promise<void> => {
     const question = replyInput.trim();
     if (
+      !canUseFederationMessages ||
+      !canUseAtoa ||
       !selectedFederationContactId || !selectedFederationContact ||
       !question || sending || federationAttachments.length > 0
     ) return;
@@ -398,6 +451,7 @@ export function InboxPage({
   };
 
   const addFederationFiles = async (files: FileList | File[]): Promise<void> => {
+    if (!canUseFederationMessages) return;
     try {
       const next = [...federationAttachments];
       for (const file of Array.from(files)) {
@@ -427,7 +481,7 @@ export function InboxPage({
     messageId: string,
     attachment: NonNullable<EnterpriseDirectMessage['attachments']>[number],
   ): Promise<void> => {
-    if (!selectedFederationContactId) return;
+    if (!canUseFederationMessages || !selectedFederationContactId) return;
     try {
       await window.otto.enterpriseFederationAttachmentSave(
         selectedFederationContactId,
@@ -442,6 +496,7 @@ export function InboxPage({
   };
 
   const copyFederationContactCode = async (): Promise<void> => {
+    if (!canUseFederationMessages) return;
     try {
       const code = await window.otto.enterpriseFederationContactCode();
       await navigator.clipboard.writeText(code);
@@ -452,7 +507,7 @@ export function InboxPage({
   };
 
   const importFederationContact = async (): Promise<void> => {
-    if (!federationContactCode.trim()) return;
+    if (!canUseFederationMessages || !federationContactCode.trim()) return;
     try {
       const contact = await window.otto.enterpriseFederationContactImport(
         federationContactCode,
@@ -469,7 +524,7 @@ export function InboxPage({
   };
 
   const confirmFederationVerification = async (): Promise<void> => {
-    if (!selectedFederationContactId) return;
+    if (!canUseFederationMessages || !selectedFederationContactId) return;
     try {
       const verification = await window.otto.enterpriseFederationContactVerify(
         selectedFederationContactId,
@@ -483,7 +538,11 @@ export function InboxPage({
   };
 
   const removeFederationContact = async (): Promise<void> => {
-    if (!selectedFederationContactId || !selectedFederationContact) return;
+    if (
+      !canUseFederationMessages ||
+      !selectedFederationContactId ||
+      !selectedFederationContact
+    ) return;
     if (!window.confirm(`移除跨服务器联系人“${selectedFederationContact.displayName}”？`)) {
       return;
     }
@@ -585,20 +644,22 @@ export function InboxPage({
             />
             添加文件
           </label>
-          <button
-            type="button"
-            className="otto-inbox-page__a2a-button"
-            disabled={
-              !replyInput.trim() || sending || federationAttachments.length > 0 ||
-              selectedFederationContact?.trustState !== 'verified'
-            }
-            title={selectedFederationContact?.trustState === 'verified'
-              ? '对方必须明确批准资料范围，授权仅使用一次'
-              : '请先核验联系人身份'}
-            onClick={() => { void askFederationPeerOtto(); }}
-          >
-            询问对方 Otto
-          </button>
+          {canUseAtoa ? (
+            <button
+              type="button"
+              className="otto-inbox-page__a2a-button"
+              disabled={
+                !replyInput.trim() || sending || federationAttachments.length > 0 ||
+                selectedFederationContact?.trustState !== 'verified'
+              }
+              title={selectedFederationContact?.trustState === 'verified'
+                ? '对方必须明确批准资料范围，授权仅使用一次'
+                : '请先核验联系人身份'}
+              onClick={() => { void askFederationPeerOtto(); }}
+            >
+              询问对方 Otto
+            </button>
+          ) : null}
         </div>
       ) : null}
       {selectedFederationContactId && federationAttachments.length > 0 ? (
@@ -639,6 +700,23 @@ export function InboxPage({
     );
   }
 
+  if (!canUseBaselineMessages && !canUseFederationMessages) {
+    return (
+      <div className="otto-inbox-page" role="region" aria-label="我的消息">
+        <header className="otto-inbox-page__header">
+          <div>
+            <h1>我的消息</h1>
+            <p>企业消息能力当前不可用</p>
+          </div>
+          <button type="button" onClick={onBack}>返回对话</button>
+        </header>
+        <div className="otto-inbox-page__empty" role="status">
+          企业私聊未启用或当前服务器未授权，不会请求企业消息数据。
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="otto-inbox-page" role="region" aria-label="我的消息">
       <header className="otto-inbox-page__header">
@@ -671,7 +749,7 @@ export function InboxPage({
       <div className="otto-inbox-page__layout">
         {/* 左：会话列表 */}
         <div className="otto-inbox-page__list" role="list" aria-label="会话列表">
-          <div className="otto-inbox-page__federation-actions">
+          {canUseFederationMessages ? <div className="otto-inbox-page__federation-actions">
             <button
               type="button"
               title="复制我的跨服务器联系码"
@@ -689,8 +767,8 @@ export function InboxPage({
               <IconPlus size={14} />
               添加联系人
             </button>
-          </div>
-          {federationSetupOpen ? (
+          </div> : null}
+          {canUseFederationMessages && federationSetupOpen ? (
             <div className="otto-inbox-page__federation-setup">
               <label htmlFor="otto-federation-contact-code">粘贴对方的联系码</label>
               <textarea
@@ -710,7 +788,7 @@ export function InboxPage({
               </button>
             </div>
           ) : null}
-          {federationError && !selectedFederationContactId ? (
+          {canUseFederationMessages && federationError && !selectedFederationContactId ? (
             <div className="otto-inbox-page__error" role="alert">{federationError}</div>
           ) : null}
           {filteredFederationContacts.length > 0 ? (

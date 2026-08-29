@@ -5,7 +5,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.js';
-import type { EnterpriseAccount } from '../preload/index.js';
+import type {
+  EnterpriseAccount,
+  EnterpriseOrganizationFeatures,
+} from '../preload/index.js';
 import { openParkServices } from './components/ParkServicesPlugin.js';
 
 const harness = vi.hoisted(() => ({
@@ -33,6 +36,29 @@ const harness = vi.hoisted(() => ({
     exportConversation: vi.fn(),
   },
   updateActions: { silentCheck: vi.fn() },
+  moduleCapabilityRetry: vi.fn(),
+  organizationFeatures: {
+    current: {
+      enterprise_tree: true,
+      park_service: true,
+      feishu_auto_reply: true,
+      direct_messages: true,
+      atoa: true,
+      knowledge: true,
+      skill_market: true,
+    },
+  },
+  configuredOrganizationFeatures: {
+    current: {
+      enterprise_tree: true,
+      park_service: true,
+      feishu_auto_reply: true,
+      direct_messages: true,
+      atoa: true,
+      knowledge: true,
+      skill_market: true,
+    },
+  },
   productActions: {
     addFriend: vi.fn(),
     clearError: vi.fn(),
@@ -112,7 +138,21 @@ vi.mock('./state/useProductWorkspace.js', () => ({
 
 vi.mock('./state/useModuleWorkspaceCapabilities.js', () => ({
   useModuleWorkspaceCapabilities: () => ({
-    status: 'ready', ready: true, modules: [], parkIdentity: null, retry: vi.fn(),
+    status: 'ready',
+    ready: true,
+    modules: [],
+    organizationFeatures: harness.organizationFeatures.current,
+    organizationFeatureState: {
+      configured: harness.configuredOrganizationFeatures.current,
+      entitled: harness.organizationFeatures.current,
+      effective: harness.organizationFeatures.current,
+    },
+    baselineEnterpriseTreeAvailable:
+      harness.configuredOrganizationFeatures.current.enterprise_tree,
+    baselineDirectMessagesAvailable:
+      harness.configuredOrganizationFeatures.current.direct_messages,
+    parkIdentity: null,
+    retry: harness.moduleCapabilityRetry,
   }),
 }));
 
@@ -129,8 +169,29 @@ vi.mock('./components/EnterpriseLoginPage.js', () => ({
 }));
 
 vi.mock('./components/Sidebar.js', () => ({
-  Sidebar: ({ onOpenHub }: { onOpenHub: () => void }) => (
-    <button type="button" onClick={onOpenHub}>open-preferences</button>
+  Sidebar: ({
+    onOpenHub,
+    onOpenAccounts,
+  }: {
+    onOpenHub: () => void;
+    onOpenAccounts?: () => void;
+  }) => (
+    <>
+      <button type="button" onClick={onOpenHub}>open-preferences</button>
+      {onOpenAccounts ? (
+        <button type="button" onClick={onOpenAccounts}>open-accounts</button>
+      ) : null}
+    </>
+  ),
+}));
+
+vi.mock('./components/AccountManagementPage.js', () => ({
+  AccountManagementPage: ({
+    onOrganizationChanged,
+  }: {
+    onOrganizationChanged?: () => void;
+  }) => (
+    <button type="button" onClick={onOrganizationChanged}>simulate-organization-change</button>
   ),
 }));
 
@@ -140,11 +201,18 @@ vi.mock('./components/ChatView.js', () => ({
     onToggleRightPanel,
     pendingAgent,
     onOpenSetup,
+    onRespondQuestion,
   }: {
     rightPanelCollapsed?: boolean;
     onToggleRightPanel?: () => void;
     pendingAgent?: { title: string } | null;
     onOpenSetup?: () => void;
+    onRespondQuestion?: (
+      callId: string,
+      outcome: 'approved',
+      payload?: unknown,
+      tool?: unknown,
+    ) => void;
   }) => (
     <main data-testid="chat-view">
       {pendingAgent ? <span data-testid="pending-agent">{pendingAgent.title}</span> : null}
@@ -159,6 +227,72 @@ vi.mock('./components/ChatView.js', () => ({
       ) : null}
       {onOpenSetup ? (
         <button type="button" onClick={onOpenSetup}>open-model-settings</button>
+      ) : null}
+      {onRespondQuestion ? (
+        <>
+          <button type="button" onClick={() => onRespondQuestion(
+            'enterprise-list-members',
+            'approved',
+            undefined,
+            {
+              confirmationDetails: { rootCommand: 'enterprise_collaboration' },
+              parameters: { action: 'list_members' },
+            },
+          )}>simulate-enterprise-list-members</button>
+          <button type="button" onClick={() => onRespondQuestion(
+            'enterprise-assign-member',
+            'approved',
+            undefined,
+            {
+              confirmationDetails: { rootCommand: 'enterprise_collaboration' },
+              parameters: {
+                action: 'assign_member_position',
+                recipientAccountId: 'peer-1',
+                department: '研发部',
+                positionTitle: '工程师',
+              },
+            },
+          )}>simulate-enterprise-assign-member</button>
+          <button type="button" onClick={() => onRespondQuestion(
+            'enterprise-send-message',
+            'approved',
+            undefined,
+            {
+              confirmationDetails: { rootCommand: 'enterprise_collaboration' },
+              parameters: {
+                action: 'send_message',
+                recipientAccountId: 'peer-1',
+                content: 'hello',
+              },
+            },
+          )}>simulate-enterprise-send-message</button>
+          <button type="button" onClick={() => onRespondQuestion(
+            'enterprise-ask-peer-otto',
+            'approved',
+            undefined,
+            {
+              confirmationDetails: { rootCommand: 'enterprise_collaboration' },
+              parameters: {
+                action: 'ask_peer_otto',
+                recipientAccountId: 'peer-1',
+                question: 'status?',
+              },
+            },
+          )}>simulate-enterprise-ask-peer-otto</button>
+          <button type="button" onClick={() => onRespondQuestion(
+            'enterprise-consult-peer-otto',
+            'approved',
+            undefined,
+            {
+              confirmationDetails: { rootCommand: 'enterprise_collaboration' },
+              parameters: {
+                action: 'consult_peer_otto',
+                recipientAccountId: 'peer-1',
+                question: 'plan?',
+              },
+            },
+          )}>simulate-enterprise-consult-peer-otto</button>
+        </>
       ) : null}
     </main>
   ),
@@ -314,6 +448,24 @@ function authFor(account: EnterpriseAccount | null, status: 'loading' | 'signed-
   };
 }
 
+function configureEnterpriseWorkspace(
+  featurePatch: Partial<EnterpriseOrganizationFeatures> = {},
+): void {
+  harness.auth.current = authFor({
+    ...accountA,
+    accountType: 'enterprise',
+    organizationId: 'organization-a',
+    organizationName: '测试企业',
+  }, 'signed-in');
+  harness.centralIdentity.current = {
+    edition: 'enterprise',
+    role: 'member',
+    profiles: [],
+  };
+  Object.assign(harness.organizationFeatures.current, featurePatch);
+  Object.assign(harness.configuredOrganizationFeatures.current, featurePatch);
+}
+
 function rightPanelPreferenceKey(account: EnterpriseAccount): string {
   return [
     'otto.right-panel.v1',
@@ -327,13 +479,35 @@ beforeEach(() => {
   localStorage.clear();
   harness.auth.current = authFor(accountA, 'signed-in');
   harness.centralIdentity.current = { edition: 'personal', role: 'member', profiles: [] };
+  Object.assign(harness.organizationFeatures.current, {
+    enterprise_tree: true,
+    park_service: true,
+    feishu_auto_reply: true,
+    direct_messages: true,
+    atoa: true,
+    knowledge: true,
+    skill_market: true,
+  });
+  Object.assign(harness.configuredOrganizationFeatures.current, {
+    enterprise_tree: true,
+    park_service: true,
+    feishu_auto_reply: true,
+    direct_messages: true,
+    atoa: true,
+    knowledge: true,
+    skill_market: true,
+  });
   Object.defineProperty(window, 'otto', {
     configurable: true,
     writable: true,
     value: {
       ...window.otto,
       autoGeneratedAgentProfiles: vi.fn(() => new Promise(() => undefined)),
-      customerModuleInstalledList: vi.fn().mockResolvedValue([]),
+      // These tests do not exercise customer-module discovery. Keep the
+      // unrelated background request pending so it cannot update App after a
+      // synchronous assertion has already completed.
+      customerModuleInstalledList: vi.fn(() => new Promise(() => undefined)),
+      enterpriseMessagesUnread: vi.fn(() => new Promise(() => undefined)),
       generateCustomAgent: vi.fn(),
       onMenu: vi.fn(() => vi.fn()),
       onNotificationSessionOpen: vi.fn(() => vi.fn()),
@@ -501,5 +675,208 @@ describe('App workspace UI integration', () => {
 
     await waitFor(() => expect(screen.getByTestId('chat-view')).toBeTruthy());
     expect(screen.queryByTestId('setup-panel')).toBeNull();
+  });
+
+  it('refreshes global effective capabilities after enterprise organization settings change', () => {
+    const adminAccount: EnterpriseAccount = {
+      ...accountA,
+      accountType: 'enterprise',
+      organizationId: 'organization-a',
+      organizationName: '测试企业',
+      isAdmin: true,
+    };
+    harness.auth.current = authFor(adminAccount, 'signed-in');
+    harness.centralIdentity.current = {
+      edition: 'enterprise',
+      role: 'company_admin',
+      profiles: [],
+    };
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'open-accounts' }));
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-organization-change' }));
+
+    expect(harness.moduleCapabilityRetry).toHaveBeenCalledOnce();
+  });
+
+  it('does not execute enterprise message tool actions when direct_messages is not effective', () => {
+    configureEnterpriseWorkspace({ direct_messages: false });
+    const enterpriseMessageSend = vi.fn();
+    Object.assign(window.otto, { enterpriseMessageSend });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-enterprise-send-message' }));
+
+    expect(enterpriseMessageSend).not.toHaveBeenCalled();
+    expect(harness.storeActions.respondToolConfirmation).toHaveBeenCalledWith(
+      'enterprise-send-message',
+      'approved',
+      {
+        newContent: JSON.stringify({
+          ok: false,
+          error: '企业私聊未启用或当前服务器未授权',
+        }),
+      },
+    );
+  });
+
+  it('polls same-organization baseline messaging without probing unentitled Federation', async () => {
+    configureEnterpriseWorkspace({ direct_messages: false });
+    harness.configuredOrganizationFeatures.current.direct_messages = true;
+    const enterpriseMessagesUnread = vi.fn(async () => []);
+    const enterprisePresenceHeartbeat = vi.fn(async () => undefined);
+    const enterpriseFederationContacts = vi.fn(async () => {
+      throw new Error('commercial module is not entitled');
+    });
+    Object.assign(window.otto, {
+      enterpriseMessagesUnread,
+      enterprisePresenceHeartbeat,
+      enterpriseFederationContacts,
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(enterpriseMessagesUnread).toHaveBeenCalled());
+    await waitFor(() => expect(enterprisePresenceHeartbeat).toHaveBeenCalled());
+    expect(enterpriseFederationContacts).not.toHaveBeenCalled();
+  });
+
+  it('does not execute organization tool actions when enterprise_tree is not effective', () => {
+    configureEnterpriseWorkspace({ enterprise_tree: false });
+    const enterpriseOrganizationView = vi.fn();
+    const enterpriseAccountUpdate = vi.fn();
+    Object.assign(window.otto, { enterpriseOrganizationView, enterpriseAccountUpdate });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-enterprise-list-members' }));
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-enterprise-assign-member' }));
+
+    expect(enterpriseOrganizationView).not.toHaveBeenCalled();
+    expect(enterpriseAccountUpdate).not.toHaveBeenCalled();
+    expect(harness.storeActions.respondToolConfirmation).toHaveBeenCalledWith(
+      'enterprise-list-members',
+      'approved',
+      {
+        newContent: JSON.stringify({
+          ok: false,
+          error: '企业组织目录未启用',
+        }),
+      },
+    );
+    expect(harness.storeActions.respondToolConfirmation).toHaveBeenCalledWith(
+      'enterprise-assign-member',
+      'approved',
+      {
+        newContent: JSON.stringify({
+          ok: false,
+          error: '企业组织树未启用或当前服务器未授权',
+        }),
+      },
+    );
+  });
+
+  it('keeps baseline member listing while advanced tree assignment is not entitled', async () => {
+    configureEnterpriseWorkspace({ enterprise_tree: false });
+    harness.configuredOrganizationFeatures.current.enterprise_tree = true;
+    const enterpriseOrganizationView = vi.fn(async () => ({
+      organization: {
+        id: 'organization-a', name: '测试企业', status: 'active' as const,
+        createdAt: '2026-08-11T00:00:00.000Z',
+      },
+      members: [],
+      employeeCount: 0,
+    }));
+    const enterpriseAccountUpdate = vi.fn();
+    Object.assign(window.otto, { enterpriseOrganizationView, enterpriseAccountUpdate });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-enterprise-list-members' }));
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-enterprise-assign-member' }));
+
+    await waitFor(() => expect(enterpriseOrganizationView).toHaveBeenCalledOnce());
+    expect(enterpriseAccountUpdate).not.toHaveBeenCalled();
+    expect(harness.storeActions.respondToolConfirmation).toHaveBeenCalledWith(
+      'enterprise-assign-member',
+      'approved',
+      {
+        newContent: JSON.stringify({
+          ok: false,
+          error: '企业组织树未启用或当前服务器未授权',
+        }),
+      },
+    );
+  });
+
+  it('does not execute Otto ask or consult tool actions when atoa is not effective', () => {
+    configureEnterpriseWorkspace({ direct_messages: true, atoa: false });
+    const enterpriseMessageSend = vi.fn();
+    Object.assign(window.otto, { enterpriseMessageSend });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-enterprise-ask-peer-otto' }));
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-enterprise-consult-peer-otto' }));
+
+    expect(enterpriseMessageSend).not.toHaveBeenCalled();
+    expect(harness.storeActions.respondToolConfirmation).toHaveBeenCalledWith(
+      'enterprise-ask-peer-otto',
+      'approved',
+      {
+        newContent: JSON.stringify({
+          ok: false,
+          error: 'Otto 协作未启用或当前服务器未授权',
+        }),
+      },
+    );
+    expect(harness.storeActions.respondToolConfirmation).toHaveBeenCalledWith(
+      'enterprise-consult-peer-otto',
+      'approved',
+      {
+        newContent: JSON.stringify({
+          ok: false,
+          error: 'Otto 协作未启用或当前服务器未授权',
+        }),
+      },
+    );
+  });
+
+  it('closes a pending tool consultation when atoa effective access is revoked', async () => {
+    configureEnterpriseWorkspace({ enterprise_tree: true, direct_messages: true, atoa: true });
+    const peer = {
+      id: 'peer-1',
+      username: 'peer-1',
+      name: '同事一',
+      role: '成员',
+      department: '研发部',
+      positionId: null,
+      positionTitle: '工程师',
+      isAdmin: false,
+      status: 'active' as const,
+    };
+    Object.assign(window.otto, {
+      enterpriseOrganizationView: vi.fn(async () => ({
+        organization: {
+          id: 'organization-a',
+          name: '测试企业',
+          status: 'active' as const,
+          createdAt: '2026-08-11T00:00:00.000Z',
+        },
+        members: [peer],
+        employeeCount: 1,
+      })),
+      enterpriseMessagesList: vi.fn(async () => []),
+      enterpriseMessageSend: vi.fn(),
+    });
+
+    const view = render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'simulate-enterprise-consult-peer-otto' }));
+    expect(await screen.findByRole('dialog', { name: '双方 Otto 协商' })).toBeTruthy();
+
+    harness.organizationFeatures.current.atoa = false;
+    view.rerender(<App />);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '双方 Otto 协商' })).toBeNull();
+    });
+    expect(window.otto.enterpriseMessageSend).not.toHaveBeenCalled();
   });
 });

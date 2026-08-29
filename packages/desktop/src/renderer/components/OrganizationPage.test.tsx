@@ -86,6 +86,7 @@ describe('OrganizationPage contacts integration', () => {
   it('renders Product Workspace friends inside the organization page', async () => {
     render(<OrganizationPage
       enterpriseAccount={account}
+      baselineEnterpriseTreeAvailable
       friends={[{
         id: 'friend-a', displayName: '常用同事', note: '财务',
         createdAt: '2026-08-01T00:00:00.000Z',
@@ -101,6 +102,7 @@ describe('OrganizationPage contacts integration', () => {
     const onAddFriend = vi.fn();
     render(<OrganizationPage
       enterpriseAccount={account}
+      baselineEnterpriseTreeAvailable
       friends={[]}
       onAddFriend={onAddFriend}
       onBack={vi.fn()}
@@ -113,6 +115,82 @@ describe('OrganizationPage contacts integration', () => {
 
     expect(onAddFriend).toHaveBeenCalledWith('李雷', '合作伙伴');
   });
+
+  it('私聊 effective=false 时不打开聊天或请求消息接口', async () => {
+    const enterpriseMessagesList = vi.fn(async () => []);
+    Object.assign(window.otto, {
+      enterpriseMessagesList,
+      enterpriseOrganizationView: vi.fn(async () => ({
+        organization: {
+          id: 'org-a', name: '测试企业', status: 'active' as const,
+          createdAt: '2026-08-01T00:00:00.000Z',
+        },
+        members: [{
+          id: 'account-b', username: 'bob', name: 'Bob', role: '成员',
+          department: '产品部', isAdmin: false, status: 'active' as const,
+        }],
+        employeeCount: 1,
+        structure: [],
+      })),
+    });
+
+    render(<OrganizationPage
+      enterpriseAccount={account}
+      baselineEnterpriseTreeAvailable
+      effectiveDirectMessages={false}
+      enterpriseDirectChatOpenRequest={{ peerAccountId: 'account-b', requestId: 1 }}
+      onBack={vi.fn()}
+    />);
+
+    await screen.findByText('Bob');
+    expect(screen.queryByRole('button', { name: '与 Bob 聊天' })).toBeNull();
+    expect(screen.queryByText('发消息')).toBeNull();
+    expect(enterpriseMessagesList).not.toHaveBeenCalled();
+  });
+
+  it('opens same-organization chat from the baseline without a Federation entitlement', async () => {
+    Object.assign(window.otto, {
+      enterpriseOrganizationView: vi.fn(async () => ({
+        organization: {
+          id: 'org-a', name: '测试企业', status: 'active' as const,
+          createdAt: '2026-08-01T00:00:00.000Z',
+        },
+        members: [{
+          id: 'account-b', username: 'bob', name: 'Bob', role: '成员',
+          department: '产品部', isAdmin: false, status: 'active' as const,
+        }],
+        employeeCount: 1,
+        structure: [],
+      })),
+      enterpriseMessagesList: vi.fn(async () => []),
+    });
+
+    render(<OrganizationPage
+      enterpriseAccount={account}
+      baselineEnterpriseTreeAvailable
+      baselineDirectMessagesAvailable
+      effectiveDirectMessages={false}
+      onBack={vi.fn()}
+    />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '与 Bob 聊天' }));
+    await waitFor(() => expect(window.otto.enterpriseMessagesList).toHaveBeenCalledWith('account-b'));
+  });
+
+  it('does not request the own organization view when its baseline switch is off', async () => {
+    const enterpriseOrganizationView = vi.fn();
+    Object.assign(window.otto, { enterpriseOrganizationView });
+
+    render(<OrganizationPage
+      enterpriseAccount={account}
+      baselineEnterpriseTreeAvailable={false}
+      effectiveEnterpriseTree={false}
+      onBack={vi.fn()}
+    />);
+
+    await screen.findByText('组织信息不可用');
+    expect(enterpriseOrganizationView).not.toHaveBeenCalled();
+  });
 });
 
 describe('OrganizationPage park administration overview', () => {
@@ -121,7 +199,12 @@ describe('OrganizationPage park administration overview', () => {
     const enterpriseParkTenants = vi.fn(async () => []);
     Object.assign(window.otto, { enterpriseOrganizationView, enterpriseParkTenants });
 
-    render(<OrganizationPage enterpriseAccount={parkAdminAccount} onBack={vi.fn()} />);
+    render(<OrganizationPage
+      enterpriseAccount={parkAdminAccount}
+      effectiveEnterpriseTree
+      effectiveParkService
+      onBack={vi.fn()}
+    />);
 
     await waitFor(() => expect(enterpriseOrganizationView).toHaveBeenCalledWith(undefined));
     await waitFor(() => expect(enterpriseParkTenants).toHaveBeenCalledOnce());
@@ -142,5 +225,56 @@ describe('OrganizationPage park administration overview', () => {
     expect(screen.getByRole('tree', { name: '北控宏创科技有限公司组织架构' })).toBeTruthy();
     expect(screen.getByText('园区管理员')).toBeTruthy();
     expect(screen.getByText('运营专员')).toBeTruthy();
+  });
+
+  it('园区服务 effective=false 时只显示本企业目录且不请求园区接口', async () => {
+    const enterpriseOrganizationView = vi.fn(async () => ownOrganizationView);
+    const enterpriseParkTenants = vi.fn(async () => []);
+    Object.assign(window.otto, { enterpriseOrganizationView, enterpriseParkTenants });
+
+    render(<OrganizationPage
+      enterpriseAccount={parkAdminAccount}
+      effectiveEnterpriseTree
+      effectiveParkService={false}
+      onBack={vi.fn()}
+    />);
+
+    await waitFor(() => expect(enterpriseOrganizationView).toHaveBeenCalledWith(undefined));
+    expect(enterpriseParkTenants).not.toHaveBeenCalled();
+    expect(screen.getByText('园区服务未启用或当前服务器未授权，当前仅显示本企业组织。')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '园区管理企业' })).toBeNull();
+  });
+
+  it('企业组织树 effective=false 时不请求入驻企业的受保护组织视图', async () => {
+    const tenant = {
+      id: 'organization-tenant',
+      name: '入驻企业',
+      slug: 'tenant',
+      status: 'active' as const,
+      industry: '智能制造',
+      employeeCount: 8,
+      departmentCount: 2,
+      onlineCount: 3,
+    };
+    const enterpriseOrganizationView = vi.fn(async () => ownOrganizationView);
+    const enterpriseParkTenants = vi.fn(async () => [tenant]);
+    Object.assign(window.otto, { enterpriseOrganizationView, enterpriseParkTenants });
+
+    render(<OrganizationPage
+      enterpriseAccount={parkAdminAccount}
+      baselineEnterpriseTreeAvailable
+      effectiveEnterpriseTree={false}
+      effectiveParkService
+      onBack={vi.fn()}
+    />);
+
+    await waitFor(() => expect(enterpriseParkTenants).toHaveBeenCalledOnce());
+    const tenantButton = screen.getByRole('button', { name: /入驻企业/ });
+    expect((tenantButton as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('企业组织树未启用或当前服务器未授权，不会请求入驻企业组织数据。')).toBeTruthy();
+
+    fireEvent.click(tenantButton);
+    expect(enterpriseOrganizationView).toHaveBeenCalledTimes(1);
+    expect(enterpriseOrganizationView).not.toHaveBeenCalledWith('organization-tenant');
   });
 });

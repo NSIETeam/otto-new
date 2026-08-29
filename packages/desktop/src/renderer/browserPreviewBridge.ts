@@ -521,6 +521,22 @@ if (!previewWindow.otto) {
       knowledge: true,
       skill_market: true,
     }),
+    enterpriseOrganizationFeatureStateGet: () => {
+      const features = {
+        enterprise_tree: true,
+        park_service: true,
+        feishu_auto_reply: false,
+        direct_messages: true,
+        atoa: true,
+        knowledge: true,
+        skill_market: true,
+      };
+      return Promise.resolve({
+        configured: { ...features },
+        entitled: { ...features },
+        effective: { ...features },
+      });
+    },
     enterpriseParkServices: () => Promise.resolve([]),
     enterpriseParkSpecialists: () => Promise.resolve([]),
     enterpriseParkAnnouncementResults: () => Promise.resolve([]),

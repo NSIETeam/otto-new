@@ -136,6 +136,74 @@ describe('PostgreSQL enterprise core authority', () => {
     expect(migration!.sql).not.toContain('payload_plaintext');
   });
 
+  it('returns the complete desktop organization department and position contract', async () => {
+    const createdAt = new Date('2026-08-03T08:00:00.000Z');
+    const updatedAt = new Date('2026-08-03T09:00:00.000Z');
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('FROM organization_departments department')) {
+        return result([
+          {
+            id: 'dept-research',
+            organization_id: 'org_default',
+            name: '研发部',
+            member_count: '3',
+            created_at: createdAt,
+            updated_at: updatedAt,
+          },
+        ]);
+      }
+      if (sql.includes('FROM organization_positions')) {
+        return result([
+          {
+            id: 'position-engineer',
+            organization_id: 'org_default',
+            department_id: 'dept-research',
+            title: '工程师',
+            role_mapping: 'department_admin',
+            created_at: createdAt,
+            updated_at: updatedAt,
+          },
+        ]);
+      }
+      throw new Error(`unexpected SQL: ${sql}`);
+    });
+    const pool: PostgresPoolLike = {
+      connect: vi.fn(),
+      query,
+      end: vi.fn(),
+    };
+    const repository = createPostgresEnterpriseCoreRepository({ pool });
+
+    await expect(
+      repository.listOrganizationStructure('org_default'),
+    ).resolves.toEqual({
+      departments: [
+        {
+          id: 'dept-research',
+          organizationId: 'org_default',
+          name: '研发部',
+          parentDepartmentId: null,
+          memberCount: 3,
+          positions: [
+            {
+              id: 'position-engineer',
+              organizationId: 'org_default',
+              departmentId: 'dept-research',
+              title: '工程师',
+              roleMapping: 'department_admin',
+              createdAt: createdAt.toISOString(),
+              updatedAt: updatedAt.toISOString(),
+            },
+          ],
+          createdAt: createdAt.toISOString(),
+          updatedAt: updatedAt.toISOString(),
+        },
+      ],
+    });
+    expect(query.mock.calls[0]?.[0]).toContain("account.status = 'active'");
+    expect(query.mock.calls[0]?.[0]).toContain('AS member_count');
+  });
+
   it('binds MLS attachment objects to one generation and device roster', () => {
     const migration = ENTERPRISE_POSTGRES_MIGRATIONS.find(
       (candidate) => candidate.version === 14,
@@ -159,25 +227,28 @@ describe('PostgreSQL enterprise core authority', () => {
     const references = currentLegalDocumentReferences();
     const pool: PostgresPoolLike = {
       connect: vi.fn(),
-      query: vi.fn(async () => result([
-        {
-          document_id: references[0]!.id,
-          document_version: references[0]!.version,
-          policy_hash: references[0]!.hash,
-          accepted_at: new Date('2026-08-03T00:00:00.000Z'),
-        },
-        {
-          document_id: references[1]!.id,
-          document_version: references[1]!.version,
-          policy_hash: '0'.repeat(64),
-          accepted_at: new Date('2026-08-03T00:00:00.000Z'),
-        },
-      ])),
+      query: vi.fn(async () =>
+        result([
+          {
+            document_id: references[0]!.id,
+            document_version: references[0]!.version,
+            policy_hash: references[0]!.hash,
+            accepted_at: new Date('2026-08-03T00:00:00.000Z'),
+          },
+          {
+            document_id: references[1]!.id,
+            document_version: references[1]!.version,
+            policy_hash: '0'.repeat(64),
+            accepted_at: new Date('2026-08-03T00:00:00.000Z'),
+          },
+        ]),
+      ),
       end: vi.fn(),
     };
     const repository = createPostgresEnterpriseCoreRepository({ pool });
 
-    const profile = await repository.getDataGovernanceProfile(governanceAccount);
+    const profile =
+      await repository.getDataGovernanceProfile(governanceAccount);
 
     expect(profile.documents.map((document) => document.accepted)).toEqual([
       true,
@@ -269,9 +340,7 @@ describe('PostgreSQL enterprise core authority', () => {
       version: 11,
       name: 'mls-inbound-welcome-discovery-index',
     });
-    expect(migration!.sql).toContain(
-      'mls_transport_events_inbound_welcome',
-    );
+    expect(migration!.sql).toContain('mls_transport_events_inbound_welcome');
     expect(migration!.sql).toContain('recipient_device_id');
     expect(migration!.sql).toContain("WHERE event_type = 'welcome'");
     expect(migration!.sql).not.toContain('payload');
@@ -635,8 +704,7 @@ describe('PostgreSQL enterprise core authority', () => {
               session_generation: 1,
               sender_account_id: 'acc_alice',
               sender_device_id: 'alice-device',
-              recipient_account_id:
-                eventType === 'welcome' ? 'acc_bob' : null,
+              recipient_account_id: eventType === 'welcome' ? 'acc_bob' : null,
               recipient_device_id:
                 eventType === 'welcome' ? 'bob-device' : null,
               event_type: eventType,
@@ -858,9 +926,10 @@ describe('PostgreSQL enterprise core authority', () => {
       )?.sql,
     ).toContain('FOR UPDATE');
     expect(
-      statements.find((statement) =>
-        statement.sql.includes('INSERT INTO mls_group_sessions') &&
-        statement.sql.includes('reset_event_id'),
+      statements.find(
+        (statement) =>
+          statement.sql.includes('INSERT INTO mls_group_sessions') &&
+          statement.sql.includes('reset_event_id'),
       )?.values,
     ).toEqual(
       expect.arrayContaining([
@@ -911,7 +980,9 @@ describe('PostgreSQL enterprise core authority', () => {
     ).rejects.toThrow(/rate limit/i);
     expect(statements.at(-1)).toBe('ROLLBACK');
     expect(
-      statements.some((sql) => sql.includes('INSERT INTO mls_transport_events')),
+      statements.some((sql) =>
+        sql.includes('INSERT INTO mls_transport_events'),
+      ),
     ).toBe(false);
   });
 

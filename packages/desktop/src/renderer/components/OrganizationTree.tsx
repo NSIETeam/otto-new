@@ -173,6 +173,8 @@ export function OrganizationTree({
   unreadCounts = {},
   directChatOpenRequest,
   onMessageRead,
+  effectiveAtoa = false,
+  effectiveKnowledge = false,
 }: {
   workspace: ProductWorkspaceSnapshot | null;
   schedules?: readonly ScheduleItemInfo[];
@@ -182,6 +184,10 @@ export function OrganizationTree({
   unreadCounts?: EnterpriseUnreadCounts;
   directChatOpenRequest?: EnterpriseDirectChatOpenRequest;
   onMessageRead?: (peerAccountId: string, messageIds?: readonly string[]) => void;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveAtoa?: boolean;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveKnowledge?: boolean;
 }): React.JSX.Element | null {
   const [open, setOpen] = useState(true);
   const [orgView, setOrgView] = useState<EnterpriseOrganizationView | null>(null);
@@ -446,6 +452,8 @@ export function OrganizationTree({
           member={member}
           currentAccount={enterpriseAccount}
           schedules={schedules}
+          effectiveAtoa={effectiveAtoa}
+          effectiveKnowledge={effectiveKnowledge}
           initialPosition={directChatInitialPosition(index)}
           stackOrder={50 + index}
           onActivate={() => activateDirectChat(member.id)}
@@ -757,6 +765,8 @@ export function DirectMessagePanel({
   member,
   currentAccount,
   schedules = [],
+  effectiveAtoa = false,
+  effectiveKnowledge = false,
   initialPosition,
   stackOrder,
   onActivate,
@@ -766,6 +776,10 @@ export function DirectMessagePanel({
   member: EnterpriseOrganizationView['members'][number];
   currentAccount?: EnterpriseAccount;
   schedules?: readonly ScheduleItemInfo[];
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveAtoa?: boolean;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveKnowledge?: boolean;
   initialPosition: { left: number; top: number };
   stackOrder: number;
   onActivate: () => void;
@@ -994,7 +1008,7 @@ export function DirectMessagePanel({
   };
 
   const askPeerOtto = async (question?: string) => {
-    if (attachments.length > 0) return;
+    if (!effectiveAtoa || attachments.length > 0) return;
     const content = buildAtoaRequest(question?.trim() || draft.trim());
     setAskingPeerOtto(true);
     try {
@@ -1205,16 +1219,18 @@ export function DirectMessagePanel({
         >
           {askingOwnOtto ? '询问中' : '问 Otto'}
         </button>
-        <button
-          type="button"
-          className="otto-direct-chat__otto"
-          disabled={askingPeerOtto || attachments.length > 0}
-          onClick={() => void askPeerOtto(draft)}
-          title={attachments.length > 0 ? '附件不会自动交给对方 Otto，请先发送或移除附件' : undefined}
-        >
-          问对方 Otto
-        </button>
-        {currentAccount ? (
+        {effectiveAtoa ? (
+          <button
+            type="button"
+            className="otto-direct-chat__otto"
+            disabled={askingPeerOtto || attachments.length > 0}
+            onClick={() => void askPeerOtto(draft)}
+            title={attachments.length > 0 ? '附件不会自动交给对方 Otto，请先发送或移除附件' : undefined}
+          >
+            问对方 Otto
+          </button>
+        ) : null}
+        {currentAccount && effectiveAtoa ? (
           <div className="otto-direct-chat__a2a-menu">
             <button
               type="button"
@@ -1412,11 +1428,12 @@ export function DirectMessagePanel({
           }}
         />
       </form>
-      {consultOpen && currentAccount ? (
+      {consultOpen && currentAccount && effectiveAtoa ? (
         <AtoaConsultDialog
           account={currentAccount}
           member={member}
           schedules={schedules}
+          effectiveKnowledge={effectiveKnowledge}
           initialQuestion={draft}
           onClose={() => setConsultOpen(false)}
           onSent={(message) => {

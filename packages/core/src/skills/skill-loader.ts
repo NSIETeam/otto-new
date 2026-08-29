@@ -303,8 +303,7 @@ export class SkillLoader {
     loadLevel: SkillLoadLevel = SkillLoadLevel.METADATA,
   ): Promise<Skill[]> {
     try {
-      const plugins = await this.marketplaceLoader.loadPlugins();
-      const targetPlugin = plugins.find(p => p.id === pluginId);
+      const targetPlugin = await this.marketplaceLoader.loadPlugin(pluginId);
 
       if (targetPlugin) {
         return targetPlugin.components.map(comp => {

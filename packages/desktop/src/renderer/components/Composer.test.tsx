@@ -198,7 +198,7 @@ describe('输入区工具布局与弹层', () => {
 });
 
 describe('专家提示词草稿', () => {
-  it('填入后不自动发送，用户可修改再发送', () => {
+  it('填入后不自动发送，用户可修改再发送', async () => {
     const onSend = vi.fn();
     render(
       <Composer
@@ -216,7 +216,7 @@ describe('专家提示词草稿', () => {
     expect(onSend).not.toHaveBeenCalled();
 
     fireEvent.change(textarea, { target: { value: '帮我做一份产品发布会 PPT' } });
-    fireEvent.keyDown(textarea, { key: 'Enter' });
+    await act(async () => fireEvent.keyDown(textarea, { key: 'Enter' }));
     expect(onSend).toHaveBeenCalledWith(
       '帮我做一份产品发布会 PPT',
       [],
@@ -695,7 +695,7 @@ describe('附件预览卡片', () => {
     expect(card?.querySelector('.otto-attachment__type-icon')?.textContent).toBe('DIR');
     expect(await screen.findByTitle(folderPath)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '发送' })));
     expect(onSend).toHaveBeenCalledWith(
       '',
       [{ folderName: '客户资料', folderPath }],
@@ -727,7 +727,7 @@ describe('附件预览卡片', () => {
     });
 
     expect(await screen.findByTitle(externalPath)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '发送' })));
     expect(onSend).toHaveBeenCalledWith(
       '',
       [{ fileName: '园区方案.pdf', filePath: externalPath }],

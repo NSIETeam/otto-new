@@ -70,7 +70,10 @@ export interface ClusteredBusinessRouteInput {
     maxLength?: number,
   ): Promise<Record<string, unknown>>;
   sendJson(res: ServerResponse, status: number, body: unknown): void;
-  requireCommercialFeature(feature: OrganizationFeatureKey): Promise<boolean>;
+  requireCommercialFeature(
+    feature: OrganizationFeatureKey,
+    organizationId?: string,
+  ): Promise<boolean>;
   commercialFeatureAvailable(feature: OrganizationFeatureKey): Promise<boolean>;
   commercialLicenseSummary(): Promise<ClusteredLicenseSummary>;
 }
@@ -2304,6 +2307,16 @@ async function handleTickets(
     }
     const targetOrganizationId =
       authority?.resourceOrganizationId ?? organizationId;
+    if (
+      isParkRequest &&
+      targetOrganizationId !== organizationId &&
+      !(await input.requireCommercialFeature(
+        'park_service',
+        targetOrganizationId,
+      ))
+    ) {
+      return true;
+    }
     const targetAccounts =
       await input.repository.listAccounts(targetOrganizationId);
     const targetTags = Array.isArray(body.targetTags)

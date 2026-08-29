@@ -16,6 +16,11 @@ import {
 import { createAliyunLoginSmsFromEnv } from 'otto-core';
 
 import {
+  ORGANIZATION_FEATURE_KEYS,
+  type OrganizationFeatureKey,
+} from '../productModules.js';
+
+import {
   baselineOrganizationFeatureForEnterpriseRoute,
   commercialFeatureForEnterpriseRoute,
   isLicenseMaintenanceRoute,
@@ -26,6 +31,7 @@ import type {
 } from '../modules/collaboration/index.js';
 import { E2EE_ATTACHMENT_MAX_CIPHERTEXT_BYTES } from '../modules/collaboration/index.js';
 import {
+  clusteredLicenseModulesEntitleFeature,
   evaluateClusteredLicense,
   parsePublicKeyList,
   type ClusteredLicenseDecision,
@@ -67,12 +73,15 @@ import {
   PostgresEnterpriseLicenseAdmissionError,
   PostgresEnterpriseSeatLimitError,
 } from './postgresLicenseSeatAdmission.js';
+import type { PostgresBusinessRecord } from './postgresBusinessRepository.js';
 import {
   createPostgresEnterpriseCoreRepository,
   normalizePostgresEnterprisePhone,
   type PostgresEnterpriseAccountView,
   type PostgresEnterpriseCoreRepository,
+  type PostgresEnterpriseFeatures,
   type PostgresE2eeAttachmentReferenceInput,
+  type PostgresOrganizationStructureView,
   type UpdatePostgresEnterpriseAccountInput,
 } from './postgresCoreRepository.js';
 import { ENTERPRISE_POSTGRES_MIGRATIONS } from './postgresMigrations.js';
@@ -113,6 +122,185 @@ type JsonBody = Record<string, unknown>;
 type AttachmentStorageService = ReturnType<
   typeof createAttachmentStorageService
 >;
+type EnterpriseOrganizationFeatures = Record<OrganizationFeatureKey, boolean>;
+type ClusteredLicenseSummary = ClusteredLicenseDecision['summary'];
+
+function publicOrganizationFeatures(
+  configured: PostgresEnterpriseFeatures,
+): EnterpriseOrganizationFeatures {
+  return {
+    enterprise_tree: configured.enterprise_tree,
+    park_service: configured.park_services,
+    // The clustered PostgreSQL schema does not yet persist this integration
+    // switch. Keep it disabled instead of reporting an enabled capability that
+    // the server cannot enforce.
+    feishu_auto_reply: false,
+    direct_messages: configured.direct_messages,
+    atoa: configured.atoa,
+    knowledge: configured.knowledge,
+    skill_market: configured.skill_market,
+  };
+}
+
+function publicOrganizationStructure(
+  structure:
+    | PostgresOrganizationStructureView
+    | PostgresOrganizationStructureView['departments'],
+): PostgresOrganizationStructureView['departments'] {
+  // Accept legacy test/injected repositories that returned the department
+  // array directly while keeping the public HTTP contract identical to the
+  // SQLite server and desktop client.
+  return Array.isArray(structure) ? structure : structure.departments;
+}
+
+type ClusteredParkPayload = {
+  name?: string;
+  slug?: string;
+  brandName?: string | null;
+  address?: string | null;
+  adminOrganizationId?: string;
+};
+
+type ClusteredParkMembershipPayload = {
+  parkId?: string;
+  adminOrganizationId?: string;
+  address?: string | null;
+  roomNumber?: string | null;
+  joinedAt?: string;
+};
+
+type ClusteredParkServicePayload = {
+  name?: string;
+  enabled?: boolean;
+  config?: Record<string, unknown>;
+  formSchema?: Record<string, unknown>;
+};
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+async function clusteredOrganizationParkView(
+  repository: PostgresEnterpriseCoreRepository,
+  organizationId: string,
+) {
+  const ownParks = await repository.listBusinessRecords<ClusteredParkPayload>({
+    organizationId,
+    domain: 'park',
+    resourceType: 'park',
+    statuses: ['active'],
+    limit: 1,
+  });
+  let park: PostgresBusinessRecord<ClusteredParkPayload> | null =
+    ownParks[0] ?? null;
+  let membership: PostgresBusinessRecord<ClusteredParkMembershipPayload> | null =
+    null;
+  if (!park) {
+    membership =
+      await repository.getBusinessRecord<ClusteredParkMembershipPayload>({
+        organizationId,
+        domain: 'park',
+        resourceType: 'membership',
+        resourceId: `membership_${organizationId}`,
+      });
+    const parkId = nonEmptyString(membership?.payload.parkId);
+    const adminOrganizationId = nonEmptyString(
+      membership?.payload.adminOrganizationId,
+    );
+    if (membership?.status !== 'active' || !parkId || !adminOrganizationId) {
+      return null;
+    }
+    park = await repository.getBusinessRecord<ClusteredParkPayload>({
+      organizationId: adminOrganizationId,
+      domain: 'park',
+      resourceType: 'park',
+      resourceId: parkId,
+    });
+  }
+  if (!park || park.status !== 'active') return null;
+
+  const declaredAdminOrganizationId = nonEmptyString(
+    park.payload.adminOrganizationId,
+  );
+  if (
+    declaredAdminOrganizationId &&
+    declaredAdminOrganizationId !== park.organizationId
+  ) {
+    return null;
+  }
+  const adminOrganizationId = park.organizationId;
+  const [adminOrganization, services] = await Promise.all([
+    repository.getOrganization(adminOrganizationId),
+    repository.listBusinessRecords<ClusteredParkServicePayload>({
+      organizationId: adminOrganizationId,
+      domain: 'park',
+      resourceType: 'service',
+      limit: 100,
+    }),
+  ]);
+  const parkId = park.resourceId;
+  const name =
+    nonEmptyString(park.payload.name) ?? adminOrganization?.name ?? parkId;
+  return {
+    id: parkId,
+    name,
+    slug:
+      nonEmptyString(park.payload.slug) ?? adminOrganization?.slug ?? parkId,
+    brandName: nonEmptyString(park.payload.brandName) ?? name,
+    adminOrganizationId,
+    status: 'active' as const,
+    createdAt: park.createdAt,
+    updatedAt: park.updatedAt,
+    isAdminOrganization: adminOrganizationId === organizationId,
+    services: services.map((service) => ({
+      parkId,
+      id: service.resourceId,
+      name: nonEmptyString(service.payload.name) ?? service.resourceId,
+      enabled:
+        typeof service.payload.enabled === 'boolean'
+          ? service.payload.enabled
+          : service.status === 'active',
+      config:
+        service.payload.config && typeof service.payload.config === 'object'
+          ? service.payload.config
+          : service.payload.formSchema &&
+              typeof service.payload.formSchema === 'object'
+            ? service.payload.formSchema
+            : {},
+      updatedAt: service.updatedAt,
+    })),
+    tenantAddress: membership?.payload.address ?? null,
+    tenantRoomNumber: membership?.payload.roomNumber ?? null,
+  };
+}
+
+function organizationFeatureState(
+  rawConfigured: PostgresEnterpriseFeatures,
+  license: ClusteredLicenseSummary,
+): {
+  configured: EnterpriseOrganizationFeatures;
+  entitled: EnterpriseOrganizationFeatures;
+  effective: EnterpriseOrganizationFeatures;
+} {
+  const configured = publicOrganizationFeatures(rawConfigured);
+  // Keep the public state on the exact same capability-expansion rule used by
+  // clustered route admission. A few same-organization collaboration
+  // endpoints retain a legacy server-side baseline exemption, but clients must
+  // not infer a commercial entitlement from that compatibility path.
+  const entitled = Object.fromEntries(
+    ORGANIZATION_FEATURE_KEYS.map((feature) => [
+      feature,
+      clusteredLicenseModulesEntitleFeature(license.modules, feature),
+    ]),
+  ) as EnterpriseOrganizationFeatures;
+  const effective = Object.fromEntries(
+    ORGANIZATION_FEATURE_KEYS.map((feature) => [
+      feature,
+      configured[feature] && entitled[feature],
+    ]),
+  ) as EnterpriseOrganizationFeatures;
+  return { configured, entitled, effective };
+}
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
@@ -788,7 +976,6 @@ export function createClusteredEnterpriseServer(
               res,
               deploymentId,
               publicKeys: licensePublicKeys,
-              requiredFeature: 'enterprise_tree',
               seatIncrement: 1,
               sendDenial: false,
             });
@@ -906,7 +1093,6 @@ export function createClusteredEnterpriseServer(
             res,
             deploymentId,
             publicKeys: licensePublicKeys,
-            requiredFeature: 'enterprise_tree',
             seatIncrement: 1,
             sendDenial: false,
           });
@@ -1083,7 +1269,6 @@ export function createClusteredEnterpriseServer(
           res,
           deploymentId,
           publicKeys: licensePublicKeys,
-          requiredFeature: 'enterprise_tree',
         });
         if (!license) return;
         sendJson(res, 200, {
@@ -1112,7 +1297,6 @@ export function createClusteredEnterpriseServer(
           res,
           deploymentId,
           publicKeys: licensePublicKeys,
-          requiredFeature: 'enterprise_tree',
           seatIncrement: body.status === 'disabled' ? 0 : 1,
         });
         if (!license) return;
@@ -1134,11 +1318,15 @@ export function createClusteredEnterpriseServer(
             positionId:
               typeof body.positionId === 'string' ? body.positionId : null,
             positionTitle:
-              typeof body.positionTitle === 'string' ? body.positionTitle : null,
+              typeof body.positionTitle === 'string'
+                ? body.positionTitle
+                : null,
             avatarUrl:
               typeof body.avatarUrl === 'string' ? body.avatarUrl : null,
             tags: Array.isArray(body.tags)
-              ? body.tags.filter((tag): tag is string => typeof tag === 'string')
+              ? body.tags.filter(
+                  (tag): tag is string => typeof tag === 'string',
+                )
               : [],
             isAdmin: body.isAdmin === true,
             status: body.status === 'disabled' ? 'disabled' : 'active',
@@ -1189,7 +1377,6 @@ export function createClusteredEnterpriseServer(
           res,
           deploymentId,
           publicKeys: licensePublicKeys,
-          requiredFeature: 'enterprise_tree',
           seatIncrement: activatesSeat ? 1 : 0,
           allowSeatOverage: reducesSeats,
         });
@@ -1274,7 +1461,6 @@ export function createClusteredEnterpriseServer(
           res,
           deploymentId,
           publicKeys: licensePublicKeys,
-          requiredFeature: 'enterprise_tree',
         });
         if (!license) return;
         const invite =
@@ -1352,7 +1538,6 @@ export function createClusteredEnterpriseServer(
             res,
             deploymentId,
             publicKeys: licensePublicKeys,
-            requiredFeature: 'enterprise_tree',
             seatIncrement: 1,
           });
           if (!license?.allowed) return;
@@ -1447,6 +1632,7 @@ export function createClusteredEnterpriseServer(
         return;
       }
 
+      let activeLicenseSummary: ClusteredLicenseSummary | null = null;
       if (!isLicenseMaintenanceRoute(path, method)) {
         const requestedOrganizationId =
           path === '/enterprise/organization/view'
@@ -1456,7 +1642,7 @@ export function createClusteredEnterpriseServer(
           method,
           crossOrganizationView: Boolean(
             requestedOrganizationId &&
-              requestedOrganizationId !== member.organizationId,
+            requestedOrganizationId !== member.organizationId,
           ),
         });
         const license = await requireClusteredLicense({
@@ -1470,18 +1656,22 @@ export function createClusteredEnterpriseServer(
           requiredFeature: commercialFeature,
         });
         if (!license) return;
-        if (
-          baselineOrganizationFeatureForEnterpriseRoute(path) ===
-            'direct_messages' &&
-          !(await repository.getOrganizationFeatures(member.organizationId))
-            .direct_messages
-        ) {
-          sendJson(res, 403, {
-            error: 'organization feature is disabled',
-            code: 'organization_feature_disabled',
-            feature: 'direct_messages',
-          });
-          return;
+        activeLicenseSummary = license.summary;
+        const organizationFeature =
+          baselineOrganizationFeatureForEnterpriseRoute(path) ??
+          commercialFeature;
+        if (organizationFeature) {
+          const configured = publicOrganizationFeatures(
+            await repository.getOrganizationFeatures(member.organizationId),
+          );
+          if (!configured[organizationFeature]) {
+            sendJson(res, 403, {
+              error: 'organization feature is disabled',
+              code: 'organization_feature_disabled',
+              feature: organizationFeature,
+            });
+            return;
+          }
         }
       }
 
@@ -1496,10 +1686,13 @@ export function createClusteredEnterpriseServer(
           repository,
           readBody: readJsonBody,
           sendJson,
-          requireCommercialFeature: async (feature) => {
+          requireCommercialFeature: async (
+            feature,
+            featureOrganizationId = member.organizationId,
+          ) => {
             const decision = await requireClusteredLicense({
               repository,
-              organizationId: member.organizationId,
+              organizationId: featureOrganizationId,
               actorAccountId: member.id,
               actorEmployeeId: member.employeeId,
               res,
@@ -1507,7 +1700,17 @@ export function createClusteredEnterpriseServer(
               publicKeys: licensePublicKeys,
               requiredFeature: feature,
             });
-            return decision?.allowed === true;
+            if (decision?.allowed !== true) return false;
+            const configured = publicOrganizationFeatures(
+              await repository.getOrganizationFeatures(featureOrganizationId),
+            );
+            if (configured[feature]) return true;
+            sendJson(res, 403, {
+              error: 'organization feature is disabled',
+              code: 'organization_feature_disabled',
+              feature,
+            });
+            return false;
           },
           commercialFeatureAvailable: async (feature) => {
             const decision = await requireClusteredLicense({
@@ -1521,7 +1724,10 @@ export function createClusteredEnterpriseServer(
               requiredFeature: feature,
               sendDenial: false,
             });
-            return decision?.allowed === true;
+            if (decision?.allowed !== true) return false;
+            return publicOrganizationFeatures(
+              await repository.getOrganizationFeatures(member.organizationId),
+            )[feature];
           },
           commercialLicenseSummary: async () => {
             const decision = await requireClusteredLicense({
@@ -1766,15 +1972,73 @@ export function createClusteredEnterpriseServer(
       }
 
       if (path === '/enterprise/organization/view' && method === 'GET') {
-        const [organization, members, structure, features] = await Promise.all([
-          repository.getOrganization(member.organizationId),
-          repository.listAccounts(member.organizationId),
-          repository.listOrganizationStructure(member.organizationId),
-          repository.getOrganizationFeatures(member.organizationId),
+        const requestedOrganizationId = url.searchParams.get('organizationId');
+        const organizationId = requestedOrganizationId || member.organizationId;
+        const isCrossOrganization = organizationId !== member.organizationId;
+        let featureLicenseSummary = activeLicenseSummary!;
+        if (isCrossOrganization) {
+          if (!member.isAdmin) {
+            sendJson(res, 403, { error: '无权查看该企业组织架构' });
+            return;
+          }
+          const memberships = await repository.listParkTenantMemberships(
+            member.organizationId,
+          );
+          if (
+            !memberships.some(
+              (membership) => membership.organizationId === organizationId,
+            )
+          ) {
+            sendJson(res, 403, { error: '无权查看该企业组织架构' });
+            return;
+          }
+          const targetLicense = await requireClusteredLicense({
+            repository,
+            organizationId,
+            actorAccountId: member.id,
+            actorEmployeeId: member.employeeId,
+            res,
+            deploymentId,
+            publicKeys: licensePublicKeys,
+            requiredFeature: 'enterprise_tree',
+            sendDenial: false,
+          });
+          if (targetLicense?.allowed !== true) {
+            sendJson(res, 403, {
+              error: '企业树功能已由管理员关闭或未获授权',
+              code: 'organization_feature_disabled',
+              feature: 'enterprise_tree',
+            });
+            return;
+          }
+          featureLicenseSummary = targetLicense.summary;
+        }
+
+        const configuredFeatures =
+          await repository.getOrganizationFeatures(organizationId);
+        const featureState = organizationFeatureState(
+          configuredFeatures,
+          featureLicenseSummary,
+        );
+        if (isCrossOrganization && !featureState.effective.enterprise_tree) {
+          sendJson(res, 403, {
+            error: '企业树功能已由管理员关闭或未获授权',
+            code: 'organization_feature_disabled',
+            feature: 'enterprise_tree',
+          });
+          return;
+        }
+        const [organization, members, structure, park] = await Promise.all([
+          repository.getOrganization(organizationId),
+          repository.listAccounts(organizationId),
+          repository.listOrganizationStructure(organizationId),
+          featureState.effective.park_service
+            ? clusteredOrganizationParkView(repository, organizationId)
+            : Promise.resolve(null),
         ]);
         const presence = options.sharedState
           ? await options.sharedState.listAccountPresence(
-              member.organizationId,
+              organizationId,
               members.map((account) => account.id),
             )
           : [];
@@ -1790,9 +2054,9 @@ export function createClusteredEnterpriseServer(
               presenceByAccount.get(account.id)?.lastSeenAt ?? null,
           })),
           employeeCount: members.filter((account) => account.employeeId).length,
-          structure,
-          features,
-          park: null,
+          structure: publicOrganizationStructure(structure),
+          features: featureState.effective,
+          park,
         });
         return;
       }
@@ -1817,10 +2081,13 @@ export function createClusteredEnterpriseServer(
       }
 
       if (path === '/enterprise/organization/features' && method === 'GET') {
+        const state = organizationFeatureState(
+          await repository.getOrganizationFeatures(member.organizationId),
+          activeLicenseSummary!,
+        );
         sendJson(res, 200, {
-          features: await repository.getOrganizationFeatures(
-            member.organizationId,
-          ),
+          features: state.effective,
+          ...state,
         });
         return;
       }
@@ -1834,24 +2101,60 @@ export function createClusteredEnterpriseServer(
           return;
         }
         const body = await readJsonBody(req);
-        const featureNames = [
+        if (typeof body.feishu_auto_reply === 'boolean') {
+          sendJson(res, 400, {
+            error: 'clustered storage does not support feishu_auto_reply yet',
+            code: 'organization_feature_not_supported',
+            feature: 'feishu_auto_reply',
+          });
+          return;
+        }
+        const directFeatureNames = [
           'enterprise_tree',
           'direct_messages',
           'atoa',
-          'park_services',
           'knowledge',
           'skill_market',
         ] as const;
-        const patch: Partial<Record<(typeof featureNames)[number], boolean>> =
-          {};
-        for (const feature of featureNames) {
+        const patch: Partial<PostgresEnterpriseFeatures> = {};
+        for (const feature of directFeatureNames) {
           if (typeof body[feature] === 'boolean')
             patch[feature] = body[feature];
         }
+        if (typeof body.park_service === 'boolean') {
+          patch.park_services = body.park_service;
+        } else if (typeof body.park_services === 'boolean') {
+          // Accept the legacy clustered wire name while all new clients use
+          // the canonical singular organization feature key.
+          patch.park_services = body.park_services;
+        }
+        if (Object.keys(patch).length === 0) {
+          sendJson(res, 400, {
+            error: 'at least one valid organization feature is required',
+            code: 'organization_feature_patch_empty',
+          });
+          return;
+        }
+        const updated = await repository.updateOrganizationFeatures(
+          member.organizationId,
+          patch,
+        );
+        const state = organizationFeatureState(updated, activeLicenseSummary!);
         sendJson(res, 200, {
-          features: await repository.updateOrganizationFeatures(
-            member.organizationId,
-            patch,
+          features: state.effective,
+          ...state,
+        });
+        return;
+      }
+
+      if (path === '/enterprise/organization/departments' && method === 'GET') {
+        if (!member.isAdmin) {
+          sendJson(res, 403, { error: 'administrator permission required' });
+          return;
+        }
+        sendJson(res, 200, {
+          structure: publicOrganizationStructure(
+            await repository.listOrganizationStructure(member.organizationId),
           ),
         });
         return;
@@ -2333,6 +2636,17 @@ export function createClusteredEnterpriseServer(
             requiredFeature: 'atoa',
           });
           if (!atoaLicense) return;
+          const configured = publicOrganizationFeatures(
+            await repository.getOrganizationFeatures(member.organizationId),
+          );
+          if (!configured.atoa) {
+            sendJson(res, 403, {
+              error: 'organization feature is disabled',
+              code: 'organization_feature_disabled',
+              feature: 'atoa',
+            });
+            return;
+          }
         }
         const message = await repository.sendE2eeDirectMessage({
           organizationId: member.organizationId,

@@ -41,7 +41,11 @@ afterEach(() => {
   }
 });
 
-describe('renderer internal-test build switch', () => {
+// Creating the first production renderer config loads webpack and
+// HtmlWebpackPlugin. Under the full parallel Desktop suite, that integration
+// check can legitimately contend for CPU well beyond Vitest's 5 s unit-test
+// default even though the five assertions are synchronous and deterministic.
+describe('renderer internal-test build switch', { timeout: 15_000 }, () => {
   it('pins every renderer dependency to the desktop React 18 singleton', () => {
     const config = createRendererConfig({}, { mode: 'production' });
     const normalize = (value) => value.replaceAll('\\', '/');

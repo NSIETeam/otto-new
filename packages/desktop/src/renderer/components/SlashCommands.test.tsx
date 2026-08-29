@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent, screen } from '@testing-library/react';
+import { act, render, fireEvent, screen } from '@testing-library/react';
 import type { ModelInfo } from 'otto-server';
 import {
   filterCommands,
@@ -165,7 +165,7 @@ describe('斜杠命令面板（Composer 集成）', () => {
     expect(onNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it('Esc 关闭面板并保留文本，之后 Enter 变回发送', () => {
+  it('Esc 关闭面板并保留文本，之后 Enter 变回发送', async () => {
     const { textarea, onSend } = renderComposer();
     type(textarea, '/new');
     expect(screen.queryByRole('listbox', { name: '斜杠命令' })).toBeTruthy();
@@ -175,15 +175,15 @@ describe('斜杠命令面板（Composer 集成）', () => {
     expect(screen.queryByRole('listbox', { name: '斜杠命令' })).toBeNull();
 
     // 面板关闭后 Enter = 发送。
-    fireEvent.keyDown(textarea, { key: 'Enter' });
+    await act(async () => fireEvent.keyDown(textarea, { key: 'Enter' }));
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend.mock.calls[0][0]).toBe('/new');
   });
 
-  it('面板关闭时（普通文本）Enter 正常发送、执行回调不触发', () => {
+  it('面板关闭时（普通文本）Enter 正常发送、执行回调不触发', async () => {
     const { textarea, onSend, onNewChat } = renderComposer();
     type(textarea, '普通消息');
-    fireEvent.keyDown(textarea, { key: 'Enter' });
+    await act(async () => fireEvent.keyDown(textarea, { key: 'Enter' }));
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend.mock.calls[0][0]).toBe('普通消息');
     expect(onNewChat).not.toHaveBeenCalled();

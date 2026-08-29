@@ -10,6 +10,12 @@ import type { Database } from '../data_platform/index.js';
 
 export type OrganizationFeatures = Record<OrganizationFeatureKey, boolean>;
 
+export interface OrganizationFeatureState {
+  configured: OrganizationFeatures;
+  entitled: OrganizationFeatures;
+  effective: OrganizationFeatures;
+}
+
 export const DEFAULT_ORGANIZATION_FEATURES: Readonly<OrganizationFeatures> = {
   enterprise_tree: true,
   park_service: true,

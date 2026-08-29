@@ -201,6 +201,8 @@ describe('model gateway composition', () => {
   });
 
   it('isolates personal usage and aggregates models and UTC days', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-29T00:00:00.000Z'));
     const database = createDatabase();
     database.exec(`
       INSERT INTO organizations (id) VALUES ('org-b');
@@ -316,6 +318,7 @@ describe('model gateway composition', () => {
       expect(serialized).not.toContain('model-other');
     } finally {
       database.close();
+      vi.useRealTimers();
     }
   });
 });

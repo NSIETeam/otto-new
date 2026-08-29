@@ -69,6 +69,20 @@ type MutableOrganizationDepartmentNode = OrganizationDepartmentNode & {
 
 export interface OrganizationPageProps {
   enterpriseAccount?: EnterpriseAccount;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveEnterpriseTree?: boolean;
+  /** Same-organization directory baseline; only true after authoritative feature state loads. */
+  baselineEnterpriseTreeAvailable?: boolean;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveParkService?: boolean;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveDirectMessages?: boolean;
+  /** Same-organization messaging baseline; only true after authoritative feature state loads. */
+  baselineDirectMessagesAvailable?: boolean;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveAtoa?: boolean;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveKnowledge?: boolean;
   schedules?: readonly ScheduleItemInfo[];
   organizationRefreshRevision?: number;
   enterpriseUnreadCounts?: EnterpriseUnreadCounts;
@@ -247,6 +261,13 @@ function departmentMatchesQuery(department: OrganizationDepartmentNode, query: s
 
 export function OrganizationPage({
   enterpriseAccount,
+  effectiveEnterpriseTree = false,
+  baselineEnterpriseTreeAvailable,
+  effectiveParkService = false,
+  effectiveDirectMessages = false,
+  baselineDirectMessagesAvailable,
+  effectiveAtoa = false,
+  effectiveKnowledge = false,
   schedules = [],
   organizationRefreshRevision = 0,
   enterpriseUnreadCounts = {},
@@ -271,9 +292,25 @@ export function OrganizationPage({
   const [friendNote, setFriendNote] = useState('');
   const handledChatRequest = useRef(0);
   const hasAuth = isAuthenticatedEnterpriseAccount(enterpriseAccount);
+  const canUseOwnOrganizationDirectory =
+    baselineEnterpriseTreeAvailable ?? effectiveEnterpriseTree;
+  const canUseLocalDirectMessages =
+    baselineDirectMessagesAvailable ?? effectiveDirectMessages;
 
   useEffect(() => {
     if (!hasAuth) return;
+    const crossOrganizationView = Boolean(
+      selectedOrganizationId &&
+      selectedOrganizationId !== enterpriseAccount?.organizationId,
+    );
+    if (
+      (crossOrganizationView && !effectiveEnterpriseTree) ||
+      (!crossOrganizationView && !canUseOwnOrganizationDirectory)
+    ) {
+      setOrgView(null);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     const load = async (showSpinner: boolean): Promise<void> => {
       if (showSpinner) setLoading(true);
@@ -292,18 +329,46 @@ export function OrganizationPage({
     void load(true);
     const timer = window.setInterval(() => void load(false), ORGANIZATION_PAGE_REFRESH_MS);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [hasAuth, enterpriseAccount?.organizationId, enterpriseAccount?.updatedAt, organizationRefreshRevision, selectedOrganizationId]);
+  }, [
+    effectiveEnterpriseTree,
+    canUseOwnOrganizationDirectory,
+    enterpriseAccount?.organizationId,
+    enterpriseAccount?.updatedAt,
+    hasAuth,
+    organizationRefreshRevision,
+    selectedOrganizationId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !effectiveEnterpriseTree &&
+      selectedOrganizationId &&
+      selectedOrganizationId !== enterpriseAccount?.organizationId
+    ) {
+      setSelectedOrganizationId(null);
+      setExpandedNodes({});
+      setQuery('');
+    }
+  }, [effectiveEnterpriseTree, enterpriseAccount?.organizationId, selectedOrganizationId]);
 
   const openChat = useCallback((member: EnterpriseOrganizationView['members'][number]) => {
+    if (!canUseLocalDirectMessages) return;
     setChatMembers((current) => [
       ...current.filter((candidate) => candidate.id !== member.id),
       member,
     ]);
-  }, []);
+  }, [canUseLocalDirectMessages]);
+
+  useEffect(() => {
+    if (!canUseLocalDirectMessages) setChatMembers([]);
+  }, [canUseLocalDirectMessages]);
 
   useEffect(() => {
     const isParkAdmin = Boolean(
-      !selectedOrganizationId && enterpriseAccount?.isAdmin && orgView?.park?.isAdminOrganization,
+      effectiveParkService &&
+      !selectedOrganizationId &&
+      enterpriseAccount?.isAdmin &&
+      orgView?.park?.isAdminOrganization,
     );
     if (!isParkAdmin) {
       setParkTenants([]);
@@ -322,10 +387,15 @@ export function OrganizationPage({
       if (!cancelled) setParkTenantsLoading(false);
     });
     return () => { cancelled = true; };
-  }, [enterpriseAccount?.isAdmin, orgView?.park?.isAdminOrganization, selectedOrganizationId]);
+  }, [
+    effectiveParkService,
+    enterpriseAccount?.isAdmin,
+    orgView?.park?.isAdminOrganization,
+    selectedOrganizationId,
+  ]);
 
   useEffect(() => {
-    if (!enterpriseDirectChatOpenRequest || !orgView) return;
+    if (!canUseLocalDirectMessages || !enterpriseDirectChatOpenRequest || !orgView) return;
     if (handledChatRequest.current === enterpriseDirectChatOpenRequest.requestId) return;
     const member = orgView.members.find(
       (candidate) => candidate.id === enterpriseDirectChatOpenRequest.peerAccountId
@@ -335,7 +405,13 @@ export function OrganizationPage({
     if (!member) return;
     handledChatRequest.current = enterpriseDirectChatOpenRequest.requestId;
     openChat(member);
-  }, [enterpriseDirectChatOpenRequest, orgView, enterpriseAccount?.id, openChat]);
+  }, [
+    canUseLocalDirectMessages,
+    enterpriseDirectChatOpenRequest,
+    orgView,
+    enterpriseAccount?.id,
+    openChat,
+  ]);
 
   const closeChat = useCallback((memberId: string) => {
     setChatMembers((current) => current.filter((candidate) => candidate.id !== memberId));
@@ -363,7 +439,10 @@ export function OrganizationPage({
 
   const organizationName = orgView?.organization?.name ?? '组织架构';
   const isParkAdmin = Boolean(
-    !selectedOrganizationId && enterpriseAccount?.isAdmin && orgView?.park?.isAdminOrganization,
+    effectiveParkService &&
+    !selectedOrganizationId &&
+    enterpriseAccount?.isAdmin &&
+    orgView?.park?.isAdminOrganization,
   );
   const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN');
   const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
@@ -430,7 +509,7 @@ export function OrganizationPage({
         </div>
         <span className={`otto-org-page__presence${member.ottoOnline ? ' is-online' : ''}`} aria-label={member.ottoOnline ? '在线' : '离线'} />
         {unread > 0 ? <span className="otto-org-page__unread" role="status" aria-label={`${unread} 条未读`}>{unread}</span> : null}
-        {!isSelf ? (
+        {!isSelf && canUseLocalDirectMessages ? (
           <button type="button" className="otto-org-page__chat-btn" onClick={() => openChat(member)} aria-label={`与 ${member.name} 聊天`}>
             发消息
           </button>
@@ -477,6 +556,12 @@ export function OrganizationPage({
         <button type="button" onClick={backFromCurrentView}>{selectedOrganizationId ? '返回园区总览' : '返回对话'}</button>
       </header>
 
+      {!effectiveParkService && orgView?.park ? (
+        <div className="otto-org-page__empty otto-org-page__empty--compact" role="status">
+          园区服务未启用或当前服务器未授权，当前仅显示本企业组织。
+        </div>
+      ) : null}
+
       {loading && !orgView ? <div className="otto-org-page__empty">正在加载组织信息…</div>
         : error ? <div className="otto-org-page__empty" role="alert">{error}</div>
           : !orgView ? <div className="otto-org-page__empty">组织信息不可用</div>
@@ -493,7 +578,12 @@ export function OrganizationPage({
                 tenants={parkTenants}
                 loading={parkTenantsLoading}
                 error={parkTenantsError}
-                onSelect={(id) => setSelectedOrganizationId(id)}
+                canViewTenantOrganizations={effectiveEnterpriseTree}
+                onSelect={(id) => {
+                  if (id === enterpriseAccount?.organizationId || effectiveEnterpriseTree) {
+                    setSelectedOrganizationId(id);
+                  }
+                }}
               />
             ) : (
               <div className="otto-org-page__body">
@@ -528,12 +618,14 @@ export function OrganizationPage({
               </div>
             )}
 
-      {chatMembers.map((member, index) => (
+      {canUseLocalDirectMessages ? chatMembers.map((member, index) => (
         <DirectMessagePanel
           key={member.id}
           member={member}
           currentAccount={enterpriseAccount}
           schedules={schedules}
+          effectiveAtoa={effectiveAtoa}
+          effectiveKnowledge={effectiveKnowledge}
           initialPosition={{
             left: (typeof window !== 'undefined' && window.innerWidth <= 760 ? 12 : 232) + ((index % 7) * 28),
             top: (typeof window !== 'undefined' && window.innerWidth <= 760 ? 12 : 48) + ((index % 7) * 28),
@@ -543,7 +635,7 @@ export function OrganizationPage({
           onMessageRead={onMessageRead}
           onClose={() => closeChat(member.id)}
         />
-      ))}
+      )) : null}
     </div>
   );
 }
@@ -553,12 +645,14 @@ function ParkOrganizationOverview({
   tenants,
   loading,
   error,
+  canViewTenantOrganizations,
   onSelect,
 }: {
   adminOrganization: ParkAdminOrganizationSummary | null;
   tenants: EnterpriseParkTenantOrganization[];
   loading: boolean;
   error: string | null;
+  canViewTenantOrganizations: boolean;
   onSelect: (organizationId: string) => void;
 }): React.JSX.Element {
   const [query, setQuery] = useState('');
@@ -613,14 +707,25 @@ function ParkOrganizationOverview({
             <IconSearch size={16} />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索企业或产业类型" aria-label="搜索企业或产业类型" />
           </label>
-          <span>{normalizedQuery ? `${visibleTenants.length} 家匹配企业` : '选择企业查看组织架构'}</span>
+          <span>{!canViewTenantOrganizations
+            ? '企业组织树未启用或当前服务器未授权，不会请求入驻企业组织数据。'
+            : normalizedQuery
+              ? `${visibleTenants.length} 家匹配企业`
+              : '选择企业查看组织架构'}</span>
         </div>
         {loading ? <div className="otto-org-page__empty otto-org-page__empty--compact">正在加载入驻企业…</div>
           : error ? <div className="otto-org-page__empty otto-org-page__empty--compact" role="alert">{error}</div>
             : visibleTenants.length ? (
               <div className="otto-org-page__tenant-grid">
                 {visibleTenants.map((tenant) => (
-                  <button key={tenant.id} type="button" className="otto-org-page__tenant-card" onClick={() => onSelect(tenant.id)}>
+                  <button
+                    key={tenant.id}
+                    type="button"
+                    className="otto-org-page__tenant-card"
+                    disabled={!canViewTenantOrganizations}
+                    title={canViewTenantOrganizations ? '查看企业组织架构' : '当前企业组织树未生效'}
+                    onClick={() => onSelect(tenant.id)}
+                  >
                     <span className="otto-org-page__tenant-brand"><IconBuilding size={18} /></span>
                     <span className="otto-org-page__tenant-copy">
                       <strong>{tenant.name}</strong>

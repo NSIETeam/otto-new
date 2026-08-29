@@ -597,6 +597,40 @@ export interface EnterpriseOrganizationFeatures {
   skill_market: boolean;
 }
 
+export interface EnterpriseOrganizationFeatureState {
+  configured: EnterpriseOrganizationFeatures;
+  entitled: EnterpriseOrganizationFeatures;
+  effective: EnterpriseOrganizationFeatures;
+}
+
+interface EnterpriseOrganizationFeatureResponse
+  extends Partial<EnterpriseOrganizationFeatureState> {
+  features: EnterpriseOrganizationFeatures;
+}
+
+function normalizeOrganizationFeatureState(
+  response: EnterpriseOrganizationFeatureResponse,
+): EnterpriseOrganizationFeatureState {
+  const disabled: EnterpriseOrganizationFeatures = {
+    enterprise_tree: false,
+    park_service: false,
+    feishu_auto_reply: false,
+    direct_messages: false,
+    atoa: false,
+    knowledge: false,
+    skill_market: false,
+  };
+  // Older servers may expose configured values as `features`. Preserve those
+  // values for the switches, but do not authorize a protected request unless
+  // the server explicitly supplies the license-effective layer.
+  const effective = response.effective ?? disabled;
+  return {
+    configured: { ...(response.configured ?? response.features) },
+    entitled: { ...(response.entitled ?? disabled) },
+    effective: { ...effective },
+  };
+}
+
 export type EnterpriseModuleUpdateRollout =
   'off' | 'canary' | 'stable' | 'required';
 
@@ -3045,15 +3079,19 @@ export class EnterpriseClient {
   }
 
   async getOrganizationFeatures(): Promise<EnterpriseOrganizationFeatures> {
+    return (await this.getOrganizationFeatureState()).effective;
+  }
+
+  async getOrganizationFeatureState(): Promise<EnterpriseOrganizationFeatureState> {
     if (!this.token) throw new Error('登录已失效，请重新登录');
     await this.assertCompatibleServer(this.serverUrl, [
       'organization_feature_switches_v1',
     ]);
-    return (
-      await this.request<{ features: EnterpriseOrganizationFeatures }>(
+    return normalizeOrganizationFeatureState(
+      await this.request<EnterpriseOrganizationFeatureResponse>(
         '/enterprise/organization/features',
-      )
-    ).features;
+      ),
+    );
   }
 
   async getModuleUpdates(): Promise<EnterpriseModuleUpdateManifest> {
@@ -3085,12 +3123,12 @@ export class EnterpriseClient {
     await this.assertCompatibleServer(this.serverUrl, [
       'organization_feature_switches_v1',
     ]);
-    return (
-      await this.request<{ features: EnterpriseOrganizationFeatures }>(
+    return normalizeOrganizationFeatureState(
+      await this.request<EnterpriseOrganizationFeatureResponse>(
         '/enterprise/organization/features',
         { method: 'PATCH', body: JSON.stringify(patch) },
-      )
-    ).features;
+      ),
+    ).effective;
   }
 
   async listOrganizationDepartments(): Promise<

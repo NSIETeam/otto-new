@@ -116,7 +116,7 @@ describe('clustered PostgreSQL license execution policy', () => {
     });
   });
 
-  it('requires an explicit knowledge entitlement instead of inheriting it from enterprise tree', () => {
+  it('expands bundled capabilities with the shared product feature catalog', () => {
     expect(
       evaluateClusteredLicense({
         ...base,
@@ -124,9 +124,8 @@ describe('clustered PostgreSQL license execution policy', () => {
         requiredFeature: 'knowledge',
       }),
     ).toMatchObject({
-      allowed: false,
-      code: 'commercial_module_not_entitled',
-      feature: 'knowledge',
+      allowed: true,
+      summary: { modules: ['enterprise_tree'] },
     });
   });
 

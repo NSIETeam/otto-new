@@ -1363,6 +1363,7 @@ describe('OrganizationTree', () => {
       <OrganizationTree
         workspace={personalWorkspace}
         enterpriseAccount={authenticatedEnterpriseAccount}
+        effectiveAtoa
       />,
     );
 
@@ -1410,6 +1411,7 @@ describe('OrganizationTree', () => {
       <OrganizationTree
         workspace={personalWorkspace}
         enterpriseAccount={authenticatedEnterpriseAccount}
+        effectiveAtoa
       />,
     );
     await waitFor(() => expect(enterpriseOrganizationView).toHaveBeenCalledOnce());

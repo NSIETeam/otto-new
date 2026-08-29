@@ -127,4 +127,18 @@ describe('双方 Otto 协商发起弹窗', () => {
     await screen.findByText('可先询问双方候选时间。');
     expect(collectContext).toHaveBeenCalledWith([]);
   });
+
+  it('企业知识未生效时不向用户提供该数据源', () => {
+    render(
+      <AtoaConsultDialog
+        account={account}
+        member={member}
+        schedules={[]}
+        onClose={vi.fn()}
+        onSent={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('checkbox', { name: '企业知识' })).toBeNull();
+  });
 });

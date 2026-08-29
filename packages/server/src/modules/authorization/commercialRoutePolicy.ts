@@ -103,7 +103,7 @@ export function commercialFeatureForEnterpriseRoute(
   }
   if (
     path === '/enterprise/organization/features' &&
-    (context.method ?? 'GET').toUpperCase() === 'GET'
+    ['GET', 'PATCH', 'PUT'].includes((context.method ?? 'GET').toUpperCase())
   ) {
     return null;
   }

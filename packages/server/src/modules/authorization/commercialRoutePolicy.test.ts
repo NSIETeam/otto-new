@@ -77,7 +77,7 @@ describe('commercial enterprise route policy', () => {
       commercialFeatureForEnterpriseRoute('/enterprise/organization/features', {
         method: 'PATCH',
       }),
-    ).toBe('enterprise_tree');
+    ).toBeNull();
   });
 
   it.each([

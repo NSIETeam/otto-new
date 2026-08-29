@@ -3,7 +3,10 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { OrganizationFeatures } from './organizationFeatureRepository.js';
+import type {
+  OrganizationFeatures,
+  OrganizationFeatureState,
+} from './organizationFeatureRepository.js';
 import type { OrganizationPositionRoleMapping } from './organizationStructureRepository.js';
 
 export interface OrganizationRouteMemberAccount {
@@ -24,6 +27,7 @@ export interface OrganizationRouteServices {
     organizationId: string,
   ): OrganizationFeatures;
   getOrganizationFeatures(organizationId: string): OrganizationFeatures;
+  getOrganizationFeatureState(organizationId: string): OrganizationFeatureState;
   updateOrganizationFeatures(
     organizationId: string,
     patch: Partial<OrganizationFeatures>,
@@ -98,13 +102,10 @@ export async function handleOrganizationRoute({
 }: OrganizationRouteDeps): Promise<boolean> {
   if (path === '/enterprise/organization/features' && method === 'GET') {
     const organizationId = memberAccount!.organizationId;
-    const configured = services.getConfiguredOrganizationFeatures(organizationId);
+    const state = services.getOrganizationFeatureState(organizationId);
     sendJSON(res, 200, {
-      features: {
-        ...services.getOrganizationFeatures(organizationId),
-        enterprise_tree: configured.enterprise_tree,
-        direct_messages: configured.direct_messages,
-      },
+      features: state.effective,
+      ...state,
     });
     return true;
   }
@@ -116,11 +117,16 @@ export async function handleOrganizationRoute({
     }
     const body = await readBody(req);
     try {
+      services.updateOrganizationFeatures(
+        memberAccount!.organizationId,
+        body as Partial<OrganizationFeatures>,
+      );
+      const state = services.getOrganizationFeatureState(
+        memberAccount!.organizationId,
+      );
       sendJSON(res, 200, {
-        features: services.updateOrganizationFeatures(
-          memberAccount!.organizationId,
-          body as Partial<OrganizationFeatures>,
-        ),
+        features: state.effective,
+        ...state,
       });
     } catch (error) {
       sendJSON(res, 400, { error: error instanceof Error ? error.message : '功能开关保存失败' });

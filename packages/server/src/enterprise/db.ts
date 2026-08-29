@@ -658,6 +658,7 @@ export type OrganizationFeatures = IdentityOrganizationFeatures;
 export const {
   getConfiguredOrganizationFeatures,
   getOrganizationFeatures,
+  getOrganizationFeatureState,
   updateOrganizationFeatures,
   isOrganizationFeatureEnabled,
   requireOrganizationFeature,

@@ -17,6 +17,7 @@ afterEach(() => {
   cleanup();
   for (const key of [
     'enterpriseOrganizationFeaturesGet',
+    'enterpriseOrganizationFeatureStateGet',
     'enterpriseOrganizationDepartments',
     'enterpriseParkView',
     'enterpriseParkServices',
@@ -110,6 +111,11 @@ describe('park service specialist assignments', () => {
 
     Object.assign(window.otto, {
       enterpriseOrganizationFeaturesGet: vi.fn(async () => features),
+      enterpriseOrganizationFeatureStateGet: vi.fn(async () => ({
+        configured: features,
+        entitled: features,
+        effective: features,
+      })),
       enterpriseOrganizationDepartments: vi.fn(async () => []),
       enterpriseParkView: vi.fn(async () => park),
       enterpriseParkServices: vi.fn(async () => [service]),
@@ -184,6 +190,11 @@ describe('organization structure editor', () => {
     const updatePosition = vi.fn(async () => departments[0].positions[0]);
     Object.assign(window.otto, {
       enterpriseOrganizationFeaturesGet: vi.fn(async () => organizationFeatures),
+      enterpriseOrganizationFeatureStateGet: vi.fn(async () => ({
+        configured: organizationFeatures,
+        entitled: organizationFeatures,
+        effective: organizationFeatures,
+      })),
       enterpriseOrganizationDepartments: vi.fn(async () => departments),
       enterpriseOrganizationPositionCreate: createPosition,
       enterpriseOrganizationPositionUpdate: updatePosition,
@@ -218,5 +229,47 @@ describe('organization structure editor', () => {
       title: '宣传主管',
       roleMapping: 'member',
     }));
+  });
+});
+
+describe('commercial feature entitlement boundaries', () => {
+  it('shows configured-but-unlicensed capabilities without calling protected APIs', async () => {
+    const effective = {
+      ...features,
+      enterprise_tree: false,
+      park_service: false,
+      direct_messages: false,
+    };
+    const configured = {
+      ...effective,
+      enterprise_tree: true,
+      park_service: true,
+      direct_messages: true,
+    };
+    const departments = vi.fn(async () => { throw new Error('must not be called'); });
+    const parkView = vi.fn(async () => { throw new Error('commercial module is not entitled'); });
+    Object.assign(window.otto, {
+      enterpriseOrganizationFeaturesGet: vi.fn(async () => effective),
+      enterpriseOrganizationFeatureStateGet: vi.fn(async () => ({
+        configured,
+        entitled: effective,
+        effective,
+      })),
+      enterpriseOrganizationDepartments: departments,
+      enterpriseParkView: parkView,
+    });
+
+    render(<EnterpriseAdministrationPanel accounts={[]} activeSection="capabilities" />);
+
+    const treeSwitch = await screen.findByRole('checkbox', { name: /企业组织树/ });
+    const parkSwitch = screen.getByRole('checkbox', { name: /园区服务/ });
+    expect((treeSwitch as HTMLInputElement).checked).toBe(true);
+    expect((parkSwitch as HTMLInputElement).checked).toBe(true);
+    expect(screen.getAllByText('未授权').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('组织结构未获许可证授权')).toBeTruthy();
+    expect(screen.getByText('园区服务未获许可证授权')).toBeTruthy();
+    expect(departments).not.toHaveBeenCalled();
+    expect(parkView).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

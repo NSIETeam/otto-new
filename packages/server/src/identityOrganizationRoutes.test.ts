@@ -10,14 +10,22 @@ import {
 } from './modules/identity_organization/index.js';
 
 function createServices(enterpriseTree = true): OrganizationRouteServices {
+  const configured = {
+    enterprise_tree: enterpriseTree,
+    park_service: true,
+    feishu_auto_reply: true,
+    direct_messages: true,
+    atoa: true,
+    knowledge: true,
+    skill_market: true,
+  };
   return {
-    getOrganizationFeatures: vi.fn(() => ({
-      enterprise_tree: enterpriseTree,
-      park_service: true,
-      feishu_auto_reply: true,
-      direct_messages: true,
-      atoa: true,
-      knowledge: true,
+    getConfiguredOrganizationFeatures: vi.fn(() => configured),
+    getOrganizationFeatures: vi.fn(() => configured),
+    getOrganizationFeatureState: vi.fn(() => ({
+      configured,
+      entitled: { ...configured },
+      effective: { ...configured },
     })),
     updateOrganizationFeatures: vi.fn((_organizationId, patch) => ({
       enterprise_tree: enterpriseTree,
@@ -26,6 +34,7 @@ function createServices(enterpriseTree = true): OrganizationRouteServices {
       direct_messages: true,
       atoa: true,
       knowledge: patch.knowledge ?? true,
+      skill_market: true,
     })),
     listOrganizationStructure: vi.fn(() => []),
     createOrganizationDepartment: vi.fn((input) => ({ id: 'dept-1', ...input })),
@@ -61,6 +70,44 @@ async function dispatch(input: {
 }
 
 describe('identity_organization route service boundary', () => {
+  it('returns configured, entitled and effective feature values without overriding effective flags', async () => {
+    const services = createServices();
+    vi.mocked(services.getOrganizationFeatureState).mockReturnValue({
+      configured: {
+        ...services.getConfiguredOrganizationFeatures('org-safe'),
+        enterprise_tree: true,
+        direct_messages: true,
+      },
+      entitled: {
+        ...services.getConfiguredOrganizationFeatures('org-safe'),
+        enterprise_tree: false,
+        direct_messages: false,
+      },
+      effective: {
+        ...services.getConfiguredOrganizationFeatures('org-safe'),
+        enterprise_tree: false,
+        direct_messages: false,
+      },
+    });
+
+    const result = await dispatch({
+      path: '/enterprise/organization/features',
+      method: 'GET',
+      services,
+      memberAccount: { organizationId: 'org-safe', isAdmin: true },
+    });
+
+    expect(result.responses).toEqual([{
+      status: 200,
+      data: expect.objectContaining({
+        features: expect.objectContaining({ enterprise_tree: false, direct_messages: false }),
+        configured: expect.objectContaining({ enterprise_tree: true, direct_messages: true }),
+        entitled: expect.objectContaining({ enterprise_tree: false, direct_messages: false }),
+        effective: expect.objectContaining({ enterprise_tree: false, direct_messages: false }),
+      }),
+    }]);
+  });
+
   it('rejects a normal member before changing organization feature flags', async () => {
     const services = createServices();
     const result = await dispatch({

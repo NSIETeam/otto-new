@@ -298,6 +298,16 @@ function OttoWorkspaceApp({
       iconSrc: module.iconDataUrl,
     })),
   });
+  const effectiveEnterpriseTree = internalAdminPreview ||
+    moduleCapabilities.organizationFeatures?.enterprise_tree === true;
+  const baselineEnterpriseTreeAvailable = internalAdminPreview ||
+    moduleCapabilities.baselineEnterpriseTreeAvailable;
+  const baselineDirectMessagesAvailable = internalAdminPreview ||
+    moduleCapabilities.baselineDirectMessagesAvailable;
+  const effectiveDirectMessages = internalAdminPreview ||
+    moduleCapabilities.organizationFeatures?.direct_messages === true;
+  const effectiveAtoa = internalAdminPreview ||
+    moduleCapabilities.organizationFeatures?.atoa === true;
   const availableModuleIds = useMemo(
     () => moduleCapabilities.modules.filter((module) => module.availability === 'available').map((module) => module.id),
     [moduleCapabilities.modules],
@@ -388,13 +398,20 @@ function OttoWorkspaceApp({
     (
       member: EnterpriseOrganizationView['members'][number],
       question: string,
-    ): Promise<EnterpriseDirectMessage> =>
-      new Promise((resolve, reject) => {
+    ): Promise<EnterpriseDirectMessage> => {
+      if (!baselineDirectMessagesAvailable) {
+        return Promise.reject(new Error('企业私聊未启用或当前服务器未授权'));
+      }
+      if (!effectiveAtoa) {
+        return Promise.reject(new Error('Otto 协作未启用或当前服务器未授权'));
+      }
+      return new Promise((resolve, reject) => {
         toolConsultResolver.current?.reject(new Error('已有一项双方 Otto 协商等待处理'));
         toolConsultResolver.current = { resolve, reject };
         setPendingToolConsult({ member, question });
-      }),
-    [],
+      });
+    },
+    [baselineDirectMessagesAvailable, effectiveAtoa],
   );
   const finishToolConsult = useCallback(
     (message: EnterpriseDirectMessage): void => {
@@ -409,6 +426,16 @@ function OttoWorkspaceApp({
     toolConsultResolver.current = null;
     setPendingToolConsult(null);
   }, []);
+  useEffect(() => {
+    if (baselineDirectMessagesAvailable && effectiveAtoa) return;
+    toolConsultResolver.current?.reject(new Error(
+      !baselineDirectMessagesAvailable
+        ? '企业私聊未启用或当前服务器未授权'
+        : 'Otto 协作未启用或当前服务器未授权',
+    ));
+    toolConsultResolver.current = null;
+    setPendingToolConsult(null);
+  }, [baselineDirectMessagesAvailable, effectiveAtoa]);
   useEffect(
     () => () => {
       toolConsultResolver.current?.reject(new Error('账号已切换，双方 Otto 协商已取消'));
@@ -418,7 +445,11 @@ function OttoWorkspaceApp({
   );
 
   useEffect(() => {
-    if (internalAdminPreview || account.accountType === 'personal') return undefined;
+    if (
+      internalAdminPreview ||
+      account.accountType === 'personal' ||
+      !baselineDirectMessagesAvailable
+    ) return undefined;
     let cancelled = false;
     let polling = false;
     let localUnreadCounts: EnterpriseUnreadCounts = {};
@@ -436,9 +467,11 @@ function OttoWorkspaceApp({
       try {
         const [response, federationContacts] = await Promise.all([
           window.otto.enterpriseMessagesUnread(),
-          window.otto.enterpriseFederationContacts().catch(
-            () => [] as EnterpriseFederationContact[],
-          ),
+          effectiveDirectMessages
+            ? window.otto.enterpriseFederationContacts().catch(
+                () => [] as EnterpriseFederationContact[],
+              )
+            : Promise.resolve([] as EnterpriseFederationContact[]),
         ]);
         const notifications = Array.isArray(response) ? response : [];
         if (cancelled) return;
@@ -489,10 +522,21 @@ function OttoWorkspaceApp({
       }
       void tracker.clear();
     };
-  }, [account.accountType, account.id, account.organizationId, internalAdminPreview]);
+  }, [
+    account.accountType,
+    account.id,
+    account.organizationId,
+    baselineDirectMessagesAvailable,
+    effectiveDirectMessages,
+    internalAdminPreview,
+  ]);
 
   useEffect(() => {
-    if (internalAdminPreview || account.accountType === 'personal') return undefined;
+    if (
+      internalAdminPreview ||
+      account.accountType === 'personal' ||
+      !baselineDirectMessagesAvailable
+    ) return undefined;
     let cancelled = false;
     const beat = async (): Promise<void> => {
       try {
@@ -509,7 +553,13 @@ function OttoWorkspaceApp({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [account.accountType, account.id, account.organizationId, internalAdminPreview]);
+  }, [
+    account.accountType,
+    account.id,
+    account.organizationId,
+    baselineDirectMessagesAvailable,
+    internalAdminPreview,
+  ]);
 
   const markEnterpriseDirectMessageRead = useCallback((
     peerAccountId: string,
@@ -542,7 +592,11 @@ function OttoWorkspaceApp({
   }, []);
 
   useEffect(() => {
-    if (internalAdminPreview || account.accountType === 'personal') return undefined;
+    if (
+      internalAdminPreview ||
+      account.accountType === 'personal' ||
+      moduleCapabilities.organizationFeatures?.atoa !== true
+    ) return undefined;
     const processing = new Set<string>();
     const abortController = new AbortController();
     let polling = false;
@@ -573,7 +627,9 @@ function OttoWorkspaceApp({
               currentAccountName: account.name,
               peerName: request.peer?.name ?? '企业同事',
               listMessages: window.otto.enterpriseMessagesList,
-              listKnowledge: () => window.otto.enterpriseKnowledgeList(),
+              listKnowledge: () => moduleCapabilities.organizationFeatures?.knowledge === true
+                ? window.otto.enterpriseKnowledgeList()
+                : Promise.resolve([]),
               workLogRecent: window.otto.workLogRecent,
               schedules: product.state.schedules,
             }),
@@ -626,12 +682,19 @@ function OttoWorkspaceApp({
     account.id,
     account.name,
     internalAdminPreview,
+    moduleCapabilities.organizationFeatures?.atoa,
+    moduleCapabilities.organizationFeatures?.knowledge,
     product.state.schedules,
     requestAtoaPermission,
   ]);
 
   useEffect(() => {
-    if (internalAdminPreview || account.accountType === 'personal') return undefined;
+    if (
+      internalAdminPreview ||
+      account.accountType === 'personal' ||
+      moduleCapabilities.organizationFeatures?.atoa !== true ||
+      moduleCapabilities.organizationFeatures?.direct_messages !== true
+    ) return undefined;
     const processing = new Set<string>();
     const abortController = new AbortController();
     const contextCache = federationAtoaContextCache.current;
@@ -664,7 +727,9 @@ function OttoWorkspaceApp({
       currentAccountName: account.name,
       peerName: task.contact.displayName,
       listMessages: async () => messages,
-      listKnowledge: () => window.otto.enterpriseKnowledgeList(),
+      listKnowledge: () => moduleCapabilities.organizationFeatures?.knowledge === true
+        ? window.otto.enterpriseKnowledgeList()
+        : Promise.resolve([]),
       workLogRecent: window.otto.workLogRecent,
       schedules: product.state.schedules,
     });
@@ -824,6 +889,9 @@ function OttoWorkspaceApp({
     account.id,
     account.name,
     internalAdminPreview,
+    moduleCapabilities.organizationFeatures?.atoa,
+    moduleCapabilities.organizationFeatures?.direct_messages,
+    moduleCapabilities.organizationFeatures?.knowledge,
     product.state.schedules,
     requestAtoaPermission,
   ]);
@@ -1120,7 +1188,11 @@ function OttoWorkspaceApp({
     authorization?: ComposerAuthorizationContext,
   ): Promise<boolean> => {
       let authorizedContext = '';
-      if (edition === 'enterprise' && text.trim()) {
+      if (
+        edition === 'enterprise' &&
+        moduleCapabilities.organizationFeatures?.knowledge === true &&
+        text.trim()
+      ) {
         try {
           const knowledge = await Promise.race([
             window.otto.enterpriseKnowledgeList({ query: text.trim() }),
@@ -1332,6 +1404,50 @@ function OttoWorkspaceApp({
         return;
       }
 
+      const action = typeof tool.parameters === 'object' && tool.parameters !== null
+        ? (tool.parameters as Record<string, unknown>).action
+        : null;
+      const isAtoaAction = action === 'ask_peer_otto' || action === 'consult_peer_otto';
+      const isDirectMessageAction = action === 'send_message' || isAtoaAction;
+      const isBaselineDirectoryAction = action === 'list_members';
+      const isEnterpriseTreeAction = action === 'assign_member_position';
+      if (isBaselineDirectoryAction && !baselineEnterpriseTreeAvailable) {
+        actions.respondToolConfirmation(callId, 'approved', {
+          newContent: JSON.stringify({
+            ok: false,
+            error: '企业组织目录未启用',
+          }),
+        });
+        return;
+      }
+      if (isEnterpriseTreeAction && !effectiveEnterpriseTree) {
+        actions.respondToolConfirmation(callId, 'approved', {
+          newContent: JSON.stringify({
+            ok: false,
+            error: '企业组织树未启用或当前服务器未授权',
+          }),
+        });
+        return;
+      }
+      if (isDirectMessageAction && !baselineDirectMessagesAvailable) {
+        actions.respondToolConfirmation(callId, 'approved', {
+          newContent: JSON.stringify({
+            ok: false,
+            error: '企业私聊未启用或当前服务器未授权',
+          }),
+        });
+        return;
+      }
+      if (isAtoaAction && !effectiveAtoa) {
+        actions.respondToolConfirmation(callId, 'approved', {
+          newContent: JSON.stringify({
+            ok: false,
+            error: 'Otto 协作未启用或当前服务器未授权',
+          }),
+        });
+        return;
+      }
+
       void executeEnterpriseCollaborationRelay(tool.parameters, account, {
         getOrganizationView: window.otto.enterpriseOrganizationView,
         sendMessage: window.otto.enterpriseMessageSend,
@@ -1350,7 +1466,15 @@ function OttoWorkspaceApp({
           });
         });
     },
-    [account, actions, requestToolConsult],
+    [
+      account,
+      actions,
+      baselineEnterpriseTreeAvailable,
+      baselineDirectMessagesAvailable,
+      effectiveAtoa,
+      effectiveEnterpriseTree,
+      requestToolConsult,
+    ],
   );
 
   const openModelSettings = (): void => {
@@ -1412,11 +1536,38 @@ function OttoWorkspaceApp({
         onLogout={onLogout}
         unreadSessions={state.unreadSessions}
       />
-      <ParkServicesPlugin internalAdminPreview={internalAdminPreview} />
+      <ParkServicesPlugin
+        internalAdminPreview={internalAdminPreview}
+        effectiveParkService={
+          internalAdminPreview || (
+            edition === 'enterprise' &&
+            moduleCapabilities.organizationFeatures?.park_service === true
+          )
+        }
+      />
 
       {mainView === 'organization' ? (
         <OrganizationPage
           enterpriseAccount={account}
+          effectiveEnterpriseTree={
+            effectiveEnterpriseTree
+          }
+          baselineEnterpriseTreeAvailable={baselineEnterpriseTreeAvailable}
+          effectiveParkService={
+            internalAdminPreview ||
+            moduleCapabilities.organizationFeatures?.park_service === true
+          }
+          effectiveDirectMessages={
+            effectiveDirectMessages
+          }
+          baselineDirectMessagesAvailable={baselineDirectMessagesAvailable}
+          effectiveAtoa={
+            effectiveAtoa
+          }
+          effectiveKnowledge={
+            internalAdminPreview ||
+            moduleCapabilities.organizationFeatures?.knowledge === true
+          }
           schedules={product.state.schedules}
           organizationRefreshRevision={organizationRefreshRevision}
           enterpriseUnreadCounts={enterpriseUnreadCounts}
@@ -1429,6 +1580,14 @@ function OttoWorkspaceApp({
       ) : mainView === 'inbox' ? (
         <InboxPage
           enterpriseAccount={account}
+          effectiveDirectMessages={
+            effectiveDirectMessages
+          }
+          baselineDirectMessagesAvailable={baselineDirectMessagesAvailable}
+          baselineEnterpriseTreeAvailable={baselineEnterpriseTreeAvailable}
+          effectiveAtoa={
+            effectiveAtoa
+          }
           enterpriseUnreadCounts={enterpriseUnreadCounts}
           federationContactOpenRequest={enterpriseFederationChatOpenRequest}
           onFederationMessageRead={markEnterpriseFederationMessageRead}
@@ -1464,7 +1623,10 @@ function OttoWorkspaceApp({
         <AccountManagementPage
           currentAccount={account}
           onBack={() => setMainView('chat')}
-          onOrganizationChanged={() => setOrganizationRefreshRevision((value) => value + 1)}
+          onOrganizationChanged={() => {
+            setOrganizationRefreshRevision((value) => value + 1);
+            moduleCapabilities.retry();
+          }}
         />
       ) : mainView === 'agents' ? (
         <AgentGallery
@@ -1510,7 +1672,9 @@ function OttoWorkspaceApp({
               onDelete={product.actions.deleteSchedule}
               onBack={() => setMainView('chat')}
             />
-          ) : mainView === 'skillzone' && edition === 'enterprise' ? (
+          ) : mainView === 'skillzone' &&
+            edition === 'enterprise' &&
+            moduleCapabilities.organizationFeatures?.skill_market === true ? (
             <SkillZonePage
               accountId={account.id}
               isAdmin={account.isAdmin}
@@ -1637,7 +1801,10 @@ function OttoWorkspaceApp({
       />
       <EnterpriseMemoryDialog
         key={`${moduleWorkspaceScopeKey}:enterprise-memory`}
-        open={moduleModal?.kind === 'enterprise-memory'}
+        open={
+          moduleModal?.kind === 'enterprise-memory' &&
+          moduleCapabilities.organizationFeatures?.knowledge === true
+        }
         role={centralIdentity.role}
         onClose={() => setModuleModal(null)}
       />
@@ -1746,11 +1913,15 @@ function OttoWorkspaceApp({
         />
       ) : null}
 
-      {pendingToolConsult ? (
+      {pendingToolConsult && baselineDirectMessagesAvailable && effectiveAtoa ? (
         <AtoaConsultDialog
           account={account}
           member={pendingToolConsult.member}
           schedules={product.state.schedules}
+          effectiveKnowledge={
+            internalAdminPreview ||
+            moduleCapabilities.organizationFeatures?.knowledge === true
+          }
           initialQuestion={pendingToolConsult.question}
           onClose={cancelToolConsult}
           onSent={finishToolConsult}

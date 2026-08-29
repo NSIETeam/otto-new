@@ -4,6 +4,7 @@
 
 import {
   canonicalLicenseCapabilityId,
+  getLicenseCapabilityFeatures,
   type OrganizationFeatureKey,
 } from '../../productModules.js';
 import { createHash } from 'node:crypto';
@@ -122,6 +123,20 @@ function denied(
 }
 
 /**
+ * Expands signed capability ids through the shared product catalog. Keeping
+ * this in the clustered policy makes admission and feature discovery use the
+ * same authority as the SQLite deployment.
+ */
+export function clusteredLicenseModulesEntitleFeature(
+  modules: readonly string[],
+  feature: OrganizationFeatureKey,
+): boolean {
+  return modules.some((module) =>
+    getLicenseCapabilityFeatures(module)?.includes(feature) === true,
+  );
+}
+
+/**
  * Verifies the original signed claims on every business admission. The
  * normalized PostgreSQL columns are presentation data only and are never an
  * authorization authority.
@@ -230,7 +245,7 @@ export function evaluateClusteredLicense(input: {
     );
   }
   const feature = input.requiredFeature ?? null;
-  if (feature && !modules.includes(feature)) {
+  if (feature && !clusteredLicenseModulesEntitleFeature(modules, feature)) {
     return denied(
       summary,
       'commercial_module_not_entitled',

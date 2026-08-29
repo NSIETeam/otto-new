@@ -1030,6 +1030,104 @@ describe('EnterpriseClient', () => {
       .toMatchObject({ authorization: 'Bearer session-token' });
   });
 
+  it('uses the server effective feature layer for protected UI decisions', async () => {
+    const configured = {
+      enterprise_tree: true,
+      park_service: true,
+      feishu_auto_reply: false,
+      direct_messages: true,
+      atoa: true,
+      knowledge: true,
+      skill_market: true,
+    };
+    const entitled = { ...configured, enterprise_tree: false, park_service: false };
+    const effective = { ...configured, enterprise_tree: false, park_service: false };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, {
+        ...API_V2_HEALTH,
+        capabilities: [
+          ...API_V2_HEALTH.capabilities,
+          'organization_feature_switches_v1',
+        ],
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        account: ACCOUNT,
+        token: 'session-token',
+        expiresAt: '2099-01-01',
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        features: effective,
+        configured,
+        entitled,
+        effective,
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        features: effective,
+        configured,
+        entitled,
+        effective,
+      }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    await client.loginWithPassword('https://enterprise.otto.test', 'staff01', 'password');
+
+    await expect(client.getOrganizationFeatureState()).resolves.toEqual({
+      configured,
+      entitled,
+      effective,
+    });
+    await expect(client.getOrganizationFeatures()).resolves.toEqual(effective);
+  });
+
+  it('fails closed when an older server omits explicit entitlement state', async () => {
+    const legacyFeatures = {
+      enterprise_tree: true,
+      park_service: true,
+      feishu_auto_reply: false,
+      direct_messages: true,
+      atoa: true,
+      knowledge: true,
+      skill_market: true,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, {
+        ...API_V2_HEALTH,
+        capabilities: [
+          ...API_V2_HEALTH.capabilities,
+          'organization_feature_switches_v1',
+        ],
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        account: ACCOUNT,
+        token: 'session-token',
+        expiresAt: '2099-01-01',
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, { features: legacyFeatures }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    await client.loginWithPassword('https://enterprise.otto.test', 'staff01', 'password');
+
+    await expect(client.getOrganizationFeatureState()).resolves.toEqual({
+      configured: legacyFeatures,
+      entitled: {
+        enterprise_tree: false,
+        park_service: false,
+        feishu_auto_reply: false,
+        direct_messages: false,
+        atoa: false,
+        knowledge: false,
+        skill_market: false,
+      },
+      effective: {
+        enterprise_tree: false,
+        park_service: false,
+        feishu_auto_reply: false,
+        direct_messages: false,
+        atoa: false,
+        knowledge: false,
+        skill_market: false,
+      },
+    });
+  });
+
   it('uses the member session to resolve a distribution-bound update policy', async () => {
     const result = {
       status: 'not_configured' as const,

@@ -649,6 +649,8 @@ const IPC = {
   enterprisePresenceHeartbeat: 'otto:enterprise-presence-heartbeat',
   enterpriseOrganizationFeaturesGet:
     'otto:enterprise-organization-features-get',
+  enterpriseOrganizationFeatureStateGet:
+    'otto:enterprise-organization-feature-state-get',
   enterpriseOrganizationFeaturesUpdate:
     'otto:enterprise-organization-features-update',
   enterpriseOrganizationDepartments: 'otto:enterprise-organization-departments',
@@ -3336,6 +3338,10 @@ function registerIpc(): void {
   ipcMain.handle(IPC.enterpriseOrganizationFeaturesGet, async () => {
     loadEnterpriseSession();
     return enterpriseClient.getOrganizationFeatures();
+  });
+  ipcMain.handle(IPC.enterpriseOrganizationFeatureStateGet, async () => {
+    loadEnterpriseSession();
+    return enterpriseClient.getOrganizationFeatureState();
   });
   ipcMain.handle(
     IPC.enterpriseOrganizationFeaturesUpdate,

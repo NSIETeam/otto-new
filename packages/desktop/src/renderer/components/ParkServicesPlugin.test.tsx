@@ -244,6 +244,20 @@ describe('ParkServicesPlugin', () => {
     expect(container.querySelector('.otto-park-fab')).toBeNull();
   });
 
+  it('有效园区能力关闭时不请求受许可证保护的园区接口', async () => {
+    const enterpriseParkView = vi.fn(async () => {
+      throw new Error('commercial module is not entitled');
+    });
+    Object.assign(window.otto, { enterpriseParkView });
+
+    render(<ParkServicesPlugin effectiveParkService={false} />);
+    openDialog();
+    await act(async () => Promise.resolve());
+
+    expect(enterpriseParkView).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('openParkServices 事件打开居中对话框，九项服务与企业星链图齐全', () => {
     render(<ParkServicesPlugin />);
     openDialog();

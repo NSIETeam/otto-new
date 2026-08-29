@@ -167,6 +167,35 @@ describe('authorization organization feature access policy', () => {
     });
 
     try {
+      expect(access.getOrganizationFeatureState('org-a')).toEqual({
+        configured: {
+          enterprise_tree: true,
+          park_service: false,
+          feishu_auto_reply: true,
+          direct_messages: true,
+          atoa: true,
+          knowledge: true,
+          skill_market: true,
+        },
+        entitled: {
+          enterprise_tree: true,
+          park_service: false,
+          feishu_auto_reply: false,
+          direct_messages: true,
+          atoa: true,
+          knowledge: true,
+          skill_market: false,
+        },
+        effective: {
+          enterprise_tree: true,
+          park_service: false,
+          feishu_auto_reply: false,
+          direct_messages: true,
+          atoa: true,
+          knowledge: true,
+          skill_market: false,
+        },
+      });
       expect(access.getOrganizationFeatures('org-a')).toEqual({
         enterprise_tree: true,
         park_service: false,

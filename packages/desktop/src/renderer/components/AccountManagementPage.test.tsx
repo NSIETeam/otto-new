@@ -60,6 +60,7 @@ const FEATURES = {
   direct_messages: true,
   atoa: true,
   knowledge: true,
+  skill_market: true,
 };
 
 const clipboardWrite = vi.fn(async () => undefined);
@@ -114,6 +115,11 @@ beforeEach(() => {
       enterpriseAccountUpdate: vi.fn(async (_id, input) => ({ ...ADMIN, ...input })),
       enterpriseAccountDelete: vi.fn(async (id) => ({ id, deleted: true as const })),
       enterpriseOrganizationFeaturesGet: vi.fn(async () => FEATURES),
+      enterpriseOrganizationFeatureStateGet: vi.fn(async () => ({
+        configured: FEATURES,
+        entitled: FEATURES,
+        effective: FEATURES,
+      })),
       enterpriseOrganizationFeaturesUpdate: vi.fn(async (patch) => ({ ...FEATURES, ...patch })),
       enterpriseOrganizationDepartments: vi.fn(async () => ORGANIZATION_STRUCTURE),
       enterpriseOrganizationDepartmentCreate: vi.fn(async () => ORGANIZATION_STRUCTURE[0]),
@@ -187,6 +193,8 @@ describe('企业管理分区导航', () => {
 
   it('切换分区时只暴露当前管理内容，并保留成员搜索条件', async () => {
     render(<AccountManagementPage currentAccount={ADMIN} onBack={() => undefined} />);
+    await waitFor(() => expect(screen.getByRole('tab', { name: /成员目录/ }).textContent)
+      .toContain('1 名成员'));
     const search = screen.getByRole('textbox', { name: '搜索账号' }) as HTMLInputElement;
     fireEvent.change(search, { target: { value: '管理员' } });
 
@@ -218,6 +226,25 @@ describe('企业管理分区导航', () => {
       }),
     ));
     expect(await screen.findByText(/企业资料已公开/)).toBeTruthy();
+  });
+
+  it('园区服务未授权时不请求受保护的企业资料接口', async () => {
+    const effective = { ...FEATURES, park_service: false };
+    Object.assign(window.otto, {
+      enterpriseOrganizationFeaturesGet: vi.fn(async () => effective),
+      enterpriseOrganizationFeatureStateGet: vi.fn(async () => ({
+        configured: { ...FEATURES, park_service: true },
+        entitled: effective,
+        effective,
+      })),
+    });
+
+    render(<AccountManagementPage currentAccount={ADMIN} onBack={() => undefined} />);
+    openManagementSection('企业资料');
+
+    expect(await screen.findByText('企业资料功能当前不可用')).toBeTruthy();
+    await waitFor(() => expect(window.otto.enterpriseOrganizationFeatureStateGet).toHaveBeenCalled());
+    expect(window.otto.enterprisePublicProfile).not.toHaveBeenCalled();
   });
 });
 
@@ -310,7 +337,7 @@ describe('园区内容发布', () => {
   });
 
   it('管理员只发布公告和问卷，其他七项服务由用户主动申请', async () => {
-    vi.mocked(window.otto.enterpriseParkView).mockResolvedValueOnce({
+    vi.mocked(window.otto.enterpriseParkView).mockResolvedValue({
       id: 'park_acme',
       name: '星河产业园',
       slug: 'acme-park',
@@ -342,7 +369,7 @@ describe('园区内容发布', () => {
   });
 
   it('有中心园区时无障碍文案使用动态品牌', async () => {
-    vi.mocked(window.otto.enterpriseParkView).mockResolvedValueOnce({
+    vi.mocked(window.otto.enterpriseParkView).mockResolvedValue({
       id: 'park_star',
       name: '星火产业园',
       slug: 'star-park',

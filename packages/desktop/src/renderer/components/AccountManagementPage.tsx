@@ -249,7 +249,11 @@ export function AccountManagementPage({
     let cancelled = false;
     setParkServiceBrand('园区服务');
     setCurrentPark(null);
-    if (!currentAccount.isAdmin || typeof window.otto.enterpriseParkView !== 'function') {
+    if (
+      !currentAccount.isAdmin ||
+      configurationFeatures?.park_service !== true ||
+      typeof window.otto.enterpriseParkView !== 'function'
+    ) {
       return () => { cancelled = true; };
     }
     void window.otto.enterpriseParkView()
@@ -266,7 +270,12 @@ export function AccountManagementPage({
         }
       });
     return () => { cancelled = true; };
-  }, [currentAccount.id, currentAccount.isAdmin, currentAccount.organizationId]);
+  }, [
+    configurationFeatures?.park_service,
+    currentAccount.id,
+    currentAccount.isAdmin,
+    currentAccount.organizationId,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -321,7 +330,11 @@ export function AccountManagementPage({
   }, [invite]);
 
   const refreshOrganizationStructure = useCallback(async (): Promise<void> => {
-    if (!currentAccount.isAdmin || !window.otto.enterpriseOrganizationDepartments) {
+    if (
+      !currentAccount.isAdmin ||
+      configurationFeatures?.enterprise_tree !== true ||
+      !window.otto.enterpriseOrganizationDepartments
+    ) {
       setOrganizationDepartments([]);
       return;
     }
@@ -331,7 +344,7 @@ export function AccountManagementPage({
       // enterprise_tree 关闭时服务端返回 403；安排入口保持 fail-closed。
       setOrganizationDepartments([]);
     }
-  }, [currentAccount.isAdmin]);
+  }, [configurationFeatures?.enterprise_tree, currentAccount.isAdmin]);
 
   useEffect(() => {
     void refreshOrganizationStructure();
@@ -931,8 +944,17 @@ export function AccountManagementPage({
         </section>
       ) : null}
 
-      {currentAccount.isAdmin ? (
-        activeSection === 'profile' ? <EnterprisePublicProfilePanel /> : null
+      {currentAccount.isAdmin && activeSection === 'profile' ? (
+        configurationFeatures?.park_service === true
+          ? <EnterprisePublicProfilePanel />
+          : (
+            <section className="otto-enterprise-profile" aria-label="企业公开资料">
+              <div className="otto-enterprise-profile__notice">
+                <strong>企业资料功能当前不可用</strong>
+                <p>园区服务尚未开启或当前许可证未授权，界面不会请求受保护的企业资料接口。</p>
+              </div>
+            </section>
+          )
       ) : null}
 
       {currentAccount.isAdmin ? (

@@ -694,6 +694,12 @@ export interface EnterpriseOrganizationFeatures {
   skill_market: boolean;
 }
 
+export interface EnterpriseOrganizationFeatureState {
+  configured: EnterpriseOrganizationFeatures;
+  entitled: EnterpriseOrganizationFeatures;
+  effective: EnterpriseOrganizationFeatures;
+}
+
 export type EnterprisePositionRoleMapping =
   'member' | 'department_admin' | 'enterprise_admin';
 
@@ -1276,6 +1282,8 @@ const IPC = {
   enterprisePresenceHeartbeat: 'otto:enterprise-presence-heartbeat',
   enterpriseOrganizationFeaturesGet:
     'otto:enterprise-organization-features-get',
+  enterpriseOrganizationFeatureStateGet:
+    'otto:enterprise-organization-feature-state-get',
   enterpriseOrganizationFeaturesUpdate:
     'otto:enterprise-organization-features-update',
   enterpriseOrganizationDepartments: 'otto:enterprise-organization-departments',
@@ -1879,6 +1887,7 @@ export interface OttoBridge {
   ): Promise<EnterpriseOrganizationView>;
   enterprisePresenceHeartbeat(): Promise<void>;
   enterpriseOrganizationFeaturesGet(): Promise<EnterpriseOrganizationFeatures>;
+  enterpriseOrganizationFeatureStateGet(): Promise<EnterpriseOrganizationFeatureState>;
   enterpriseOrganizationFeaturesUpdate(
     patch: Partial<EnterpriseOrganizationFeatures>,
   ): Promise<EnterpriseOrganizationFeatures>;
@@ -3177,6 +3186,11 @@ const bridge: OttoBridge = {
     return ipcRenderer.invoke(
       IPC.enterpriseOrganizationFeaturesGet,
     ) as Promise<EnterpriseOrganizationFeatures>;
+  },
+  enterpriseOrganizationFeatureStateGet(): Promise<EnterpriseOrganizationFeatureState> {
+    return ipcRenderer.invoke(
+      IPC.enterpriseOrganizationFeatureStateGet,
+    ) as Promise<EnterpriseOrganizationFeatureState>;
   },
   enterpriseOrganizationFeaturesUpdate(
     patch: Partial<EnterpriseOrganizationFeatures>,

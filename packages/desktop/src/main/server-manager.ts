@@ -521,9 +521,6 @@ export class ServerManager {
       OTTO_DEFAULT_WORKSPACE_PATH: os.homedir(),
     };
 
-    let spawnArgs: string[];
-    let spawnOpts: childProcess.SpawnOptions;
-
     if (nodeExec.endsWith('Electron') || nodeExec.includes('electron')) {
       // 打包形态：Electron 主二进制 + ELECTRON_RUN_AS_NODE
       env.ELECTRON_RUN_AS_NODE = '1';
@@ -535,22 +532,16 @@ export class ServerManager {
       if (!env.OTTO_SQLCIPHER_NATIVE_BINDING && fs.existsSync(packagedBinding)) {
         env.OTTO_SQLCIPHER_NATIVE_BINDING = packagedBinding;
       }
-      spawnArgs = [binPath, 'start'];
-      spawnOpts = {
-        env,
-        detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      };
-    } else {
-      // 开发形态：直接用 node 跑
-      spawnArgs = [binPath, 'start'];
-      spawnOpts = {
-        env,
-        detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: true, // Windows 开发环境需要 shell
-      };
     }
+
+    // Node/Electron 都能直接接收脚本路径和参数数组。不要经过 shell，确保
+    // 空格、&、^ 等路径字符始终只是参数内容，不能改变命令结构。
+    const spawnArgs = [binPath, 'start'];
+    const spawnOpts: childProcess.SpawnOptions = {
+      env,
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    };
 
     const child = this.dependencies.spawnDetached(
       process.execPath,

@@ -1367,11 +1367,18 @@ function ParkServiceWindow({
   </div>;
 }
 
-export function ParkServicesPlugin({ internalAdminPreview = false }: {
+export function ParkServicesPlugin({
+  internalAdminPreview = false,
+  effectiveParkService,
+}: {
   internalAdminPreview?: boolean;
+  effectiveParkService?: boolean;
 } = {}): React.JSX.Element {
   const [parkEnabled, setParkEnabled] = useState(() => (
-    internalAdminPreview || typeof window.otto?.enterpriseParkView !== 'function'
+    internalAdminPreview || (
+      effectiveParkService !== false &&
+      typeof window.otto?.enterpriseParkView !== 'function'
+    )
   ));
   const [parkAdminOrganization, setParkAdminOrganization] = useState(false);
   const [parkStatistics, setParkStatistics] = useState<EnterpriseParkStatistics | null>(null);
@@ -1500,6 +1507,13 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
         setServices(defaultServices(DEFAULT_PARK));
         return;
       }
+      if (effectiveParkService === false) {
+        setParkEnabled(false);
+        setParkAdminOrganization(false);
+        setBrand('');
+        setServices(defaultServices(DEFAULT_PARK));
+        return;
+      }
       const enterpriseParkView = window.otto?.enterpriseParkView;
       if (typeof enterpriseParkView === 'function') {
         try {
@@ -1565,7 +1579,7 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
       }
     })();
     return () => { cancelled = true; };
-  }, [internalAdminPreview]);
+  }, [effectiveParkService, internalAdminPreview]);
 
   useEffect(() => {
     if (internalAdminPreview) {

@@ -352,6 +352,9 @@ means no source-level substitute is accepted.
 - Removed the public `ChannelConnectorV1.approveAdmin()` method. Provider admin
   approval is accepted only as a Broker state transition; a local REST, CLI or
   Desktop caller cannot manufacture it.
+- Removed the residual `/channels/pairings/:id/approve` route match entirely.
+  Terminal pairing routes now release their provider index, so completed,
+  denied and expired sessions cannot accumulate during long-running service.
 - The legacy self-hosted Feishu credential path remains only as an explicitly
   labelled advanced compatibility path. It must not be reused by managed QR
   connectors or treated as the default onboarding design.

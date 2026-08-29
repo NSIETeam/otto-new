@@ -2583,7 +2583,7 @@ export class OttoServer {
       return;
     }
     const channelPairingMatch = path.match(
-      /^\/channels\/pairings\/(pair_[a-f0-9]{24})(?:\/(approve|install))?$/,
+      /^\/channels\/pairings\/(pair_[a-f0-9]{24})(?:\/(install))?$/,
     );
     if (channelPairingMatch) {
       if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
@@ -2607,7 +2607,20 @@ export class OttoServer {
         return sendJson(res, 405, err('method_not_allowed'));
       }
       void operation
-        .then((result) => sendJson(res, 200, ok(result)))
+        .then((result) => {
+          const status = result && typeof result === 'object' && 'status' in result
+            ? String((result as { status: unknown }).status)
+            : undefined;
+          if (
+            req.method === 'DELETE'
+            || action === 'install'
+            || (status !== undefined
+              && ['connected', 'expired', 'denied', 'failed', 'revoked'].includes(status))
+          ) {
+            this.channelPairingProviders.delete(pairingId);
+          }
+          sendJson(res, 200, ok(result));
+        })
         .catch((error) => {
           sendJson(res, 409, err(error instanceof Error ? error.message : String(error)));
         });

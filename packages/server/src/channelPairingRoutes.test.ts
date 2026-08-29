@@ -130,16 +130,9 @@ describe('channel pairing REST routes', () => {
     expect(begun.status).toBe(201);
     expect(await begun.json()).toMatchObject({ ok: true, data: { status: 'waiting_scan' } });
 
-    for (const [suffix, method] of [
-      ['', 'GET'],
-      ['', 'DELETE'],
-    ] as const) {
-      const response = await fetch(`${baseUrl}/channels/pairings/${pairing.pairingId}${suffix}`, {
-        method,
-        headers: auth,
-      });
-      expect(response.status).toBe(200);
-    }
+    expect((await fetch(`${baseUrl}/channels/pairings/${pairing.pairingId}`, {
+      method: 'GET', headers: auth,
+    })).status).toBe(200);
     const installed = await fetch(
       `${baseUrl}/channels/pairings/${pairing.pairingId}/install`,
       {
@@ -152,12 +145,29 @@ describe('channel pairing REST routes', () => {
       },
     );
     expect(installed.status).toBe(200);
+    expect((await fetch(`${baseUrl}/channels/pairings/${pairing.pairingId}`, {
+      method: 'GET', headers: auth,
+    })).status).toBe(404);
+
+    await fetch(`${baseUrl}/channels/pairings`, {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'feishu', installationPublicKey: 'public-key', requestedScopes: ['im:message'],
+      }),
+    });
+    expect((await fetch(`${baseUrl}/channels/pairings/${pairing.pairingId}`, {
+      method: 'DELETE', headers: auth,
+    })).status).toBe(200);
+    expect((await fetch(`${baseUrl}/channels/pairings/${pairing.pairingId}`, {
+      method: 'GET', headers: auth,
+    })).status).toBe(404);
     expect(connector.getPairingStatus).toHaveBeenCalledOnce();
     const localApproval = await fetch(
       `${baseUrl}/channels/pairings/${pairing.pairingId}/approve`,
       { method: 'POST', headers: auth },
     );
-    expect(localApproval.status).toBe(405);
+    expect(localApproval.status).toBe(404);
     expect(connector.completeInstallation).toHaveBeenCalledOnce();
     expect(connector.completeInstallation).toHaveBeenCalledWith(
       pairing.pairingId,

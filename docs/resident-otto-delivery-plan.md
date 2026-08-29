@@ -329,6 +329,9 @@ means no source-level substitute is accepted.
 
 | Requirement | Evidence | State |
 | --- | --- | --- |
+| Tracked right-rail assets are classified and compact surfaces reject unregistered SVG/raster drift | `visual-asset-inventory.mjs`, inventory contract test, `visual-style-contract.test.mjs` | Automated |
+| Shared theme-aware module, customer-module, navigation and channel-status icons | `ModuleIcon.tsx`, `icons.tsx`, catalog and focused component tests | Automated |
+| Renderer network polling never overlaps and renderer feature code has no raw interval | `nonOverlappingPoll.ts`, focused page/timer tests, production source scan | Automated |
 | Shared QR connector and device-bound installation | `channelConnector.ts`, `managedChannelConnector.ts`, focused connector tests | Automated |
 | Protected credential custody and idempotent outbound writes | `channelCredentialVault.ts`, `channelOutboundLedger.ts`, focused persistence tests | Automated |
 | Broker outbound runtime, tenant checking, timeout and reconnect | `brokerChannelRuntime.ts`, `brokerChannelRuntime.test.ts` | Automated |
@@ -351,3 +354,14 @@ means no source-level substitute is accepted.
   connectors or treated as the default onboarding design.
 - Generated `dist`, release packages and test reports are evidence artifacts,
   not source inputs, and must remain outside committed source payloads.
+- Uploaded and generated artwork remains available in explicit editor/gallery
+  contexts, but no longer controls compact Workspace tiles. Custom experts and
+  customer modules use registered semantic icons there so theme and optical
+  weight cannot drift with package content.
+- Removed private inline close, delete and overflow SVGs from App, Sidebar and
+  conversation overlays. New common navigation/overlay icons must enter through
+  the shared registry; functional QR SVG remains separately classified.
+- Replaced renderer feature `setInterval` calls with either non-overlapping
+  async polling or deadline-based one-shot timers. Core protocol watchdogs and
+  Server generated admin pages remain separately auditable and are not claimed
+  complete by the renderer migration.

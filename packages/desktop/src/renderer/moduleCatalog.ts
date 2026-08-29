@@ -5,7 +5,6 @@
 import type { EnterpriseOrganizationFeatures } from '../preload/index.js';
 import type { AgentProfile } from './agents/departmentAgents.js';
 import type { CustomAgentDefinition } from './customAgents.js';
-import { customAgentIconToModuleIcon } from './customAgentIcons.js';
 import type { ModuleIconKey, ModuleIconSource } from './components/ModuleIcon.js';
 
 export type ModuleAvailability = 'available' | 'disabled' | 'hidden';
@@ -253,7 +252,9 @@ function customAgentModules(context: ModuleCatalogContext): ModuleDefinition[] {
     label: agent.name,
     description: agent.instructions,
     category: 'custom-agent',
-    icon: customAgentIconToModuleIcon(agent.icon),
+    // Rich custom artwork stays in the editor/gallery. Compact workspace tiles
+    // deliberately use the shared theme-aware semantic icon family.
+    icon: 'agent',
     activation: {
       kind: 'agent',
       profileId: baseProfileId,
@@ -269,7 +270,7 @@ function customerModules(context: ModuleCatalogContext): ModuleDefinition[] {
     label: module.name,
     description: module.description,
     category: 'customer-module',
-    icon: module.iconSrc ? { kind: 'image', src: module.iconSrc } : 'custom-agent',
+    icon: 'customer-module',
     activation: { kind: 'customer-module', moduleId: module.id, version: module.version },
     availability: module.enabled ? 'available' : 'disabled',
     ...(module.suspendedReason ? { disabledReason: module.suspendedReason } : {}),

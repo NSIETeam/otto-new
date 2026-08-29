@@ -25,6 +25,7 @@ import {
   IconMegaphone,
   IconMicrophone,
   IconParking,
+  IconPackage,
   IconPhone,
   IconRepair,
   IconSearch,
@@ -62,6 +63,7 @@ const MODULE_LINE_ICON_REGISTRY = {
   'office-research': IconSearch,
   'office-copywriting': IconSquarePen,
   agent: IconAgent,
+  'customer-module': IconPackage,
   'self-development': IconTerminal,
 } as const;
 

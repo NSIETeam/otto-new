@@ -68,6 +68,8 @@ describe('desktop visual style contract', () => {
     expect(catalog).toContain("meeting: 'office-meeting'");
     expect(catalog).toContain("copy: 'office-copywriting'");
     expect(catalog).not.toContain('if (profile.icon) return `generated:${profile.icon}`');
+    expect(catalog).toContain("icon: 'customer-module'");
+    expect(catalog).not.toContain("module.iconSrc ? { kind: 'image'");
   });
 
   it('keeps common navigation and overlay icons in the shared icon registry', async () => {

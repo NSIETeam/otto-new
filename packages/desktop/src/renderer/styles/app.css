@@ -719,6 +719,17 @@
   color: var(--otto-feishu-fg);
   background: var(--otto-feishu-bg);
 }
+.otto-channel-status-icon { color: currentColor; }
+.otto-channel-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .55;
+}
+[data-feishu-state="connected"] .otto-channel-status-icon { color: var(--otto-success); }
+[data-feishu-state="offline"] .otto-channel-status-icon { color: var(--otto-danger); }
+.otto-channel-status-icon--spin { animation: otto-generated-icon-spin 1.8s linear infinite; }
 .otto-badge--local {
   color: var(--otto-local-fg);
   background: var(--otto-local-bg);
@@ -743,7 +754,8 @@
   to { transform: rotate(360deg); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .otto-generated-icon--spin { animation: none; }
+  .otto-generated-icon--spin,
+  .otto-channel-status-icon--spin { animation: none; }
 }
 
 /* ── 模块超市 ─────────────────────────────────────────────────── */

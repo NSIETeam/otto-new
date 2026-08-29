@@ -17,6 +17,7 @@
     "start": "electron .",
     "runtime:verify:mac": "node scripts/verify-document-runtime.mjs --target darwin-arm64 --target darwin-x64",
     "runtime:verify:win": "node scripts/verify-document-runtime.mjs --target win32-x64",
+    "visual:inventory": "node scripts/visual-asset-inventory.mjs",
     "dist": "npm run build && electron-builder --mac --dir",
     "dist:dmg": "npm run build && electron-builder --mac dmg --arm64",
     "dist:dmg:x64": "npm run build && electron-builder --mac dmg --x64",

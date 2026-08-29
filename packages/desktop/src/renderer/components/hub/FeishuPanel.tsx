@@ -24,9 +24,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { FeishuConfigPublic } from '../../../preload/index.js';
 import {
   deriveFeishuBadgeState,
+  FeishuStatusIcon,
   type FeishuStatusResult,
 } from '../FeishuStatusBadge.js';
-import { GeneratedIcon } from '../GeneratedIcon.js';
 import { IconExternalLink } from '../icons.js';
 import { Panel, Card, Badge, Empty } from './HubUI.js';
 import { ChannelPairingCard } from './ChannelPairingCard.js';
@@ -189,20 +189,8 @@ export function FeishuPanel(): React.JSX.Element {
 
       {/* 连接状态：与徽标同一套推导（诚实：重连中/锁冲突/离线各是各）。 */}
       <Card className="otto-hub__card--pad">
-        <div className="otto-hub__feishu-status">
-          {view.icon ? (
-            <GeneratedIcon
-              name={view.icon}
-              size={20}
-              className={view.kind === 'reconnecting' ? 'otto-generated-icon--spin' : undefined}
-            />
-          ) : (
-            <span
-              className="otto-hub__dot"
-              style={{ background: view.dotColor }}
-              aria-hidden
-            />
-          )}
+        <div className="otto-hub__feishu-status" data-feishu-state={view.kind}>
+          <FeishuStatusIcon view={view} size={20} />
           <span className="otto-hub__row-name">{view.label}</span>
           {cfg?.botName ? <Badge>Bot · {cfg.botName}</Badge> : null}
           {cfg?.tenantName ? <Badge>{cfg.tenantName}</Badge> : null}

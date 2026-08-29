@@ -17,7 +17,7 @@
  * 保持 `{ type, payload }` 信封不变即可零改组件。
  *
  * 健壮性（Issue #4 收尾）：
- *   - 连接前 send() 进入队列，连上后 flush（renderer 不必等握手）。
+ *   - 仅短暂缓存经审查的只读请求；写操作断线时明确失败，避免重放副作用。
  *   - 断线后指数退避自动重连；端点变更（main 推送）触发重连到新端点。
  *   - 连接状态变化经 onConnectionChange 通知 renderer 做 UI 指示。
  */
@@ -41,6 +41,7 @@ import {
   sendAuthorizedWorkspaceFrame,
   sendAuthorizedFileFrame,
 } from './outbound-file-authorization.js';
+import { ReconnectFrameQueue } from './outbound-frame-queue.js';
 
 /**
  * 飞书守护状态（main 从 server /health 透传；renderer 徽标据此渲染）。
@@ -2141,8 +2142,10 @@ let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
 const frameHandlers = new Set<FrameHandler>();
 const connectionHandlers = new Set<ConnectionHandler>();
-/** 连接前积压的出站帧，连上后按序 flush。 */
-const sendQueue: ClientToServer[] = [];
+/** 仅缓存短时、幂等、只读请求；写操作绝不跨断线重放。 */
+const reconnectQueue = new ReconnectFrameQueue();
+/** 端点、身份或显式断开变化时递增，隔离旧连接上下文。 */
+let connectionGeneration = 0;
 
 function notifyConnection(connected: boolean): void {
   for (const h of connectionHandlers) {
@@ -2187,28 +2190,29 @@ async function getEndpoint(): Promise<ServerEndpoint | null> {
   return (await ipcRenderer.invoke(IPC.getEndpoint)) as ServerEndpoint | null;
 }
 
-/** flush 连接前积压的帧。 */
+/** flush 当前连接代际内仍未过期的安全只读帧。 */
 function flushQueue(): void {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  while (sendQueue.length > 0) {
-    const frame = sendQueue.shift()!;
-    if (hasOutboundPathReference(frame)) {
-      // 防御旧队列/未来回归：路径引用必须针对当前连接重新走 main 授权，绝不
-      // 在重连、登出或账号切换后复用队列里的裸 realpath。
-      if (frame.type === 'send_user_message') {
-        dispatchFrame({
-          type: 'error',
-          payload: {
-            sessionId: frame.payload.sessionId,
-            code: 'file_access_denied',
-            message: '连接已变化，附件授权已失效，请重新发送',
-          },
-        });
-      }
-      continue;
-    }
+  for (const frame of reconnectQueue.drain(connectionGeneration)) {
     ws.send(JSON.stringify(frame));
   }
+}
+
+function rejectDisconnectedFrame(frame: ClientToServer): void {
+  const payload = frame.payload as unknown;
+  const sessionId =
+    payload && typeof payload === 'object' && 'sessionId' in payload
+      && typeof (payload as { sessionId?: unknown }).sessionId === 'string'
+      ? (payload as { sessionId: string }).sessionId
+      : undefined;
+  dispatchFrame({
+    type: 'error',
+    payload: {
+      sessionId,
+      code: 'offline_write_rejected',
+      message: '连接已断开；为避免重复操作，本次请求未排队，请恢复连接后重试',
+    },
+  });
 }
 
 /** 安排一次退避重连（仅在 wantConnected 时）。 */
@@ -2295,6 +2299,8 @@ const bridge: OttoBridge = {
 
   disconnect(): void {
     wantConnected = false;
+    connectionGeneration += 1;
+    reconnectQueue.clear();
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = undefined;
@@ -2315,9 +2321,11 @@ const bridge: OttoBridge = {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(authorized));
       } else {
-        // 连接前（或重连中）排队，open 后 flush —— 对齐 webview
-        // multiSessionMessageService 的 ready 前排队行为。
-        sendQueue.push(authorized);
+        const result = reconnectQueue.enqueue(
+          authorized,
+          connectionGeneration,
+        );
+        if (result === 'rejected') rejectDisconnectedFrame(authorized);
       }
     };
     if (frame.type === 'set_session_workspace') {
@@ -3764,6 +3772,10 @@ const bridge: OttoBridge = {
 ipcRenderer.on(IPC.endpointChanged, (_e, ep: ServerEndpoint | null) => {
   const changed = serverEndpointChanged(currentEndpoint, ep);
   currentEndpoint = ep;
+  if (changed) {
+    connectionGeneration += 1;
+    reconnectQueue.clear();
+  }
   if (wantConnected && changed) {
     // 重连到新端点：关旧连接，立即重连（清退避计数）。
     reconnectAttempt = 0;

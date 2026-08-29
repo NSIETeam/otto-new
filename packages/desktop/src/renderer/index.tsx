@@ -16,13 +16,28 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import './browserPreviewBridge.js';
 import { App } from './App.js';
+import { DesktopPetSurface } from './components/DesktopPetSurface.js';
+import { readPetWidgetEnabled } from './petWidgetPreference.js';
 
 const container = document.getElementById('root');
 if (!container) {
   throw new Error('找不到 #root 容器');
 }
+const surface = new URLSearchParams(window.location.search).get('surface');
+const desktopPetSurface = surface === 'desktop-pet';
+if (desktopPetSurface) {
+  document.documentElement.dataset.ottoSurface = 'desktop-pet';
+  document.body.dataset.ottoSurface = 'desktop-pet';
+} else {
+  const desktopPetSync = window.otto?.desktopPetSetEnabled?.(
+    readPetWidgetEnabled(),
+  );
+  void desktopPetSync?.catch(() => {
+    // 浏览器预览或旧 preload 不支持独立小宠物窗口时保持主界面可用。
+  });
+}
 createRoot(container).render(
   <React.StrictMode>
-    <App />
+    {desktopPetSurface ? <DesktopPetSurface /> : <App />}
   </React.StrictMode>,
 );

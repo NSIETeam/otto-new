@@ -7,7 +7,8 @@
 /**
  * 产业园服务入口。
  *
- * 九项园区服务均使用企业服务器：公告和问卷由管理员发布；七类申请按职责标签
+ * 十项园区能力均使用企业服务器：公告和问卷由管理员发布；七类申请按职责标签，
+ * 企业星链图只使用企业主动公开资料，
  * 自动投递，并用结构化处理表完成受理、回复、办理和验收。
  */
 
@@ -29,10 +30,12 @@ import {
   IconChevronDown,
   IconClose,
   IconIdBadge,
+  IconNetwork,
   IconPackage,
   IconUtensils,
   IconWrench,
 } from './icons.js';
+import { EnterpriseStarMapView } from './EnterpriseStarMapView.js';
 
 type IconComponent = (props: { size?: number; className?: string }) => React.JSX.Element;
 
@@ -334,7 +337,7 @@ function visibleTicketHistory(ticket: EnterpriseRepairTicket): EnterpriseRepairT
 }
 
 /**
- * 9 项正好形成 3 列 × 3 行，对应《客户服务工作流程》。steps 仅保留为服务说明；
+ * 九项服务对应《客户服务工作流程》，另提供企业星链图。steps 仅保留为服务说明；
  * 实际申请和状态都由企业服务器保存。
  */
 function baseDefaultServices(park: string): ParkService[] {
@@ -428,6 +431,10 @@ function baseDefaultServices(park: string): ParkService[] {
         { role: '安保公司', owner: '李队', detail: '接收登记信息，安排访客车辆通行与停车指引。' },
         { role: '园区门岗', owner: '安保值班员', detail: '车辆到访时核验登记信息并放行，流程完成。' },
       ],
+    },
+    {
+      id: 'enterprise-star-map', icon: IconNetwork, name: '企业星链图', desc: '发现园区内可核实的合作线索',
+      prompt: `打开${park}企业星链图，根据企业主动公开的能力、产品与合作需求查看合作线索。`,
     },
   ];
 }
@@ -1213,6 +1220,7 @@ function ServiceRequestView({ service, onBack, onComplete, focusTicket }: {
 function ServiceDemo({ service, onBack, onComplete, focusTicket }: { service: ParkService; onBack: () => void; onComplete: (ticket?: EnterpriseRepairTicket) => void; focusTicket: EnterpriseRepairTicket | null }): React.JSX.Element {
   if (service.id === 'announcement') return <AnnouncementView onBack={onBack} />;
   if (service.id === 'satisfaction') return <SatisfactionView onBack={onBack} />;
+  if (service.id === 'enterprise-star-map') return <EnterpriseStarMapView onBack={onBack} />;
   return <ServiceRequestView service={service} onBack={onBack} onComplete={onComplete} focusTicket={focusTicket} />;
 }
 
@@ -1359,11 +1367,18 @@ function ParkServiceWindow({
   </div>;
 }
 
-export function ParkServicesPlugin({ internalAdminPreview = false }: {
+export function ParkServicesPlugin({
+  internalAdminPreview = false,
+  effectiveParkService,
+}: {
   internalAdminPreview?: boolean;
+  effectiveParkService?: boolean;
 } = {}): React.JSX.Element {
   const [parkEnabled, setParkEnabled] = useState(() => (
-    internalAdminPreview || typeof window.otto?.enterpriseParkView !== 'function'
+    internalAdminPreview || (
+      effectiveParkService !== false &&
+      typeof window.otto?.enterpriseParkView !== 'function'
+    )
   ));
   const [parkAdminOrganization, setParkAdminOrganization] = useState(false);
   const [parkStatistics, setParkStatistics] = useState<EnterpriseParkStatistics | null>(null);
@@ -1445,7 +1460,9 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
 
   const historyCategoryOptions = useMemo(() => {
     const configuredNames = new Map(services.map((service) => [service.id, service.name]));
-    return baseDefaultServices(DEFAULT_PARK).map((service) => ({
+    return baseDefaultServices(DEFAULT_PARK)
+      .filter((service) => service.id !== 'enterprise-star-map')
+      .map((service) => ({
       id: service.id,
       name: configuredNames.get(service.id) || service.name,
     }));
@@ -1487,6 +1504,13 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
         setParkEnabled(true);
         setParkAdminOrganization(true);
         setBrand(DEFAULT_BRAND);
+        setServices(defaultServices(DEFAULT_PARK));
+        return;
+      }
+      if (effectiveParkService === false) {
+        setParkEnabled(false);
+        setParkAdminOrganization(false);
+        setBrand('');
         setServices(defaultServices(DEFAULT_PARK));
         return;
       }
@@ -1555,7 +1579,7 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
       }
     })();
     return () => { cancelled = true; };
-  }, [internalAdminPreview]);
+  }, [effectiveParkService, internalAdminPreview]);
 
   useEffect(() => {
     if (internalAdminPreview) {
@@ -2132,6 +2156,8 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
                 ? '查看园区发布的最新通知和历史公告。'
                 : selected?.id === 'satisfaction'
                   ? '实名填写园区发布的调查问卷，提交后不能修改。'
+                  : selected?.id === 'enterprise-star-map'
+                    ? '用企业主动公开资料发现合作线索，并逐条核实推理依据。'
                   : selected?.id === 'repair'
                     ? '提交报修、查看进度，并确认最终维修结果。'
                   : selected

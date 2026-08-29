@@ -120,6 +120,7 @@ export function prepareDesktopSqlCipherRuntime(
   options: {
     homeDirectory?: string;
     resourcesPath?: string;
+    developmentBindingPath?: string;
   } = {},
 ): { keyPath: string | null; nativeBindingPath: string | null } {
   const encryptionMode = environment.OTTO_DATABASE_ENCRYPTION
@@ -182,6 +183,13 @@ export function prepareDesktopSqlCipherRuntime(
     if (fs.existsSync(packagedBinding)) {
       nativeBindingPath = packagedBinding;
       environment.OTTO_SQLCIPHER_NATIVE_BINDING = packagedBinding;
+    }
+  }
+  if (!nativeBindingPath && options.developmentBindingPath) {
+    const developmentBinding = path.resolve(options.developmentBindingPath);
+    if (fs.existsSync(developmentBinding)) {
+      nativeBindingPath = developmentBinding;
+      environment.OTTO_SQLCIPHER_NATIVE_BINDING = developmentBinding;
     }
   }
 
@@ -316,6 +324,15 @@ export class ServerManager {
       prepareDesktopSqlCipherRuntime(process.env, {
         homeDirectory: os.homedir(),
         resourcesPath: process.resourcesPath,
+        developmentBindingPath: path.resolve(
+          __dirname,
+          '..',
+          '..',
+          'native',
+          'sqlcipher',
+          `${process.platform}-${process.arch}`,
+          'better_sqlite3.node',
+        ),
       });
     }
     this.kernelUpdateRoot = options.kernelUpdateRoot;
@@ -504,33 +521,27 @@ export class ServerManager {
       OTTO_DEFAULT_WORKSPACE_PATH: os.homedir(),
     };
 
-    let spawnArgs: string[];
-    let spawnOpts: childProcess.SpawnOptions;
-
     if (nodeExec.endsWith('Electron') || nodeExec.includes('electron')) {
       // 打包形态：Electron 主二进制 + ELECTRON_RUN_AS_NODE
       env.ELECTRON_RUN_AS_NODE = '1';
-      env.OTTO_SQLCIPHER_NATIVE_BINDING = path.join(
+      const packagedBinding = path.join(
         process.resourcesPath,
         'sqlcipher',
         'better_sqlite3.node',
       );
-      spawnArgs = [binPath, 'start'];
-      spawnOpts = {
-        env,
-        detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      };
-    } else {
-      // 开发形态：直接用 node 跑
-      spawnArgs = [binPath, 'start'];
-      spawnOpts = {
-        env,
-        detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: true, // Windows 开发环境需要 shell
-      };
+      if (!env.OTTO_SQLCIPHER_NATIVE_BINDING && fs.existsSync(packagedBinding)) {
+        env.OTTO_SQLCIPHER_NATIVE_BINDING = packagedBinding;
+      }
     }
+
+    // Node/Electron 都能直接接收脚本路径和参数数组。不要经过 shell，确保
+    // 空格、&、^ 等路径字符始终只是参数内容，不能改变命令结构。
+    const spawnArgs = [binPath, 'start'];
+    const spawnOpts: childProcess.SpawnOptions = {
+      env,
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    };
 
     const child = this.dependencies.spawnDetached(
       process.execPath,

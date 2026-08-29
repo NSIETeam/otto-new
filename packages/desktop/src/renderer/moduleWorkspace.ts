@@ -1,9 +1,28 @@
-/**
- * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
- */
+/** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
+
+import { OFFICIAL_MODULE_GROUP_TEMPLATES } from './moduleGroupCatalog.js';
+import {
+  LOCAL_USER_PUBLISHER_ID,
+  normalizeComponentPackageReference,
+  type ComponentPackageReference,
+} from './modulePackages.js';
 
 export const MODULE_WORKSPACE_SCHEMA_VERSION = 1 as const;
 export const MODULE_GROUP_NAME_MAX_LENGTH = 40;
+export const PARK_SERVICES_GROUP_ID = 'park-services';
+export const PARK_SERVICES_GROUP_NAME = '园区服务';
+export const PARK_SERVICES_GROUP_MODULE_IDS = [
+  'park-announcement',
+  'park-satisfaction',
+  'park-renovation',
+  'park-parking',
+  'park-network-phone',
+  'park-meeting-room',
+  'park-electric-card',
+  'park-repair',
+  'park-vehicle-visit',
+  'park-my-applications',
+] as const;
 
 export type ModuleWorkspaceEdition = 'personal' | 'enterprise';
 
@@ -17,6 +36,7 @@ export interface ModuleGroupLayout {
   name: string;
   rows: 2 | 3;
   moduleIds: string[];
+  package?: ComponentPackageReference;
 }
 
 export interface ModuleWorkspaceLayout {
@@ -38,34 +58,15 @@ export function resolveModuleGridColumns(
   return presentation === 'panel' && containerWidth > 0 && containerWidth <= 250 ? 2 : 3;
 }
 
-const ENTERPRISE_DEFAULT_GROUPS: readonly ModuleGroupLayout[] = [
-  {
-    id: 'park-services',
-    name: '园区服务',
-    rows: 2,
-    moduleIds: [
-      'park-announcement',
-      'park-satisfaction',
-      'park-renovation',
-      'park-parking',
-      'park-network-phone',
-      'park-meeting-room',
-    ],
-  },
-  {
-    id: 'daily-office',
-    name: '日常办公',
-    rows: 2,
-    moduleIds: [
-      'agent-enterprise-work',
-      'agent-ppt',
-      'agent-meeting',
-      'agent-word',
-      'agent-excel',
-      'enterprise-memory',
-    ],
-  },
-] as const;
+const ENTERPRISE_DEFAULT_GROUPS: readonly ModuleGroupLayout[] = OFFICIAL_MODULE_GROUP_TEMPLATES
+  .filter((template) => template.autoInstall && template.editions.includes('enterprise'))
+  .map((template) => ({
+    id: template.groupId,
+    name: template.name,
+    rows: template.rows,
+    moduleIds: [...template.moduleIds],
+    package: { ...template.package },
+  }));
 
 const PERSONAL_DEFAULT_GROUP: ModuleGroupLayout = {
   id: 'daily-office',
@@ -75,7 +76,11 @@ const PERSONAL_DEFAULT_GROUP: ModuleGroupLayout = {
 };
 
 function cloneGroup(group: ModuleGroupLayout): ModuleGroupLayout {
-  return { ...group, moduleIds: [...group.moduleIds] };
+  return {
+    ...group,
+    package: group.package ? { ...group.package } : undefined,
+    moduleIds: [...group.moduleIds],
+  };
 }
 
 function normalizeGroupName(value: unknown): string {
@@ -151,6 +156,7 @@ export function normalizeModuleWorkspace(value: unknown): ModuleWorkspaceLayout 
       name?: unknown;
       rows?: unknown;
       moduleIds?: unknown;
+      package?: unknown;
     };
     const id = uniqueGroupId(normalizeGroupId(group.id, index), usedGroupIds);
     usedGroupIds.add(id);
@@ -159,10 +165,42 @@ export function normalizeModuleWorkspace(value: unknown): ModuleWorkspaceLayout 
       name: normalizeGroupName(group.name),
       rows: group.rows === 3 ? 3 : 2,
       moduleIds: normalizeModuleIds(group.moduleIds, seenModuleIds),
+      package: normalizeComponentPackageReference(group.package),
     });
   });
 
   return { version: MODULE_WORKSPACE_SCHEMA_VERSION, groups };
+}
+
+function reconcileParkServicesGroup(
+  layout: ModuleWorkspaceLayout,
+  capabilities: ModuleWorkspaceCapabilities,
+): ModuleWorkspaceLayout {
+  const parkGroup = layout.groups.find((group) => group.id === PARK_SERVICES_GROUP_ID);
+  if (!parkGroup) return layout;
+
+  const available = new Set(capabilities.availableModuleIds);
+  const existing = new Set(layout.groups.flatMap((group) => group.moduleIds));
+  const packagedModuleIds = PARK_SERVICES_GROUP_MODULE_IDS.filter(
+    (moduleId) => available.has(moduleId) || existing.has(moduleId),
+  );
+  const packagedSet = new Set<string>(PARK_SERVICES_GROUP_MODULE_IDS);
+  const groups = layout.groups.map((group) => {
+    if (group.id === PARK_SERVICES_GROUP_ID) {
+      return {
+        ...group,
+        moduleIds: [
+          ...packagedModuleIds,
+          ...group.moduleIds.filter((moduleId) => !packagedSet.has(moduleId)),
+        ],
+      };
+    }
+    return {
+      ...group,
+      moduleIds: group.moduleIds.filter((moduleId) => !packagedSet.has(moduleId)),
+    };
+  });
+  return normalizeModuleWorkspace({ ...layout, groups });
 }
 
 export function parseModuleWorkspace(
@@ -175,7 +213,7 @@ export function parseModuleWorkspace(
     if (parsed?.version !== MODULE_WORKSPACE_SCHEMA_VERSION || !Array.isArray(parsed.groups)) {
       return createDefaultModuleWorkspace(capabilities);
     }
-    const normalized = normalizeModuleWorkspace(parsed);
+    const normalized = reconcileParkServicesGroup(normalizeModuleWorkspace(parsed), capabilities);
     return normalized.groups.length > 0
       ? normalized
       : createDefaultModuleWorkspace(capabilities);
@@ -219,6 +257,26 @@ export function addOrMoveModules(
   };
 }
 
+export function updateGroupModuleSelection(
+  layout: ModuleWorkspaceLayout,
+  targetGroupId: string,
+  moduleIds: readonly string[],
+): ModuleWorkspaceLayout {
+  if (!layout.groups.some((group) => group.id === targetGroupId)) return layout;
+
+  const selected = [...new Set(moduleIds.map((moduleId) => moduleId.trim()).filter(Boolean))];
+  const selectedSet = new Set(selected);
+  return {
+    ...layout,
+    groups: layout.groups.map((group) => group.id === targetGroupId
+      ? { ...group, moduleIds: selected }
+      : {
+        ...group,
+        moduleIds: group.moduleIds.filter((moduleId) => !selectedSet.has(moduleId)),
+      }),
+  };
+}
+
 function nextUniqueLabel(base: string, existing: Set<string>): string {
   if (!existing.has(base)) return base;
   let suffix = 2;
@@ -238,7 +296,44 @@ export function createModuleGroup(layout: ModuleWorkspaceLayout): ModuleWorkspac
   }
   return {
     ...layout,
-    groups: [...layout.groups.map(cloneGroup), { id, name, rows: 2, moduleIds: [] }],
+    groups: [...layout.groups.map(cloneGroup), {
+      id,
+      name,
+      rows: 2,
+      moduleIds: [],
+      package: {
+        source: 'user',
+        packageId: `user.group.${id}`,
+        publisherId: LOCAL_USER_PUBLISHER_ID,
+        version: '1.0.0',
+      },
+    }],
+  };
+}
+
+export function createParkServicesModuleGroup(
+  layout: ModuleWorkspaceLayout,
+  availableModuleIds: readonly string[],
+): ModuleWorkspaceLayout {
+  if (layout.groups.some((group) => group.id === PARK_SERVICES_GROUP_ID)) return layout;
+  const available = new Set(availableModuleIds);
+  const moduleIds = PARK_SERVICES_GROUP_MODULE_IDS.filter((moduleId) => available.has(moduleId));
+  if (moduleIds.length === 0) return layout;
+  const packagedSet = new Set<string>(PARK_SERVICES_GROUP_MODULE_IDS);
+  return {
+    ...layout,
+    groups: [
+      ...layout.groups.map((group) => ({
+        ...group,
+        moduleIds: group.moduleIds.filter((moduleId) => !packagedSet.has(moduleId)),
+      })),
+      {
+        id: PARK_SERVICES_GROUP_ID,
+        name: PARK_SERVICES_GROUP_NAME,
+        rows: 2,
+        moduleIds,
+      },
+    ],
   };
 }
 

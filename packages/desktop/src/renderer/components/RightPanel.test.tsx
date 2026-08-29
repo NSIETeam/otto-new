@@ -36,7 +36,7 @@ describe('RightPanel module workspace boundary', () => {
   it('delegates module activation and marketplace opening', () => {
     const { props } = renderPanel();
     fireEvent.click(screen.getByRole('button', { name: '打开 PPT 创作专家' }));
-    fireEvent.click(screen.getByRole('button', { name: '向日常办公添加模块' }));
+    fireEvent.click(screen.getByRole('button', { name: '管理“日常办公”中的模块' }));
     expect(props.onActivate).toHaveBeenCalledWith(modules[0]);
     expect(props.onOpenMarketplace).toHaveBeenCalledWith('daily');
   });

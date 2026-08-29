@@ -36,6 +36,7 @@ export function AtoaConsultDialog({
   account,
   member,
   schedules,
+  effectiveKnowledge = false,
   initialQuestion = '',
   onClose,
   onSent,
@@ -47,6 +48,8 @@ export function AtoaConsultDialog({
   account: EnterpriseAccount;
   member: Member;
   schedules: readonly ScheduleItemInfo[];
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveKnowledge?: boolean;
   initialQuestion?: string;
   onClose(): void;
   onSent(message: EnterpriseDirectMessage): void;
@@ -69,16 +72,22 @@ export function AtoaConsultDialog({
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const availableContextSources = effectiveKnowledge
+    ? CONSULT_CONTEXT_SOURCES
+    : CONSULT_CONTEXT_SOURCES.filter(
+        (source) => source !== 'enterprise_knowledge',
+      );
 
   const resetProposal = (): void => {
     setProposal('');
     setError('');
   };
   const toggleSource = (source: AtoaContextSource): void => {
+    if (source === 'enterprise_knowledge' && !effectiveKnowledge) return;
     setSources((current) =>
       current.includes(source)
         ? current.filter((item) => item !== source)
-        : CONSULT_CONTEXT_SOURCES.filter(
+        : availableContextSources.filter(
             (item) => item === source || current.includes(item),
           ),
     );
@@ -100,7 +109,9 @@ export function AtoaConsultDialog({
             currentAccountName: account.name,
             peerName: member.name,
             listMessages: window.otto.enterpriseMessagesList,
-            listKnowledge: () => window.otto.enterpriseKnowledgeList(),
+            listKnowledge: () => effectiveKnowledge
+              ? window.otto.enterpriseKnowledgeList()
+              : Promise.resolve([]),
             workLogRecent: window.otto.workLogRecent,
             schedules,
           });
@@ -174,7 +185,7 @@ export function AtoaConsultDialog({
         <fieldset>
           <legend>允许我的 Otto 用于提案的资料（默认不选）</legend>
           <div className="otto-a2a-consult__sources">
-            {CONSULT_CONTEXT_SOURCES.map((source) => (
+            {availableContextSources.map((source) => (
               <label key={source}>
                 <input
                   type="checkbox"

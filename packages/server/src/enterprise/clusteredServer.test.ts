@@ -23,6 +23,7 @@ import type {
   PostgresEnterpriseAccountView,
   PostgresEnterpriseCoreRepository,
 } from './postgresCoreRepository.js';
+import type { PostgresBusinessRecord } from './postgresBusinessRepository.js';
 
 const account: PostgresEnterpriseAccountView = {
   id: 'acc_admin',
@@ -55,18 +56,20 @@ const peerAccount: PostgresEnterpriseAccountView = {
 };
 
 const licenseKeyPair = generateKeyPairSync('ed25519');
-const licensePrivateKey = licenseKeyPair.privateKey.export({
-  format: 'pem',
-  type: 'pkcs8',
-}).toString();
-const licensePublicKey = licenseKeyPair.publicKey.export({
-  format: 'pem',
-  type: 'spki',
-}).toString();
+const licensePrivateKey = licenseKeyPair.privateKey
+  .export({
+    format: 'pem',
+    type: 'pkcs8',
+  })
+  .toString();
+const licensePublicKey = licenseKeyPair.publicKey
+  .export({
+    format: 'pem',
+    type: 'spki',
+  })
+  .toString();
 
-function activeLicenseRecord(
-  overrides: Record<string, unknown> = {},
-) {
+function activeLicenseRecord(overrides: Record<string, unknown> = {}) {
   const payload = {
     id: 'lic_clustered_test',
     deploymentId: 'clustered-enterprise',
@@ -109,8 +112,9 @@ function activeLicenseRecord(
 }
 
 function repository(
-  licenseRecord: ReturnType<typeof activeLicenseRecord> | null =
-    activeLicenseRecord(),
+  licenseRecord: ReturnType<
+    typeof activeLicenseRecord
+  > | null = activeLicenseRecord(),
 ): PostgresEnterpriseCoreRepository {
   const getDataGovernanceProfile = vi.fn(async () => ({
     ...dataGovernanceConfiguration(),
@@ -163,10 +167,10 @@ function repository(
       skill_market: true,
     })),
     updateOrganizationFeatures: vi.fn(async (_organizationId, patch) => ({
-      enterprise_tree: true,
-      direct_messages: true,
-      atoa: true,
-      park_services: true,
+      enterprise_tree: patch.enterprise_tree ?? true,
+      direct_messages: patch.direct_messages ?? true,
+      atoa: patch.atoa ?? true,
+      park_services: patch.park_services ?? true,
       knowledge: patch.knowledge ?? true,
       skill_market: patch.skill_market ?? true,
     })),
@@ -180,16 +184,18 @@ function repository(
       updatedAtMs: Date.parse('2026-08-01T00:00:00.000Z'),
     })),
     listBusinessRecords: vi.fn(async () => []),
-    getBusinessRecord: vi.fn(async (input: {
-      domain: string;
-      resourceType: string;
-      resourceId: string;
-    }) =>
-      input.domain === 'commercial_control' &&
-      input.resourceType === 'license' &&
-      input.resourceId === 'current'
-        ? licenseRecord
-        : null),
+    getBusinessRecord: vi.fn(
+      async (input: {
+        domain: string;
+        resourceType: string;
+        resourceId: string;
+      }) =>
+        input.domain === 'commercial_control' &&
+        input.resourceType === 'license' &&
+        input.resourceId === 'current'
+          ? licenseRecord
+          : null,
+    ),
     createBusinessRecord: vi.fn(async (input) => ({
       organizationId: input.organizationId,
       domain: input.domain,
@@ -234,6 +240,8 @@ function repository(
     getAccount: vi.fn(async (id: string) =>
       id === peerAccount.id ? peerAccount : id === account.id ? account : null,
     ),
+    listUnreadE2eeNotifications: vi.fn(async () => []),
+    listE2eeDirectMessages: vi.fn(async () => []),
     getOrganization: vi.fn(async (id: string) =>
       id === account.organizationId
         ? {
@@ -355,6 +363,16 @@ describe('clustered PostgreSQL enterprise server', () => {
         code: 'deployment_license_inactive',
       },
       {
+        repository: repository(null),
+        path: '/enterprise/organization/invite',
+        code: 'deployment_license_inactive',
+      },
+      {
+        repository: repository(null),
+        path: '/enterprise/organization/view',
+        code: 'deployment_license_inactive',
+      },
+      {
         repository: repository(
           activeLicenseRecord({ expiresAt: '2020-01-01T00:00:00.000Z' }),
         ),
@@ -406,6 +424,696 @@ describe('clustered PostgreSQL enterprise server', () => {
     expect(exported.status).toBe(200);
   });
 
+  it('reports expanded entitlements with the same capability rule used by clustered route admission', async () => {
+    const repo = repository(
+      activeLicenseRecord({ modules: ['enterprise_tree'] }),
+    );
+    const { baseUrl } = await listen(repo);
+    const headers = { authorization: 'Bearer clustered-session-token' };
+
+    const response = await fetch(
+      `${baseUrl}/enterprise/organization/features`,
+      { headers },
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      entitled: {
+        enterprise_tree: true,
+        knowledge: true,
+      },
+      effective: {
+        enterprise_tree: true,
+        knowledge: true,
+      },
+    });
+
+    const knowledge = await fetch(`${baseUrl}/enterprise/knowledge`, {
+      headers,
+    });
+    expect(knowledge.status).toBe(200);
+  });
+
+  it('rejects licensed clustered routes when the organization switch is disabled', async () => {
+    const repo = repository();
+    repo.getOrganizationFeatures = vi.fn(async () => ({
+      enterprise_tree: false,
+      direct_messages: false,
+      atoa: false,
+      park_services: false,
+      knowledge: false,
+      skill_market: false,
+    }));
+    const { baseUrl } = await listen(repo);
+    const headers = { authorization: 'Bearer clustered-session-token' };
+
+    for (const [path, feature] of [
+      ['/enterprise/organization/departments', 'enterprise_tree'],
+      ['/enterprise/organization/public-profile', 'park_service'],
+      ['/enterprise/federation/contacts', 'direct_messages'],
+      ['/enterprise/atoa/tasks', 'atoa'],
+      ['/enterprise/knowledge', 'knowledge'],
+      ['/enterprise/skills', 'skill_market'],
+    ] as const) {
+      const response = await fetch(`${baseUrl}${path}`, { headers });
+      expect(response.status, path).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        code: 'organization_feature_disabled',
+        feature,
+      });
+    }
+  });
+
+  it.each(['atoa_request', 'atoa_response'] as const)(
+    'rejects %s messages when A2A is licensed but disabled by the organization',
+    async (contentType) => {
+      const repo = repository();
+      const sendE2eeDirectMessage = vi.fn();
+      repo.sendE2eeDirectMessage =
+        sendE2eeDirectMessage as unknown as typeof repo.sendE2eeDirectMessage;
+      repo.getOrganizationFeatures = vi.fn(async () => ({
+        enterprise_tree: true,
+        direct_messages: true,
+        atoa: false,
+        park_services: true,
+        knowledge: true,
+        skill_market: true,
+      }));
+      const { baseUrl } = await listen(repo);
+
+      const response = await fetch(
+        `${baseUrl}/enterprise/messages/${peerAccount.id}`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer clustered-session-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            messageId: `message-${contentType}`,
+            senderDeviceId: 'device-admin',
+            protocolVersion: 1,
+            contentType,
+            ciphertext: 'encrypted',
+            nonce: 'nonce',
+            signature: 'signature',
+            envelopes: [],
+          }),
+        },
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        code: 'organization_feature_disabled',
+        feature: 'atoa',
+      });
+      expect(sendE2eeDirectMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a park ticket when the park administrator organization disables park_service', async () => {
+    const targetOrganizationId = 'org_park_admin';
+    const targetAccount: PostgresEnterpriseAccountView = {
+      ...account,
+      id: 'acc_park_admin',
+      organizationId: targetOrganizationId,
+      organizationName: 'Park Admin',
+      username: 'park-admin',
+      name: 'Park Administrator',
+    };
+    const sourceLicense = activeLicenseRecord();
+    const targetLicense = {
+      ...activeLicenseRecord({ organizationId: targetOrganizationId }),
+      organizationId: targetOrganizationId,
+    };
+    const membership: PostgresBusinessRecord<Record<string, unknown>> = {
+      organizationId: account.organizationId,
+      domain: 'park',
+      resourceType: 'membership',
+      resourceId: `membership_${account.organizationId}`,
+      ownerAccountId: account.id,
+      status: 'active',
+      version: 1,
+      payload: {
+        parkId: 'park-admin',
+        adminOrganizationId: targetOrganizationId,
+      },
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+    };
+    const park: PostgresBusinessRecord<Record<string, unknown>> = {
+      organizationId: targetOrganizationId,
+      domain: 'park',
+      resourceType: 'park',
+      resourceId: 'park-admin',
+      ownerAccountId: targetAccount.id,
+      status: 'active',
+      version: 1,
+      payload: {
+        name: 'Otto Park',
+        address: null,
+        adminOrganizationId: targetOrganizationId,
+      },
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+    };
+    const repo = repository();
+    repo.getBusinessRecord = vi.fn(
+      async (input: {
+        organizationId: string;
+        domain: string;
+        resourceType: string;
+        resourceId: string;
+      }) => {
+        if (
+          input.domain === 'commercial_control' &&
+          input.resourceType === 'license' &&
+          input.resourceId === 'current'
+        ) {
+          return input.organizationId === targetOrganizationId
+            ? targetLicense
+            : sourceLicense;
+        }
+        if (
+          input.organizationId === account.organizationId &&
+          input.domain === 'park' &&
+          input.resourceType === 'membership'
+        ) {
+          return membership;
+        }
+        if (
+          input.organizationId === targetOrganizationId &&
+          input.domain === 'park' &&
+          input.resourceType === 'park' &&
+          input.resourceId === park.resourceId
+        ) {
+          return park;
+        }
+        return null;
+      },
+    ) as unknown as typeof repo.getBusinessRecord;
+    repo.listAccounts = vi.fn(async (organizationId: string) =>
+      organizationId === targetOrganizationId
+        ? [targetAccount]
+        : [account, peerAccount],
+    );
+    repo.getOrganizationFeatures = vi.fn(async (organizationId: string) => ({
+      enterprise_tree: true,
+      direct_messages: true,
+      atoa: true,
+      park_services: organizationId !== targetOrganizationId,
+      knowledge: true,
+      skill_market: true,
+    }));
+    const { baseUrl } = await listen(repo);
+
+    const response = await fetch(`${baseUrl}/enterprise/tickets`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer clustered-session-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        serviceId: 'repair',
+        title: 'Park administrator disabled service',
+        description: 'This request must not be persisted.',
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'organization_feature_disabled',
+      feature: 'park_service',
+    });
+    expect(repo.getOrganizationFeatures).toHaveBeenCalledWith(
+      targetOrganizationId,
+    );
+    expect(repo.createBusinessRecord).not.toHaveBeenCalled();
+    expect(repo.appendBusinessEvent).not.toHaveBeenCalled();
+  });
+
+  it('serves the desktop department-list contract only when enterprise_tree is effective', async () => {
+    const repo = repository();
+    const timestamp = '2026-08-01T00:00:00.000Z';
+    const structure = {
+      departments: [
+        {
+          id: 'dept-research',
+          organizationId: 'org_default',
+          name: '研发部',
+          parentDepartmentId: null,
+          memberCount: 2,
+          positions: [
+            {
+              id: 'position-engineer',
+              organizationId: 'org_default',
+              departmentId: 'dept-research',
+              title: '工程师',
+              roleMapping: 'member',
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            },
+          ],
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ],
+    };
+    repo.listOrganizationStructure = vi.fn(async () => structure);
+    const { baseUrl } = await listen(repo);
+
+    const response = await fetch(
+      `${baseUrl}/enterprise/organization/departments`,
+      { headers: { authorization: 'Bearer clustered-session-token' } },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      structure: structure.departments,
+    });
+    expect(repo.listOrganizationStructure).toHaveBeenCalledWith('org_default');
+  });
+
+  it('loads an authorized park tenant from the target organization without leaking clustered storage keys', async () => {
+    const tenantOrganizationId = 'org_tenant';
+    const tenantAccount: PostgresEnterpriseAccountView = {
+      ...peerAccount,
+      id: 'acc_tenant',
+      organizationId: tenantOrganizationId,
+      organizationName: 'Tenant Ltd',
+      username: 'tenant',
+      name: 'Tenant Member',
+    };
+    const tenantOrganization = {
+      id: tenantOrganizationId,
+      name: 'Tenant Ltd',
+      slug: 'tenant-ltd',
+      parkId: 'park-1',
+      status: 'active' as const,
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+    };
+    const tenantStructure = {
+      departments: [
+        {
+          id: 'dept-tenant',
+          organizationId: tenantOrganizationId,
+          name: '租户部门',
+          parentDepartmentId: null,
+          memberCount: 1,
+          positions: [],
+          createdAt: account.createdAt,
+          updatedAt: account.updatedAt,
+        },
+      ],
+    };
+    const membership: PostgresBusinessRecord<Record<string, unknown>> = {
+      organizationId: tenantOrganizationId,
+      domain: 'park',
+      resourceType: 'membership',
+      resourceId: `membership_${tenantOrganizationId}`,
+      ownerAccountId: null,
+      status: 'active',
+      version: 1,
+      payload: {
+        parkId: 'park-1',
+        adminOrganizationId: account.organizationId,
+        address: 'B座',
+        roomNumber: '1201',
+        joinedAt: account.createdAt,
+      },
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+    };
+    const park: PostgresBusinessRecord<Record<string, unknown>> = {
+      organizationId: account.organizationId,
+      domain: 'park',
+      resourceType: 'park',
+      resourceId: 'park-1',
+      ownerAccountId: account.id,
+      status: 'active',
+      version: 1,
+      payload: {
+        name: '宏创园区',
+        slug: 'hongchuang-park',
+        brandName: '宏创园区服务',
+        adminOrganizationId: account.organizationId,
+      },
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+    };
+    const tenantLicense = {
+      ...activeLicenseRecord({ organizationId: tenantOrganizationId }),
+      organizationId: tenantOrganizationId,
+    };
+    const repo = repository();
+    repo.listParkTenantMemberships = vi.fn(async () => [membership]);
+    repo.getOrganization = vi.fn(async (organizationId: string) =>
+      organizationId === tenantOrganizationId
+        ? tenantOrganization
+        : organizationId === account.organizationId
+          ? {
+              id: account.organizationId,
+              name: account.organizationName,
+              slug: 'otto',
+              parkId: null,
+              status: 'active' as const,
+              createdAt: account.createdAt,
+              updatedAt: account.updatedAt,
+            }
+          : null,
+    );
+    repo.listAccounts = vi.fn(async (organizationId: string) =>
+      organizationId === tenantOrganizationId
+        ? [tenantAccount]
+        : organizationId === account.organizationId
+          ? [account, peerAccount]
+          : [],
+    );
+    repo.listOrganizationStructure = vi.fn(async (organizationId: string) =>
+      organizationId === tenantOrganizationId
+        ? tenantStructure
+        : { departments: [] },
+    );
+    repo.getBusinessRecord = vi.fn(
+      async (input: {
+        organizationId: string;
+        domain: string;
+        resourceType: string;
+        resourceId: string;
+      }) => {
+        if (
+          input.domain === 'commercial_control' &&
+          input.resourceType === 'license' &&
+          input.resourceId === 'current'
+        ) {
+          return input.organizationId === tenantOrganizationId
+            ? tenantLicense
+            : activeLicenseRecord();
+        }
+        if (
+          input.organizationId === tenantOrganizationId &&
+          input.domain === 'park' &&
+          input.resourceType === 'membership' &&
+          input.resourceId === `membership_${tenantOrganizationId}`
+        ) {
+          return membership;
+        }
+        if (
+          input.organizationId === account.organizationId &&
+          input.domain === 'park' &&
+          input.resourceType === 'park' &&
+          input.resourceId === park.resourceId
+        ) {
+          return park;
+        }
+        return null;
+      },
+    ) as unknown as typeof repo.getBusinessRecord;
+    repo.getOrganizationFeatures = vi.fn(async () => ({
+      enterprise_tree: true,
+      direct_messages: true,
+      atoa: true,
+      park_services: true,
+      knowledge: true,
+      skill_market: true,
+    }));
+    const listAccountPresence = vi.fn(async () => []);
+    const sharedState = {
+      getAccountBySession: vi.fn(async () => account),
+      listAccountPresence,
+    } as unknown as ClusteredEnterpriseSharedState;
+    const { baseUrl } = await listen(repo, { sharedState });
+
+    const response = await fetch(
+      `${baseUrl}/enterprise/organization/view?organizationId=${tenantOrganizationId}`,
+      { headers: { authorization: 'Bearer clustered-session-token' } },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      organization: unknown;
+      members: unknown[];
+      structure: unknown[];
+      features: Record<string, boolean>;
+      park: Record<string, unknown> | null;
+    };
+    expect(body).toMatchObject({
+      organization: tenantOrganization,
+      members: [{ id: tenantAccount.id, organizationId: tenantOrganizationId }],
+      structure: tenantStructure.departments,
+      features: {
+        enterprise_tree: true,
+        park_service: true,
+      },
+      park: {
+        id: 'park-1',
+        name: '宏创园区',
+        slug: 'hongchuang-park',
+        brandName: '宏创园区服务',
+        adminOrganizationId: account.organizationId,
+        isAdminOrganization: false,
+        tenantAddress: 'B座',
+        tenantRoomNumber: '1201',
+      },
+    });
+    expect(body.features).not.toHaveProperty('park_services');
+    expect(repo.listParkTenantMemberships).toHaveBeenCalledWith('org_default');
+    expect(repo.listAccounts).toHaveBeenCalledWith(tenantOrganizationId);
+    expect(repo.listOrganizationStructure).toHaveBeenCalledWith(
+      tenantOrganizationId,
+    );
+    expect(listAccountPresence).toHaveBeenCalledWith(tenantOrganizationId, [
+      tenantAccount.id,
+    ]);
+  });
+
+  it('returns the real clustered park context that makes the administrator tenant list reachable', async () => {
+    const park: PostgresBusinessRecord<Record<string, unknown>> = {
+      organizationId: account.organizationId,
+      domain: 'park',
+      resourceType: 'park',
+      resourceId: `park_${account.organizationId}`,
+      ownerAccountId: account.id,
+      status: 'active',
+      version: 1,
+      payload: {
+        name: '宏创园区',
+        slug: 'hongchuang-park',
+        brandName: '宏创园区服务',
+        adminOrganizationId: account.organizationId,
+      },
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+    };
+    const service: PostgresBusinessRecord<Record<string, unknown>> = {
+      organizationId: account.organizationId,
+      domain: 'park',
+      resourceType: 'service',
+      resourceId: 'repair',
+      ownerAccountId: account.id,
+      status: 'active',
+      version: 1,
+      payload: {
+        name: '物业报修',
+        enabled: true,
+        config: { category: 'maintenance' },
+      },
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+    };
+    const repo = repository();
+    repo.listBusinessRecords = vi.fn(
+      async (input: { domain: string; resourceType?: string }) => {
+        if (input.domain !== 'park') return [];
+        if (input.resourceType === 'park') return [park];
+        if (input.resourceType === 'service') return [service];
+        return [];
+      },
+    ) as unknown as typeof repo.listBusinessRecords;
+    const defaultGetBusinessRecord = repo.getBusinessRecord;
+    repo.getBusinessRecord = vi.fn(
+      async (input: {
+        organizationId: string;
+        domain: string;
+        resourceType: string;
+        resourceId: string;
+      }) => {
+        if (
+          input.organizationId === account.organizationId &&
+          input.domain === 'park' &&
+          input.resourceType === 'park' &&
+          input.resourceId === park.resourceId
+        ) {
+          return park;
+        }
+        return defaultGetBusinessRecord(input);
+      },
+    ) as unknown as typeof repo.getBusinessRecord;
+    const { baseUrl } = await listen(repo);
+    const headers = { authorization: 'Bearer clustered-session-token' };
+
+    const response = await fetch(`${baseUrl}/enterprise/organization/view`, {
+      headers,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      park: {
+        id: park.resourceId,
+        name: '宏创园区',
+        slug: 'hongchuang-park',
+        brandName: '宏创园区服务',
+        adminOrganizationId: account.organizationId,
+        isAdminOrganization: true,
+        services: [
+          {
+            parkId: park.resourceId,
+            id: service.resourceId,
+            name: '物业报修',
+            enabled: true,
+            config: { category: 'maintenance' },
+          },
+        ],
+        tenantAddress: null,
+        tenantRoomNumber: null,
+      },
+    });
+
+    const tenants = await fetch(`${baseUrl}/enterprise/park/tenants`, {
+      headers,
+    });
+    expect(tenants.status).toBe(200);
+    await expect(tenants.json()).resolves.toEqual({ organizations: [] });
+  });
+
+  it.each([
+    {
+      reason: '目标企业缺少许可证',
+      targetLicenseModules: null,
+      targetConfigured: true,
+      expectsTargetConfigurationRead: false,
+    },
+    {
+      reason: '目标企业关闭企业树',
+      targetLicenseModules: [
+        'enterprise_tree',
+        'direct_messages',
+        'atoa',
+        'knowledge',
+        'skill_market',
+        'park_service',
+      ],
+      targetConfigured: false,
+      expectsTargetConfigurationRead: true,
+    },
+  ])(
+    'rejects a cross-organization view without leaking target data when $reason',
+    async ({
+      targetLicenseModules,
+      targetConfigured,
+      expectsTargetConfigurationRead,
+    }) => {
+      const tenantOrganizationId = 'org_private_tenant';
+      const tenantAccount: PostgresEnterpriseAccountView = {
+        ...peerAccount,
+        id: 'acc_private_tenant',
+        organizationId: tenantOrganizationId,
+        organizationName: 'Private Tenant',
+      };
+      const membership: PostgresBusinessRecord<Record<string, unknown>> = {
+        organizationId: tenantOrganizationId,
+        domain: 'park',
+        resourceType: 'membership',
+        resourceId: `membership_${tenantOrganizationId}`,
+        ownerAccountId: null,
+        status: 'active',
+        version: 1,
+        payload: {
+          parkId: `park_${account.organizationId}`,
+          adminOrganizationId: account.organizationId,
+        },
+        createdAt: account.createdAt,
+        updatedAt: account.updatedAt,
+      };
+      const targetLicense = targetLicenseModules
+        ? {
+            ...activeLicenseRecord({
+              organizationId: tenantOrganizationId,
+              modules: targetLicenseModules,
+            }),
+            organizationId: tenantOrganizationId,
+          }
+        : null;
+      const repo = repository();
+      repo.listParkTenantMemberships = vi.fn(async () => [membership]);
+      repo.listAccounts = vi.fn(async (organizationId: string) =>
+        organizationId === tenantOrganizationId
+          ? [tenantAccount]
+          : [account, peerAccount],
+      );
+      repo.getBusinessRecord = vi.fn(
+        async (input: {
+          organizationId: string;
+          domain: string;
+          resourceType: string;
+          resourceId: string;
+        }) => {
+          if (
+            input.domain !== 'commercial_control' ||
+            input.resourceType !== 'license' ||
+            input.resourceId !== 'current'
+          ) {
+            return null;
+          }
+          return input.organizationId === tenantOrganizationId
+            ? targetLicense
+            : activeLicenseRecord();
+        },
+      ) as unknown as typeof repo.getBusinessRecord;
+      repo.getOrganizationFeatures = vi.fn(async (organizationId: string) => ({
+        enterprise_tree:
+          organizationId === tenantOrganizationId ? targetConfigured : true,
+        direct_messages: true,
+        atoa: true,
+        park_services: true,
+        knowledge: true,
+        skill_market: true,
+      }));
+      const { baseUrl } = await listen(repo);
+
+      const response = await fetch(
+        `${baseUrl}/enterprise/organization/view?organizationId=${tenantOrganizationId}`,
+        { headers: { authorization: 'Bearer clustered-session-token' } },
+      );
+
+      expect(response.status).toBe(403);
+      const body = await response.json();
+      expect(body).toEqual({
+        error: '企业树功能已由管理员关闭或未获授权',
+        code: 'organization_feature_disabled',
+        feature: 'enterprise_tree',
+      });
+      expect(body).not.toHaveProperty('license');
+      expect(repo.getOrganization).not.toHaveBeenCalledWith(
+        tenantOrganizationId,
+      );
+      expect(repo.listOrganizationStructure).not.toHaveBeenCalledWith(
+        tenantOrganizationId,
+      );
+      expect(repo.listBusinessRecords).not.toHaveBeenCalled();
+      expect(repo.getOrganizationFeatures).toHaveBeenCalledWith(
+        account.organizationId,
+      );
+      expect(
+        vi
+          .mocked(repo.getOrganizationFeatures)
+          .mock.calls.some(
+            ([organizationId]) => organizationId === tenantOrganizationId,
+          ),
+      ).toBe(expectsTargetConfigurationRead);
+    },
+  );
+
   it('stores heartbeats in shared state and exposes presence in the organization tree', async () => {
     const touchAccountPresence = vi.fn(async () => ({
       accountId: account.id,
@@ -425,7 +1133,10 @@ describe('clustered PostgreSQL enterprise server', () => {
       touchAccountPresence,
       listAccountPresence,
     } as unknown as ClusteredEnterpriseSharedState;
-    const { baseUrl } = await listen(repository(), { sharedState });
+    const { baseUrl } = await listen(
+      repository(activeLicenseRecord({ modules: ['direct_messages'] })),
+      { sharedState },
+    );
     const authorization = 'Bearer clustered-session-token';
 
     const heartbeat = await fetch(`${baseUrl}/enterprise/presence/heartbeat`, {
@@ -469,6 +1180,119 @@ describe('clustered PostgreSQL enterprise server', () => {
       'acc_admin',
       'acc_peer',
     ]);
+  });
+
+  it('keeps same-organization directory, feature discovery, presence, and chat in the licensed baseline', async () => {
+    const repo = repository(activeLicenseRecord({ modules: [] }));
+    repo.getOrganizationInvite = vi.fn(async () => ({
+      id: 'orginvite_baseline',
+      organizationId: 'org_default',
+      code: 'Ab3D-k9Pq-Z7xY',
+      status: 'active' as const,
+      defaultDepartment: null,
+      departmentId: null,
+      positionId: null,
+      positionTitle: null,
+      defaultRole: null,
+      maxUses: null,
+      usedCount: 0,
+      issuedAt: '2026-08-01T00:00:00.000Z',
+      expiresAt: '2026-08-08T00:00:00.000Z',
+      validHours: 168 as const,
+    }));
+    const sharedState = {
+      getAccountBySession: vi.fn(async () => account),
+      touchAccountPresence: vi.fn(async () => ({
+        accountId: account.id,
+        online: true,
+        lastSeenAt: '2026-08-01T00:00:00.000Z',
+      })),
+      listAccountPresence: vi.fn(async () => []),
+    } as unknown as ClusteredEnterpriseSharedState;
+    const { baseUrl } = await listen(repo, { sharedState });
+    const headers = { authorization: 'Bearer clustered-session-token' };
+
+    for (const [path, request] of [
+      [
+        '/enterprise/organization/view',
+        fetch(`${baseUrl}/enterprise/organization/view`, { headers }),
+      ],
+      [
+        '/enterprise/organization/features',
+        fetch(`${baseUrl}/enterprise/organization/features`, { headers }),
+      ],
+      [
+        '/enterprise/accounts',
+        fetch(`${baseUrl}/enterprise/accounts`, { headers }),
+      ],
+      [
+        '/enterprise/organization/invite',
+        fetch(`${baseUrl}/enterprise/organization/invite`, { headers }),
+      ],
+      [
+        '/enterprise/messages/unread',
+        fetch(`${baseUrl}/enterprise/messages/unread`, { headers }),
+      ],
+      [
+        '/enterprise/presence/heartbeat',
+        fetch(`${baseUrl}/enterprise/presence/heartbeat`, {
+          method: 'POST',
+          headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ clientId: 'desktop-main' }),
+        }),
+      ],
+    ] as const) {
+      const response = await request;
+      expect(
+        response.status,
+        `${path}: ${await response.clone().text()}`,
+      ).toBe(200);
+    }
+
+    const featureStateResponse = await fetch(
+      `${baseUrl}/enterprise/organization/features`,
+      { headers },
+    );
+    await expect(featureStateResponse.json()).resolves.toMatchObject({
+      configured: {
+        enterprise_tree: true,
+        park_service: true,
+        direct_messages: true,
+      },
+      entitled: {
+        enterprise_tree: false,
+        park_service: false,
+        direct_messages: false,
+      },
+      effective: {
+        enterprise_tree: false,
+        park_service: false,
+        direct_messages: false,
+      },
+      features: {
+        enterprise_tree: false,
+        park_service: false,
+        direct_messages: false,
+      },
+    });
+
+    repo.getOrganizationFeatures = vi.fn(async () => ({
+      enterprise_tree: true,
+      direct_messages: false,
+      atoa: true,
+      park_services: true,
+      knowledge: true,
+      skill_market: true,
+    }));
+    const disabledMessages = await fetch(
+      `${baseUrl}/enterprise/messages/unread`,
+      { headers },
+    );
+    expect(disabledMessages.status).toBe(403);
+    await expect(disabledMessages.json()).resolves.toMatchObject({
+      code: 'organization_feature_disabled',
+      feature: 'direct_messages',
+    });
   });
 
   it('serves complete versioned legal text and records exact document consent', async () => {
@@ -755,7 +1579,11 @@ describe('clustered PostgreSQL enterprise server', () => {
       body: JSON.stringify({
         scope: 'worklog',
         expectedVersion: 0,
-        payload: { schemaVersion: 1, generatedAt: '2026-08-14T00:00:00Z', files: [] },
+        payload: {
+          schemaVersion: 1,
+          generatedAt: '2026-08-14T00:00:00Z',
+          files: [],
+        },
       }),
     });
     expect(stored.status).toBe(402);
@@ -834,6 +1662,205 @@ describe('clustered PostgreSQL enterprise server', () => {
     );
   });
 
+  it('hides expired clustered knowledge and restores it through audited revalidation', async () => {
+    let knowledgeRecord: PostgresBusinessRecord<Record<string, unknown>> = {
+      organizationId: account.organizationId,
+      domain: 'knowledge',
+      resourceType: 'entry',
+      resourceId: 'knowledge-expired',
+      ownerAccountId: account.id,
+      status: 'active',
+      version: 2,
+      payload: {
+        title: 'Expired runbook',
+        department: null,
+        category: 'runbook',
+        content: 'Restore from the verified backup.',
+        tags: [],
+        contributor: account.name,
+        contributorAccountId: account.id,
+        confidence: 0.9,
+        sourceType: 'manual',
+        sourceId: null,
+        sourceLabel: null,
+        reviewedBy: account.name,
+        reviewedAt: '2025-01-01T00:00:00.000Z',
+        reviewNote: null,
+        reviewDueAt: '2025-06-30T00:00:00.000Z',
+        expiresAt: '2025-12-31T00:00:00.000Z',
+      },
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    };
+    const baseRepo = repository();
+    const repo = {
+      ...baseRepo,
+      listBusinessRecords: vi.fn(async () => [knowledgeRecord]),
+      getBusinessRecord: vi.fn(
+        async (input: {
+          domain: string;
+          resourceType: string;
+          resourceId: string;
+        }) => {
+          if (
+            input.domain === 'commercial_control' &&
+            input.resourceId === 'current'
+          ) {
+            return activeLicenseRecord();
+          }
+          if (
+            input.domain === 'knowledge' &&
+            input.resourceId === knowledgeRecord.resourceId
+          ) {
+            return knowledgeRecord;
+          }
+          return null;
+        },
+      ),
+      updateBusinessRecord: vi.fn(
+        async (input: {
+          expectedVersion: number;
+          status: string;
+          payload: Record<string, unknown>;
+        }) => {
+          if (input.expectedVersion !== knowledgeRecord.version) return null;
+          knowledgeRecord = {
+            ...knowledgeRecord,
+            status: input.status,
+            version: knowledgeRecord.version + 1,
+            payload: input.payload,
+            updatedAt: new Date().toISOString(),
+          };
+          return knowledgeRecord;
+        },
+      ),
+    } as unknown as PostgresEnterpriseCoreRepository;
+    const { baseUrl } = await listen(repo);
+
+    const memberList = await fetch(`${baseUrl}/enterprise/knowledge`, {
+      headers: { authorization: 'Bearer peer-session-token' },
+    });
+    expect(memberList.status).toBe(200);
+    await expect(memberList.json()).resolves.toEqual({ knowledge: [] });
+
+    const adminReviewList = await fetch(
+      `${baseUrl}/enterprise/knowledge?includeReview=true`,
+      { headers: { authorization: 'Bearer clustered-session-token' } },
+    );
+    expect(adminReviewList.status).toBe(200);
+    await expect(adminReviewList.json()).resolves.toMatchObject({
+      knowledge: [
+        { id: 'knowledge-expired', expiresAt: '2025-12-31T00:00:00.000Z' },
+      ],
+    });
+
+    const revalidation = await fetch(
+      `${baseUrl}/enterprise/knowledge/knowledge-expired/revalidate`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer clustered-session-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          rationale: '已核对当前备份制度和最近恢复演练，确认该知识继续有效。',
+          validForDays: 180,
+        }),
+      },
+    );
+    expect(revalidation.status).toBe(200);
+    const revalidatedPayload = (await revalidation.json()) as {
+      knowledge: { reviewDueAt: string; expiresAt: string };
+    };
+    expect(
+      Date.parse(revalidatedPayload.knowledge.reviewDueAt),
+    ).toBeGreaterThan(Date.now());
+    expect(Date.parse(revalidatedPayload.knowledge.expiresAt)).toBeGreaterThan(
+      Date.parse(revalidatedPayload.knowledge.reviewDueAt),
+    );
+    expect(repo.appendBusinessEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: account.organizationId,
+        eventType: 'revalidated',
+        payload: expect.objectContaining({ validForDays: 180 }),
+      }),
+    );
+
+    const restoredList = await fetch(`${baseUrl}/enterprise/knowledge`, {
+      headers: { authorization: 'Bearer peer-session-token' },
+    });
+    await expect(restoredList.json()).resolves.toMatchObject({
+      knowledge: [{ id: 'knowledge-expired' }],
+    });
+  });
+
+  it('keeps the administrator evidence endpoint compatible until clustered evidence is retained', async () => {
+    const repo = {
+      ...repository(),
+      getBusinessRecord: vi.fn(
+        async (input: {
+          domain: string;
+          resourceType: string;
+          resourceId: string;
+        }) => {
+          if (
+            input.domain === 'commercial_control' &&
+            input.resourceId === 'current'
+          ) {
+            return activeLicenseRecord();
+          }
+          if (
+            input.domain === 'knowledge' &&
+            input.resourceId === 'knowledge-1'
+          ) {
+            return {
+              organizationId: account.organizationId,
+              domain: 'knowledge',
+              resourceType: 'entry',
+              resourceId: 'knowledge-1',
+              ownerAccountId: account.id,
+              status: 'active',
+              version: 1,
+              payload: {
+                title: 'Runbook',
+                department: null,
+                category: 'runbook',
+                content: 'Restore from PITR.',
+                tags: [],
+                contributor: account.name,
+                contributorAccountId: account.id,
+                confidence: 0.9,
+                sourceType: 'manual',
+                sourceId: null,
+                sourceLabel: null,
+                reviewedBy: account.name,
+                reviewedAt: '2026-08-01T00:00:00.000Z',
+                reviewNote: null,
+              },
+              createdAt: '2026-08-01T00:00:00.000Z',
+              updatedAt: '2026-08-01T00:00:00.000Z',
+            };
+          }
+          return null;
+        },
+      ),
+    } as unknown as PostgresEnterpriseCoreRepository;
+    const { baseUrl } = await listen(repo);
+
+    const evidence = await fetch(
+      `${baseUrl}/enterprise/knowledge/knowledge-1/evidence`,
+      { headers: { authorization: 'Bearer clustered-session-token' } },
+    );
+    expect(evidence.status).toBe(200);
+    await expect(evidence.json()).resolves.toEqual({ evidence: [] });
+
+    const memberEvidence = await fetch(
+      `${baseUrl}/enterprise/knowledge/knowledge-1/evidence`,
+      { headers: { authorization: 'Bearer peer-session-token' } },
+    );
+    expect(memberEvidence.status).toBe(403);
+  });
+
   it('accepts the desktop feature PATCH contract for migrated domains', async () => {
     const repo = repository();
     const { baseUrl } = await listen(repo);
@@ -845,17 +1872,66 @@ describe('clustered PostgreSQL enterprise server', () => {
           authorization: 'Bearer clustered-session-token',
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ knowledge: false, skill_market: false }),
+        body: JSON.stringify({
+          park_service: false,
+          knowledge: false,
+          skill_market: false,
+        }),
       },
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      features: { knowledge: false, skill_market: false },
+      configured: {
+        park_service: false,
+        knowledge: false,
+        skill_market: false,
+      },
+      entitled: {
+        park_service: true,
+        knowledge: true,
+        skill_market: true,
+        feishu_auto_reply: false,
+      },
+      effective: {
+        park_service: false,
+        knowledge: false,
+        skill_market: false,
+        feishu_auto_reply: false,
+      },
+      features: {
+        park_service: false,
+        knowledge: false,
+        skill_market: false,
+        feishu_auto_reply: false,
+      },
     });
     expect(repo.updateOrganizationFeatures).toHaveBeenCalledWith(
       'org_default',
-      { knowledge: false, skill_market: false },
+      { park_services: false, knowledge: false, skill_market: false },
     );
+  });
+
+  it('rejects unsupported or empty clustered feature patches without persisting them', async () => {
+    const repo = repository();
+    const { baseUrl } = await listen(repo);
+    const headers = {
+      authorization: 'Bearer clustered-session-token',
+      'content-type': 'application/json',
+    };
+
+    for (const [body, code] of [
+      [{ feishu_auto_reply: true }, 'organization_feature_not_supported'],
+      [{}, 'organization_feature_patch_empty'],
+    ] as const) {
+      const response = await fetch(
+        `${baseUrl}/enterprise/organization/features`,
+        { method: 'PATCH', headers, body: JSON.stringify(body) },
+      );
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ code });
+    }
+
+    expect(repo.updateOrganizationFeatures).not.toHaveBeenCalled();
   });
 
   it('mounts park, ticketing and commercial control on PostgreSQL authority', async () => {
@@ -989,7 +2065,7 @@ describe('clustered PostgreSQL enterprise server', () => {
       validHours: 168 as const,
     }));
     const repo = {
-      ...repository(),
+      ...repository(activeLicenseRecord({ modules: [] })),
       issueOrganizationInvite,
     } as unknown as PostgresEnterpriseCoreRepository;
     const { baseUrl } = await listen(repo, {
@@ -1137,7 +2213,7 @@ describe('clustered PostgreSQL enterprise server', () => {
       account: joined,
     }));
     const repo = {
-      ...repository(),
+      ...repository(activeLicenseRecord({ modules: [] })),
       getAccountBySession: vi.fn(async () => personal),
       inspectOrganizationInvite: vi.fn(async () => ({
         status: 'active' as const,

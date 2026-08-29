@@ -4,6 +4,7 @@
 
 import { createHash } from 'node:crypto';
 import type { Database } from '../data_platform/index.js';
+import { enterpriseKnowledgeContradictoryEvidenceIndexes } from './knowledgeRetentionPolicy.js';
 
 export const ENTERPRISE_KNOWLEDGE_MAX_DEPARTMENT_LENGTH = 120;
 export const ENTERPRISE_KNOWLEDGE_MAX_CATEGORY_LENGTH = 120;
@@ -42,12 +43,15 @@ export interface EnterpriseKnowledgeEntryView {
   supersedes_id: number | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  review_due_at: string | null;
+  expires_at: string | null;
   archived_at: string | null;
   created_at: string;
   updated_at: string;
   evidence_count?: number;
   distinct_session_count?: number;
   distinct_contributor_count?: number;
+  verified_evidence_count?: number;
   first_observed_at?: string | null;
   last_observed_at?: string | null;
 }
@@ -70,6 +74,24 @@ export interface EnterpriseKnowledgeRevisionView {
   changed_by: string | null;
   change_note: string | null;
   created_at: string;
+  adjudication?: EnterpriseKnowledgeAdjudicationView;
+}
+
+export interface EnterpriseKnowledgeAdjudicationInput {
+  acceptedEvidenceIds: number[];
+  rejectedEvidenceIds: number[];
+  rationale: string;
+}
+
+export interface EnterpriseKnowledgeAdjudicationView {
+  id: number;
+  knowledgeId: number;
+  revisionVersion: number;
+  acceptedEvidenceIds: number[];
+  rejectedEvidenceIds: number[];
+  rationale: string;
+  adjudicatedBy: string;
+  createdAt: string;
 }
 
 export interface EnterpriseKnowledgeRepositoryStore {
@@ -109,6 +131,26 @@ export interface ReviseEnterpriseKnowledgeInput {
   sourceLabel?: string | null;
   changedBy: string;
   changeNote?: string;
+  /** 管理员已检查冲突证据，并以本次人工修订作为裁决结论。 */
+  resolveConflict?: boolean;
+  adjudication?: EnterpriseKnowledgeAdjudicationInput;
+}
+
+export interface RefreshEnterpriseKnowledgeEvidenceInput {
+  id: number;
+  organizationId?: string;
+  confidence: number;
+  sourceLabel: string;
+  changedBy: string;
+  changeNote: string;
+}
+
+export interface RevalidateEnterpriseKnowledgeInput {
+  id: number;
+  organizationId?: string;
+  reviewer: string;
+  rationale: string;
+  validForDays: number;
 }
 
 function requireOrganization(store: EnterpriseKnowledgeRepositoryStore, value?: string): string {
@@ -154,6 +196,28 @@ function normalizeStatus(value: unknown): EnterpriseKnowledgeStatus {
   throw new Error('knowledge status is invalid');
 }
 
+function normalizeAdjudicationEvidenceIds(value: unknown, field: string): number[] {
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new Error(`${field} is invalid`);
+  }
+  const normalized = [...new Set(value)];
+  if (!normalized.every((id) => Number.isSafeInteger(id) && Number(id) > 0)) {
+    throw new Error(`${field} is invalid`);
+  }
+  return normalized as number[];
+}
+
+function parseAdjudicationEvidenceIds(value: string): number[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is number => Number.isSafeInteger(id) && id > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function normalizeSourceType(value: unknown): EnterpriseKnowledgeSourceType {
   if (value === undefined) return 'manual';
   if (
@@ -193,6 +257,55 @@ function runTransaction<T>(database: Database, operation: () => T): T {
     if (ownsTransaction && database.inTransaction) database.exec('ROLLBACK');
     throw error;
   }
+}
+
+function lifecycleDays(sourceType: EnterpriseKnowledgeSourceType): {
+  reviewDays: number;
+  validDays: number;
+} {
+  return sourceType === 'auto_capture'
+    ? { reviewDays: 90, validDays: 180 }
+    : { reviewDays: 180, validDays: 365 };
+}
+
+function refreshKnowledgeLifecycle(
+  database: Database,
+  id: number,
+  organizationId: string,
+  sourceType: EnterpriseKnowledgeSourceType,
+  validForDays?: number,
+  referenceAt?: string | null,
+): void {
+  const defaults = lifecycleDays(sourceType);
+  const validDays = validForDays ?? defaults.validDays;
+  const reviewDays = validForDays === undefined
+    ? defaults.reviewDays
+    : Math.max(15, Math.floor(validDays / 2));
+  database.prepare(
+    `UPDATE knowledge SET
+       review_due_at = CASE WHEN status = 'active' THEN datetime(COALESCE(?, 'now'), ?) ELSE NULL END,
+       expires_at = CASE WHEN status = 'active' THEN datetime(COALESCE(?, 'now'), ?) ELSE NULL END
+     WHERE id = ? AND organization_id = ?`,
+  ).run(
+    referenceAt ?? null,
+    `+${reviewDays} days`,
+    referenceAt ?? null,
+    `+${validDays} days`,
+    id,
+    organizationId,
+  );
+}
+
+function latestKnowledgeEvidenceObservedAt(
+  database: Database,
+  id: number,
+  organizationId: string,
+): string | null {
+  const row = database.prepare(
+    `SELECT MAX(observed_at) AS observed_at FROM knowledge_retention_evidence
+     WHERE promoted_knowledge_id = ? AND organization_id = ?`,
+  ).get(id, organizationId) as { observed_at: string | null };
+  return row.observed_at;
 }
 
 function getEntry(
@@ -301,7 +414,7 @@ export function saveEnterpriseKnowledgeInRepository(
         ).get(organizationId, sourceId) as EnterpriseKnowledgeEntryView | undefined
       : undefined;
 
-    if (existing?.content_hash === contentHash) {
+    if (existing?.content_hash === contentHash && existing.status === status) {
       return { outcome: 'unchanged', entry: existing };
     }
 
@@ -333,6 +446,7 @@ export function saveEnterpriseKnowledgeInRepository(
         existing.id,
         organizationId,
       );
+      refreshKnowledgeLifecycle(database, existing.id, organizationId, sourceType);
       const updated = getEntry(database, existing.id, organizationId)!;
       writeRevision(database, updated, reviewedBy ?? contributor, 'knowledge updated');
       return { outcome: 'updated', entry: updated };
@@ -351,6 +465,13 @@ export function saveEnterpriseKnowledgeInRepository(
       if (duplicateRevision) {
         return { outcome: 'unchanged', entry: duplicateRevision };
       }
+    } else if (!existing && sourceId && status === 'pending_review') {
+      const archivedPredecessor = database.prepare(
+        `SELECT * FROM knowledge
+         WHERE organization_id = ? AND source_id = ? AND status = 'archived'
+         ORDER BY datetime(updated_at) DESC, id DESC LIMIT 1`,
+      ).get(organizationId, sourceId) as EnterpriseKnowledgeEntryView | undefined;
+      supersedesId = archivedPredecessor?.id ?? null;
     }
 
     const result = database.prepare(
@@ -381,6 +502,7 @@ export function saveEnterpriseKnowledgeInRepository(
       status,
     ) as { lastInsertRowid?: number | bigint };
     const id = Number(result.lastInsertRowid);
+    refreshKnowledgeLifecycle(database, id, organizationId, sourceType);
     const entry = getEntry(database, id, organizationId);
     if (!entry) throw new Error('knowledge insert failed');
     writeRevision(database, entry, reviewedBy ?? contributor, 'knowledge created');
@@ -413,6 +535,10 @@ const KNOWLEDGE_WITH_EVIDENCE_SELECT = `SELECT k.*,
     FROM knowledge_retention_evidence e
     WHERE e.organization_id = k.organization_id AND e.promoted_knowledge_id = k.id), 0)
     AS distinct_contributor_count,
+  COALESCE((SELECT SUM(e.verified)
+    FROM knowledge_retention_evidence e
+    WHERE e.organization_id = k.organization_id AND e.promoted_knowledge_id = k.id), 0)
+    AS verified_evidence_count,
   (SELECT MIN(e.observed_at) FROM knowledge_retention_evidence e
     WHERE e.organization_id = k.organization_id AND e.promoted_knowledge_id = k.id)
     AS first_observed_at,
@@ -420,6 +546,79 @@ const KNOWLEDGE_WITH_EVIDENCE_SELECT = `SELECT k.*,
     WHERE e.organization_id = k.organization_id AND e.promoted_knowledge_id = k.id)
     AS last_observed_at
   FROM knowledge k`;
+
+function getEntryWithEvidence(
+  database: Database,
+  id: number,
+  organizationId: string,
+): EnterpriseKnowledgeEntryView | null {
+  return (database.prepare(
+    `${KNOWLEDGE_WITH_EVIDENCE_SELECT}
+     WHERE k.id = ? AND k.organization_id = ?`,
+  ).get(id, organizationId) as EnterpriseKnowledgeEntryView | undefined) ?? null;
+}
+
+/**
+ * Refreshes evidence-derived metadata without pretending that an administrator
+ * re-reviewed the published conclusion. The revision trail still records why
+ * the reliability changed.
+ */
+export function refreshEnterpriseKnowledgeEvidenceInRepository(
+  store: EnterpriseKnowledgeRepositoryStore,
+  input: RefreshEnterpriseKnowledgeEvidenceInput,
+): EnterpriseKnowledgeEntryView | null {
+  const organizationId = requireOrganization(store, input.organizationId);
+  const confidence = normalizeConfidence(input.confidence);
+  const sourceLabel = normalizeRequiredText(
+    input.sourceLabel,
+    ENTERPRISE_KNOWLEDGE_MAX_SOURCE_LABEL_LENGTH,
+    'knowledge source label',
+  );
+  const changedBy = normalizeRequiredText(
+    input.changedBy,
+    ENTERPRISE_KNOWLEDGE_MAX_CONTRIBUTOR_LENGTH,
+    'knowledge editor',
+  );
+  const changeNote = normalizeRequiredText(input.changeNote, 500, 'knowledge change note');
+  const database = store.db();
+  return runTransaction(database, () => {
+    const current = getEntry(database, input.id, organizationId);
+    if (!current) return null;
+    if (current.status === 'archived') {
+      throw new Error('archived knowledge evidence cannot be refreshed');
+    }
+    if (current.confidence === confidence && current.source_label === sourceLabel) {
+      if (current.status === 'active') {
+        refreshKnowledgeLifecycle(
+          database,
+          current.id,
+          organizationId,
+          current.source_type,
+          undefined,
+          latestKnowledgeEvidenceObservedAt(database, current.id, organizationId),
+        );
+      }
+      return getEntryWithEvidence(database, current.id, organizationId);
+    }
+    database.prepare(
+      `UPDATE knowledge SET confidence = ?, source_label = ?, version = version + 1,
+       updated_at = datetime('now') WHERE id = ? AND organization_id = ?`,
+    ).run(confidence, sourceLabel, current.id, organizationId);
+    if (current.status === 'active') {
+      refreshKnowledgeLifecycle(
+        database,
+        current.id,
+        organizationId,
+        current.source_type,
+        undefined,
+        latestKnowledgeEvidenceObservedAt(database, current.id, organizationId),
+      );
+    }
+    const updated = getEntry(database, current.id, organizationId)!;
+    writeRevision(database, updated, changedBy, changeNote);
+    return getEntryWithEvidence(database, current.id, organizationId);
+  });
+}
 
 function queryTerms(query: string): string[] {
   const normalized = query.trim().toLowerCase();
@@ -510,7 +709,8 @@ export function listEnterpriseKnowledgeFromRepository(
     ENTERPRISE_KNOWLEDGE_MAX_CATEGORY_LENGTH,
     'knowledge category',
   );
-  let sql = `${KNOWLEDGE_WITH_EVIDENCE_SELECT} WHERE k.organization_id = ? AND k.status = 'active'`;
+  let sql = `${KNOWLEDGE_WITH_EVIDENCE_SELECT} WHERE k.organization_id = ? AND k.status = 'active'
+    AND (k.expires_at IS NULL OR datetime(k.expires_at) > datetime('now'))`;
   const params: string[] = [normalizedOrganizationId];
   if (normalizedDepartment) {
     sql += ' AND k.department = ?';
@@ -541,7 +741,8 @@ export function searchEnterpriseKnowledgeInRepository(
     ENTERPRISE_KNOWLEDGE_MAX_QUERY_LENGTH,
     'knowledge query',
   ) ?? '';
-  let sql = `${KNOWLEDGE_WITH_EVIDENCE_SELECT} WHERE k.organization_id = ? AND k.status = 'active'`;
+  let sql = `${KNOWLEDGE_WITH_EVIDENCE_SELECT} WHERE k.organization_id = ? AND k.status = 'active'
+    AND (k.expires_at IS NULL OR datetime(k.expires_at) > datetime('now'))`;
   const params: Array<string | number> = [normalizedOrganizationId];
   if (normalizedDepartment) {
     sql += ' AND k.department = ?';
@@ -576,10 +777,13 @@ export function listMemberEnterpriseKnowledgeFromRepository(
   let sql = `${KNOWLEDGE_WITH_EVIDENCE_SELECT} WHERE k.organization_id = ?`;
   const params: Array<string | number> = [normalizedOrganizationId];
   if (options.includeOwnPending && contributorAccountId) {
-    sql += " AND (k.status = 'active' OR (k.status = 'pending_review' AND k.contributor_account_id = ?))";
+    sql += ` AND ((k.status = 'active'
+      AND (k.expires_at IS NULL OR datetime(k.expires_at) > datetime('now')))
+      OR (k.status = 'pending_review' AND k.contributor_account_id = ?))`;
     params.push(contributorAccountId);
   } else {
-    sql += " AND k.status = 'active'";
+    sql += ` AND k.status = 'active'
+      AND (k.expires_at IS NULL OR datetime(k.expires_at) > datetime('now'))`;
   }
   if (department) {
     sql += ' AND (k.department IS NULL OR k.department = ?)';
@@ -658,6 +862,12 @@ export function reviewEnterpriseKnowledgeInRepository(
     if (input.action === 'approve' && entry.status !== 'pending_review') {
       throw new Error('only pending knowledge can be approved');
     }
+    if (
+      input.action === 'approve'
+      && entry.source_label?.includes('证据存在冲突')
+    ) {
+      throw new Error('contested knowledge must be resolved before approval');
+    }
     let canonicalSourceId = entry.source_id;
     if (input.action === 'approve' && entry.supersedes_id) {
       const superseded = getEntry(database, entry.supersedes_id, organizationId);
@@ -700,6 +910,7 @@ export function reviewEnterpriseKnowledgeInRepository(
       entry.id,
       organizationId,
     );
+    refreshKnowledgeLifecycle(database, entry.id, organizationId, entry.source_type);
     const updated = getEntry(database, entry.id, organizationId)!;
     writeRevision(database, updated, reviewer, note ?? input.action);
     return updated;
@@ -716,6 +927,60 @@ export function reviseEnterpriseKnowledgeInRepository(
     const current = getEntry(database, input.id, organizationId);
     if (!current) return null;
     if (current.status === 'archived') throw new Error('archived knowledge cannot be revised');
+    const contested = Boolean(current.source_label?.includes('证据存在冲突'));
+    if (input.resolveConflict === true && !contested) {
+      throw new Error('knowledge is not contested');
+    }
+    if (input.adjudication && input.resolveConflict !== true) {
+      throw new Error('adjudication requires conflict resolution');
+    }
+    let adjudication: EnterpriseKnowledgeAdjudicationInput | null = null;
+    if (contested && input.resolveConflict === true) {
+      if (!input.adjudication) {
+        throw new Error('contested knowledge requires an evidence adjudication');
+      }
+      const acceptedEvidenceIds = normalizeAdjudicationEvidenceIds(
+        input.adjudication.acceptedEvidenceIds,
+        'accepted evidence ids',
+      );
+      const rejectedEvidenceIds = normalizeAdjudicationEvidenceIds(
+        input.adjudication.rejectedEvidenceIds,
+        'rejected evidence ids',
+      );
+      if (acceptedEvidenceIds.length === 0 || rejectedEvidenceIds.length === 0) {
+        throw new Error('adjudication must accept and reject evidence');
+      }
+      if (acceptedEvidenceIds.some((id) => rejectedEvidenceIds.includes(id))) {
+        throw new Error('adjudication evidence cannot be both accepted and rejected');
+      }
+      const rationale = normalizeRequiredText(
+        input.adjudication.rationale,
+        1_000,
+        'adjudication rationale',
+      );
+      if (rationale.length < 12) throw new Error('adjudication rationale is too short');
+      const evidence = database.prepare(
+        `SELECT id, content FROM knowledge_retention_evidence
+         WHERE organization_id = ? AND promoted_knowledge_id = ?
+         ORDER BY datetime(observed_at), id`,
+      ).all(organizationId, current.id) as Array<{ id: number; content: string }>;
+      const evidenceIds = new Set(evidence.map((item) => item.id));
+      const selectedIds = [...acceptedEvidenceIds, ...rejectedEvidenceIds];
+      if (selectedIds.some((id) => !evidenceIds.has(id))) {
+        throw new Error('adjudication evidence does not belong to this knowledge');
+      }
+      const contradictoryIndexes = enterpriseKnowledgeContradictoryEvidenceIndexes(
+        evidence.map((item) => item.content),
+      );
+      const contradictoryEvidenceIds = [...contradictoryIndexes]
+        .map((index) => evidence[index]?.id)
+        .filter((id): id is number => id !== undefined);
+      const selectedSet = new Set(selectedIds);
+      if (contradictoryEvidenceIds.some((id) => !selectedSet.has(id))) {
+        throw new Error('every contested evidence item must be adjudicated');
+      }
+      adjudication = { acceptedEvidenceIds, rejectedEvidenceIds, rationale };
+    }
     const title = input.title === undefined
       ? current.title
       : normalizeRequiredText(input.title, ENTERPRISE_KNOWLEDGE_MAX_TITLE_LENGTH, 'knowledge title');
@@ -728,9 +993,12 @@ export function reviseEnterpriseKnowledgeInRepository(
     const confidence = input.confidence === undefined
       ? current.confidence
       : normalizeConfidence(input.confidence);
-    const sourceLabel = input.sourceLabel === undefined
-      ? current.source_label
-      : normalizeOptionalText(
+    const sourceLabel = input.resolveConflict === true
+      && current.source_label?.includes('证据存在冲突')
+      ? '管理员已裁决冲突；以本次人工修订结论为准'
+      : input.sourceLabel === undefined
+        ? current.source_label
+        : normalizeOptionalText(
           input.sourceLabel,
           ENTERPRISE_KNOWLEDGE_MAX_SOURCE_LABEL_LENGTH,
           'knowledge source label',
@@ -759,6 +1027,9 @@ export function reviseEnterpriseKnowledgeInRepository(
       current.id,
       organizationId,
     );
+    if (current.status === 'active') {
+      refreshKnowledgeLifecycle(database, current.id, organizationId, current.source_type);
+    }
     const updated = getEntry(database, current.id, organizationId)!;
     writeRevision(
       database,
@@ -766,7 +1037,90 @@ export function reviseEnterpriseKnowledgeInRepository(
       changedBy,
       normalizeOptionalText(input.changeNote, 500, 'knowledge change note') ?? 'knowledge revised',
     );
+    if (adjudication) {
+      database.prepare(
+        `INSERT INTO knowledge_adjudications
+         (knowledge_id, organization_id, revision_version,
+          accepted_evidence_ids_json, rejected_evidence_ids_json,
+          rationale, adjudicated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        updated.id,
+        organizationId,
+        updated.version,
+        JSON.stringify(adjudication.acceptedEvidenceIds),
+        JSON.stringify(adjudication.rejectedEvidenceIds),
+        adjudication.rationale,
+        changedBy,
+      );
+    }
     return updated;
+  });
+}
+
+export function revalidateEnterpriseKnowledgeInRepository(
+  store: EnterpriseKnowledgeRepositoryStore,
+  input: RevalidateEnterpriseKnowledgeInput,
+): EnterpriseKnowledgeEntryView | null {
+  const organizationId = requireOrganization(store, input.organizationId);
+  const reviewer = normalizeRequiredText(
+    input.reviewer,
+    ENTERPRISE_KNOWLEDGE_MAX_CONTRIBUTOR_LENGTH,
+    'knowledge reviewer',
+  );
+  const rationale = normalizeRequiredText(
+    input.rationale,
+    1_000,
+    'knowledge revalidation rationale',
+  );
+  if (rationale.length < 12) {
+    throw new Error('knowledge revalidation rationale is too short');
+  }
+  if (!Number.isSafeInteger(input.validForDays)
+    || input.validForDays < 30
+    || input.validForDays > 365) {
+    throw new Error('knowledge validity days must be between 30 and 365');
+  }
+  const database = store.db();
+  return runTransaction(database, () => {
+    const current = getEntry(database, input.id, organizationId);
+    if (!current) return null;
+    if (current.status !== 'active') {
+      throw new Error('only active knowledge can be revalidated');
+    }
+    if (current.source_label?.includes('证据存在冲突')) {
+      throw new Error('contested knowledge cannot be revalidated');
+    }
+    database.prepare(
+      `UPDATE knowledge SET version = version + 1, reviewed_by = ?,
+       reviewed_at = datetime('now'), updated_at = datetime('now')
+       WHERE id = ? AND organization_id = ?`,
+    ).run(reviewer, current.id, organizationId);
+    refreshKnowledgeLifecycle(
+      database,
+      current.id,
+      organizationId,
+      current.source_type,
+      input.validForDays,
+    );
+    const updated = getEntry(database, current.id, organizationId)!;
+    writeRevision(database, updated, reviewer, `复核确认：${rationale}`);
+    database.prepare(
+      `INSERT INTO knowledge_revalidations
+       (knowledge_id, organization_id, revision_version, rationale,
+        valid_for_days, review_due_at, expires_at, reviewed_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      updated.id,
+      organizationId,
+      updated.version,
+      rationale,
+      input.validForDays,
+      updated.review_due_at,
+      updated.expires_at,
+      reviewer,
+    );
+    return getEntryWithEvidence(database, updated.id, organizationId);
   });
 }
 
@@ -776,9 +1130,41 @@ export function listEnterpriseKnowledgeRevisionsFromRepository(
   organizationId?: string,
 ): EnterpriseKnowledgeRevisionView[] {
   const normalizedOrganizationId = requireOrganization(store, organizationId);
-  return store.db().prepare(
+  const database = store.db();
+  const revisions = database.prepare(
     `SELECT * FROM knowledge_revisions
      WHERE organization_id = ? AND knowledge_id = ?
      ORDER BY version DESC, id DESC`,
   ).all(normalizedOrganizationId, id) as EnterpriseKnowledgeRevisionView[];
+  const adjudications = database.prepare(
+    `SELECT * FROM knowledge_adjudications
+     WHERE organization_id = ? AND knowledge_id = ?
+     ORDER BY revision_version DESC, id DESC`,
+  ).all(normalizedOrganizationId, id) as Array<{
+    id: number;
+    knowledge_id: number;
+    revision_version: number;
+    accepted_evidence_ids_json: string;
+    rejected_evidence_ids_json: string;
+    rationale: string;
+    adjudicated_by: string;
+    created_at: string;
+  }>;
+  const adjudicationByVersion = new Map(adjudications.map((item) => [
+    item.revision_version,
+    {
+      id: item.id,
+      knowledgeId: item.knowledge_id,
+      revisionVersion: item.revision_version,
+      acceptedEvidenceIds: parseAdjudicationEvidenceIds(item.accepted_evidence_ids_json),
+      rejectedEvidenceIds: parseAdjudicationEvidenceIds(item.rejected_evidence_ids_json),
+      rationale: item.rationale,
+      adjudicatedBy: item.adjudicated_by,
+      createdAt: item.created_at,
+    } satisfies EnterpriseKnowledgeAdjudicationView,
+  ]));
+  return revisions.map((revision) => {
+    const adjudication = adjudicationByVersion.get(revision.version);
+    return adjudication ? { ...revision, adjudication } : revision;
+  });
 }

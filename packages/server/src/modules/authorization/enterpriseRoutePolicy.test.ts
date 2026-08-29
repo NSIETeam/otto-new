@@ -14,3 +14,12 @@ describe('customer module route authorization', () => {
     expect(isMemberRoute(review)).toBe(false);
   });
 });
+
+describe('enterprise public profile and partnership route authorization', () => {
+  it('allows signed-in members to read public profile and star-map routes', () => {
+    expect(isMemberRoute('/enterprise/organization/public-profile')).toBe(true);
+    expect(isMemberRoute('/enterprise/park/star-map')).toBe(true);
+    expect(isAdminRoute('/enterprise/organization/public-profile')).toBe(false);
+    expect(isAdminRoute('/enterprise/park/star-map')).toBe(false);
+  });
+});

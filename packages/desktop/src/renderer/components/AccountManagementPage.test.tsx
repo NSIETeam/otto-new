@@ -60,6 +60,7 @@ const FEATURES = {
   direct_messages: true,
   atoa: true,
   knowledge: true,
+  skill_market: true,
 };
 
 const clipboardWrite = vi.fn(async () => undefined);
@@ -114,6 +115,11 @@ beforeEach(() => {
       enterpriseAccountUpdate: vi.fn(async (_id, input) => ({ ...ADMIN, ...input })),
       enterpriseAccountDelete: vi.fn(async (id) => ({ id, deleted: true as const })),
       enterpriseOrganizationFeaturesGet: vi.fn(async () => FEATURES),
+      enterpriseOrganizationFeatureStateGet: vi.fn(async () => ({
+        configured: FEATURES,
+        entitled: FEATURES,
+        effective: FEATURES,
+      })),
       enterpriseOrganizationFeaturesUpdate: vi.fn(async (patch) => ({ ...FEATURES, ...patch })),
       enterpriseOrganizationDepartments: vi.fn(async () => ORGANIZATION_STRUCTURE),
       enterpriseOrganizationDepartmentCreate: vi.fn(async () => ORGANIZATION_STRUCTURE[0]),
@@ -125,6 +131,17 @@ beforeEach(() => {
       enterpriseParkView: vi.fn(async () => null),
       enterpriseParkRegister: vi.fn(async () => null),
       enterpriseParkJoin: vi.fn(async () => null),
+      enterprisePublicProfile: vi.fn(async () => ({
+        organizationId: 'org_acme', organizationName: '星河科技',
+        summary: '企业数字化服务商', website: 'https://example.com',
+        industryTags: ['软件'], productsServices: ['数字化咨询'],
+        capabilities: ['软件开发'], cooperationNeeds: ['园区渠道'],
+        publicContact: 'bd@example.com', isPublic: false, updatedAt: null,
+      })),
+      enterprisePublicProfileUpdate: vi.fn(async (input) => ({
+        organizationId: 'org_acme', organizationName: '星河科技',
+        ...input, updatedAt: '2026-08-29T08:00:00.000Z',
+      })),
       enterpriseParkServicePush: vi.fn(async () => ({ recipientCount: 1 })),
       enterpriseParkSurveyResults: vi.fn(async () => [{
         id: 'survey-1', title: '第三季度满意度调查', body: '请评价园区服务',
@@ -144,17 +161,17 @@ async function readyCreateButton(): Promise<HTMLButtonElement> {
   return button;
 }
 
-function openManagementSection(label: '组织结构' | '成员目录' | '产业园端' | '企业能力'): void {
+function openManagementSection(label: '组织结构' | '成员目录' | '企业资料' | '产业园端' | '企业能力'): void {
   fireEvent.click(screen.getByRole('tab', { name: new RegExp(label) }));
 }
 
 describe('企业管理分区导航', () => {
-  it('使用四个清晰分区并默认进入成员目录', async () => {
+  it('使用五个清晰分区并默认进入成员目录', async () => {
     render(<AccountManagementPage currentAccount={ADMIN} onBack={() => undefined} />);
 
     const tabs = screen.getAllByRole('tab');
     expect(tabs.map((tab) => tab.querySelector('strong')?.textContent)).toEqual([
-      '组织结构', '成员目录', '产业园端', '企业能力',
+      '组织结构', '成员目录', '企业资料', '产业园端', '企业能力',
     ]);
     const membersTab = screen.getByRole('tab', { name: /成员目录/ });
     const secondaryNavigation = screen.getByRole('complementary', { name: '企业管理导航' });
@@ -169,13 +186,15 @@ describe('企业管理分区导航', () => {
       .toContain('1 名成员'));
 
     fireEvent.keyDown(membersTab, { key: 'ArrowRight' });
-    expect(screen.getByRole('tab', { name: /产业园端/ }).getAttribute('aria-selected')).toBe('true');
-    fireEvent.keyDown(screen.getByRole('tab', { name: /产业园端/ }), { key: 'Home' });
+    expect(screen.getByRole('tab', { name: /企业资料/ }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(screen.getByRole('tab', { name: /企业资料/ }), { key: 'Home' });
     expect(screen.getByRole('tab', { name: /组织结构/ }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('切换分区时只暴露当前管理内容，并保留成员搜索条件', async () => {
     render(<AccountManagementPage currentAccount={ADMIN} onBack={() => undefined} />);
+    await waitFor(() => expect(screen.getByRole('tab', { name: /成员目录/ }).textContent)
+      .toContain('1 名成员'));
     const search = screen.getByRole('textbox', { name: '搜索账号' }) as HTMLInputElement;
     fireEvent.change(search, { target: { value: '管理员' } });
 
@@ -186,6 +205,46 @@ describe('企业管理分区导航', () => {
 
     openManagementSection('成员目录');
     expect((screen.getByRole('textbox', { name: '搜索账号' }) as HTMLInputElement).value).toBe('管理员');
+  });
+
+  it('企业资料默认私有，管理员确认公开后才提交星链图字段', async () => {
+    render(<AccountManagementPage currentAccount={ADMIN} onBack={() => undefined} />);
+    openManagementSection('企业资料');
+
+    expect(await screen.findByDisplayValue('企业数字化服务商')).toBeTruthy();
+    expect(screen.getByText('当前仅企业管理员可见')).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: '合作需求' }), {
+      target: { value: '园区渠道\n智能制造客户' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /向同一园区公开/ }));
+    fireEvent.click(screen.getByRole('button', { name: '保存企业资料' }));
+
+    await waitFor(() => expect(window.otto.enterprisePublicProfileUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cooperationNeeds: ['园区渠道', '智能制造客户'],
+        isPublic: true,
+      }),
+    ));
+    expect(await screen.findByText(/企业资料已公开/)).toBeTruthy();
+  });
+
+  it('园区服务未授权时不请求受保护的企业资料接口', async () => {
+    const effective = { ...FEATURES, park_service: false };
+    Object.assign(window.otto, {
+      enterpriseOrganizationFeaturesGet: vi.fn(async () => effective),
+      enterpriseOrganizationFeatureStateGet: vi.fn(async () => ({
+        configured: { ...FEATURES, park_service: true },
+        entitled: effective,
+        effective,
+      })),
+    });
+
+    render(<AccountManagementPage currentAccount={ADMIN} onBack={() => undefined} />);
+    openManagementSection('企业资料');
+
+    expect(await screen.findByText('企业资料功能当前不可用')).toBeTruthy();
+    await waitFor(() => expect(window.otto.enterpriseOrganizationFeatureStateGet).toHaveBeenCalled());
+    expect(window.otto.enterprisePublicProfile).not.toHaveBeenCalled();
   });
 });
 
@@ -278,7 +337,7 @@ describe('园区内容发布', () => {
   });
 
   it('管理员只发布公告和问卷，其他七项服务由用户主动申请', async () => {
-    vi.mocked(window.otto.enterpriseParkView).mockResolvedValueOnce({
+    vi.mocked(window.otto.enterpriseParkView).mockResolvedValue({
       id: 'park_acme',
       name: '星河产业园',
       slug: 'acme-park',
@@ -310,7 +369,7 @@ describe('园区内容发布', () => {
   });
 
   it('有中心园区时无障碍文案使用动态品牌', async () => {
-    vi.mocked(window.otto.enterpriseParkView).mockResolvedValueOnce({
+    vi.mocked(window.otto.enterpriseParkView).mockResolvedValue({
       id: 'park_star',
       name: '星火产业园',
       slug: 'star-park',

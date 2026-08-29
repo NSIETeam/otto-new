@@ -122,6 +122,8 @@ const BUSINESS_PROMOTION_ORDER = [
   'account_sync_snapshots',
   'knowledge',
   'knowledge_revisions',
+  'knowledge_adjudications',
+  'knowledge_revalidations',
   'knowledge_retention_evidence',
   'enterprise_skills',
   'enterprise_skill_versions',
@@ -132,6 +134,7 @@ const BUSINESS_PROMOTION_ORDER = [
   'park_invites',
   'park_services',
   'park_tenant_profiles',
+  'enterprise_public_profiles',
   'park_service_specialists',
   'park_settings',
   'park_meeting_rooms',
@@ -168,6 +171,20 @@ function stringValue(value: unknown, label: string): string {
 
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function positiveIntegerJsonArray(value: unknown, label: string): number[] {
+  try {
+    const parsed = JSON.parse(String(value ?? '[]')) as unknown;
+    if (!Array.isArray(parsed)
+      || parsed.length > 100
+      || !parsed.every((item) => Number.isSafeInteger(item) && item > 0)) {
+      throw new Error('invalid');
+    }
+    return parsed as number[];
+  } catch {
+    throw new Error(`SQLite promotion ${label} is invalid`);
+  }
 }
 
 function timestamp(value: unknown, label: string): string {
@@ -1175,6 +1192,17 @@ function jsonValue(value: unknown, fallback: unknown): unknown {
   }
 }
 
+function jsonStringList(value: unknown): string[] {
+  const parsed = jsonValue(value, []);
+  return Array.isArray(parsed)
+    ? parsed
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 20)
+    : [];
+}
+
 function legacyTimestamp(value: unknown): string {
   if (value === null || value === undefined || value === '') {
     return new Date(0).toISOString();
@@ -1373,6 +1401,8 @@ async function promoteBusinessTables(input: {
         sourceLabel: optionalString(row.source_label),
         reviewedBy: optionalString(row.reviewed_by),
         reviewedAt: optionalString(row.reviewed_at),
+        reviewDueAt: optionalString(row.review_due_at),
+        expiresAt: optionalString(row.expires_at),
         reviewNote: null,
       },
       createdAt: row.created_at,
@@ -1403,6 +1433,57 @@ async function promoteBusinessTables(input: {
         status: row.status,
         changedBy: row.changed_by,
         changeNote: row.change_note,
+      },
+      createdAt: row.created_at,
+    });
+  }
+  for (const row of input.loaded.get('knowledge_adjudications') ?? []) {
+    await insertBusinessEvent({
+      client: input.client,
+      organizationId: stringValue(
+        row.organization_id,
+        'knowledge adjudication organization id',
+      ),
+      domain: 'knowledge',
+      eventId: `adjudication_${String(row.id)}`,
+      resourceType: 'entry',
+      resourceId: String(row.knowledge_id),
+      eventType: 'adjudicated',
+      payload: {
+        revisionVersion: Number(row.revision_version),
+        acceptedEvidenceIds: positiveIntegerJsonArray(
+          row.accepted_evidence_ids_json,
+          'knowledge accepted evidence ids',
+        ),
+        rejectedEvidenceIds: positiveIntegerJsonArray(
+          row.rejected_evidence_ids_json,
+          'knowledge rejected evidence ids',
+        ),
+        rationale: row.rationale,
+        adjudicatedBy: row.adjudicated_by,
+      },
+      createdAt: row.created_at,
+    });
+  }
+  for (const row of input.loaded.get('knowledge_revalidations') ?? []) {
+    await insertBusinessEvent({
+      client: input.client,
+      organizationId: stringValue(
+        row.organization_id,
+        'knowledge revalidation organization id',
+      ),
+      domain: 'knowledge',
+      eventId: `revalidation_${String(row.id)}`,
+      resourceType: 'entry',
+      resourceId: String(row.knowledge_id),
+      eventType: 'revalidated',
+      payload: {
+        revisionVersion: Number(row.revision_version),
+        rationale: row.rationale,
+        validForDays: Number(row.valid_for_days),
+        reviewDueAt: row.review_due_at,
+        expiresAt: row.expires_at,
+        reviewedBy: row.reviewed_by,
       },
       createdAt: row.created_at,
     });
@@ -1667,6 +1748,32 @@ async function promoteBusinessTables(input: {
         joinedAt: legacyTimestamp(row.updated_at),
       },
       createdAt: row.updated_at,
+      updatedAt: row.updated_at,
+    });
+  }
+  for (const row of input.loaded.get('enterprise_public_profiles') ?? []) {
+    const organizationId = stringValue(
+      row.organization_id,
+      'enterprise public profile organization id',
+    );
+    await insertBusinessRecord({
+      client: input.client,
+      organizationId,
+      domain: 'park',
+      resourceType: 'public_profile',
+      resourceId: `public_profile_${organizationId}`,
+      ownerAccountId: optionalString(row.updated_by_account_id),
+      payload: {
+        summary: optionalString(row.summary) ?? '',
+        website: optionalString(row.website) ?? '',
+        industryTags: jsonStringList(row.industry_tags_json),
+        productsServices: jsonStringList(row.products_services_json),
+        capabilities: jsonStringList(row.capabilities_json),
+        cooperationNeeds: jsonStringList(row.cooperation_needs_json),
+        publicContact: optionalString(row.public_contact) ?? '',
+        isPublic: booleanValue(row.is_public),
+      },
+      createdAt: row.created_at,
       updatedAt: row.updated_at,
     });
   }

@@ -89,8 +89,13 @@ export async function controlLicenseClaim(
 /** 读取当前是否存在已导入的 License（用于幂等判断；状态计算由上层 store 负责）。 */
 function readCurrentLicense(database: Database): { status: string } | null {
   try {
+    // Only presence matters here. Restricting this query to the stable `id`
+    // column also keeps activation idempotent while an older deployment is
+    // being migrated and does not yet have the newer ordering columns.
     const row = database.prepare(
-      'SELECT id FROM deployment_license ORDER BY updated_at DESC LIMIT 1',
+      `SELECT id FROM deployment_license
+       WHERE id IS NOT NULL AND id <> ''
+       LIMIT 1`,
     ).get() as { id?: string } | undefined;
     if (!row || !row.id) return null;
     return { status: 'present' };

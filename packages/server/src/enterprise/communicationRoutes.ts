@@ -147,10 +147,10 @@ export async function handleCommunicationRoute({
         sendJSON(res, 403, { error: '无权查看该企业组织架构' });
         return true;
       }
-    }
-    if (!db.getOrganizationFeatures(organizationId).enterprise_tree) {
-      sendJSON(res, 403, { error: '企业树功能已由管理员关闭' });
-      return true;
+      if (!db.getOrganizationFeatures(organizationId).enterprise_tree) {
+        sendJSON(res, 403, { error: '企业树功能已由管理员关闭' });
+        return true;
+      }
     }
     sendJSON(res, 200, organizationViewPayload(organizationId));
     return true;
@@ -158,11 +158,6 @@ export async function handleCommunicationRoute({
 
   if (path === '/enterprise/organization/sync' && method === 'GET') {
     const organizationId = memberAccount.organizationId;
-    const features = db.getOrganizationFeatures(organizationId);
-    if (!features.enterprise_tree) {
-      sendJSON(res, 403, { error: '企业树同步功能已由管理员关闭' });
-      return true;
-    }
     sendJSON(res, 200, organizationViewPayload(organizationId));
     return true;
   }
@@ -666,7 +661,8 @@ export async function handleCommunicationRoute({
 
   if (path === '/enterprise/messages/unread' && method === 'GET') {
     if (
-      !db.getOrganizationFeatures(memberAccount.organizationId).direct_messages
+      !db.getConfiguredOrganizationFeatures(memberAccount.organizationId)
+        .direct_messages
     ) {
       sendJSON(res, 403, { error: '企业内部消息功能已由管理员关闭' });
       return true;
@@ -684,7 +680,8 @@ export async function handleCommunicationRoute({
 
   if (path.startsWith('/enterprise/message-attachments/') && method === 'GET') {
     if (
-      !db.getOrganizationFeatures(memberAccount.organizationId).direct_messages
+      !db.getConfiguredOrganizationFeatures(memberAccount.organizationId)
+        .direct_messages
     ) {
       sendJSON(res, 403, { error: 'enterprise direct messages are disabled' });
       return true;
@@ -716,7 +713,8 @@ export async function handleCommunicationRoute({
     (method === 'GET' || method === 'POST')
   ) {
     if (
-      !db.getOrganizationFeatures(memberAccount.organizationId).direct_messages
+      !db.getConfiguredOrganizationFeatures(memberAccount.organizationId)
+        .direct_messages
     ) {
       sendJSON(res, 403, { error: '企业内部消息功能已由管理员关闭' });
       return true;

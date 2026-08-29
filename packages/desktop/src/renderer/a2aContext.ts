@@ -15,6 +15,10 @@ import {
   type AtoaContextSource,
   displayDirectMessageContent,
 } from './atoaProtocol.js';
+import {
+  enterpriseKnowledgeExclusionNotice,
+  evaluateEnterpriseKnowledgeApplicability,
+} from './enterpriseKnowledgeApplicability.js';
 
 interface WorkLogEntry {
   time: string;
@@ -85,8 +89,13 @@ function formatMessages(
 }
 
 function formatKnowledge(items: EnterpriseKnowledgeItem[]): string {
-  const rows = [...items]
-    .filter((item) => !item.status || item.status === 'active')
+  const evaluated = items.map((item) => ({
+    item,
+    applicability: evaluateEnterpriseKnowledgeApplicability(item),
+  }));
+  const rows = evaluated
+    .filter(({ applicability }) => applicability.usable)
+    .map(({ item }) => item)
     .sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt))
     .slice(0, 20)
     .map((item) => {
@@ -97,7 +106,14 @@ function formatKnowledge(items: EnterpriseKnowledgeItem[]): string {
       const citation = `[企业知识#${text(item.id, 40)} v${item.version || 1}]`;
       return `- ${citation} ${text(item.title, 160) || meta || '知识'}${meta ? ` (${meta})` : ''}${source ? `；来源：${source}` : ''}: ${text(item.content, 500)}`;
     });
-  return rows.length > 0 ? rows.join('\n') : '（没有可用企业知识）';
+  const notice = enterpriseKnowledgeExclusionNotice(
+    evaluated
+      .filter(({ applicability }) => !applicability.usable)
+      .map(({ applicability }) => applicability),
+  );
+  return [rows.length > 0 ? rows.join('\n') : '（没有可用企业知识）', notice]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function formatWorkLogs(days: WorkLogDay[]): string {

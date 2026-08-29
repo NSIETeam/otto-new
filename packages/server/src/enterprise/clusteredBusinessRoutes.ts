@@ -24,6 +24,11 @@ import type {
   PostgresEnterpriseBusinessRepository,
 } from './postgresBusinessRepository.js';
 import type { OrganizationFeatureKey } from '../productModules.js';
+import { inferParkPartnerships } from '../modules/park_services/parkPartnershipInference.js';
+import type {
+  EnterprisePublicProfile,
+  EnterprisePublicProfileInput,
+} from '../modules/park_services/parkPartnershipTypes.js';
 import type {
   PostgresEnterpriseAccountView,
   PostgresEnterpriseCoreRepository,
@@ -65,7 +70,10 @@ export interface ClusteredBusinessRouteInput {
     maxLength?: number,
   ): Promise<Record<string, unknown>>;
   sendJson(res: ServerResponse, status: number, body: unknown): void;
-  requireCommercialFeature(feature: OrganizationFeatureKey): Promise<boolean>;
+  requireCommercialFeature(
+    feature: OrganizationFeatureKey,
+    organizationId?: string,
+  ): Promise<boolean>;
   commercialFeatureAvailable(feature: OrganizationFeatureKey): Promise<boolean>;
   commercialLicenseSummary(): Promise<ClusteredLicenseSummary>;
 }
@@ -85,6 +93,8 @@ type KnowledgePayload = {
   reviewedBy: string | null;
   reviewedAt: string | null;
   reviewNote: string | null;
+  reviewDueAt?: string | null;
+  expiresAt?: string | null;
 };
 
 type SkillPayload = {
@@ -122,15 +132,76 @@ function text(
   return normalized;
 }
 
+function textList(
+  value: unknown,
+  label: string,
+  maximumItems = 20,
+): string[] {
+  if (!Array.isArray(value)) return [];
+  const items = Array.from(
+    new Set(
+      value
+        .map((item) => text(item, label, 80, false))
+        .filter((item): item is string => Boolean(item)),
+    ),
+  );
+  if (items.length > maximumItems) {
+    throw new Error(`${label} supports at most ${maximumItems} items`);
+  }
+  return items;
+}
+
 function knowledgeView(record: PostgresBusinessRecord<KnowledgePayload>) {
+  const lifecycle = clusteredKnowledgeEffectiveLifecycle(record);
   return {
     id: record.resourceId,
     organizationId: record.organizationId,
     ...record.payload,
+    ...lifecycle,
     status: record.status,
     version: record.version,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+  };
+}
+
+function clusteredKnowledgeLifecycle(sourceType: string, validForDays?: number): {
+  reviewDueAt: string;
+  expiresAt: string;
+} {
+  const validDays = validForDays ?? (sourceType === 'auto_capture' ? 180 : 365);
+  const reviewDays = validForDays === undefined
+    ? sourceType === 'auto_capture' ? 90 : 180
+    : Math.max(15, Math.floor(validDays / 2));
+  const now = Date.now();
+  return {
+    reviewDueAt: new Date(now + reviewDays * 86_400_000).toISOString(),
+    expiresAt: new Date(now + validDays * 86_400_000).toISOString(),
+  };
+}
+
+function clusteredKnowledgeEffectiveLifecycle(
+  record: PostgresBusinessRecord<KnowledgePayload>,
+): { reviewDueAt: string | null; expiresAt: string | null } {
+  if (record.status !== 'active') return { reviewDueAt: null, expiresAt: null };
+  if (record.payload.reviewDueAt && record.payload.expiresAt) {
+    return {
+      reviewDueAt: record.payload.reviewDueAt,
+      expiresAt: record.payload.expiresAt,
+    };
+  }
+  const reference = Date.parse(
+    record.payload.reviewedAt || record.updatedAt || record.createdAt,
+  );
+  const defaults = clusteredKnowledgeLifecycle(record.payload.sourceType);
+  if (!Number.isFinite(reference)) return defaults;
+  const reviewDays = record.payload.sourceType === 'auto_capture' ? 90 : 180;
+  const validDays = record.payload.sourceType === 'auto_capture' ? 180 : 365;
+  return {
+    reviewDueAt: record.payload.reviewDueAt
+      || new Date(reference + reviewDays * 86_400_000).toISOString(),
+    expiresAt: record.payload.expiresAt
+      || new Date(reference + validDays * 86_400_000).toISOString(),
   };
 }
 
@@ -300,6 +371,11 @@ async function handleKnowledge(
       });
     const visible = records.filter((record) => {
       const entry = record.payload;
+      const lifecycle = clusteredKnowledgeEffectiveLifecycle(record);
+      if (!(input.member.isAdmin && includeReview)
+        && record.status === 'active'
+        && lifecycle.expiresAt
+        && Date.parse(lifecycle.expiresAt) <= Date.now()) return false;
       if (
         !input.member.isAdmin &&
         entry.department &&
@@ -369,6 +445,9 @@ async function handleKnowledge(
           reviewedBy: status === 'active' ? input.member.name : null,
           reviewedAt: status === 'active' ? new Date().toISOString() : null,
           reviewNote: null,
+          ...(status === 'active'
+            ? clusteredKnowledgeLifecycle(sourceType)
+            : { reviewDueAt: null, expiresAt: null }),
         },
       });
     input.sendJson(input.res, 200, {
@@ -411,6 +490,9 @@ async function handleKnowledge(
           reviewedBy: input.member.name,
           reviewedAt: new Date().toISOString(),
           reviewNote: text(body.note, 'review note', 1_000, false),
+          ...(body.action === 'approve'
+            ? clusteredKnowledgeLifecycle(current.payload.sourceType)
+            : { reviewDueAt: null, expiresAt: null }),
         },
       }),
     );
@@ -446,6 +528,98 @@ async function handleKnowledge(
     return true;
   }
 
+  const revalidate = /^\/enterprise\/knowledge\/([^/]+)\/revalidate$/u.exec(
+    input.path,
+  );
+  if (revalidate && input.method === 'POST') {
+    if (!input.member.isAdmin) {
+      input.sendJson(input.res, 403, { error: 'administrator permission required' });
+      return true;
+    }
+    const body = await input.readBody(input.req);
+    const rationale = text(body.rationale, 'revalidation rationale', 1_000)!;
+    if (rationale.length < 12) throw new Error('revalidation rationale is too short');
+    if (!Number.isSafeInteger(body.validForDays)
+      || Number(body.validForDays) < 30
+      || Number(body.validForDays) > 365) {
+      throw new Error('validity days must be between 30 and 365');
+    }
+    const resourceId = decodeURIComponent(revalidate[1]!);
+    const before = await input.repository.getBusinessRecord<KnowledgePayload>({
+      organizationId,
+      domain: 'knowledge',
+      resourceType: 'entry',
+      resourceId,
+    });
+    if (!before) {
+      input.sendJson(input.res, 404, { error: 'knowledge not found' });
+      return true;
+    }
+    if (before.status !== 'active') throw new Error('only active knowledge can be revalidated');
+    if (before.payload.sourceLabel?.includes('证据存在冲突')) {
+      throw new Error('contested knowledge cannot be revalidated');
+    }
+    const saved = await updateRecordWithRetry<KnowledgePayload>(
+      input.repository,
+      { organizationId, domain: 'knowledge', resourceType: 'entry', resourceId },
+      (current) => ({
+        status: current.status,
+        payload: {
+          ...current.payload,
+          reviewedBy: input.member.name,
+          reviewedAt: new Date().toISOString(),
+          reviewNote: rationale,
+          ...clusteredKnowledgeLifecycle(current.payload.sourceType, Number(body.validForDays)),
+        },
+      }),
+    );
+    if (!saved) throw new Error('business record changed concurrently');
+    await input.repository.appendBusinessEvent({
+      organizationId,
+      domain: 'knowledge',
+      resourceType: 'entry',
+      resourceId,
+      actorAccountId: input.member.id,
+      eventType: 'revalidated',
+      payload: {
+        fromVersion: before.version,
+        toVersion: saved.version,
+        rationale,
+        validForDays: Number(body.validForDays),
+        reviewDueAt: saved.payload.reviewDueAt,
+        expiresAt: saved.payload.expiresAt,
+      },
+    });
+    input.sendJson(input.res, 200, { knowledge: knowledgeView(saved) });
+    return true;
+  }
+
+  const evidence = /^\/enterprise\/knowledge\/([^/]+)\/evidence$/u.exec(
+    input.path,
+  );
+  if (evidence && input.method === 'GET') {
+    if (!input.member.isAdmin) {
+      input.sendJson(input.res, 403, {
+        error: 'administrator permission required',
+      });
+      return true;
+    }
+    const knowledge = await input.repository.getBusinessRecord<KnowledgePayload>({
+      organizationId,
+      domain: 'knowledge',
+      resourceType: 'entry',
+      resourceId: decodeURIComponent(evidence[1]!),
+    });
+    input.sendJson(
+      input.res,
+      knowledge ? 200 : 404,
+      knowledge
+        ? { evidence: [] }
+        : { error: 'knowledge not found' },
+    );
+    return true;
+  }
+
   const entry = /^\/enterprise\/knowledge\/([^/]+)$/u.exec(input.path);
   if (entry && input.method === 'PATCH') {
     if (!input.member.isAdmin) {
@@ -456,6 +630,12 @@ async function handleKnowledge(
     }
     const resourceId = decodeURIComponent(entry[1]!);
     const body = await input.readBody(input.req);
+    if (body.resolveConflict === true || body.adjudication !== undefined) {
+      input.sendJson(input.res, 409, {
+        error: 'clustered knowledge adjudication is not available',
+      });
+      return true;
+    }
     const before = await input.repository.getBusinessRecord<KnowledgePayload>({
       organizationId,
       domain: 'knowledge',
@@ -498,6 +678,9 @@ async function handleKnowledge(
             body.sourceLabel === undefined
               ? current.payload.sourceLabel
               : text(body.sourceLabel, 'source label', 300, false),
+          ...(current.status === 'active'
+            ? clusteredKnowledgeLifecycle(current.payload.sourceType)
+            : {}),
         },
       }),
     );
@@ -851,6 +1034,131 @@ type ParkMembershipPayload = {
   joinedAt: string;
 };
 
+type EnterprisePublicProfilePayload = EnterprisePublicProfileInput &
+  Record<string, unknown>;
+
+function enterprisePublicProfileView(
+  organizationId: string,
+  organizationName: string,
+  record: PostgresBusinessRecord<EnterprisePublicProfilePayload> | null,
+): EnterprisePublicProfile {
+  return {
+    organizationId,
+    organizationName,
+    summary: record?.payload.summary ?? '',
+    website: record?.payload.website ?? '',
+    industryTags: record?.payload.industryTags ?? [],
+    productsServices: record?.payload.productsServices ?? [],
+    capabilities: record?.payload.capabilities ?? [],
+    cooperationNeeds: record?.payload.cooperationNeeds ?? [],
+    publicContact: record?.payload.publicContact ?? '',
+    isPublic: record?.payload.isPublic === true,
+    updatedAt: record?.updatedAt ?? null,
+  };
+}
+
+async function handleEnterprisePublicProfile(
+  input: ClusteredBusinessRouteInput,
+): Promise<boolean> {
+  if (input.path !== '/enterprise/organization/public-profile') return false;
+  if (input.method !== 'GET' && input.method !== 'PUT') return false;
+  const organizationId = input.member.organizationId;
+  const organization = await input.repository.getOrganization(organizationId);
+  if (!organization) {
+    input.sendJson(input.res, 404, { error: 'organization not found' });
+    return true;
+  }
+  const identity = {
+    organizationId,
+    domain: 'park' as const,
+    resourceType: 'public_profile',
+    resourceId: `public_profile_${organizationId}`,
+  };
+  const current =
+    await input.repository.getBusinessRecord<EnterprisePublicProfilePayload>(
+      identity,
+    );
+  if (input.method === 'GET') {
+    input.sendJson(input.res, 200, {
+      profile: enterprisePublicProfileView(
+        organizationId,
+        organization.name,
+        current,
+      ),
+    });
+    return true;
+  }
+  if (!input.member.isAdmin) {
+    input.sendJson(input.res, 403, {
+      error: 'administrator permission required',
+    });
+    return true;
+  }
+  const body = await input.readBody(input.req);
+  const payload: EnterprisePublicProfilePayload = {
+    summary: text(body.summary, 'organization summary', 1000, false) ?? '',
+    website: text(body.website, 'organization website', 300, false) ?? '',
+    industryTags: textList(body.industryTags, 'industry tag'),
+    productsServices: textList(body.productsServices, 'product or service'),
+    capabilities: textList(body.capabilities, 'organization capability'),
+    cooperationNeeds: textList(body.cooperationNeeds, 'cooperation need'),
+    publicContact:
+      text(body.publicContact, 'public contact', 240, false) ?? '',
+    isPublic: body.isPublic === true,
+  };
+  if (payload.website && !/^https?:\/\//iu.test(payload.website)) {
+    input.sendJson(input.res, 400, {
+      error: 'organization website must start with http:// or https://',
+    });
+    return true;
+  }
+  if (
+    payload.isPublic &&
+    (!payload.summary ||
+      payload.productsServices.length +
+        payload.capabilities.length +
+        payload.cooperationNeeds.length ===
+        0)
+  ) {
+    input.sendJson(input.res, 400, {
+      error:
+        'complete the summary and at least one offering, capability or cooperation need before publishing',
+    });
+    return true;
+  }
+  const saved = current
+    ? await updateRecordWithRetry(input.repository, identity, () => ({
+        status: 'active',
+        payload,
+      }))
+    : await input.repository.createBusinessRecord({
+        ...identity,
+        ownerAccountId: input.member.id,
+        payload,
+      });
+  if (!saved) throw new Error('business record changed concurrently');
+  await input.repository.appendBusinessEvent({
+    ...identity,
+    actorAccountId: input.member.id,
+    eventType: 'visibility_updated',
+    payload: {
+      isPublic: payload.isPublic,
+      industryTagCount: payload.industryTags.length,
+      productServiceCount: payload.productsServices.length,
+      capabilityCount: payload.capabilities.length,
+      cooperationNeedCount: payload.cooperationNeeds.length,
+    },
+  });
+  input.sendJson(input.res, 200, {
+    profile: enterprisePublicProfileView(
+      organizationId,
+      organization.name,
+      saved,
+    ),
+  });
+  return true;
+}
+
 async function parkAuthority(input: ClusteredBusinessRouteInput): Promise<{
   park: PostgresBusinessRecord<ParkPayload> | null;
   membership: PostgresBusinessRecord<ParkMembershipPayload> | null;
@@ -1166,6 +1474,64 @@ async function handlePark(
       })),
     );
     input.sendJson(input.res, 200, { organizations });
+    return true;
+  }
+
+  if (input.path === '/enterprise/park/star-map' && input.method === 'GET') {
+    const authority = await parkAuthority(input);
+    if (!authority.park) {
+      input.sendJson(input.res, 404, { error: 'park not found' });
+      return true;
+    }
+    const memberships =
+      await input.repository.listParkTenantMemberships<ParkMembershipPayload>(
+        authority.resourceOrganizationId,
+      );
+    const organizationIds = Array.from(
+      new Set([
+        authority.park.payload.adminOrganizationId,
+        ...memberships.map((membership) => membership.organizationId),
+      ]),
+    );
+    const profiles = (
+      await Promise.all(
+        organizationIds.map(async (candidateOrganizationId) => {
+          const [organization, profile] = await Promise.all([
+            input.repository.getOrganization(candidateOrganizationId),
+            input.repository.getBusinessRecord<EnterprisePublicProfilePayload>({
+              organizationId: candidateOrganizationId,
+              domain: 'park',
+              resourceType: 'public_profile',
+              resourceId: `public_profile_${candidateOrganizationId}`,
+            }),
+          ]);
+          if (
+            !organization ||
+            organization.status !== 'active' ||
+            !profile ||
+            profile.status !== 'active' ||
+            !profile.payload.isPublic
+          ) {
+            return null;
+          }
+          return enterprisePublicProfileView(
+            candidateOrganizationId,
+            organization.name,
+            profile,
+          );
+        }),
+      )
+    ).filter((profile): profile is EnterprisePublicProfile => profile !== null);
+    input.sendJson(input.res, 200, {
+      starMap: {
+        parkId: authority.park.resourceId,
+        parkName: authority.park.payload.name,
+        currentOrganizationId: organizationId,
+        generatedAt: new Date().toISOString(),
+        nodes: profiles,
+        edges: inferParkPartnerships(profiles),
+      },
+    });
     return true;
   }
 
@@ -1941,6 +2307,16 @@ async function handleTickets(
     }
     const targetOrganizationId =
       authority?.resourceOrganizationId ?? organizationId;
+    if (
+      isParkRequest &&
+      targetOrganizationId !== organizationId &&
+      !(await input.requireCommercialFeature(
+        'park_service',
+        targetOrganizationId,
+      ))
+    ) {
+      return true;
+    }
     const targetAccounts =
       await input.repository.listAccounts(targetOrganizationId);
     const targetTags = Array.isArray(body.targetTags)
@@ -2799,6 +3175,7 @@ export async function handleClusteredBusinessRoute(
     (await handleAccountSync(input)) ||
     (await handleKnowledge(input)) ||
     (await handleSkills(input)) ||
+    (await handleEnterprisePublicProfile(input)) ||
     (await handlePark(input)) ||
     (await handleTickets(input)) ||
     (await handleCommercialControl(input))

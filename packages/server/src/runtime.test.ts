@@ -29,7 +29,7 @@ import { ToolCallStatus, type ServerToClient } from './protocol.js';
 const noOpWorkLogger = { log: async () => undefined };
 
 describe('CoreSessionRuntime 会话标题生成', () => {
-  it('使用独立临时 Chat 和 4～8 字提示词，不污染主会话', async () => {
+  it('使用独立临时 Chat 生成简短标题并允许必要产品名，不污染主会话', async () => {
     const sendMessage = vi.fn(async () => chunk('登录故障排查'));
     const createTemporaryChat = vi.fn(async () => ({ sendMessage }));
     const getChat = vi.fn();
@@ -56,7 +56,7 @@ describe('CoreSessionRuntime 会话标题生成', () => {
     );
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: expect.stringContaining('标题必须为 4～8 个汉字'),
+        message: expect.stringContaining('产品名、API 名、型号和版本号可保留'),
         config: expect.objectContaining({ maxOutputTokens: 32, temperature: 0.2 }),
       }),
       expect.stringContaining(`session-title-${session.sessionId}-`),

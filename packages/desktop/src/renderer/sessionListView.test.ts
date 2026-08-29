@@ -4,7 +4,9 @@ import type { SessionSummary } from 'otto-server';
 import {
   DEFAULT_SESSION_LIST_PREFERENCE,
   groupSessionsForSidebar,
+  isProjectSession,
   readSessionListPreference,
+  sameWorkspacePath,
   sessionListPreferenceStorageKey,
   writeSessionListPreference,
 } from './sessionListView.js';
@@ -29,6 +31,38 @@ const scope = {
 };
 
 describe('session list view grouping', () => {
+  it('separates project sessions from ordinary conversations without migrating stored sessions', () => {
+    const now = new Date('2026-08-26T12:00:00+08:00').getTime();
+    const sessions = [
+      makeSession({
+        sessionId: 'ordinary',
+        workspacePath: 'C:\\Users\\yang',
+        updatedAt: now,
+      }),
+      makeSession({
+        sessionId: 'project',
+        workspacePath: 'C:\\work\\otto',
+        updatedAt: now - 1,
+      }),
+    ];
+
+    const groups = groupSessionsForSidebar(sessions, 'kind', now, 'c:/Users/yang/');
+
+    expect(groups.map((group) => [group.section, group.label])).toEqual([
+      ['projects', 'otto'],
+      ['conversations', '今天'],
+    ]);
+    expect(groups[0].sessions[0].sessionId).toBe('project');
+    expect(groups[1].sessions[0].sessionId).toBe('ordinary');
+  });
+
+  it('compares Windows workspace paths case-insensitively and fails closed before default path loads', () => {
+    const session = makeSession({ workspacePath: 'D:\\Otto\\Project\\' });
+    expect(sameWorkspacePath(session.workspacePath, 'd:/otto/project')).toBe(true);
+    expect(isProjectSession(session, 'D:/otto/project')).toBe(false);
+    expect(isProjectSession(session, undefined)).toBe(false);
+  });
+
   it('keeps the existing relative-time ordering', () => {
     const now = new Date('2026-08-26T12:00:00+08:00').getTime();
     const sessions = [
@@ -100,6 +134,10 @@ describe('session list view grouping', () => {
 });
 
 describe('session list view preference', () => {
+  it('uses the project-and-conversation view for new users', () => {
+    expect(DEFAULT_SESSION_LIST_PREFERENCE.mode).toBe('kind');
+  });
+
   it('is scoped by server, organization, and account', () => {
     expect(sessionListPreferenceStorageKey(scope)).not.toBe(
       sessionListPreferenceStorageKey({ ...scope, accountId: 'account-b' }),
@@ -134,6 +172,7 @@ describe('session list view preference', () => {
       version: 1,
       mode: 'workspace',
       collapsedWorkspaceKeys: ['workspace:/a', 'workspace:/a', '', 'workspace:/b'],
+      removedProjectPaths: [' /Users/yang/old ', '/Users/yang/old'],
     }, { setItem })).toBe(true);
 
     expect(setItem).toHaveBeenCalledWith(
@@ -142,7 +181,29 @@ describe('session list view preference', () => {
         version: 1,
         mode: 'workspace',
         collapsedWorkspaceKeys: ['workspace:/a', 'workspace:/b'],
+        removedProjectPaths: ['/Users/yang/old'],
       }),
     );
+  });
+
+  it('moves removed projects back to ordinary conversations without dropping their sessions', () => {
+    const now = new Date('2026-08-26T12:00:00+08:00').getTime();
+    const session = makeSession({
+      sessionId: 'kept-history',
+      workspacePath: '/Users/yang/project',
+      updatedAt: now,
+    });
+
+    const groups = groupSessionsForSidebar(
+      [session],
+      'kind',
+      now,
+      '/Users/yang',
+      ['/Users/yang/project'],
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].section).toBe('conversations');
+    expect(groups[0].sessions[0].sessionId).toBe('kept-history');
   });
 });

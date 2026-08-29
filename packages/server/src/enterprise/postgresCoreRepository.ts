@@ -59,6 +59,7 @@ import {
   hashIdentitySecret,
   identitySecretMatches,
   isAcceptableAccountPassword,
+  type OrganizationPositionRoleMapping,
 } from '../modules/identity_organization/index.js';
 import {
   CURRENT_LEGAL_DOCUMENTS,
@@ -177,12 +178,21 @@ export interface UpdatePostgresEnterpriseAccountInput {
 export interface PostgresOrganizationStructureView {
   departments: Array<{
     id: string;
+    organizationId: string;
     name: string;
+    parentDepartmentId: string | null;
+    memberCount: number;
     positions: Array<{
       id: string;
+      organizationId: string;
+      departmentId: string;
       title: string;
-      roleMapping: string | null;
+      roleMapping: OrganizationPositionRoleMapping;
+      createdAt: string;
+      updatedAt: string;
     }>;
+    createdAt: string;
+    updatedAt: string;
   }>;
 }
 
@@ -202,10 +212,9 @@ export interface PostgresE2eeAttachmentReferenceInput {
   ciphertextSha256: string;
 }
 
-export type SendPostgresE2eeDirectMessageInput =
-  SendE2eeDirectMessageInput & {
-    attachmentReferences?: PostgresE2eeAttachmentReferenceInput[];
-  };
+export type SendPostgresE2eeDirectMessageInput = SendE2eeDirectMessageInput & {
+  attachmentReferences?: PostgresE2eeAttachmentReferenceInput[];
+};
 
 export interface PostgresE2eeAttachmentAuthority {
   message: E2eeDirectMessageView;
@@ -359,11 +368,14 @@ interface MlsEventRow extends Record<string, unknown> {
   expires_at: Date | string;
 }
 
-type Queryable = Pick<PostgresPoolLike, 'query'> | Pick<PostgresClientLike, 'query'>;
+type Queryable =
+  Pick<PostgresPoolLike, 'query'> | Pick<PostgresClientLike, 'query'>;
 
 function iso(value: Date | string | null): string | null {
   if (value === null) return null;
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+  return value instanceof Date
+    ? value.toISOString()
+    : new Date(value).toISOString();
 }
 
 function requiredIdentifier(value: string, label: string): string {
@@ -395,20 +407,22 @@ function normalizeUsername(value: string): string {
 export function normalizePostgresEnterprisePhone(value: string): string {
   let digits = value.trim().replace(/[^\d]/g, '');
   if (digits.startsWith('0086')) digits = digits.slice(4);
-  else if (digits.startsWith('86') && digits.length === 13) digits = digits.slice(2);
+  else if (digits.startsWith('86') && digits.length === 13)
+    digits = digits.slice(2);
   if (!/^1[3-9]\d{9}$/.test(digits)) throw new Error('phone is invalid');
   return `+86${digits}`;
 }
 
-function normalizeOptionalPhone(value: string | null | undefined): string | null {
+function normalizeOptionalPhone(
+  value: string | null | undefined,
+): string | null {
   return value?.trim() ? normalizePostgresEnterprisePhone(value) : null;
 }
 
 function normalizeTags(values: readonly string[] | undefined): string[] {
-  const tags = (values ?? [])
-    .map((value) => value.trim())
-    .filter(Boolean);
-  if (tags.some((tag) => tag.length > 80)) throw new Error('account tag is too long');
+  const tags = (values ?? []).map((value) => value.trim()).filter(Boolean);
+  if (tags.some((tag) => tag.length > 80))
+    throw new Error('account tag is too long');
   return [...new Set(tags)].sort((left, right) => left.localeCompare(right));
 }
 
@@ -499,7 +513,9 @@ function accountView(row: AccountRow): PostgresEnterpriseAccountView {
   };
 }
 
-function organizationView(row: OrganizationRow): PostgresEnterpriseOrganizationView {
+function organizationView(
+  row: OrganizationRow,
+): PostgresEnterpriseOrganizationView {
   return {
     id: row.id,
     name: row.name,
@@ -543,9 +559,13 @@ function transparencyEntry(row: TransparencyRow): E2eeKeyTransparencyEntry {
   };
 }
 
-function parseEnvelopes(value: E2eeMessageEnvelope[] | string): E2eeMessageEnvelope[] {
-  const parsed = typeof value === 'string' ? (JSON.parse(value) as unknown) : value;
-  if (!Array.isArray(parsed)) throw new Error('stored E2EE envelopes are invalid');
+function parseEnvelopes(
+  value: E2eeMessageEnvelope[] | string,
+): E2eeMessageEnvelope[] {
+  const parsed =
+    typeof value === 'string' ? (JSON.parse(value) as unknown) : value;
+  if (!Array.isArray(parsed))
+    throw new Error('stored E2EE envelopes are invalid');
   return parsed as E2eeMessageEnvelope[];
 }
 
@@ -663,7 +683,10 @@ function postgresMlsEventMatches(
   );
 }
 
-async function transaction<T>(pool: PostgresPoolLike, operation: (client: PostgresClientLike) => Promise<T>): Promise<T> {
+async function transaction<T>(
+  pool: PostgresPoolLike,
+  operation: (client: PostgresClientLike) => Promise<T>,
+): Promise<T> {
   const client = await pool.connect();
   let active = false;
   try {
@@ -753,9 +776,10 @@ async function appendTransparencyEntry(
     actorDeviceId: string | null;
   },
 ): Promise<E2eeKeyTransparencyEntry> {
-  await database.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
-    `${input.organizationId}:${input.accountId}:e2ee-transparency`,
-  ]);
+  await database.query(
+    'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+    [`${input.organizationId}:${input.accountId}:e2ee-transparency`],
+  );
   const previousResult = await database.query<TransparencyRow>(
     `SELECT * FROM e2ee_key_transparency_log
      WHERE organization_id = $1 AND account_id = $2
@@ -807,7 +831,8 @@ export function createPostgresEnterpriseCoreRepository(input: {
   mlsResourcePolicy?: Partial<MlsResourceGovernancePolicy>;
   accountSyncKeyProvider?: AccountSyncEncryptionKeyProvider;
 }) {
-  const defaultOrganizationId = input.defaultOrganizationId?.trim() || 'org_default';
+  const defaultOrganizationId =
+    input.defaultOrganizationId?.trim() || 'org_default';
   const sessionTtlMs = input.sessionTtlMs ?? SESSION_TTL_MS;
   if (!Number.isSafeInteger(sessionTtlMs) || sessionTtlMs < 60_000) {
     throw new Error('PostgreSQL enterprise session TTL is invalid');
@@ -824,7 +849,9 @@ export function createPostgresEnterpriseCoreRepository(input: {
     return { milliseconds, iso: new Date(milliseconds).toISOString() };
   }
 
-  async function getOrganization(id: string): Promise<PostgresEnterpriseOrganizationView | null> {
+  async function getOrganization(
+    id: string,
+  ): Promise<PostgresEnterpriseOrganizationView | null> {
     const result = await input.pool.query<OrganizationRow>(
       'SELECT * FROM organizations WHERE id = $1',
       [requiredIdentifier(id, 'organization id')],
@@ -842,13 +869,18 @@ export function createPostgresEnterpriseCoreRepository(input: {
         ? 'a.id = $1 AND a.organization_id = $2 AND a.deleted_at IS NULL'
         : 'a.id = $1 AND a.deleted_at IS NULL',
       organizationId
-        ? [requiredIdentifier(id, 'account id'), requiredIdentifier(organizationId, 'organization id')]
+        ? [
+            requiredIdentifier(id, 'account id'),
+            requiredIdentifier(organizationId, 'organization id'),
+          ]
         : [requiredIdentifier(id, 'account id')],
     );
     return row ? accountView(row) : null;
   }
 
-  async function listAccounts(organizationId: string): Promise<PostgresEnterpriseAccountView[]> {
+  async function listAccounts(
+    organizationId: string,
+  ): Promise<PostgresEnterpriseAccountView[]> {
     const result = await input.pool.query<AccountRow>(
       `${ACCOUNT_SELECT}
        WHERE a.organization_id = $1 AND a.deleted_at IS NULL
@@ -887,7 +919,10 @@ export function createPostgresEnterpriseCoreRepository(input: {
     if (!isAcceptableAccountPassword(raw.password)) {
       throw new Error('account password does not meet security requirements');
     }
-    const id = requiredIdentifier(raw.id ?? `acc_${randomUUID()}`, 'account id');
+    const id = requiredIdentifier(
+      raw.id ?? `acc_${randomUUID()}`,
+      'account id',
+    );
     const organizationId = requiredIdentifier(
       raw.organizationId ?? defaultOrganizationId,
       'organization id',
@@ -965,7 +1000,13 @@ export function createPostgresEnterpriseCoreRepository(input: {
           [id, organizationId, tag],
         );
       }
-      await logAudit('account_created', organizationId, null, { accountId: id }, client);
+      await logAudit(
+        'account_created',
+        organizationId,
+        null,
+        { accountId: id },
+        client,
+      );
     });
     return (await getAccount(id, organizationId))!;
   }
@@ -973,9 +1014,15 @@ export function createPostgresEnterpriseCoreRepository(input: {
   async function updateAccount(
     raw: UpdatePostgresEnterpriseAccountInput,
   ): Promise<PostgresEnterpriseAccountView> {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const accountId = requiredIdentifier(raw.accountId, 'account id');
-    if (raw.password !== undefined && !isAcceptableAccountPassword(raw.password)) {
+    if (
+      raw.password !== undefined &&
+      !isAcceptableAccountPassword(raw.password)
+    ) {
       throw new Error('account password does not meet security requirements');
     }
     await transaction(input.pool, async (client) => {
@@ -1041,14 +1088,24 @@ export function createPostgresEnterpriseCoreRepository(input: {
         [
           accountId,
           organizationId,
-          raw.username === undefined ? row.username : normalizeUsername(raw.username),
-          raw.phone === undefined ? row.phone : normalizeOptionalPhone(raw.phone),
+          raw.username === undefined
+            ? row.username
+            : normalizeUsername(raw.username),
+          raw.phone === undefined
+            ? row.phone
+            : normalizeOptionalPhone(raw.phone),
           raw.feishuOpenId === undefined
             ? row.feishu_open_id
             : optionalText(raw.feishuOpenId, 'Feishu open id', 200),
-          raw.password === undefined ? row.password_hash : hashIdentitySecret(raw.password),
-          raw.name === undefined ? row.name : optionalText(raw.name, 'account name', 120),
-          raw.role === undefined ? row.role : optionalText(raw.role, 'role', 120),
+          raw.password === undefined
+            ? row.password_hash
+            : hashIdentitySecret(raw.password),
+          raw.name === undefined
+            ? row.name
+            : optionalText(raw.name, 'account name', 120),
+          raw.role === undefined
+            ? row.role
+            : optionalText(raw.role, 'role', 120),
           raw.department === undefined
             ? row.department
             : optionalText(raw.department, 'department', 120),
@@ -1069,7 +1126,9 @@ export function createPostgresEnterpriseCoreRepository(input: {
         ],
       );
       if (raw.tags !== undefined) {
-        await client.query('DELETE FROM account_tags WHERE account_id = $1', [accountId]);
+        await client.query('DELETE FROM account_tags WHERE account_id = $1', [
+          accountId,
+        ]);
         for (const tag of normalizeTags(raw.tags)) {
           await client.query(
             `INSERT INTO account_tags (account_id, organization_id, tag)
@@ -1078,19 +1137,33 @@ export function createPostgresEnterpriseCoreRepository(input: {
           );
         }
       }
-      await logAudit('account_updated', organizationId, null, { accountId }, client);
+      await logAudit(
+        'account_updated',
+        organizationId,
+        null,
+        { accountId },
+        client,
+      );
     });
     return (await getAccount(accountId, organizationId))!;
   }
 
-  async function deleteAccount(organizationIdValue: string, accountIdValue: string): Promise<boolean> {
-    const organizationId = requiredIdentifier(organizationIdValue, 'organization id');
+  async function deleteAccount(
+    organizationIdValue: string,
+    accountIdValue: string,
+  ): Promise<boolean> {
+    const organizationId = requiredIdentifier(
+      organizationIdValue,
+      'organization id',
+    );
     const accountId = requiredIdentifier(accountIdValue, 'account id');
     return transaction(input.pool, async (client) => {
-      const existing = await client.query<{
-        is_admin: boolean;
-        status: 'active' | 'disabled';
-      } & Record<string, unknown>>(
+      const existing = await client.query<
+        {
+          is_admin: boolean;
+          status: 'active' | 'disabled';
+        } & Record<string, unknown>
+      >(
         `SELECT is_admin, status FROM accounts
          WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE`,
         [accountId, organizationId],
@@ -1098,7 +1171,9 @@ export function createPostgresEnterpriseCoreRepository(input: {
       const account = existing.rows[0];
       if (!account) return false;
       if (account.is_admin && account.status === 'active') {
-        const administrators = await client.query<{ count: number | string } & Record<string, unknown>>(
+        const administrators = await client.query<
+          { count: number | string } & Record<string, unknown>
+        >(
           `SELECT count(*)::integer AS count FROM accounts
            WHERE organization_id = $1 AND is_admin = TRUE AND status = 'active'
              AND deleted_at IS NULL`,
@@ -1114,9 +1189,19 @@ export function createPostgresEnterpriseCoreRepository(input: {
              username = concat('deleted-', id), phone = NULL, feishu_open_id = NULL,
              password_hash = $3, updated_at = CURRENT_TIMESTAMP
          WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
-        [accountId, organizationId, hashIdentitySecret(randomBytes(32).toString('base64url'))],
+        [
+          accountId,
+          organizationId,
+          hashIdentitySecret(randomBytes(32).toString('base64url')),
+        ],
       );
-      await logAudit('account_deleted', organizationId, null, { accountId }, client);
+      await logAudit(
+        'account_deleted',
+        organizationId,
+        null,
+        { accountId },
+        client,
+      );
       return Number(deleted.rowCount ?? 0) === 1;
     });
   }
@@ -1126,13 +1211,15 @@ export function createPostgresEnterpriseCoreRepository(input: {
     password: string,
   ): Promise<PostgresEnterpriseAccountView | null> {
     const normalized = identifier.trim();
-    const phone = normalized ? (() => {
-      try {
-        return normalizePostgresEnterprisePhone(normalized);
-      } catch {
-        return null;
-      }
-    })() : null;
+    const phone = normalized
+      ? (() => {
+          try {
+            return normalizePostgresEnterprisePhone(normalized);
+          } catch {
+            return null;
+          }
+        })()
+      : null;
     const row = await accountByCondition(
       input.pool,
       `a.deleted_at IS NULL AND a.status = 'active'
@@ -1140,7 +1227,8 @@ export function createPostgresEnterpriseCoreRepository(input: {
        AND (lower(a.username) = lower($1) OR ($2::text IS NOT NULL AND a.phone = $2))`,
       [normalized, phone],
     );
-    if (!row || !identitySecretMatches(password, row.password_hash)) return null;
+    if (!row || !identitySecretMatches(password, row.password_hash))
+      return null;
     return accountView(row);
   }
 
@@ -1220,11 +1308,14 @@ export function createPostgresEnterpriseCoreRepository(input: {
        WHERE id = $2 AND status = 'active' AND deleted_at IS NULL`,
       [tokenHash, accountId, expiresAt],
     );
-    if (Number(result.rowCount ?? 0) !== 1) throw new Error('account is unavailable');
+    if (Number(result.rowCount ?? 0) !== 1)
+      throw new Error('account is unavailable');
     return { token, expiresAt };
   }
 
-  async function getAccountBySession(token: string): Promise<PostgresEnterpriseAccountView | null> {
+  async function getAccountBySession(
+    token: string,
+  ): Promise<PostgresEnterpriseAccountView | null> {
     if (!token.trim()) return null;
     const tokenHash = createHash('sha256').update(token).digest('hex');
     const row = await accountByCondition(
@@ -1253,7 +1344,10 @@ export function createPostgresEnterpriseCoreRepository(input: {
   async function getOrganizationFeatures(
     organizationIdValue: string,
   ): Promise<PostgresEnterpriseFeatures> {
-    const organizationId = requiredIdentifier(organizationIdValue, 'organization id');
+    const organizationId = requiredIdentifier(
+      organizationIdValue,
+      'organization id',
+    );
     const result = await input.pool.query<
       PostgresEnterpriseFeatures & Record<string, unknown>
     >(
@@ -1262,7 +1356,8 @@ export function createPostgresEnterpriseCoreRepository(input: {
        FROM organization_features WHERE organization_id = $1`,
       [organizationId],
     );
-    if (!result.rows[0]) throw new Error('organization features are unavailable');
+    if (!result.rows[0])
+      throw new Error('organization features are unavailable');
     return result.rows[0];
   }
 
@@ -1270,7 +1365,10 @@ export function createPostgresEnterpriseCoreRepository(input: {
     organizationIdValue: string,
     patch: Partial<PostgresEnterpriseFeatures>,
   ): Promise<PostgresEnterpriseFeatures> {
-    const organizationId = requiredIdentifier(organizationIdValue, 'organization id');
+    const organizationId = requiredIdentifier(
+      organizationIdValue,
+      'organization id',
+    );
     const current = await getOrganizationFeatures(organizationId);
     const next = { ...current, ...patch };
     await input.pool.query(
@@ -1289,44 +1387,83 @@ export function createPostgresEnterpriseCoreRepository(input: {
         next.skill_market,
       ],
     );
-    await logAudit('organization_features_updated', organizationId, null, { features: next });
+    await logAudit('organization_features_updated', organizationId, null, {
+      features: next,
+    });
     return next;
   }
 
   async function listOrganizationStructure(
     organizationIdValue: string,
   ): Promise<PostgresOrganizationStructureView> {
-    const organizationId = requiredIdentifier(organizationIdValue, 'organization id');
+    const organizationId = requiredIdentifier(
+      organizationIdValue,
+      'organization id',
+    );
     const departments = await input.pool.query<
-      { id: string; name: string } & Record<string, unknown>
+      {
+        id: string;
+        organization_id: string;
+        name: string;
+        member_count: number | string;
+        created_at: Date | string;
+        updated_at: Date | string;
+      } & Record<string, unknown>
     >(
-      `SELECT id, name FROM organization_departments
-       WHERE organization_id = $1 ORDER BY name, id`,
+      `SELECT department.id, department.organization_id, department.name,
+              department.created_at, department.updated_at,
+              (SELECT count(*)::integer FROM accounts account
+               WHERE account.organization_id = department.organization_id
+                 AND account.department_id = department.id
+                 AND account.deleted_at IS NULL
+                 AND account.status = 'active') AS member_count
+       FROM organization_departments department
+       WHERE department.organization_id = $1 ORDER BY department.name, department.id`,
       [organizationId],
     );
     const positions = await input.pool.query<
       {
         id: string;
+        organization_id: string;
         department_id: string;
         title: string;
         role_mapping: string | null;
+        created_at: Date | string;
+        updated_at: Date | string;
       } & Record<string, unknown>
     >(
-      `SELECT id, department_id, title, role_mapping FROM organization_positions
+      `SELECT id, organization_id, department_id, title, role_mapping,
+              created_at, updated_at FROM organization_positions
        WHERE organization_id = $1 ORDER BY title, id`,
       [organizationId],
     );
     return {
       departments: departments.rows.map((department) => ({
         id: department.id,
+        organizationId: department.organization_id,
         name: department.name,
+        // PostgreSQL deployment schema does not persist nested departments yet.
+        // Emit the canonical Desktop field explicitly so consumers do not have
+        // to distinguish clustered and single-node response shapes.
+        parentDepartmentId: null,
+        memberCount: Number(department.member_count),
         positions: positions.rows
           .filter((position) => position.department_id === department.id)
           .map((position) => ({
             id: position.id,
+            organizationId: position.organization_id,
+            departmentId: position.department_id,
             title: position.title,
-            roleMapping: position.role_mapping,
+            roleMapping:
+              position.role_mapping === 'department_admin' ||
+              position.role_mapping === 'enterprise_admin'
+                ? position.role_mapping
+                : 'member',
+            createdAt: iso(position.created_at)!,
+            updatedAt: iso(position.updated_at)!,
           })),
+        createdAt: iso(department.created_at)!,
+        updatedAt: iso(department.updated_at)!,
       })),
     };
   }
@@ -1335,13 +1472,20 @@ export function createPostgresEnterpriseCoreRepository(input: {
     organizationId: string;
     name: string;
   }) {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const name = optionalText(raw.name, 'department name', 120);
     if (!name) throw new Error('department name is required');
     const id = `dept_${randomUUID()}`;
     const result = await input.pool.query<
-      { id: string; name: string; created_at: Date | string; updated_at: Date | string } &
-        Record<string, unknown>
+      {
+        id: string;
+        name: string;
+        created_at: Date | string;
+        updated_at: Date | string;
+      } & Record<string, unknown>
     >(
       `INSERT INTO organization_departments (id, organization_id, name)
        VALUES ($1, $2, $3)
@@ -1365,13 +1509,20 @@ export function createPostgresEnterpriseCoreRepository(input: {
     departmentId: string;
     name: string;
   }) {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const departmentId = requiredIdentifier(raw.departmentId, 'department id');
     const name = optionalText(raw.name, 'department name', 120);
     if (!name) throw new Error('department name is required');
     const result = await input.pool.query<
-      { id: string; name: string; created_at: Date | string; updated_at: Date | string } &
-        Record<string, unknown>
+      {
+        id: string;
+        name: string;
+        created_at: Date | string;
+        updated_at: Date | string;
+      } & Record<string, unknown>
     >(
       `UPDATE organization_departments
        SET name = $3, updated_at = CURRENT_TIMESTAMP
@@ -1401,10 +1552,15 @@ export function createPostgresEnterpriseCoreRepository(input: {
     organizationId: string;
     departmentId: string;
   }): Promise<boolean> {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const departmentId = requiredIdentifier(raw.departmentId, 'department id');
     return transaction(input.pool, async (client) => {
-      const assigned = await client.query<{ count: number | string } & Record<string, unknown>>(
+      const assigned = await client.query<
+        { count: number | string } & Record<string, unknown>
+      >(
         `SELECT count(*)::integer AS count FROM accounts
          WHERE organization_id = $1 AND department_id = $2 AND deleted_at IS NULL`,
         [organizationId, departmentId],
@@ -1418,9 +1574,15 @@ export function createPostgresEnterpriseCoreRepository(input: {
         [organizationId, departmentId],
       );
       if (Number(deleted.rowCount ?? 0) === 1) {
-        await logAudit('organization_department_deleted', organizationId, null, {
-          departmentId,
-        }, client);
+        await logAudit(
+          'organization_department_deleted',
+          organizationId,
+          null,
+          {
+            departmentId,
+          },
+          client,
+        );
         return true;
       }
       return false;
@@ -1433,7 +1595,10 @@ export function createPostgresEnterpriseCoreRepository(input: {
     title: string;
     roleMapping?: string | null;
   }) {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const departmentId = requiredIdentifier(raw.departmentId, 'department id');
     const title = optionalText(raw.title, 'position title', 120);
     if (!title) throw new Error('position title is required');
@@ -1452,7 +1617,13 @@ export function createPostgresEnterpriseCoreRepository(input: {
         (id, organization_id, department_id, title, role_mapping)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, department_id, title, role_mapping, created_at, updated_at`,
-      [id, organizationId, departmentId, title, optionalText(raw.roleMapping, 'role mapping', 120)],
+      [
+        id,
+        organizationId,
+        departmentId,
+        title,
+        optionalText(raw.roleMapping, 'role mapping', 120),
+      ],
     );
     await logAudit('organization_position_created', organizationId, null, {
       positionId: id,
@@ -1474,7 +1645,10 @@ export function createPostgresEnterpriseCoreRepository(input: {
     title?: string;
     roleMapping?: string | null;
   }) {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const positionId = requiredIdentifier(raw.positionId, 'position id');
     const current = await input.pool.query<
       { title: string; role_mapping: string | null } & Record<string, unknown>
@@ -1484,13 +1658,15 @@ export function createPostgresEnterpriseCoreRepository(input: {
       [organizationId, positionId],
     );
     if (!current.rows[0]) throw new Error('position not found');
-    const title = raw.title === undefined
-      ? current.rows[0].title
-      : optionalText(raw.title, 'position title', 120);
+    const title =
+      raw.title === undefined
+        ? current.rows[0].title
+        : optionalText(raw.title, 'position title', 120);
     if (!title) throw new Error('position title is required');
-    const roleMapping = raw.roleMapping === undefined
-      ? current.rows[0].role_mapping
-      : optionalText(raw.roleMapping, 'role mapping', 120);
+    const roleMapping =
+      raw.roleMapping === undefined
+        ? current.rows[0].role_mapping
+        : optionalText(raw.roleMapping, 'role mapping', 120);
     const result = await input.pool.query<
       {
         id: string;
@@ -1531,10 +1707,15 @@ export function createPostgresEnterpriseCoreRepository(input: {
     organizationId: string;
     positionId: string;
   }): Promise<boolean> {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const positionId = requiredIdentifier(raw.positionId, 'position id');
     return transaction(input.pool, async (client) => {
-      const assigned = await client.query<{ count: number | string } & Record<string, unknown>>(
+      const assigned = await client.query<
+        { count: number | string } & Record<string, unknown>
+      >(
         `SELECT count(*)::integer AS count FROM accounts
          WHERE organization_id = $1 AND position_id = $2 AND deleted_at IS NULL`,
         [organizationId, positionId],
@@ -1548,9 +1729,15 @@ export function createPostgresEnterpriseCoreRepository(input: {
         [organizationId, positionId],
       );
       if (Number(deleted.rowCount ?? 0) === 1) {
-        await logAudit('organization_position_deleted', organizationId, null, {
-          positionId,
-        }, client);
+        await logAudit(
+          'organization_position_deleted',
+          organizationId,
+          null,
+          {
+            positionId,
+          },
+          client,
+        );
         return true;
       }
       return false;
@@ -1561,7 +1748,10 @@ export function createPostgresEnterpriseCoreRepository(input: {
     organizationIdValue: string,
     limitValue = 200,
   ): Promise<PostgresEnterpriseAuditRecord[]> {
-    const organizationId = requiredIdentifier(organizationIdValue, 'organization id');
+    const organizationId = requiredIdentifier(
+      organizationIdValue,
+      'organization id',
+    );
     const limit = Math.max(1, Math.min(1_000, Math.floor(limitValue)));
     const result = await input.pool.query<
       {
@@ -1591,14 +1781,27 @@ export function createPostgresEnterpriseCoreRepository(input: {
     }));
   }
 
-  async function registerE2eeDevice(raw: E2eeDeviceRegistrationInput): Promise<E2eeDeviceView> {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+  async function registerE2eeDevice(
+    raw: E2eeDeviceRegistrationInput,
+  ): Promise<E2eeDeviceView> {
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const accountId = requiredIdentifier(raw.accountId, 'account id');
     const deviceId = requiredIdentifier(raw.deviceId, 'device id');
     const deviceName = raw.deviceName.trim().slice(0, 120);
     if (!deviceName) throw new Error('device name is required');
-    const signingKey = requirePublicKey(raw.identitySigningPublicKey, 'ed25519', 'identity signing public key');
-    const exchangeKey = requirePublicKey(raw.deviceExchangePublicKey, 'x25519', 'device exchange public key');
+    const signingKey = requirePublicKey(
+      raw.identitySigningPublicKey,
+      'ed25519',
+      'identity signing public key',
+    );
+    const exchangeKey = requirePublicKey(
+      raw.deviceExchangePublicKey,
+      'x25519',
+      'device exchange public key',
+    );
     const fingerprint = e2eeDeviceKeyFingerprint({
       identitySigningPublicKey: signingKey,
       deviceExchangePublicKey: exchangeKey,
@@ -1610,7 +1813,8 @@ export function createPostgresEnterpriseCoreRepository(input: {
          AND a.deleted_at IS NULL AND o.status = 'active'`,
         [accountId, organizationId],
       );
-      if (!account) throw new Error('device account is not active in organization');
+      if (!account)
+        throw new Error('device account is not active in organization');
       const existing = await client.query<DeviceRow>(
         `SELECT * FROM e2ee_devices
          WHERE organization_id = $1 AND account_id = $2 AND device_id = $3
@@ -1634,7 +1838,9 @@ export function createPostgresEnterpriseCoreRepository(input: {
         );
         return deviceView(refreshed.rows[0]!);
       }
-      const approvedCount = await client.query<{ count: number | string } & Record<string, unknown>>(
+      const approvedCount = await client.query<
+        { count: number | string } & Record<string, unknown>
+      >(
         `SELECT count(*)::integer AS count FROM e2ee_devices
          WHERE organization_id = $1 AND account_id = $2
            AND approval_state = 'approved' AND revoked_at IS NULL`,
@@ -1669,11 +1875,17 @@ export function createPostgresEnterpriseCoreRepository(input: {
         keyFingerprint: fingerprint,
         actorDeviceId: firstDevice ? deviceId : null,
       });
-      await logAudit('e2ee_device_registered', organizationId, account.employee_id, {
-        accountId,
-        deviceId,
-        approvalState: firstDevice ? 'approved' : 'pending',
-      }, client);
+      await logAudit(
+        'e2ee_device_registered',
+        organizationId,
+        account.employee_id,
+        {
+          accountId,
+          deviceId,
+          approvalState: firstDevice ? 'approved' : 'pending',
+        },
+        client,
+      );
       return deviceView(inserted.rows[0]!);
     });
   }
@@ -1685,11 +1897,17 @@ export function createPostgresEnterpriseCoreRepository(input: {
     includeRevoked?: boolean;
     includePending?: boolean;
   }): Promise<E2eeDeviceView[]> {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
-    const requesterAccountId = requiredIdentifier(raw.requesterAccountId, 'requester account id');
-    const accountIds = (raw.accountIds?.length ? raw.accountIds : [requesterAccountId]).map((id) =>
-      requiredIdentifier(id, 'account id'),
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
     );
+    const requesterAccountId = requiredIdentifier(
+      raw.requesterAccountId,
+      'requester account id',
+    );
+    const accountIds = (
+      raw.accountIds?.length ? raw.accountIds : [requesterAccountId]
+    ).map((id) => requiredIdentifier(id, 'account id'));
     if (accountIds.some((id) => id !== requesterAccountId)) {
       const requester = await getAccount(requesterAccountId, organizationId);
       if (!requester) throw new Error('requester account is unavailable');
@@ -1700,19 +1918,40 @@ export function createPostgresEnterpriseCoreRepository(input: {
          AND ($3::boolean OR revoked_at IS NULL)
          AND ($4::boolean OR approval_state = 'approved')
        ORDER BY account_id, created_at, device_id`,
-      [organizationId, accountIds, raw.includeRevoked === true, raw.includePending === true],
+      [
+        organizationId,
+        accountIds,
+        raw.includeRevoked === true,
+        raw.includePending === true,
+      ],
     );
     return result.rows.map(deviceView);
   }
 
-  async function approveE2eeDevice(raw: E2eeDeviceApprovalInput): Promise<E2eeDeviceView> {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+  async function approveE2eeDevice(
+    raw: E2eeDeviceApprovalInput,
+  ): Promise<E2eeDeviceView> {
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const accountId = requiredIdentifier(raw.accountId, 'account id');
-    const approverDeviceId = requiredIdentifier(raw.approverDeviceId, 'approver device id');
-    const targetDeviceId = requiredIdentifier(raw.targetDeviceId, 'target device id');
+    const approverDeviceId = requiredIdentifier(
+      raw.approverDeviceId,
+      'approver device id',
+    );
+    const targetDeviceId = requiredIdentifier(
+      raw.targetDeviceId,
+      'target device id',
+    );
     const targetKeyFingerprint = raw.targetKeyFingerprint.trim().toLowerCase();
-    if (!KEY_FINGERPRINT.test(targetKeyFingerprint)) throw new Error('E2EE device key fingerprint is invalid');
-    const signature = requireCanonicalBase64(raw.signature, 'device approval signature', 128);
+    if (!KEY_FINGERPRINT.test(targetKeyFingerprint))
+      throw new Error('E2EE device key fingerprint is invalid');
+    const signature = requireCanonicalBase64(
+      raw.signature,
+      'device approval signature',
+      128,
+    );
     return transaction(input.pool, async (client) => {
       const devices = await client.query<DeviceRow>(
         `SELECT * FROM e2ee_devices
@@ -1720,20 +1959,37 @@ export function createPostgresEnterpriseCoreRepository(input: {
            AND device_id = ANY($3::text[]) FOR UPDATE`,
         [organizationId, accountId, [approverDeviceId, targetDeviceId]],
       );
-      const approver = devices.rows.find((device) => device.device_id === approverDeviceId);
-      const target = devices.rows.find((device) => device.device_id === targetDeviceId);
-      if (!approver || approver.approval_state !== 'approved' || approver.revoked_at) {
+      const approver = devices.rows.find(
+        (device) => device.device_id === approverDeviceId,
+      );
+      const target = devices.rows.find(
+        (device) => device.device_id === targetDeviceId,
+      );
+      if (
+        !approver ||
+        approver.approval_state !== 'approved' ||
+        approver.revoked_at
+      ) {
         throw new Error('approver device is not active and approved');
       }
-      if (!target || target.revoked_at) throw new Error('target device is unavailable');
-      if (target.key_fingerprint !== targetKeyFingerprint) throw new Error('target device fingerprint changed');
-      if (!verify(null, e2eeDeviceApprovalSignaturePayload({
-        organizationId,
-        accountId,
-        approverDeviceId,
-        targetDeviceId,
-        targetKeyFingerprint,
-      }), approver.identity_signing_public_key, signature)) {
+      if (!target || target.revoked_at)
+        throw new Error('target device is unavailable');
+      if (target.key_fingerprint !== targetKeyFingerprint)
+        throw new Error('target device fingerprint changed');
+      if (
+        !verify(
+          null,
+          e2eeDeviceApprovalSignaturePayload({
+            organizationId,
+            accountId,
+            approverDeviceId,
+            targetDeviceId,
+            targetKeyFingerprint,
+          }),
+          approver.identity_signing_public_key,
+          signature,
+        )
+      ) {
         throw new Error('device approval signature is invalid');
       }
       if (target.approval_state !== 'approved') {
@@ -1752,11 +2008,17 @@ export function createPostgresEnterpriseCoreRepository(input: {
           keyFingerprint: targetKeyFingerprint,
           actorDeviceId: approverDeviceId,
         });
-        await logAudit('e2ee_device_approved', organizationId, null, {
-          accountId,
-          approverDeviceId,
-          targetDeviceId,
-        }, client);
+        await logAudit(
+          'e2ee_device_approved',
+          organizationId,
+          null,
+          {
+            accountId,
+            approverDeviceId,
+            targetDeviceId,
+          },
+          client,
+        );
       }
       const updated = await client.query<DeviceRow>(
         `SELECT * FROM e2ee_devices
@@ -1772,7 +2034,10 @@ export function createPostgresEnterpriseCoreRepository(input: {
     accountId: string;
     deviceId: string;
   }): Promise<boolean> {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const accountId = requiredIdentifier(raw.accountId, 'account id');
     const deviceId = requiredIdentifier(raw.deviceId, 'device id');
     return transaction(input.pool, async (client) => {
@@ -1793,7 +2058,13 @@ export function createPostgresEnterpriseCoreRepository(input: {
         keyFingerprint: row.key_fingerprint,
         actorDeviceId: deviceId,
       });
-      await logAudit('e2ee_device_revoked', organizationId, null, { accountId, deviceId }, client);
+      await logAudit(
+        'e2ee_device_revoked',
+        organizationId,
+        null,
+        { accountId, deviceId },
+        client,
+      );
       return true;
     });
   }
@@ -1803,7 +2074,10 @@ export function createPostgresEnterpriseCoreRepository(input: {
     requesterAccountId: string;
     accountId: string;
   }): Promise<E2eeKeyTransparencyView> {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     requiredIdentifier(raw.requesterAccountId, 'requester account id');
     const accountId = requiredIdentifier(raw.accountId, 'account id');
     const result = await input.pool.query<TransparencyRow>(
@@ -2129,7 +2403,9 @@ export function createPostgresEnterpriseCoreRepository(input: {
       [organizationId, accountId, deviceId, mlsNow().iso],
     );
     if (inventory.rows.length > 100) {
-      throw new Error('MLS KeyPackage inventory exceeds the safe response limit');
+      throw new Error(
+        'MLS KeyPackage inventory exceeds the safe response limit',
+      );
     }
     return inventory.rows.map((row) => ({
       reference: requireMlsKeyPackageReference(row.key_package_reference),
@@ -2419,8 +2695,7 @@ export function createPostgresEnterpriseCoreRepository(input: {
       conversationId: direct.conversationId,
       senderAccountId,
       senderDeviceId,
-      recipientAccountId:
-        raw.eventType === 'welcome' ? targetAccountId : null,
+      recipientAccountId: raw.eventType === 'welcome' ? targetAccountId : null,
       recipientDeviceId,
       eventType: raw.eventType,
       epoch,
@@ -2772,7 +3047,9 @@ export function createPostgresEnterpriseCoreRepository(input: {
       Number(retention.rows[0]?.expired_floor_sequence ?? 0),
     );
     if (afterSequence < retentionFloor) {
-      throw new Error('MLS event cursor expired; secure session reset required');
+      throw new Error(
+        'MLS event cursor expired; secure session reset required',
+      );
     }
     const events = await input.pool.query<MlsEventRow>(
       `SELECT event.* FROM mls_transport_events AS event
@@ -2973,7 +3250,9 @@ export function createPostgresEnterpriseCoreRepository(input: {
   async function cleanupExpiredMlsResources(
     raw: { before?: string; limit?: number } = {},
   ): Promise<MlsResourceCleanupResult> {
-    const parsedBefore = raw.before ? new Date(raw.before) : new Date(mlsNow().iso);
+    const parsedBefore = raw.before
+      ? new Date(raw.before)
+      : new Date(mlsNow().iso);
     if (Number.isNaN(parsedBefore.getTime())) {
       throw new Error('MLS cleanup timestamp is invalid');
     }
@@ -3105,7 +3384,8 @@ export function createPostgresEnterpriseCoreRepository(input: {
   async function sendE2eeDirectMessage(
     raw: SendPostgresE2eeDirectMessageInput,
   ): Promise<E2eeDirectMessageView> {
-    if (raw.protocolVersion !== E2EE_PROTOCOL_VERSION) throw new Error('E2EE protocol version is unsupported');
+    if (raw.protocolVersion !== E2EE_PROTOCOL_VERSION)
+      throw new Error('E2EE protocol version is unsupported');
     if ((raw.attachments?.length ?? 0) > E2EE_ATTACHMENT_MAX_COUNT) {
       throw new Error('a message can contain at most 6 encrypted attachments');
     }
@@ -3129,10 +3409,19 @@ export function createPostgresEnterpriseCoreRepository(input: {
     const normalized = {
       ...raw,
       organizationId: requiredIdentifier(raw.organizationId, 'organization id'),
-      senderAccountId: requiredIdentifier(raw.senderAccountId, 'sender account id'),
-      recipientAccountId: requiredIdentifier(raw.recipientAccountId, 'recipient account id'),
+      senderAccountId: requiredIdentifier(
+        raw.senderAccountId,
+        'sender account id',
+      ),
+      recipientAccountId: requiredIdentifier(
+        raw.recipientAccountId,
+        'recipient account id',
+      ),
       messageId: requiredIdentifier(raw.messageId, 'message id'),
-      senderDeviceId: requiredIdentifier(raw.senderDeviceId, 'sender device id'),
+      senderDeviceId: requiredIdentifier(
+        raw.senderDeviceId,
+        'sender device id',
+      ),
       inReplyToMessageId: raw.inReplyToMessageId
         ? requiredIdentifier(raw.inReplyToMessageId, 'reply message id')
         : null,
@@ -3142,16 +3431,27 @@ export function createPostgresEnterpriseCoreRepository(input: {
         E2EE_MESSAGE_MAX_CIPHERTEXT_BYTES,
       ).toString('base64'),
       nonce: requireNonce(raw.nonce, 'message nonce'),
-      signature: requireCanonicalBase64(raw.signature, 'message signature', 128).toString('base64'),
+      signature: requireCanonicalBase64(
+        raw.signature,
+        'message signature',
+        128,
+      ).toString('base64'),
       envelopes: raw.envelopes.map((envelope) => ({
-        accountId: requiredIdentifier(envelope.accountId, 'envelope account id'),
+        accountId: requiredIdentifier(
+          envelope.accountId,
+          'envelope account id',
+        ),
         deviceId: requiredIdentifier(envelope.deviceId, 'envelope device id'),
         ephemeralPublicKey: requirePublicKey(
           envelope.ephemeralPublicKey,
           'x25519',
           'envelope ephemeral public key',
         ),
-        wrappedKey: requireCanonicalBase64(envelope.wrappedKey, 'wrapped key', 128).toString('base64'),
+        wrappedKey: requireCanonicalBase64(
+          envelope.wrappedKey,
+          'wrapped key',
+          128,
+        ).toString('base64'),
         nonce: requireNonce(envelope.nonce, 'envelope nonce'),
       })),
       attachmentReferences,
@@ -3159,18 +3459,30 @@ export function createPostgresEnterpriseCoreRepository(input: {
     if (normalized.senderAccountId === normalized.recipientAccountId) {
       throw new Error('sender and recipient must be different');
     }
-    if (!['message', 'atoa_request', 'atoa_response'].includes(normalized.contentType)) {
+    if (
+      !['message', 'atoa_request', 'atoa_response'].includes(
+        normalized.contentType,
+      )
+    ) {
       throw new Error('E2EE content type is invalid');
     }
-    if ((normalized.contentType === 'atoa_response') !== Boolean(normalized.inReplyToMessageId)) {
+    if (
+      (normalized.contentType === 'atoa_response') !==
+      Boolean(normalized.inReplyToMessageId)
+    ) {
       throw new Error('A2A responses must reference exactly one request');
     }
     return transaction(input.pool, async (client) => {
-      const accounts = await client.query<{ id: string } & Record<string, unknown>>(
+      const accounts = await client.query<
+        { id: string } & Record<string, unknown>
+      >(
         `SELECT a.id FROM accounts AS a JOIN organizations AS o ON o.id = a.organization_id
          WHERE a.organization_id = $1 AND a.id = ANY($2::text[])
            AND a.status = 'active' AND a.deleted_at IS NULL AND o.status = 'active'`,
-        [normalized.organizationId, [normalized.senderAccountId, normalized.recipientAccountId]],
+        [
+          normalized.organizationId,
+          [normalized.senderAccountId, normalized.recipientAccountId],
+        ],
       );
       if (new Set(accounts.rows.map((row) => row.id)).size !== 2) {
         throw new Error('message participant is not active in organization');
@@ -3230,15 +3542,23 @@ export function createPostgresEnterpriseCoreRepository(input: {
          WHERE organization_id = $1 AND account_id = ANY($2::text[])
            AND approval_state = 'approved' AND revoked_at IS NULL
          ORDER BY account_id, device_id`,
-        [normalized.organizationId, [normalized.senderAccountId, normalized.recipientAccountId]],
+        [
+          normalized.organizationId,
+          [normalized.senderAccountId, normalized.recipientAccountId],
+        ],
       );
       const senderDevice = devices.rows.find(
         (device) =>
           device.account_id === normalized.senderAccountId &&
           device.device_id === normalized.senderDeviceId,
       );
-      if (!senderDevice) throw new Error('sender E2EE device is not registered or was revoked');
-      if (!devices.rows.some((device) => device.account_id === normalized.recipientAccountId)) {
+      if (!senderDevice)
+        throw new Error('sender E2EE device is not registered or was revoked');
+      if (
+        !devices.rows.some(
+          (device) => device.account_id === normalized.recipientAccountId,
+        )
+      ) {
         throw new Error('recipient has no active E2EE device');
       }
       const expectedEnvelopes = devices.rows
@@ -3251,7 +3571,9 @@ export function createPostgresEnterpriseCoreRepository(input: {
         new Set(actualEnvelopes).size !== actualEnvelopes.length ||
         JSON.stringify(actualEnvelopes) !== JSON.stringify(expectedEnvelopes)
       ) {
-        throw new Error('message key envelopes must cover every active participant device exactly once');
+        throw new Error(
+          'message key envelopes must cover every active participant device exactly once',
+        );
       }
       const {
         signature: _signature,
@@ -3262,12 +3584,14 @@ export function createPostgresEnterpriseCoreRepository(input: {
         ...unsigned,
         attachments: [],
       });
-      if (!verify(
-        null,
-        signaturePayload,
-        senderDevice.identity_signing_public_key,
-        Buffer.from(normalized.signature, 'base64'),
-      )) {
+      if (
+        !verify(
+          null,
+          signaturePayload,
+          senderDevice.identity_signing_public_key,
+          Buffer.from(normalized.signature, 'base64'),
+        )
+      ) {
         throw new Error('message signature is invalid');
       }
       if (normalized.inReplyToMessageId) {
@@ -3283,7 +3607,8 @@ export function createPostgresEnterpriseCoreRepository(input: {
             normalized.senderAccountId,
           ],
         );
-        if (!request.rows[0]) throw new Error('referenced A2A request does not exist');
+        if (!request.rows[0])
+          throw new Error('referenced A2A request does not exist');
       }
       await client.query(
         `INSERT INTO direct_messages
@@ -3306,7 +3631,10 @@ export function createPostgresEnterpriseCoreRepository(input: {
           normalized.inReplyToMessageId,
         ],
       );
-      for (const [ordinal, attachment] of normalized.attachmentReferences.entries()) {
+      for (const [
+        ordinal,
+        attachment,
+      ] of normalized.attachmentReferences.entries()) {
         await client.query(
           `INSERT INTO direct_message_attachment_objects
              (attachment_id, message_id, organization_id, ordinal, e2ee_nonce,
@@ -3344,9 +3672,15 @@ export function createPostgresEnterpriseCoreRepository(input: {
     peerAccountId: string;
     limit?: number;
   }): Promise<E2eeDirectMessageView[]> {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const accountId = requiredIdentifier(raw.accountId, 'account id');
-    const peerAccountId = requiredIdentifier(raw.peerAccountId, 'peer account id');
+    const peerAccountId = requiredIdentifier(
+      raw.peerAccountId,
+      'peer account id',
+    );
     const limit = Math.max(1, Math.min(200, Math.floor(raw.limit ?? 100)));
     return transaction(input.pool, async (client) => {
       await client.query(
@@ -3487,8 +3821,10 @@ export function createPostgresEnterpriseCoreRepository(input: {
   ): Promise<void> {
     await transaction(input.pool, async (client) => {
       const failed = await client.query<
-        { organization_id: string; ciphertext_bytes: number | string } &
-          Record<string, unknown>
+        { organization_id: string; ciphertext_bytes: number | string } & Record<
+          string,
+          unknown
+        >
       >(
         `UPDATE attachment_objects
          SET state = 'failed',
@@ -3529,7 +3865,10 @@ export function createPostgresEnterpriseCoreRepository(input: {
     accountId: string;
     limit?: number;
   }) {
-    const organizationId = requiredIdentifier(raw.organizationId, 'organization id');
+    const organizationId = requiredIdentifier(
+      raw.organizationId,
+      'organization id',
+    );
     const accountId = requiredIdentifier(raw.accountId, 'account id');
     const limit = Math.max(1, Math.min(200, Math.floor(raw.limit ?? 50)));
     const result = await input.pool.query<
@@ -3556,18 +3895,21 @@ export function createPostgresEnterpriseCoreRepository(input: {
   }
 
   async function readiness() {
-    const result = await input.pool.query<{
-      schema_version: number | string;
-      organizations: number | string;
-      accounts: number | string;
-    } & Record<string, unknown>>(
+    const result = await input.pool.query<
+      {
+        schema_version: number | string;
+        organizations: number | string;
+        accounts: number | string;
+      } & Record<string, unknown>
+    >(
       `SELECT
          COALESCE((SELECT max(version) FROM otto_schema_migrations), 0)::integer AS schema_version,
          (SELECT count(*) FROM organizations)::integer AS organizations,
          (SELECT count(*) FROM accounts WHERE deleted_at IS NULL)::integer AS accounts`,
     );
     const row = result.rows[0];
-    if (!row) throw new Error('PostgreSQL enterprise repository readiness failed');
+    if (!row)
+      throw new Error('PostgreSQL enterprise repository readiness failed');
     return {
       ready: true as const,
       backend: 'postgresql' as const,
@@ -3581,12 +3923,14 @@ export function createPostgresEnterpriseCoreRepository(input: {
     account?: PostgresEnterpriseAccountView | null,
   ) {
     const accepted = account
-      ? await input.pool.query<{
-          document_id: 'terms' | 'privacy';
-          document_version: string;
-          policy_hash: string;
-          accepted_at: Date | string;
-        } & Record<string, unknown>>(
+      ? await input.pool.query<
+          {
+            document_id: 'terms' | 'privacy';
+            document_version: string;
+            policy_hash: string;
+            accepted_at: Date | string;
+          } & Record<string, unknown>
+        >(
           `SELECT document_id, document_version, policy_hash, accepted_at
            FROM legal_consents WHERE account_id = $1`,
           [account.id],
@@ -3819,7 +4163,9 @@ export function createPostgresEnterpriseCoreRepository(input: {
          WHERE organization_id = $2 AND account_id = $1`,
         [account.id, account.organizationId],
       );
-      await client.query('DELETE FROM auth_sessions WHERE account_id = $1', [account.id]);
+      await client.query('DELETE FROM auth_sessions WHERE account_id = $1', [
+        account.id,
+      ]);
       await client.query(
         `UPDATE accounts SET
            username = concat('deleted-', id), phone = NULL, feishu_open_id = NULL,

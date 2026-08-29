@@ -107,14 +107,15 @@ describe('Sidebar：布局（工具区已迁右侧面板）', () => {
     expect(screen.queryByText('全部智能体')).toBeNull();
   });
 
-  it('只保留一个明确的新建对话入口，不再显示品牌行铅笔按钮', () => {
+  it('新建会话下方不再显示打开项目入口', () => {
     const onNewChat = vi.fn();
     renderSidebar({ onNewChat });
 
-    const buttons = screen.getAllByRole('button', { name: '新建对话' });
+    const buttons = screen.getAllByRole('button', { name: '新建会话' });
     expect(buttons).toHaveLength(1);
     fireEvent.click(buttons[0]);
     expect(onNewChat).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '打开项目' })).toBeNull();
   });
 
   it('任务标题只用一个数字表示总数，并支持整体展开收起', () => {
@@ -208,7 +209,7 @@ describe('Sidebar：布局（工具区已迁右侧面板）', () => {
 
     const primaryNav = screen.getByRole('navigation', { name: '主导航' });
     expect(within(primaryNav).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      '新建对话',
+      '新建会话',
       '工作台',
       '组织架构',
       '我的消息',
@@ -222,7 +223,7 @@ describe('Sidebar：布局（工具区已迁右侧面板）', () => {
     expect(onOpenAccounts).toHaveBeenCalledOnce();
   });
 
-  it('主导航每个入口都有语义对应的图标，且新建对话与其他入口同级', () => {
+  it('主导航每个入口都有语义对应的图标，且新建入口与其他入口同级', () => {
     renderSidebar({
       enterpriseAccount: ENTERPRISE_ADMIN_ACCOUNT,
       onNavigate: vi.fn(),
@@ -232,7 +233,7 @@ describe('Sidebar：布局（工具区已迁右侧面板）', () => {
     const primaryNav = screen.getByRole('navigation', { name: '主导航' });
     const buttons = within(primaryNav).getAllByRole('button');
     expect(buttons.map((button) => button.textContent)).toEqual([
-      '新建对话',
+      '新建会话',
       '工作台',
       '组织架构',
       '我的消息',
@@ -499,29 +500,102 @@ describe('Sidebar：任务分组方式', () => {
     }
   });
 
-  it('默认保持按时间，并可从菜单切换到按工作目录', () => {
-    renderSidebar({ sessions: workspaceSessions, preferenceScope });
+  it('默认区分项目与普通会话，并可从菜单切换到按工作目录', () => {
+    const onNewProjectChat = vi.fn();
+    renderSidebar({
+      sessions: workspaceSessions,
+      preferenceScope,
+      defaultWorkspacePath: '/Users/yang',
+      onNewProjectChat,
+    });
 
+    expect(screen.getByText('项目')).toBeTruthy();
     expect(screen.getByText('项目新任务').closest('.otto-session-group')
-      ?.classList.contains('otto-session-group--workspace')).toBe(false);
+      ?.classList.contains('otto-session-group--workspace')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '在 project 项目中新建会话' }));
+    expect(onNewProjectChat).toHaveBeenCalledWith('/Users/yang/project');
 
     fireEvent.click(screen.getByRole('button', { name: '视图选项' }));
     const menu = screen.getByRole('menu', { name: '视图选项' });
     expect(menu.parentElement).toBe(document.body);
     expect(within(menu).getByText('分组方式')).toBeTruthy();
-    expect(within(menu).getByRole('menuitemradio', { name: '按时间' })
+    expect(within(menu).getByRole('menuitemradio', { name: '项目与会话' })
       .getAttribute('aria-checked')).toBe('true');
     fireEvent.click(within(menu).getByRole('menuitemradio', { name: '按工作目录' }));
 
-    const project = screen.getByRole('button', { name: 'project，2 个任务' });
+    const project = screen.getByRole('button', { name: 'project，2 个会话' });
     const projectIcon = project.querySelector('.otto-workspace-group__icon');
     expect(projectIcon?.getAttribute('width')).toBe('16');
     expect(projectIcon?.getAttribute('height')).toBe('16');
-    expect(screen.getByRole('button', { name: 'Desktop，1 个任务' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Desktop，1 个会话' })).toBeTruthy();
     expect(screen.getByText('项目新任务').closest('.otto-session-group')
       ?.classList.contains('otto-session-group--workspace')).toBe(true);
     expect(JSON.parse(localStorage.getItem(sessionListPreferenceStorageKey(preferenceScope)) ?? '{}'))
       .toMatchObject({ mode: 'workspace' });
+  });
+
+  it('最近打开但尚无会话的项目仍保留在项目区', () => {
+    const onNewProjectChat = vi.fn();
+    renderSidebar({
+      sessions: [makeSession({ workspacePath: '/Users/yang' })],
+      preferenceScope,
+      defaultWorkspacePath: '/Users/yang',
+      recentWorkspacePaths: ['/Users/yang', '/Users/yang/empty-project'],
+      onNewProjectChat,
+    });
+
+    expect(screen.getByRole('button', { name: 'empty-project，0 个会话' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '在 empty-project 项目中新建会话' }));
+    expect(onNewProjectChat).toHaveBeenCalledWith('/Users/yang/empty-project');
+  });
+
+  it('右键项目可删除项目归类，但保留本地文件夹和历史会话', () => {
+    renderSidebar({
+      sessions: workspaceSessions,
+      preferenceScope,
+      defaultWorkspacePath: '/Users/yang',
+    });
+
+    const project = screen.getByRole('button', { name: 'project，2 个会话' });
+    fireEvent.contextMenu(project, { clientX: 120, clientY: 160 });
+    const menu = screen.getByRole('menu', { name: '项目操作' });
+    fireEvent.click(within(menu).getByRole('menuitem', { name: '删除项目' }));
+
+    const dialog = screen.getByRole('dialog', { name: '删除项目' });
+    expect(within(dialog).getByText(
+      '确定从 Otto 中删除项目「project」吗？本地文件夹和历史会话都会保留。',
+    )).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除项目' }));
+
+    expect(screen.queryByRole('button', { name: 'project，2 个会话' })).toBeNull();
+    expect(screen.getByText('项目新任务')).toBeTruthy();
+    expect(screen.getByText('项目旧任务')).toBeTruthy();
+    expect(JSON.parse(
+      localStorage.getItem(sessionListPreferenceStorageKey(preferenceScope)) ?? '{}',
+    )).toMatchObject({ removedProjectPaths: ['/Users/yang/project'] });
+  });
+
+  it('重新打开被删除的目录时恢复项目归类', async () => {
+    localStorage.setItem(sessionListPreferenceStorageKey(preferenceScope), JSON.stringify({
+      version: 1,
+      mode: 'kind',
+      collapsedWorkspaceKeys: [],
+      removedProjectPaths: ['/Users/yang/project'],
+    }));
+    const onNewProjectChat = vi.fn(async () => '/Users/yang/project');
+    renderSidebar({
+      sessions: workspaceSessions,
+      preferenceScope,
+      defaultWorkspacePath: '/Users/yang',
+      onNewProjectChat,
+    });
+
+    expect(screen.queryByRole('button', { name: 'project，2 个会话' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '打开新项目' }));
+
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: 'project，2 个会话' }),
+    ).toBeTruthy());
   });
 
   it('分组菜单点击外部或按 Escape 都会关闭，并把焦点还给触发按钮', () => {
@@ -550,7 +624,7 @@ describe('Sidebar：任务分组方式', () => {
       unreadSessions: ['project-old'],
     });
 
-    const project = screen.getByRole('button', { name: 'project，2 个任务，1 个未读任务' });
+    const project = screen.getByRole('button', { name: 'project，2 个会话，1 个未读会话' });
     expect(project.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(project);
     expect(project.getAttribute('aria-expanded')).toBe('false');
@@ -571,7 +645,7 @@ describe('Sidebar：任务分组方式', () => {
       preferenceScope,
     });
 
-    const project = screen.getByRole('button', { name: 'project，2 个任务' });
+    const project = screen.getByRole('button', { name: 'project，2 个会话' });
     expect(project.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(project);
     expect(project.getAttribute('aria-expanded')).toBe('false');

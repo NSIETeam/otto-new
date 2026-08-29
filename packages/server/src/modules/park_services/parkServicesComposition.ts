@@ -6,6 +6,12 @@ import type { Database } from '../data_platform/index.js';
 import { createParkLifecycleFacade } from './parkLifecycleFacade.js';
 import { createParkMembershipFacade } from './parkMembershipFacade.js';
 import {
+  getEnterpriseParkStarMapFromRepository,
+  getEnterprisePublicProfileFromRepository,
+  updateEnterprisePublicProfileInRepository,
+  type ParkPartnershipRepositoryStore,
+} from './parkPartnershipRepository.js';
+import {
   listParkTenantOrganizationsFromRepository,
   type ParkTenantOrganizationRepositoryStore,
 } from './parkMembershipRepository.js';
@@ -191,6 +197,15 @@ export function createParkServicesComposition<
     createMeetingBookingId: () => `park_booking_${options.createUuid()}`,
     now,
   });
+  const partnershipStore: ParkPartnershipRepositoryStore = {
+    db: options.db,
+    getAccount: options.getAccount,
+    getOrganization: options.getOrganization,
+    getParkForOrganization,
+    normalizeOptionalText: options.normalizeOptionalText,
+    nowISO: () => now().toISOString(),
+    audit: options.audit,
+  };
 
   function createTicketWithMeetingReservation(
     input: CreateTicketWithMeetingReservationInput,
@@ -231,6 +246,19 @@ export function createParkServicesComposition<
     listParkTenantOrganizations,
     getParkTenantProfile: membership.getTenantProfile,
     updateParkTenantProfile: membership.updateTenantProfile,
+    getEnterprisePublicProfile: (organizationId: string) =>
+      getEnterprisePublicProfileFromRepository(
+        partnershipStore,
+        organizationId,
+      ),
+    updateEnterprisePublicProfile: (
+      input: Parameters<typeof updateEnterprisePublicProfileInRepository>[1],
+    ) => updateEnterprisePublicProfileInRepository(partnershipStore, input),
+    getEnterpriseParkStarMap: (organizationId: string) =>
+      getEnterpriseParkStarMapFromRepository(
+        partnershipStore,
+        organizationId,
+      ),
     issueParkInvite: membership.issueInvite,
     joinOrganizationToPark: membership.joinOrganization,
     createTicketWithMeetingReservation,

@@ -130,6 +130,47 @@ describe('A2A 授权资料收集', () => {
     expect(result.context).toContain('企业知识：读取失败');
   });
 
+  it('A2A 企业知识授权仍排除过期与冲突记忆', async () => {
+    const result = await collectAuthorizedAtoaContext({
+      sources: ['enterprise_knowledge'],
+      peerAccountId: 'peer-1',
+      currentAccountId: 'me',
+      currentAccountName: 'Bob',
+      peerName: 'Alice',
+      listMessages: vi.fn(async () => []),
+      listKnowledge: vi.fn(async () => [
+        {
+          id: 'current', organizationId: 'org-1', sourceId: 'current-source',
+          department: '交付部', category: 'process', content: '上线前必须完成回滚演练。',
+          contributor: null, confidence: 0.86, status: 'active' as const,
+          sourceType: 'auto_capture' as const,
+          lastObservedAt: new Date().toISOString(), createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'stale', organizationId: 'org-1', sourceId: 'stale-source',
+          department: '交付部', category: 'process', content: '旧网关无需回滚演练。',
+          contributor: null, confidence: 0.86, status: 'active' as const,
+          sourceType: 'auto_capture' as const,
+          lastObservedAt: '2020-01-01T00:00:00.000Z', createdAt: '2020-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'conflict', organizationId: 'org-1', sourceId: 'conflict-source',
+          department: '交付部', category: 'process', content: '禁止进行回滚演练。',
+          contributor: null, confidence: 0.3, status: 'active' as const,
+          sourceType: 'auto_capture' as const,
+          sourceLabel: '证据存在冲突，需人工裁决', createdAt: new Date().toISOString(),
+        },
+      ]),
+      workLogRecent: vi.fn(async () => []),
+      schedules: [],
+    });
+
+    expect(result.context).toContain('上线前必须完成回滚演练');
+    expect(result.context).not.toContain('旧网关无需回滚演练');
+    expect(result.context).not.toContain('禁止进行回滚演练');
+    expect(result.context).toContain('已排除 2 条不可直接使用的企业记忆');
+  });
+
   it('空授权不调用任何数据源，且总上下文不超过 8000 字符', async () => {
     const listMessages = vi.fn(async () => []);
     const listKnowledge = vi.fn(async () => []);

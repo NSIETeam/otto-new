@@ -10,6 +10,7 @@ import { URL } from 'url';
 import * as crypto from 'crypto';
 
 import { createOttoAuthHandler } from './ottoAuth.js';
+import { OneTimeOttoAuthStateStore } from './ottoAuthState.js';
 import { getFeishuConfigFromServer, getFeishuTenantsFromServer } from '../../config/serverConfig.js';
 import { ProxyAuthManager } from '../../core/proxyAuth.js';
 import { AuthTemplates } from './templates/index.js';
@@ -21,6 +22,31 @@ type VipLoginData = {
   expiresIn?: number;
   user?: { email?: string; name?: string; avatar?: string; quota_name?: string; expires_at?: string };
 };
+
+export function isTrustedOttoAuthStartRequest(
+  origin: string | undefined,
+  secFetchSite: string | undefined,
+  expectedPort: number,
+  remoteAddress: string | undefined,
+): boolean {
+  if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress ?? '')) {
+    return false;
+  }
+  if (secFetchSite?.toLowerCase() === 'cross-site') return false;
+  // CLI/native callers do not send browser Origin headers.
+  if (!origin) return !secFetchSite;
+  try {
+    const parsed = new URL(origin);
+    const allowedOrigins = new Set([
+      `http://localhost:${expectedPort}`,
+      `http://127.0.0.1:${expectedPort}`,
+      `http://[::1]:${expectedPort}`,
+    ]);
+    return allowedOrigins.has(parsed.origin);
+  } catch {
+    return false;
+  }
+}
 
 
 
@@ -35,6 +61,7 @@ export class AuthServer {
   private readonly BASE_CALLBACK_PORT = 7863;
   private actualSelectPort: number = 7862;
   private actualCallbackPort: number = 7863;
+  private readonly ottoStateStore = new OneTimeOttoAuthStateStore();
 
   /**
    * 启动认证服务器
@@ -98,7 +125,7 @@ export class AuthServer {
             }
           });
         } else if (reqUrl.pathname === '/start-otto-auth' && req.method === 'POST') {
-          await this.handleStartOttoAuth(res);
+          await this.handleStartOttoAuth(req, res);
         } else if (reqUrl.pathname === '/start-vipcard-auth' && req.method === 'POST') {
           await this.handleStartVipCardAuth(req, res);
         } else if (reqUrl.pathname === '/api/backend/feishu-allowed' && req.method === 'GET') {
@@ -148,7 +175,7 @@ export class AuthServer {
                 }
               });
             } else if (reqUrl.pathname === '/start-otto-auth' && req.method === 'POST') {
-              await this.handleStartOttoAuth(res);
+              await this.handleStartOttoAuth(req, res);
             } else if (reqUrl.pathname === '/start-vipcard-auth' && req.method === 'POST') {
               await this.handleStartVipCardAuth(req, res);
             } else if (reqUrl.pathname === '/api/backend/feishu-allowed' && req.method === 'GET') {
@@ -161,7 +188,7 @@ export class AuthServer {
           });
         }
 
-        this.selectServer!.listen(currentPort, () => {
+        this.selectServer!.listen(currentPort, 'localhost', () => {
           this.actualSelectPort = currentPort;
           console.log(`🌐 认证选择服务器启动在端口 ${currentPort}`);
           console.log(`🔗 认证选择页面: http://localhost:${currentPort}`);
@@ -228,7 +255,7 @@ export class AuthServer {
           });
         }
 
-        this.callbackServer!.listen(currentPort, () => {
+        this.callbackServer!.listen(currentPort, 'localhost', () => {
           this.actualCallbackPort = currentPort;
           console.log(`🌐 认证回调服务器启动在端口 ${currentPort}`);
           console.log(`🔗 认证回调地址: http://localhost:${currentPort}/callback`);
@@ -448,7 +475,7 @@ export class AuthServer {
     });
 
     const authUrl = `https://open.feishu.cn/open-apis/authen/v1/authorize?${params.toString()}`;
-    console.log('🔗 [Auth Server] 飞书认证URL:', authUrl);
+    console.log('🔗 [Auth Server] 飞书认证地址已生成');
 
     return authUrl;
   }
@@ -463,12 +490,35 @@ export class AuthServer {
   /**
    * 处理启动Otto认证请求
    */
-  private async handleStartOttoAuth(res: http.ServerResponse): Promise<void> {
+  private async handleStartOttoAuth(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    // This endpoint is invoked by the local auth page. Remove the server-wide
+    // wildcard CORS header and reject browser requests from foreign origins.
+    res.removeHeader('Access-Control-Allow-Origin');
+    const secFetchSiteHeader = req.headers['sec-fetch-site'];
+    const secFetchSite = Array.isArray(secFetchSiteHeader)
+      ? secFetchSiteHeader[0]
+      : secFetchSiteHeader;
+    if (!isTrustedOttoAuthStartRequest(
+      req.headers.origin,
+      secFetchSite,
+      this.actualSelectPort,
+      req.socket.remoteAddress,
+    )) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: '不允许跨站启动Otto登录' }));
+      return;
+    }
+
+    let state: string | undefined;
     try {
       console.log('🚀 [Auth Server] 启动Otto认证流程');
 
+      state = this.ottoStateStore.issue();
       const ottoHandler = createOttoAuthHandler(this.actualCallbackPort);
-      const authUrl = ottoHandler.buildAuthUrl();
+      const authUrl = ottoHandler.buildAuthUrl(state);
 
       const response = {
         success: true,
@@ -476,12 +526,12 @@ export class AuthServer {
       };
 
       res.writeHead(200, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
+        'Content-Type': 'application/json'
       });
       res.end(JSON.stringify(response));
 
     } catch (error) {
+      if (state) this.ottoStateStore.consume(state);
       console.error('❌ [Auth Server] Otto认证启动失败:', error);
       const response = {
         success: false,
@@ -489,8 +539,7 @@ export class AuthServer {
       };
 
       res.writeHead(500, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
+        'Content-Type': 'application/json'
       });
       res.end(JSON.stringify(response));
     }
@@ -722,7 +771,7 @@ export class AuthServer {
       avatar: loginData.user?.avatar || ''
     };
     proxyAuthManager.setUserInfo(userInfo);
-    console.log(`✅ [Auth Server] VIP卡用户信息已保存到~/.otto/: ${userInfo.name} (${userInfo.email || code})`)
+    console.log('✅ [Auth Server] VIP卡用户信息已安全保存');
 
     // 返回成功响应
     const response = {
@@ -754,7 +803,6 @@ export class AuthServer {
     const plat = url.searchParams.get('plat');
 
     console.log('🔄 [Auth Server] 收到认证回调');
-    console.log('🔄 [Auth Server] 回调URL:', url.toString());
     console.log('🔄 [Auth Server] 平台参数:', plat);
 
     if (plat === 'otto') {
@@ -834,10 +882,13 @@ export class AuthServer {
     try {
       console.log('🔄 [Auth Server] 处理Otto认证回调');
       const ottoHandler = createOttoAuthHandler(this.actualCallbackPort);
-      const result = ottoHandler.handleCallback(url);
+      const result = ottoHandler.handleCallback(
+        url,
+        (state) => this.ottoStateStore.consume(state),
+      );
 
       if (!result.success) {
-        console.error('❌ [Auth Server] Otto认证失败:', result.error);
+        console.error('❌ [Auth Server] Otto认证回调返回失败');
         this.sendErrorResponse(res, result.error || 'Otto authentication failed');
         return;
       }
@@ -895,8 +946,8 @@ export class AuthServer {
       }
 
       if (!jwtResponse.ok) {
-        const errorText = await jwtResponse.text();
-        console.error('❌ [Auth Server] JWT交换失败:', jwtResponse.status, errorText);
+        await jwtResponse.text();
+        console.error('❌ [Auth Server] JWT交换失败:', jwtResponse.status, jwtResponse.statusText);
         this.sendErrorResponse(res, `Authentication failed (HTTP ${jwtResponse.status}). Please try again later.`);
         return;
       }
@@ -910,13 +961,7 @@ export class AuthServer {
         return;
       }
 
-      console.log('📋 [Auth Server] JWT交换响应数据:', jwtData);
-
-      console.log('✅ [Auth Server] JWT交换成功:', {
-        user: jwtData.user?.name,
-        email: jwtData.user?.email,
-        expiresIn: jwtData.expiresIn,
-      });
+      console.log('✅ [Auth Server] JWT交换成功');
 
       // 保存JWT令牌和用户信息到~/.otto/目录
       const proxyAuthManager = ProxyAuthManager.getInstance();
@@ -965,7 +1010,7 @@ export class AuthServer {
       const error = url.searchParams.get('error');
 
       if (error) {
-        console.error('❌ [Auth Server] 飞书认证错误:', error);
+        console.error('❌ [Auth Server] 飞书认证回调返回错误');
         this.sendErrorResponse(res, `Feishu authentication failed: ${error}`);
         return;
       }
@@ -1059,8 +1104,8 @@ export class AuthServer {
       }
 
       if (!jwtResponse.ok) {
-        const errorText = await jwtResponse.text();
-        console.error('❌ [Auth Server] JWT交换失败:', jwtResponse.status, errorText);
+        await jwtResponse.text();
+        console.error('❌ [Auth Server] JWT交换失败:', jwtResponse.status, jwtResponse.statusText);
         this.sendErrorResponse(res, `Authentication failed (HTTP ${jwtResponse.status}). Please try again later.`);
         return;
       }
@@ -1074,13 +1119,7 @@ export class AuthServer {
         return;
       }
 
-      console.log('📋 [Auth Server] JWT交换响应数据:', jwtData);
-
-      console.log('✅ [Auth Server] JWT交换成功33:', {
-        user: jwtData.user?.name,
-        email: jwtData.user?.email,
-        expiresIn: jwtData.expiresIn,
-      });
+      console.log('✅ [Auth Server] JWT交换成功');
 
       // 保存JWT令牌和用户信息到~/.otto/目录
       const proxyAuthManager = ProxyAuthManager.getInstance();
@@ -1179,6 +1218,7 @@ export class AuthServer {
    * 停止服务器
    */
   stop(): void {
+    this.ottoStateStore.clear();
     if (this.selectServer) {
       this.selectServer.close();
       console.log('🛑 认证选择服务器已停止');

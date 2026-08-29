@@ -397,7 +397,10 @@ export async function handleMemberWorkflowRoute({
           distinctSessionCount: observed.distinctSessionCount,
           distinctContributorCount: observed.distinctContributorCount,
           spanDays: observed.spanDays,
+          contradictoryEvidenceCount: observed.contradictoryEvidenceCount,
+          verifiedEvidenceCount: observed.verifiedEvidenceCount,
           impactScore: observed.impactScore,
+          reliabilityScore: observed.reliabilityScore,
         },
       });
       return true;
@@ -483,6 +486,50 @@ export async function handleMemberWorkflowRoute({
         : undefined,
       changedBy: memberAccount!.name,
       changeNote: typeof body.changeNote === 'string' ? body.changeNote : undefined,
+      resolveConflict: body.resolveConflict === true,
+      adjudication: body.adjudication && typeof body.adjudication === 'object'
+        ? {
+          acceptedEvidenceIds: Array.isArray(
+            (body.adjudication as Record<string, unknown>).acceptedEvidenceIds,
+          )
+            ? (body.adjudication as Record<string, unknown>).acceptedEvidenceIds as number[]
+            : [],
+          rejectedEvidenceIds: Array.isArray(
+            (body.adjudication as Record<string, unknown>).rejectedEvidenceIds,
+          )
+            ? (body.adjudication as Record<string, unknown>).rejectedEvidenceIds as number[]
+            : [],
+          rationale: typeof (body.adjudication as Record<string, unknown>).rationale === 'string'
+            ? (body.adjudication as Record<string, unknown>).rationale as string
+            : '',
+        }
+        : undefined,
+    });
+    if (!knowledge) {
+      sendJSON(res, 404, { error: 'knowledge not found' });
+      return true;
+    }
+    sendJSON(res, 200, { knowledge });
+    return true;
+  }
+
+  const revalidateMatch = path.match(/^\/enterprise\/knowledge\/(\d+)\/revalidate$/u);
+  if (revalidateMatch && method === 'POST') {
+    if (!db.getOrganizationFeatures(memberAccount!.organizationId).knowledge) {
+      sendJSON(res, 403, { error: '企业知识功能已由管理员关闭' });
+      return true;
+    }
+    if (!memberAccount!.isAdmin) {
+      sendJSON(res, 403, { error: '只有企业管理员可以复核知识' });
+      return true;
+    }
+    const body = await readBody(req);
+    const knowledge = db.revalidateKnowledge({
+      id: Number(revalidateMatch[1]),
+      organizationId: memberAccount!.organizationId,
+      reviewer: memberAccount!.name,
+      rationale: typeof body.rationale === 'string' ? body.rationale : '',
+      validForDays: typeof body.validForDays === 'number' ? body.validForDays : 0,
     });
     if (!knowledge) {
       sendJSON(res, 404, { error: 'knowledge not found' });
@@ -508,6 +555,28 @@ export async function handleMemberWorkflowRoute({
         memberAccount!.organizationId,
       ),
     });
+    return true;
+  }
+
+  const evidenceMatch = path.match(/^\/enterprise\/knowledge\/(\d+)\/evidence$/u);
+  if (evidenceMatch && method === 'GET') {
+    if (!db.getOrganizationFeatures(memberAccount!.organizationId).knowledge) {
+      sendJSON(res, 403, { error: '企业知识功能已由管理员关闭' });
+      return true;
+    }
+    if (!memberAccount!.isAdmin) {
+      sendJSON(res, 403, { error: '只有企业管理员可以查看知识证据' });
+      return true;
+    }
+    const evidence = db.getKnowledgeEvidence(
+      Number(evidenceMatch[1]),
+      memberAccount!.organizationId,
+    );
+    if (!evidence) {
+      sendJSON(res, 404, { error: 'knowledge not found' });
+      return true;
+    }
+    sendJSON(res, 200, { evidence });
     return true;
   }
 

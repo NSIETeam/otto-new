@@ -158,8 +158,6 @@ describe('SettingsHubPage internal-test navigation', () => {
           createdAt: '',
           updatedAt: '',
         },
-        uiMode: 'work',
-        onUiModeChange: vi.fn(),
         onManageAccounts: vi.fn(),
       }),
     );

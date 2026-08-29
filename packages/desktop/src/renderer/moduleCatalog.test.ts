@@ -52,6 +52,35 @@ describe('static module catalog', () => {
       && module.icon
     ))).toBe(true);
     expect(ids.some((id) => /organization|contact|friend/i.test(id))).toBe(false);
+    expect(buildModuleCatalog(enterpriseContext()).every((module) => (
+      module.package?.packageId
+      && module.package.publisherId
+      && module.package.version
+    ))).toBe(true);
+  });
+
+  it('publishes five enterprise recruitment modules and hides them from personal workspaces', () => {
+    const enterprise = buildModuleCatalog(enterpriseContext());
+    const recruitment = enterprise.filter((module) => module.category === 'recruitment');
+    expect(recruitment.map((module) => module.id)).toEqual([
+      'recruitment-resume-analysis',
+      'recruitment-candidate-screening',
+      'recruitment-interview-audio',
+      'recruitment-interview-kit',
+      'recruitment-privacy-audit',
+    ]);
+    expect(recruitment.every((module) => module.availability === 'available')).toBe(true);
+    expect(recruitment.every((module) => (
+      module.activation.kind === 'dialog' && module.activation.dialog === 'recruitment'
+    ))).toBe(true);
+
+    const personal = buildModuleCatalog({
+      edition: 'personal', profiles: BASE_AGENT_PROFILES, organizationFeatures: enabledFeatures,
+      parkAuthorization: { hasParkContext: false, canViewStatistics: false, canViewStaffTasks: false },
+      customAgents: [],
+    });
+    expect(personal.filter((module) => module.category === 'recruitment')
+      .every((module) => module.availability === 'hidden')).toBe(true);
   });
 
   it('maps each fixed agent from its existing profile instead of duplicating profile data', () => {
@@ -72,7 +101,10 @@ describe('capability-driven availability', () => {
 
     expect(catalog.find((module) => module.id === 'enterprise-memory')?.availability).toBe('hidden');
     expect(catalog.find((module) => module.id === 'skill-zone')?.availability).toBe('hidden');
-    expect(catalog.find((module) => module.id === 'park-announcement')?.availability).toBe('hidden');
+    expect(catalog.find((module) => module.id === 'park-announcement')).toMatchObject({
+      availability: 'disabled',
+      disabledReason: '当前企业尚未启用园区服务',
+    });
     expect(catalog.find((module) => module.id === 'agent-ppt')?.availability).toBe('available');
   });
 

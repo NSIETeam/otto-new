@@ -13,50 +13,43 @@ afterEach(() => {
 });
 
 describe('FirstRunGuide', () => {
-  it('walks through the conversational UI and remembers completion for that mode', () => {
-    render(<FirstRunGuide mode="conversational" />);
-
-    expect(screen.getByText('对话就是主工作区')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
-    expect(screen.getByText('从这里发起任务')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '下一步' }));
-    expect(screen.getByText('历史与企业入口都在左侧')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '开始使用' }));
-
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(localStorage.getItem('otto:first-run-guide:v2:conversational')).toBe('completed');
-    expect(localStorage.getItem('otto:first-run-guide:v2:work')).toBeNull();
-  });
-
-  it('uses a separate walkthrough and completion state for the work UI', () => {
-    localStorage.setItem('otto:first-run-guide:v2:conversational', 'completed');
-    render(<FirstRunGuide mode="work" />);
+  it('walks through the unified workspace UI and remembers completion', () => {
+    render(<FirstRunGuide />);
 
     expect(screen.getByText('对话与工作区并排协作')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '下一步' }));
     expect(screen.getByText('右侧工作区会一直陪着你')).toBeTruthy();
-    expect(screen.getByText('工作式 UI 导览')).toBeTruthy();
+    expect(screen.getByText('Otto 工作区导览')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /前往第 4 步/ }));
+    expect(screen.getByText('左侧统一管理工作入口')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '开始使用' }));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(localStorage.getItem('otto:first-run-guide:v3:workspace')).toBe('completed');
   });
 
-  it('starts the matching walkthrough when the user switches UI modes', () => {
-    localStorage.setItem('otto:first-run-guide:v2:conversational', 'completed');
-    const view = render(<FirstRunGuide mode="conversational" />);
+  it('stays hidden after the workspace walkthrough has completed', () => {
+    localStorage.setItem('otto:first-run-guide:v3:workspace', 'completed');
+    render(<FirstRunGuide />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('honors completion from the former work-layout guide without accepting the retired layout', () => {
+    localStorage.setItem('otto:first-run-guide:v2:work', 'completed');
+    const completed = render(<FirstRunGuide />);
     expect(screen.queryByRole('dialog')).toBeNull();
 
-    view.rerender(<FirstRunGuide mode="work" />);
+    completed.unmount();
+    localStorage.clear();
+    localStorage.setItem('otto:first-run-guide:v2:conversational', 'completed');
+    render(<FirstRunGuide />);
     expect(screen.getByText('对话与工作区并排协作')).toBeTruthy();
   });
 
-  it('stays hidden after the selected mode has completed its walkthrough', () => {
-    localStorage.setItem('otto:first-run-guide:v2:work', 'completed');
-    render(<FirstRunGuide mode="work" />);
-    expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
   it('supports direct step navigation from the progress controls', () => {
-    render(<FirstRunGuide mode="conversational" />);
+    render(<FirstRunGuide />);
     fireEvent.click(screen.getByRole('button', { name: /前往第 3 步/ }));
-    expect(screen.getByText('历史与企业入口都在左侧')).toBeTruthy();
+    expect(screen.getByText('从这里下达任务')).toBeTruthy();
   });
 
   it('remains usable when browser storage is unavailable', () => {
@@ -67,7 +60,7 @@ describe('FirstRunGuide', () => {
       throw new Error('storage blocked');
     });
 
-    render(<FirstRunGuide mode="conversational" />);
+    render(<FirstRunGuide />);
     expect(screen.getByRole('dialog')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '跳过导览' }));
     expect(screen.queryByRole('dialog')).toBeNull();

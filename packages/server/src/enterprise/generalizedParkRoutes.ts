@@ -42,6 +42,12 @@ function getParkAdmin(
   return park;
 }
 
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
 export async function handleGeneralizedParkRoute({
   path,
   method,
@@ -52,6 +58,57 @@ export async function handleGeneralizedParkRoute({
   readBody,
   sendJSON,
 }: GeneralizedParkRouteDeps): Promise<boolean> {
+  if (
+    path === '/enterprise/organization/public-profile' &&
+    (method === 'GET' || method === 'PUT')
+  ) {
+    const account = memberAccount!;
+    if (method === 'GET') {
+      sendJSON(res, 200, {
+        profile: db.getEnterprisePublicProfile(account.organizationId),
+      });
+      return true;
+    }
+    const body = await readBody(req);
+    try {
+      const profile = db.updateEnterprisePublicProfile({
+        organizationId: account.organizationId,
+        actorAccountId: account.id,
+        summary: typeof body.summary === 'string' ? body.summary : '',
+        website: typeof body.website === 'string' ? body.website : '',
+        industryTags: stringList(body.industryTags),
+        productsServices: stringList(body.productsServices),
+        capabilities: stringList(body.capabilities),
+        cooperationNeeds: stringList(body.cooperationNeeds),
+        publicContact:
+          typeof body.publicContact === 'string' ? body.publicContact : '',
+        isPublic: body.isPublic === true,
+      });
+      sendJSON(res, 200, { profile });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '企业资料保存失败';
+      sendJSON(res, /只有企业管理员/.test(message) ? 403 : 400, {
+        error: message,
+      });
+    }
+    return true;
+  }
+
+  if (path === '/enterprise/park/star-map' && method === 'GET') {
+    const account = memberAccount!;
+    if (!requireParkService(account.organizationId, res, sendJSON)) return true;
+    try {
+      sendJSON(res, 200, {
+        starMap: db.getEnterpriseParkStarMap(account.organizationId),
+      });
+    } catch (error) {
+      sendJSON(res, 400, {
+        error: error instanceof Error ? error.message : '企业星链图读取失败',
+      });
+    }
+    return true;
+  }
+
   if (path === '/enterprise/park/manage' && (method === 'GET' || method === 'POST')) {
     const principal = adminPrincipal!;
     if (principal.kind !== 'account') {

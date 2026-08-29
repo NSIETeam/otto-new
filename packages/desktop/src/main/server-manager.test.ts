@@ -102,6 +102,25 @@ describe('desktop SQLCipher runtime custody', () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
+
+  it('uses the verified development binding when packaged resources are absent', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'otto-desktop-dev-binding-'));
+    const developmentBinding = path.join(root, 'native', 'better_sqlite3.node');
+    const environment: NodeJS.ProcessEnv = { OTTO_USER_DIR: path.join(root, 'user') };
+    try {
+      await fs.mkdir(path.dirname(developmentBinding), { recursive: true });
+      await fs.writeFile(developmentBinding, 'verified-development-binding');
+
+      expect(prepareDesktopSqlCipherRuntime(environment, {
+        homeDirectory: root,
+        resourcesPath: path.join(root, 'missing-resources'),
+        developmentBindingPath: developmentBinding,
+      }).nativeBindingPath).toBe(path.resolve(developmentBinding));
+      expect(environment.OTTO_SQLCIPHER_NATIVE_BINDING).toBe(path.resolve(developmentBinding));
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 function discoveredMainModule() {
@@ -512,8 +531,10 @@ describe('ServerManager enterprise lifecycle', () => {
 });
 
 describe('ServerManager kernel overlay loading', () => {
-  async function installOverlayKernel(): Promise<{ root: string; modulePath: string; binPath: string }> {
-    const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'otto-server-manager-kernel-'));
+  async function installOverlayKernel(
+    tempPrefix = 'otto-server-manager-kernel-',
+  ): Promise<{ root: string; modulePath: string; binPath: string }> {
+    const userData = await fs.mkdtemp(path.join(os.tmpdir(), tempPrefix));
     const root = resolveKernelUpdateRoot(userData);
     const body = JSON.stringify({
       schemaVersion: 1,
@@ -588,8 +609,12 @@ export class OttoServer {
   });
 
   it('uses the active kernel bin path for detached server startup', async () => {
-    const overlay = await installOverlayKernel();
+    const overlay = await installOverlayKernel('otto server & manager kernel-');
+    let capturedCommand = '';
     let capturedArgs: string[] = [];
+    let capturedOptions: NonNullable<
+      Parameters<ServerManagerDependencies['spawnDetached']>[2]
+    > = {};
     let spawned = false;
     const runningChild = Object.assign(new EventEmitter(), {
       exitCode: null,
@@ -610,8 +635,10 @@ export class OttoServer {
         loadOttoServer: async () => mod,
         pidAlive: () => true,
         probeHealth: async () => true,
-        spawnDetached: vi.fn((_cmd, args) => {
+        spawnDetached: vi.fn((command, args, options) => {
+          capturedCommand = command;
           capturedArgs = args as string[];
+          capturedOptions = options ?? {};
           spawned = true;
           return runningChild;
         }) as unknown as ServerManagerDependencies['spawnDetached'],
@@ -621,7 +648,15 @@ export class OttoServer {
     const ensured = await manager.ensure();
 
     expect(ensured.ownership).toBe('detached');
-    expect(capturedArgs[0]).toBe(overlay.binPath);
+    expect(overlay.binPath).toContain(' ');
+    expect(overlay.binPath).toContain('&');
+    expect(capturedCommand).toBe(process.execPath);
+    expect(capturedArgs).toEqual([overlay.binPath, 'start']);
+    expect(capturedOptions).toMatchObject({
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    expect(capturedOptions.shell).toBeUndefined();
     await manager.shutdown(true);
   });
 });

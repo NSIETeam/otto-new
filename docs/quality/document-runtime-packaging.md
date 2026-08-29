@@ -29,3 +29,16 @@ Windows 多套大型运行时同时塞进一个安装包。
 
 内置 Python 会设置自己的 `PYTHONPATH` 和 `PYTHONNOUSERSITE=1`，避免依赖用户机器
 临时安装的包而出现“这台电脑能用、另一台不能用”的差异。
+
+## 智能招聘音频组件
+
+智能招聘的 PDF/DOCX 解析复用上述文档运行时。WhisperX 音频转写属于独立的大型企业
+组件，不进入默认轻量安装包。正式启用“音频面试分析”的发行物必须在同一 Python
+运行时的 `python/site-packages` 中离线安装
+`packages/desktop/runtime/recruitment/requirements.txt`，并随组件提供可执行的 FFmpeg。
+
+- 当前固定稳定版：`whisperx==3.8.6`，Python `>=3.10,<3.14`；
+- 说话人区分还需要配置只读 `HF_TOKEN`，并由发行/部署方确认已接受所使用的
+  pyannote 模型条款；未配置时仍允许转写，但界面必须明确要求人工确认说话人；
+- 审计记录必须保存实际 WhisperX 模型名，不允许只记录“AI 分析”；
+- 运行时缺失或加载失败时必须显式报错，禁止伪造转写或静默回退为未知模型。

@@ -10,8 +10,6 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { DEFAULT_UI_MODE, type UiMode } from '../../uiModePreference.js';
-import { UiModePreview } from '../UiModeGuide.js';
 import type { UseSettingsData } from '../../state/useSettingsData.js';
 import { GeneratedIcon, type GeneratedIconName } from '../GeneratedIcon.js';
 import { IconClose } from '../icons.js';
@@ -43,15 +41,7 @@ const THEME_OPTIONS: Array<{ id: 'system' | 'light' | 'dark'; label: string }> =
   { id: 'dark', label: '深色' },
 ];
 
-export function PrefsPanel({
-  data,
-  uiMode = 'conversational',
-  onUiModeChange = () => undefined,
-}: {
-  data: UseSettingsData;
-  uiMode?: UiMode;
-  onUiModeChange?: (mode: UiMode) => void;
-}): React.JSX.Element {
+export function PrefsPanel({ data }: { data: UseSettingsData }): React.JSX.Element {
   const { state, actions } = data;
   const s = state.settings;
   const [langDraft, setLangDraft] = useState('');
@@ -105,7 +95,6 @@ export function PrefsPanel({
 
   const preferencesAreDefault = Boolean(
     s &&
-      uiMode === DEFAULT_UI_MODE &&
       theme === 'system' &&
       s.agentStyle === 'default' &&
       !petWidgetEnabled &&
@@ -135,7 +124,7 @@ export function PrefsPanel({
       return;
     }
     if (!window.confirm(
-      '恢复外观与回复的默认设置？\n\n这会重置本页面的界面、主题和回复偏好，不会影响账号、工作目录或其他设置。',
+      '恢复外观与回复的默认设置？\n\n这会重置本页面的主题和回复偏好，不会影响账号、工作目录或其他设置。',
     )) return;
 
     resetErrorBaseline.current = state.lastError;
@@ -144,7 +133,6 @@ export function PrefsPanel({
     const needsThemeReset = theme !== 'system';
     setThemeResetSettled(!needsThemeReset);
     try {
-      if (uiMode !== DEFAULT_UI_MODE) onUiModeChange(DEFAULT_UI_MODE);
       let themeReset: Promise<unknown> | undefined;
       if (needsThemeReset) {
         setTheme('system');
@@ -204,36 +192,6 @@ export function PrefsPanel({
       ) : (
         <>
         <Card className="otto-prefs-simple">
-          <div className="otto-hub__setting otto-hub__setting--stack">
-            <div className="otto-hub__setting-text">
-              <div className="otto-hub__field-label">界面模式</div>
-              <div className="otto-hub__field-hint">
-                两种界面的功能和数据完全相同，切换后立即生效。
-              </div>
-            </div>
-            <div className="otto-ui-mode-setting" role="radiogroup" aria-label="界面模式">
-              <button
-                type="button"
-                role="radio"
-                aria-checked={uiMode === 'conversational'}
-                className={uiMode === 'conversational' ? 'is-active' : ''}
-                onClick={() => onUiModeChange('conversational')}
-              >
-                <UiModePreview mode="conversational" />
-                <span><strong>对话式 UI</strong><small>专注当前对话</small></span>
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={uiMode === 'work'}
-                className={uiMode === 'work' ? 'is-active' : ''}
-                onClick={() => onUiModeChange('work')}
-              >
-                <UiModePreview mode="work" />
-                <span><strong>工作式 UI</strong><small>右侧常驻工作区</small></span>
-              </button>
-            </div>
-          </div>
           <div className="otto-hub__setting otto-hub__setting--stack">
             <div className="otto-hub__setting-text">
               <div className="otto-hub__field-label">外观</div>
@@ -306,7 +264,7 @@ export function PrefsPanel({
           <div className="otto-hub__setting">
             <div className="otto-hub__setting-text">
               <div className="otto-hub__field-label">小宠物挂件</div>
-              <div className="otto-hub__field-hint">在右下角显示 Otto 的实时工作状态。</div>
+              <div className="otto-hub__field-hint">单击互动、双击打开 Otto、按住拖动；自动记住位置。</div>
             </div>
             <button
               type="button"

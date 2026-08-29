@@ -114,7 +114,7 @@ describe('ModuleWorkspace drag reorder contract', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     const groupList = container.querySelector('[data-reorder-group="groups"]');
     expect(groupList).toBeTruthy();
 
@@ -140,7 +140,7 @@ describe('ModuleWorkspace drag reorder contract', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     const moduleGrid = container.querySelector('[data-reorder-group="modules:park-services"]');
     expect(moduleGrid).toBeTruthy();
 
@@ -167,14 +167,14 @@ describe('ModuleWorkspace drag reorder contract', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     expect(container.querySelector('.otto-module-workspace.is-reduced-motion')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '拖动功能组：园区服务' })).toBeNull();
     expect(screen.queryByRole('button', { name: '拖动模块：园区公告' })).toBeNull();
     expect(screen.getByRole('button', { name: '移除 园区公告' })).toBeTruthy();
   });
 
-  it('auto-scrolls the workspace viewport when dragging a group near its edge', () => {
+  it('does not make the workspace follow ordinary pointer movement near an edge', () => {
     const { container } = render(
       <ModuleWorkspace
         presentation="panel"
@@ -198,10 +198,10 @@ describe('ModuleWorkspace drag reorder contract', () => {
     const bottomMove = new Event('pointermove', { bubbles: true });
     Object.defineProperty(bottomMove, 'clientY', { value: 295 });
     fireEvent(groupList, bottomMove);
-    expect(viewport.scrollTop).toBeGreaterThan(100);
+    expect(viewport.scrollTop).toBe(100);
     const topMove = new Event('pointermove', { bubbles: true });
     Object.defineProperty(topMove, 'clientY', { value: 2 });
     fireEvent(groupList, topMove);
-    expect(viewport.scrollTop).toBeLessThan(120);
+    expect(viewport.scrollTop).toBe(100);
   });
 });

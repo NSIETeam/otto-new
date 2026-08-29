@@ -12,6 +12,7 @@ import {
   buildSavePayload,
   effectiveModelIds,
   buildModelsFileJson,
+  savePayloadAppearsInModels,
   vendorFromBaseUrl,
   type SetupFormState,
 } from './presets.js';
@@ -136,5 +137,80 @@ describe('编辑模型 payload', () => {
       enabled: false,
       makeActive: false,
     });
+  });
+});
+
+describe('保存回包确认', () => {
+  const deepseekPayload = buildSavePayload({
+    ...form,
+    presetId: 'deepseek',
+    provider: 'openai',
+    baseUrl: 'https://api.deepseek.com/v1',
+    modelId: 'deepseek-chat',
+  });
+
+  it('只在服务端列表真正包含刚保存的 DeepSeek 模型时确认成功', () => {
+    expect(
+      savePayloadAppearsInModels(
+        [
+          {
+            id: 'custom:openai:old-model@old',
+            displayName: '旧模型',
+            provider: 'openai',
+            baseUrl: 'https://api.example.com/v1',
+            modelId: 'old-model',
+          },
+        ],
+        deepseekPayload,
+      ),
+    ).toBe(false);
+
+    expect(
+      savePayloadAppearsInModels(
+        [
+          {
+            id: 'custom:openai:deepseek-chat@abc123',
+            displayName: 'DeepSeek deepseek-chat',
+            provider: 'openai',
+            baseUrl: 'https://api.deepseek.com/v1/',
+            modelId: 'deepseek-chat',
+          },
+        ],
+        deepseekPayload,
+      ),
+    ).toBe(true);
+  });
+
+  it('批量保存时必须等全部模型都出现在服务端列表', () => {
+    const payload = {
+      ...deepseekPayload,
+      modelId: 'deepseek-chat',
+      modelIds: ['deepseek-chat', 'deepseek-reasoner'],
+    };
+    const chatOnly = [
+      {
+        id: 'custom:openai:deepseek-chat@abc123',
+        displayName: 'deepseek-chat',
+        provider: 'openai',
+        baseUrl: 'https://api.deepseek.com/v1',
+        modelId: 'deepseek-chat',
+      },
+    ];
+    expect(savePayloadAppearsInModels(chatOnly, payload)).toBe(false);
+    expect(
+      savePayloadAppearsInModels(
+        [
+          ...chatOnly,
+          {
+            id: 'custom:openai:deepseek-reasoner@abc123',
+            displayName: 'deepseek-reasoner',
+            provider: 'openai',
+            baseUrl: 'https://api.deepseek.com/v1',
+            modelId: 'deepseek-reasoner',
+          },
+        ],
+        payload,
+      ),
+    ).toBe(true);
   });
 });

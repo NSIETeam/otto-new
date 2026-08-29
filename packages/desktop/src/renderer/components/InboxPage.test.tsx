@@ -78,6 +78,8 @@ describe('InboxPage response hardening', () => {
     render(
       <InboxPage
         enterpriseAccount={account}
+        effectiveDirectMessages
+        effectiveAtoa
         onBack={() => undefined}
       />,
     );
@@ -86,6 +88,55 @@ describe('InboxPage response hardening', () => {
       expect(screen.getByText('暂无消息')).toBeTruthy();
     });
     expect(screen.getByRole('region', { name: '我的消息' })).toBeTruthy();
+  });
+
+  it('confirms a direct-message read only after the conversation load succeeds', async () => {
+    const peer = {
+      id: 'member-2',
+      username: 'member-2',
+      name: '同事二',
+      role: '成员',
+      department: '研发部',
+      positionId: null,
+      positionTitle: '工程师',
+      isAdmin: false,
+      status: 'active' as const,
+    };
+    let resolveMessages!: (messages: []) => void;
+    const enterpriseMessagesList = vi.fn(() => new Promise<[]>(
+      (resolve) => { resolveMessages = resolve; },
+    ));
+    const onMessageRead = vi.fn();
+    Object.assign(window.otto, {
+      enterpriseMessagesUnread: vi.fn(async () => [{
+        id: 'message-1',
+        source: 'enterprise' as const,
+        title: '同事二发来消息',
+        senderAccountId: peer.id,
+        senderName: peer.name,
+        preview: '请查看项目进度',
+        createdAt: '2026-08-27T12:00:00.000Z',
+      }]),
+      enterpriseOrganizationView: vi.fn(async () => ({ members: [peer] })),
+      enterpriseMessagesList,
+    });
+
+    render(
+      <InboxPage
+        enterpriseAccount={account}
+        effectiveDirectMessages
+        enterpriseUnreadCounts={{ 'enterprise:message:member-2': 1 }}
+        onMessageRead={onMessageRead}
+        onBack={() => undefined}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('listitem', { name: /同事二/ }));
+    await waitFor(() => expect(enterpriseMessagesList).toHaveBeenCalledWith('member-2'));
+    expect(onMessageRead).not.toHaveBeenCalled();
+
+    resolveMessages([]);
+    await waitFor(() => expect(onMessageRead).toHaveBeenCalledWith('member-2'));
   });
 
   it('opens a federated E2EE conversation from the same contact list', async () => {
@@ -132,6 +183,8 @@ describe('InboxPage response hardening', () => {
     render(
       <InboxPage
         enterpriseAccount={account}
+        effectiveDirectMessages
+        effectiveAtoa
         onBack={() => undefined}
       />,
     );
@@ -178,6 +231,8 @@ describe('InboxPage response hardening', () => {
     render(
       <InboxPage
         enterpriseAccount={account}
+        effectiveDirectMessages
+        effectiveAtoa
         onBack={() => undefined}
       />,
     );
@@ -199,5 +254,98 @@ describe('InboxPage response hardening', () => {
     expect(contactId).toBe(contact.id);
     expect(content).toMatch(/^OTTO_ATOA_REQUEST /u);
     expect(content).toContain('你明天下午是否方便开会？');
+  });
+
+  it('私聊 effective=false 时 fail closed，不请求本企业或跨服务器消息接口', async () => {
+    const bridge = window.otto as unknown as Record<string, ReturnType<typeof vi.fn>>;
+
+    render(
+      <InboxPage
+        enterpriseAccount={account}
+        effectiveDirectMessages={false}
+        onBack={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText('企业私聊未启用或当前服务器未授权，不会请求企业消息数据。')).toBeTruthy();
+    expect(bridge.enterpriseMessagesUnread).not.toHaveBeenCalled();
+    expect(bridge.enterpriseOrganizationView).not.toHaveBeenCalled();
+    expect(bridge.enterpriseFederationContacts).not.toHaveBeenCalled();
+    expect(bridge.enterpriseFederationMessagesList).not.toHaveBeenCalled();
+  });
+
+  it('keeps local baseline messaging without probing unentitled Federation', async () => {
+    const bridge = window.otto as unknown as Record<string, ReturnType<typeof vi.fn>>;
+
+    render(
+      <InboxPage
+        enterpriseAccount={account}
+        baselineDirectMessagesAvailable
+        baselineEnterpriseTreeAvailable
+        effectiveDirectMessages={false}
+        onBack={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText('暂无消息')).toBeTruthy();
+    expect(bridge.enterpriseMessagesUnread).toHaveBeenCalled();
+    expect(bridge.enterpriseOrganizationView).toHaveBeenCalled();
+    expect(bridge.enterpriseFederationContacts).not.toHaveBeenCalled();
+    expect(screen.queryByTitle('复制我的跨服务器联系码')).toBeNull();
+    expect(screen.queryByTitle('添加跨服务器联系人')).toBeNull();
+  });
+
+  it('does not load the member directory when its baseline switch is off', async () => {
+    const bridge = window.otto as unknown as Record<string, ReturnType<typeof vi.fn>>;
+
+    render(
+      <InboxPage
+        enterpriseAccount={account}
+        baselineDirectMessagesAvailable
+        baselineEnterpriseTreeAvailable={false}
+        effectiveDirectMessages={false}
+        onBack={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText('暂无消息')).toBeTruthy();
+    expect(bridge.enterpriseMessagesUnread).toHaveBeenCalled();
+    expect(bridge.enterpriseOrganizationView).not.toHaveBeenCalled();
+  });
+
+  it('A2A effective=false 时不显示跨服务器 Otto 询问入口，也不会发送 A2A 请求', async () => {
+    const contact: EnterpriseFederationContact = {
+      id: 'contact-remote',
+      identity: 'deployment-b:remote-account',
+      remoteDeploymentId: 'deployment-b',
+      remotePrincipalId: 'remote-account',
+      displayName: '远程同事',
+      deploymentDisplayName: '北京私有部署',
+      createdAt: '2026-08-12T00:00:00.000Z',
+      updatedAt: '2026-08-12T00:00:00.000Z',
+      lastMessageAt: null,
+      unreadCount: 0,
+      trustState: 'verified',
+      keyFingerprint: 'b'.repeat(64),
+    };
+    const bridge = window.otto as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    bridge.enterpriseFederationContacts.mockResolvedValue([contact]);
+
+    render(
+      <InboxPage
+        enterpriseAccount={account}
+        effectiveDirectMessages
+        effectiveAtoa={false}
+        onBack={() => undefined}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('listitem', { name: /远程同事/ }));
+    await screen.findByText('1234 5678 9012 3456');
+    expect(screen.queryByRole('button', { name: '询问对方 Otto' })).toBeNull();
+    fireEvent.change(screen.getByRole('textbox', { name: '回复消息' }), {
+      target: { value: '请让对方 Otto 回答' },
+    });
+    expect(bridge.enterpriseFederationMessageSend).not.toHaveBeenCalled();
   });
 });

@@ -236,14 +236,20 @@ export interface EnterpriseKnowledgeRecordResult {
     promoted: boolean;
     reason:
       | 'incubating'
+      | 'transient'
+      | 'contested'
       | 'long_term_recurrence'
       | 'cross_member_corroboration'
+      | 'governed_decision'
       | 'high_impact_verified';
     evidenceCount: number;
     distinctSessionCount: number;
     distinctContributorCount: number;
     spanDays: number;
+    contradictoryEvidenceCount?: number;
+    verifiedEvidenceCount?: number;
     impactScore: number;
+    reliabilityScore: number;
   };
 }
 
@@ -267,13 +273,17 @@ export interface EnterpriseKnowledgeItem {
   sourceLabel: string | null;
   status: 'pending_review' | 'active' | 'archived';
   version: number;
+  supersedesId: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  reviewDueAt?: string | null;
+  expiresAt?: string | null;
   createdAt: string;
   updatedAt: string;
   evidenceCount?: number;
   distinctSessionCount?: number;
   distinctContributorCount?: number;
+  verifiedEvidenceCount?: number;
   firstObservedAt?: string | null;
   lastObservedAt?: string | null;
 }
@@ -289,6 +299,31 @@ export interface EnterpriseKnowledgeRevision {
   changedBy: string | null;
   changeNote: string | null;
   createdAt: string;
+  adjudication?: EnterpriseKnowledgeAdjudication;
+}
+
+export interface EnterpriseKnowledgeAdjudication {
+  id: string;
+  acceptedEvidenceIds: string[];
+  rejectedEvidenceIds: string[];
+  rationale: string;
+  adjudicatedBy: string;
+}
+
+export interface EnterpriseKnowledgeEvidence {
+  id: string;
+  knowledgeId: string;
+  sourceId: string;
+  content: string;
+  tags: string[];
+  contributor: string | null;
+  confidence: number;
+  verified: boolean;
+  impactScore: number;
+  impactReasons: string[];
+  observedAt: string;
+  stance: 'affirmative' | 'negative' | 'neutral';
+  contested: boolean;
 }
 
 export type EnterpriseSkillVisibility = 'department' | 'company';
@@ -372,10 +407,16 @@ interface EnterpriseKnowledgeRow {
   sourceLabel?: string | null;
   status?: EnterpriseKnowledgeItem['status'];
   version?: number;
+  supersedes_id?: string | number | null;
+  supersedesId?: string | number | null;
   reviewed_by?: string | null;
   reviewedBy?: string | null;
   reviewed_at?: string | null;
   reviewedAt?: string | null;
+  review_due_at?: string | null;
+  reviewDueAt?: string | null;
+  expires_at?: string | null;
+  expiresAt?: string | null;
   created_at?: string;
   createdAt?: string;
   updated_at?: string;
@@ -386,6 +427,8 @@ interface EnterpriseKnowledgeRow {
   distinctSessionCount?: number;
   distinct_contributor_count?: number;
   distinctContributorCount?: number;
+  verified_evidence_count?: number;
+  verifiedEvidenceCount?: number;
   first_observed_at?: string | null;
   firstObservedAt?: string | null;
   last_observed_at?: string | null;
@@ -407,6 +450,47 @@ interface EnterpriseKnowledgeRevisionRow {
   changeNote?: string | null;
   created_at?: string;
   createdAt?: string;
+  adjudication?: {
+    id: string | number;
+    acceptedEvidenceIds?: Array<string | number>;
+    rejectedEvidenceIds?: Array<string | number>;
+    rationale?: string;
+    adjudicatedBy?: string;
+  };
+}
+
+interface EnterpriseKnowledgeEvidenceRow {
+  id: string | number;
+  knowledgeId?: string | number;
+  knowledge_id?: string | number;
+  sourceId?: string;
+  source_id?: string;
+  content: string;
+  tags?: unknown;
+  contributor?: string | null;
+  confidence?: number;
+  verified?: boolean;
+  impactScore?: number;
+  impact_score?: number;
+  impactReasons?: unknown;
+  impact_reasons?: unknown;
+  observedAt?: string;
+  observed_at?: string;
+  stance?: EnterpriseKnowledgeEvidence['stance'];
+  contested?: boolean;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+function normalizeEnterpriseTimestamp(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/u.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
 }
 
 function mapEnterpriseKnowledgeItem(
@@ -429,8 +513,19 @@ function mapEnterpriseKnowledgeItem(
     sourceLabel: item.sourceLabel ?? item.source_label ?? null,
     status: item.status || 'active',
     version: typeof item.version === 'number' ? item.version : 1,
+    supersedesId: item.supersedesId !== undefined
+      ? item.supersedesId === null ? null : String(item.supersedesId)
+      : item.supersedes_id === null || item.supersedes_id === undefined
+        ? null
+        : String(item.supersedes_id),
     reviewedBy: item.reviewedBy ?? item.reviewed_by ?? null,
     reviewedAt: item.reviewedAt ?? item.reviewed_at ?? null,
+    ...((item.reviewDueAt ?? item.review_due_at) !== undefined
+      ? { reviewDueAt: normalizeEnterpriseTimestamp(item.reviewDueAt ?? item.review_due_at) }
+      : {}),
+    ...((item.expiresAt ?? item.expires_at) !== undefined
+      ? { expiresAt: normalizeEnterpriseTimestamp(item.expiresAt ?? item.expires_at) }
+      : {}),
     createdAt: item.createdAt || item.created_at || '',
     updatedAt:
       item.updatedAt ||
@@ -452,6 +547,12 @@ function mapEnterpriseKnowledgeItem(
       ? {
           distinctContributorCount:
             item.distinctContributorCount ?? item.distinct_contributor_count,
+        }
+      : {}),
+    ...((item.verifiedEvidenceCount ?? item.verified_evidence_count) !== undefined
+      ? {
+          verifiedEvidenceCount:
+            item.verifiedEvidenceCount ?? item.verified_evidence_count,
         }
       : {}),
     ...((item.firstObservedAt ?? item.first_observed_at) !== undefined
@@ -494,6 +595,40 @@ export interface EnterpriseOrganizationFeatures {
   atoa: boolean;
   knowledge: boolean;
   skill_market: boolean;
+}
+
+export interface EnterpriseOrganizationFeatureState {
+  configured: EnterpriseOrganizationFeatures;
+  entitled: EnterpriseOrganizationFeatures;
+  effective: EnterpriseOrganizationFeatures;
+}
+
+interface EnterpriseOrganizationFeatureResponse
+  extends Partial<EnterpriseOrganizationFeatureState> {
+  features: EnterpriseOrganizationFeatures;
+}
+
+function normalizeOrganizationFeatureState(
+  response: EnterpriseOrganizationFeatureResponse,
+): EnterpriseOrganizationFeatureState {
+  const disabled: EnterpriseOrganizationFeatures = {
+    enterprise_tree: false,
+    park_service: false,
+    feishu_auto_reply: false,
+    direct_messages: false,
+    atoa: false,
+    knowledge: false,
+    skill_market: false,
+  };
+  // Older servers may expose configured values as `features`. Preserve those
+  // values for the switches, but do not authorize a protected request unless
+  // the server explicitly supplies the license-effective layer.
+  const effective = response.effective ?? disabled;
+  return {
+    configured: { ...(response.configured ?? response.features) },
+    entitled: { ...(response.entitled ?? disabled) },
+    effective: { ...effective },
+  };
 }
 
 export type EnterpriseModuleUpdateRollout =
@@ -661,6 +796,42 @@ export interface EnterprisePark {
   services?: EnterpriseParkService[];
   tenantAddress?: string | null;
   tenantRoomNumber?: string | null;
+}
+
+export interface EnterprisePublicProfileInput {
+  summary: string;
+  website: string;
+  industryTags: string[];
+  productsServices: string[];
+  capabilities: string[];
+  cooperationNeeds: string[];
+  publicContact: string;
+  isPublic: boolean;
+}
+
+export interface EnterprisePublicProfile extends EnterprisePublicProfileInput {
+  organizationId: string;
+  organizationName: string;
+  updatedAt: string | null;
+}
+
+export interface EnterpriseParkPartnershipEdge {
+  id: string;
+  sourceOrganizationId: string;
+  targetOrganizationId: string;
+  strength: 'strong' | 'promising' | 'exploratory';
+  ruleConfidence: number;
+  evidence: string[];
+  unverifiedQuestions: string[];
+}
+
+export interface EnterpriseParkStarMap {
+  parkId: string;
+  parkName: string;
+  currentOrganizationId: string;
+  generatedAt: string;
+  nodes: EnterprisePublicProfile[];
+  edges: EnterpriseParkPartnershipEdge[];
 }
 
 export interface EnterpriseParkTenantProfile {
@@ -2593,12 +2764,46 @@ export class EnterpriseClient {
       content: string;
       confidence?: number;
       changeNote?: string;
+      resolveConflict?: boolean;
+      adjudication?: {
+        acceptedEvidenceIds: string[];
+        rejectedEvidenceIds: string[];
+        rationale: string;
+      };
     },
   ): Promise<EnterpriseKnowledgeItem> {
     if (!this.token) throw new Error('登录已失效，请重新登录');
+    const adjudication = input.adjudication
+      ? {
+        acceptedEvidenceIds: input.adjudication.acceptedEvidenceIds.map((evidenceId) => {
+          if (!/^\d+$/u.test(evidenceId)) throw new Error('裁决证据编号不正确');
+          return Number(evidenceId);
+        }),
+        rejectedEvidenceIds: input.adjudication.rejectedEvidenceIds.map((evidenceId) => {
+          if (!/^\d+$/u.test(evidenceId)) throw new Error('裁决证据编号不正确');
+          return Number(evidenceId);
+        }),
+        rationale: input.adjudication.rationale,
+      }
+      : undefined;
     const response = await this.request<{ knowledge: EnterpriseKnowledgeRow }>(
       `/enterprise/knowledge/${encodeURIComponent(id)}`,
-      { method: 'PATCH', body: JSON.stringify(input) },
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ ...input, ...(adjudication ? { adjudication } : {}) }),
+      },
+    );
+    return mapEnterpriseKnowledgeItem(response.knowledge);
+  }
+
+  async revalidateKnowledge(
+    id: string,
+    input: { rationale: string; validForDays: number },
+  ): Promise<EnterpriseKnowledgeItem> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    const response = await this.request<{ knowledge: EnterpriseKnowledgeRow }>(
+      `/enterprise/knowledge/${encodeURIComponent(id)}/revalidate`,
+      { method: 'POST', body: JSON.stringify(input) },
     );
     return mapEnterpriseKnowledgeItem(response.knowledge);
   }
@@ -2621,6 +2826,45 @@ export class EnterpriseClient {
       changedBy: item.changedBy ?? item.changed_by ?? null,
       changeNote: item.changeNote ?? item.change_note ?? null,
       createdAt: item.createdAt || item.created_at || '',
+      adjudication: item.adjudication
+        ? {
+          id: String(item.adjudication.id),
+          acceptedEvidenceIds: (item.adjudication.acceptedEvidenceIds ?? []).map(String),
+          rejectedEvidenceIds: (item.adjudication.rejectedEvidenceIds ?? []).map(String),
+          rationale: item.adjudication.rationale ?? '',
+          adjudicatedBy: item.adjudication.adjudicatedBy ?? '',
+        }
+        : undefined,
+    }));
+  }
+
+  async listKnowledgeEvidence(
+    id: string,
+  ): Promise<EnterpriseKnowledgeEvidence[]> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    const response = await this.request<{
+      evidence: EnterpriseKnowledgeEvidenceRow[];
+    }>(`/enterprise/knowledge/${encodeURIComponent(id)}/evidence`);
+    return response.evidence.map((item) => ({
+      id: String(item.id),
+      knowledgeId: String(item.knowledgeId ?? item.knowledge_id ?? id),
+      sourceId: item.sourceId ?? item.source_id ?? '',
+      content: item.content,
+      tags: stringArray(item.tags),
+      contributor: item.contributor ?? null,
+      confidence: typeof item.confidence === 'number'
+        ? Math.min(1, Math.max(0, item.confidence))
+        : 0,
+      verified: item.verified === true,
+      impactScore: typeof (item.impactScore ?? item.impact_score) === 'number'
+        ? Math.min(1, Math.max(0, item.impactScore ?? item.impact_score ?? 0))
+        : 0,
+      impactReasons: stringArray(item.impactReasons ?? item.impact_reasons),
+      observedAt: item.observedAt ?? item.observed_at ?? '',
+      stance: item.stance === 'affirmative' || item.stance === 'negative'
+        ? item.stance
+        : 'neutral',
+      contested: item.contested === true,
     }));
   }
 
@@ -2835,15 +3079,19 @@ export class EnterpriseClient {
   }
 
   async getOrganizationFeatures(): Promise<EnterpriseOrganizationFeatures> {
+    return (await this.getOrganizationFeatureState()).effective;
+  }
+
+  async getOrganizationFeatureState(): Promise<EnterpriseOrganizationFeatureState> {
     if (!this.token) throw new Error('登录已失效，请重新登录');
     await this.assertCompatibleServer(this.serverUrl, [
       'organization_feature_switches_v1',
     ]);
-    return (
-      await this.request<{ features: EnterpriseOrganizationFeatures }>(
+    return normalizeOrganizationFeatureState(
+      await this.request<EnterpriseOrganizationFeatureResponse>(
         '/enterprise/organization/features',
-      )
-    ).features;
+      ),
+    );
   }
 
   async getModuleUpdates(): Promise<EnterpriseModuleUpdateManifest> {
@@ -2875,12 +3123,12 @@ export class EnterpriseClient {
     await this.assertCompatibleServer(this.serverUrl, [
       'organization_feature_switches_v1',
     ]);
-    return (
-      await this.request<{ features: EnterpriseOrganizationFeatures }>(
+    return normalizeOrganizationFeatureState(
+      await this.request<EnterpriseOrganizationFeatureResponse>(
         '/enterprise/organization/features',
         { method: 'PATCH', body: JSON.stringify(patch) },
-      )
-    ).features;
+      ),
+    ).effective;
   }
 
   async listOrganizationDepartments(): Promise<
@@ -3038,6 +3286,33 @@ export class EnterpriseClient {
         '/enterprise/park/tenants',
       )
     ).organizations;
+  }
+
+  async getEnterprisePublicProfile(): Promise<EnterprisePublicProfile> {
+    return (
+      await this.request<{ profile: EnterprisePublicProfile }>(
+        '/enterprise/organization/public-profile',
+      )
+    ).profile;
+  }
+
+  async updateEnterprisePublicProfile(
+    input: EnterprisePublicProfileInput,
+  ): Promise<EnterprisePublicProfile> {
+    return (
+      await this.request<{ profile: EnterprisePublicProfile }>(
+        '/enterprise/organization/public-profile',
+        { method: 'PUT', body: JSON.stringify(input) },
+      )
+    ).profile;
+  }
+
+  async getEnterpriseParkStarMap(): Promise<EnterpriseParkStarMap> {
+    return (
+      await this.request<{ starMap: EnterpriseParkStarMap }>(
+        '/enterprise/park/star-map',
+      )
+    ).starMap;
   }
 
   async getParkStatistics(): Promise<EnterpriseParkStatistics> {

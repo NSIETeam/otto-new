@@ -19,6 +19,7 @@ import {
   EnterpriseAdministrationPanel,
   type EnterpriseAdministrationSection,
 } from './EnterpriseAdministrationPanel.js';
+import { EnterprisePublicProfilePanel } from './EnterprisePublicProfilePanel.js';
 import {
   IconBuilding,
   IconDashboard,
@@ -27,7 +28,10 @@ import {
   IconPlus,
 } from './icons.js';
 
-type EnterpriseManagementSection = 'members' | EnterpriseAdministrationSection;
+type EnterpriseManagementSection =
+  | 'members'
+  | 'profile'
+  | EnterpriseAdministrationSection;
 
 export interface AccountDraft {
   username: string;
@@ -245,7 +249,11 @@ export function AccountManagementPage({
     let cancelled = false;
     setParkServiceBrand('园区服务');
     setCurrentPark(null);
-    if (!currentAccount.isAdmin || typeof window.otto.enterpriseParkView !== 'function') {
+    if (
+      !currentAccount.isAdmin ||
+      configurationFeatures?.park_service !== true ||
+      typeof window.otto.enterpriseParkView !== 'function'
+    ) {
       return () => { cancelled = true; };
     }
     void window.otto.enterpriseParkView()
@@ -262,7 +270,12 @@ export function AccountManagementPage({
         }
       });
     return () => { cancelled = true; };
-  }, [currentAccount.id, currentAccount.isAdmin, currentAccount.organizationId]);
+  }, [
+    configurationFeatures?.park_service,
+    currentAccount.id,
+    currentAccount.isAdmin,
+    currentAccount.organizationId,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -317,7 +330,11 @@ export function AccountManagementPage({
   }, [invite]);
 
   const refreshOrganizationStructure = useCallback(async (): Promise<void> => {
-    if (!currentAccount.isAdmin || !window.otto.enterpriseOrganizationDepartments) {
+    if (
+      !currentAccount.isAdmin ||
+      configurationFeatures?.enterprise_tree !== true ||
+      !window.otto.enterpriseOrganizationDepartments
+    ) {
       setOrganizationDepartments([]);
       return;
     }
@@ -327,7 +344,7 @@ export function AccountManagementPage({
       // enterprise_tree 关闭时服务端返回 403；安排入口保持 fail-closed。
       setOrganizationDepartments([]);
     }
-  }, [currentAccount.isAdmin]);
+  }, [configurationFeatures?.enterprise_tree, currentAccount.isAdmin]);
 
   useEffect(() => {
     void refreshOrganizationStructure();
@@ -693,6 +710,13 @@ export function AccountManagementPage({
       icon: IconIdBadge,
     },
     {
+      id: 'profile',
+      label: '企业资料',
+      description: '维护对外介绍，并决定是否进入企业星链图',
+      meta: '公开资料与合作线索',
+      icon: IconBuilding,
+    },
+    {
       id: 'park',
       label: '产业园端',
       description: '管理入驻、园区服务和内容发布',
@@ -755,7 +779,7 @@ export function AccountManagementPage({
       <aside className="otto-account-workspace__rail" aria-label="企业管理导航">
         <header className="otto-account-hero">
           <h1>企业管理</h1>
-          <p>管理组织结构、成员身份、企业能力和产业园服务。</p>
+          <p>管理组织结构、成员身份、企业资料、企业能力和产业园服务。</p>
         </header>
         <nav className="otto-account-workspace__tabs" aria-label="企业管理分类" role="tablist">
           {managementSections.map((section, sectionIndex) => {
@@ -920,10 +944,27 @@ export function AccountManagementPage({
         </section>
       ) : null}
 
+      {currentAccount.isAdmin && activeSection === 'profile' ? (
+        configurationFeatures?.park_service === true
+          ? <EnterprisePublicProfilePanel />
+          : (
+            <section className="otto-enterprise-profile" aria-label="企业公开资料">
+              <div className="otto-enterprise-profile__notice">
+                <strong>企业资料功能当前不可用</strong>
+                <p>园区服务尚未开启或当前许可证未授权，界面不会请求受保护的企业资料接口。</p>
+              </div>
+            </section>
+          )
+      ) : null}
+
       {currentAccount.isAdmin ? (
         <EnterpriseAdministrationPanel
           accounts={accounts}
-          activeSection={activeSection === 'members' ? null : activeSection}
+          activeSection={
+            activeSection === 'members' || activeSection === 'profile'
+              ? null
+              : activeSection
+          }
           onChanged={() => {
             void window.otto.enterpriseAccounts().then(setAccounts).catch((cause: unknown) => {
               setError(errorMessage(cause));

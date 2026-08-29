@@ -8,7 +8,15 @@ import {
   UnifiedPlugin,
   ComponentQuery,
 } from '../models/unified.js';
+import { SettingsManager } from '../settings-manager.js';
+import { MarketplaceLoader } from './marketplace-loader.js';
 import { IUnifiedLoaderService, IComponentLoader, IPluginLoader } from './types.js';
+
+export interface UniversalComponentLoaderOptions {
+  settingsManager?: SettingsManager;
+  /** Replaces the default marketplace loader when explicitly provided. */
+  loaders?: ReadonlyArray<IComponentLoader | IPluginLoader>;
+}
 
 /**
  * 通用组件加载器
@@ -20,12 +28,19 @@ export class UniversalComponentLoader implements IUnifiedLoaderService {
   private components: Map<string, UnifiedComponent> = new Map();
   private plugins: Map<string, UnifiedPlugin> = new Map();
   private loaders: Array<IComponentLoader | IPluginLoader> = [];
+  private settingsManager?: SettingsManager;
+  private settingsInitialized = false;
   private initialized = false;
 
-  constructor() {
-    // TODO: Initialize specific loaders here
-    // this.loaders.push(new MarketplaceLoader());
-    // this.loaders.push(new ExtensionLoader());
+  constructor(options: UniversalComponentLoaderOptions = {}) {
+    if (options.loaders !== undefined) {
+      this.loaders = [...options.loaders];
+      this.settingsManager = options.settingsManager;
+      return;
+    }
+
+    this.settingsManager = options.settingsManager ?? new SettingsManager();
+    this.loaders = [new MarketplaceLoader(this.settingsManager)];
   }
 
   /**
@@ -42,6 +57,8 @@ export class UniversalComponentLoader implements IUnifiedLoaderService {
    * 刷新所有组件（重新扫描）
    */
   async refresh(): Promise<void> {
+    await this.initializeSettings();
+
     this.components.clear();
     this.plugins.clear();
 
@@ -134,6 +151,13 @@ export class UniversalComponentLoader implements IUnifiedLoaderService {
   // ==========================================================================
   // Private Helpers
   // ==========================================================================
+
+  private async initializeSettings(): Promise<void> {
+    if (this.settingsInitialized || !this.settingsManager) return;
+
+    await this.settingsManager.initialize();
+    this.settingsInitialized = true;
+  }
 
   private isPlugin(item: unknown): item is UnifiedPlugin {
     return Boolean(item && typeof item === 'object' && 'components' in item && 'structure' in item);

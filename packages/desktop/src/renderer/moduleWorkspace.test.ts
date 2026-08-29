@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addOrMoveModules,
   createModuleGroup,
+  createParkServicesModuleGroup,
   createDefaultModuleWorkspace,
   deleteModuleGroup,
   getModuleWorkspaceStorageKey,
@@ -14,6 +15,7 @@ import {
   reorderModulesInGroup,
   resolveModuleGridColumns,
   restoreDefaultModuleWorkspace,
+  updateGroupModuleSelection,
   updateModuleGroupRows,
   validateModuleGroupName,
   type ModuleWorkspaceCapabilities,
@@ -62,23 +64,10 @@ const sampleLayout = (): ModuleWorkspaceLayout => ({
 });
 
 describe('module workspace defaults', () => {
-  it('creates the enterprise two-group 2x3 defaults', () => {
+  it('auto-installs only the official daily-office group for a new enterprise workspace', () => {
     expect(createDefaultModuleWorkspace(enterpriseCapabilities)).toEqual({
       version: 1,
       groups: [
-        {
-          id: 'park-services',
-          name: '园区服务',
-          rows: 2,
-          moduleIds: [
-            'park-announcement',
-            'park-satisfaction',
-            'park-renovation',
-            'park-parking',
-            'park-network-phone',
-            'park-meeting-room',
-          ],
-        },
         {
           id: 'daily-office',
           name: '日常办公',
@@ -91,6 +80,12 @@ describe('module workspace defaults', () => {
             'agent-excel',
             'enterprise-memory',
           ],
+          package: {
+            source: 'official',
+            packageId: 'otto.group.daily-office',
+            publisherId: 'otto.official',
+            version: '1.0.0',
+          },
         },
       ],
     });
@@ -120,6 +115,29 @@ describe('module workspace parsing and normalization', () => {
 
     expect(parseModuleWorkspace('{bad json', enterpriseCapabilities)).toEqual(defaults);
     expect(parseModuleWorkspace(JSON.stringify({ version: 99 }), enterpriseCapabilities)).toEqual(defaults);
+  });
+
+  it('restores available park entries into the complete park-services group', () => {
+    const parsed = parseModuleWorkspace(JSON.stringify({
+      version: 1,
+      groups: [
+        {
+          id: 'park-services', name: '园区服务', rows: 2,
+          moduleIds: ['park-announcement', 'park-repair', 'park-meeting-room'],
+        },
+        { id: 'daily-office', name: '日常办公', rows: 2, moduleIds: ['agent-ppt'] },
+      ],
+    }), enterpriseCapabilities);
+
+    expect(parsed.groups[0].moduleIds).toEqual([
+      'park-announcement',
+      'park-satisfaction',
+      'park-renovation',
+      'park-parking',
+      'park-network-phone',
+      'park-meeting-room',
+      'park-repair',
+    ]);
   });
 
   it('deduplicates module IDs globally, repairs group IDs, clamps rows, and keeps unknown modules', () => {
@@ -181,12 +199,36 @@ describe('module workspace layout operations', () => {
     const first = createModuleGroup(sampleLayout());
     const second = createModuleGroup(first);
 
-    expect(first.groups.at(-1)).toEqual({
+    expect(first.groups.at(-1)).toMatchObject({
       id: 'custom-group', name: '新功能组', rows: 2, moduleIds: [],
+      package: { source: 'user', packageId: 'user.group.custom-group' },
     });
-    expect(second.groups.at(-1)).toEqual({
+    expect(second.groups.at(-1)).toMatchObject({
       id: 'custom-group-2', name: '新功能组 2', rows: 2, moduleIds: [],
+      package: { source: 'user', packageId: 'user.group.custom-group-2' },
     });
+  });
+
+  it('adds park services as one complete function group and removes duplicate park entries', () => {
+    const withoutParkGroup: ModuleWorkspaceLayout = {
+      version: 1,
+      groups: [{
+        id: 'daily-office', name: '日常办公', rows: 2,
+        moduleIds: ['agent-ppt', 'park-announcement'],
+      }],
+    };
+    const next = createParkServicesModuleGroup(withoutParkGroup, [
+      'park-announcement', 'park-repair', 'park-parking',
+    ]);
+
+    expect(next.groups[0].moduleIds).toEqual(['agent-ppt']);
+    expect(next.groups[1]).toEqual({
+      id: 'park-services',
+      name: '园区服务',
+      rows: 2,
+      moduleIds: ['park-announcement', 'park-parking', 'park-repair'],
+    });
+    expect(createParkServicesModuleGroup(next, ['park-announcement'])).toBe(next);
   });
 
   it('rejects blank and duplicate group names without mutating layout', () => {
@@ -205,6 +247,27 @@ describe('module workspace layout operations', () => {
       'agent-excel',
     ]);
     expect(next.groups[1].moduleIds).toEqual(['agent-word']);
+  });
+
+  it('applies additions and removals for one group as a single selection', () => {
+    const next = updateGroupModuleSelection(
+      sampleLayout(),
+      'park-services',
+      ['park-satisfaction', 'agent-ppt', 'agent-excel', 'agent-ppt'],
+    );
+
+    expect(next.groups[0].moduleIds).toEqual([
+      'park-satisfaction',
+      'agent-ppt',
+      'agent-excel',
+    ]);
+    expect(next.groups[1].moduleIds).toEqual(['agent-word']);
+  });
+
+  it('ignores a group selection update when the target group does not exist', () => {
+    const current = sampleLayout();
+
+    expect(updateGroupModuleSelection(current, 'missing', ['agent-ppt'])).toBe(current);
   });
 
   it('removes only the requested module from layout', () => {

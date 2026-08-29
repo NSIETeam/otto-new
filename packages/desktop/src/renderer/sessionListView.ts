@@ -1,13 +1,15 @@
 import type { SessionSummary } from 'otto-server';
 
-import type { UiModePreferenceScope } from './uiModePreference.js';
+import type { WorkspacePreferenceScope } from './workspacePreferenceScope.js';
 
-export type SessionListMode = 'time' | 'workspace';
+export type SessionListMode = 'kind' | 'time' | 'workspace';
+export type SessionListSection = 'projects' | 'conversations';
 
 export interface SidebarSessionGroup {
   key: string;
   label: string;
   fullPath?: string;
+  section?: SessionListSection;
   collapsible: boolean;
   sessions: SessionSummary[];
 }
@@ -16,12 +18,15 @@ export interface SessionListPreference {
   version: 1;
   mode: SessionListMode;
   collapsedWorkspaceKeys: string[];
+  /** 用户从项目区移除的目录；只解除项目归类，不删除目录或历史会话。 */
+  removedProjectPaths: string[];
 }
 
 export const DEFAULT_SESSION_LIST_PREFERENCE: SessionListPreference = {
   version: 1,
-  mode: 'time',
+  mode: 'kind',
   collapsedWorkspaceKeys: [],
+  removedProjectPaths: [],
 };
 
 const STORAGE_PREFIX = 'otto.session-list.v1';
@@ -32,7 +37,7 @@ function normalizeServerUrl(value: string | null | undefined): string {
   return normalized || 'local';
 }
 
-export function sessionListPreferenceStorageKey(scope: UiModePreferenceScope): string {
+export function sessionListPreferenceStorageKey(scope: WorkspacePreferenceScope): string {
   return [
     STORAGE_PREFIX,
     normalizeServerUrl(scope.serverUrl),
@@ -44,7 +49,8 @@ export function sessionListPreferenceStorageKey(scope: UiModePreferenceScope): s
 function normalizePreference(value: unknown): SessionListPreference {
   if (!value || typeof value !== 'object') return DEFAULT_SESSION_LIST_PREFERENCE;
   const candidate = value as Partial<SessionListPreference>;
-  if (candidate.version !== 1 || (candidate.mode !== 'time' && candidate.mode !== 'workspace')) {
+  if (candidate.version !== 1
+    || (candidate.mode !== 'kind' && candidate.mode !== 'time' && candidate.mode !== 'workspace')) {
     return DEFAULT_SESSION_LIST_PREFERENCE;
   }
   const collapsedWorkspaceKeys = Array.isArray(candidate.collapsedWorkspaceKeys)
@@ -52,11 +58,18 @@ function normalizePreference(value: unknown): SessionListPreference {
       (key): key is string => typeof key === 'string' && key.trim().length > 0,
     ))]
     : [];
-  return { version: 1, mode: candidate.mode, collapsedWorkspaceKeys };
+  const removedProjectPaths = Array.isArray(candidate.removedProjectPaths)
+    ? [...new Set(candidate.removedProjectPaths.filter(
+      (workspacePath): workspacePath is string => (
+        typeof workspacePath === 'string' && workspacePath.trim().length > 0
+      ),
+    ).map((workspacePath) => workspacePath.trim()))]
+    : [];
+  return { version: 1, mode: candidate.mode, collapsedWorkspaceKeys, removedProjectPaths };
 }
 
 export function readSessionListPreference(
-  scope: UiModePreferenceScope,
+  scope: WorkspacePreferenceScope,
   storage: Pick<Storage, 'getItem'> = window.localStorage,
 ): SessionListPreference {
   try {
@@ -69,7 +82,7 @@ export function readSessionListPreference(
 }
 
 export function writeSessionListPreference(
-  scope: UiModePreferenceScope,
+  scope: WorkspacePreferenceScope,
   preference: SessionListPreference,
   storage: Pick<Storage, 'setItem'> = window.localStorage,
 ): boolean {
@@ -105,7 +118,7 @@ function pathParts(workspacePath: string): string[] {
   return workspacePath.split(/[\\/]+/).filter(Boolean);
 }
 
-function workspaceBaseLabel(workspacePath: string | undefined): string {
+export function workspaceDisplayName(workspacePath: string | undefined): string {
   const value = workspacePath?.trim();
   if (!value) return '默认工作目录';
   if (/^[\\/]+$/.test(value) || /^[A-Za-z]:[\\/]?$/.test(value)) return value;
@@ -150,7 +163,7 @@ function groupByWorkspace(sessions: readonly SessionSummary[]): SidebarSessionGr
     else {
       byKey.set(key, {
         key,
-        label: workspaceBaseLabel(session.workspacePath),
+        label: workspaceDisplayName(session.workspacePath),
         fullPath: session.workspacePath?.trim() || undefined,
         collapsible: true,
         sessions: [session],
@@ -186,10 +199,72 @@ function groupByWorkspace(sessions: readonly SessionSummary[]): SidebarSessionGr
   return groups;
 }
 
+function normalizeWorkspacePath(workspacePath: string | null | undefined): string {
+  const value = workspacePath?.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!value) return '';
+  return /^[A-Za-z]:\//.test(value) ? value.toLowerCase() : value;
+}
+
+export function sameWorkspacePath(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const normalizedLeft = normalizeWorkspacePath(left);
+  const normalizedRight = normalizeWorkspacePath(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
+/**
+ * Otto 项目沿用真实工作目录作为稳定身份。默认目录中的会话属于普通会话；
+ * 绑定其他目录的会话属于项目，因此旧会话无需迁移数据库即可自动归档。
+ */
+export function isProjectSession(
+  session: Pick<SessionSummary, 'workspacePath'>,
+  defaultWorkspacePath: string | null | undefined,
+): boolean {
+  if (!session.workspacePath?.trim() || !defaultWorkspacePath?.trim()) return false;
+  return !sameWorkspacePath(session.workspacePath, defaultWorkspacePath);
+}
+
+function groupByKind(
+  sessions: readonly SessionSummary[],
+  defaultWorkspacePath: string | null | undefined,
+  now: number,
+  removedProjectPaths: readonly string[],
+): SidebarSessionGroup[] {
+  const projectSessions = sessions.filter((session) => (
+    isProjectSession(session, defaultWorkspacePath)
+    && !removedProjectPaths.some((workspacePath) => (
+      sameWorkspacePath(session.workspacePath, workspacePath)
+    ))
+  ));
+  const conversationSessions = sessions.filter((session) => (
+    !isProjectSession(session, defaultWorkspacePath)
+    || removedProjectPaths.some((workspacePath) => (
+      sameWorkspacePath(session.workspacePath, workspacePath)
+    ))
+  ));
+  return [
+    ...groupByWorkspace(projectSessions).map((group) => ({
+      ...group,
+      section: 'projects' as const,
+    })),
+    ...groupByTime(conversationSessions, now).map((group) => ({
+      ...group,
+      section: 'conversations' as const,
+    })),
+  ];
+}
+
 export function groupSessionsForSidebar(
   sessions: readonly SessionSummary[],
   mode: SessionListMode,
   now = Date.now(),
+  defaultWorkspacePath?: string,
+  removedProjectPaths: readonly string[] = [],
 ): SidebarSessionGroup[] {
+  if (mode === 'kind') {
+    return groupByKind(sessions, defaultWorkspacePath, now, removedProjectPaths);
+  }
   return mode === 'workspace' ? groupByWorkspace(sessions) : groupByTime(sessions, now);
 }

@@ -61,6 +61,25 @@ export const PARK_CORE_SCHEMA_CONTRIBUTOR: DatabaseSchemaContributor = {
         FOREIGN KEY (park_id) REFERENCES parks(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS enterprise_public_profiles (
+        organization_id TEXT PRIMARY KEY,
+        summary TEXT NOT NULL DEFAULT '',
+        website TEXT NOT NULL DEFAULT '',
+        industry_tags_json TEXT NOT NULL DEFAULT '[]',
+        products_services_json TEXT NOT NULL DEFAULT '[]',
+        capabilities_json TEXT NOT NULL DEFAULT '[]',
+        cooperation_needs_json TEXT NOT NULL DEFAULT '[]',
+        public_contact TEXT NOT NULL DEFAULT '',
+        is_public INTEGER NOT NULL DEFAULT 0 CHECK(is_public IN (0, 1)),
+        updated_by_account_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (organization_id) REFERENCES organizations(id)
+          ON DELETE CASCADE,
+        FOREIGN KEY (updated_by_account_id) REFERENCES accounts(id)
+          ON DELETE SET NULL
+      );
+
       CREATE TABLE IF NOT EXISTS park_service_specialists (
         park_id TEXT NOT NULL,
         service_id TEXT NOT NULL,
@@ -73,6 +92,8 @@ export const PARK_CORE_SCHEMA_CONTRIBUTOR: DatabaseSchemaContributor = {
 
       CREATE INDEX IF NOT EXISTS idx_park_invites_active
         ON park_invites(park_id, expires_at_ms, revoked_at_ms);
+      CREATE INDEX IF NOT EXISTS idx_enterprise_public_profiles_visibility
+        ON enterprise_public_profiles(is_public, updated_at);
     `);
   },
 };

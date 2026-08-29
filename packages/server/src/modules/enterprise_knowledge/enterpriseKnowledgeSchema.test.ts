@@ -47,11 +47,13 @@ describe('enterprise knowledge schema contributor', () => {
           )
           .all(),
       ).toEqual([
+        { name: 'idx_knowledge_adjudication_entry' },
         { name: 'idx_knowledge_contributor' },
         { name: 'idx_knowledge_dept' },
         { name: 'idx_knowledge_organization' },
         { name: 'idx_knowledge_retention_contributor' },
         { name: 'idx_knowledge_retention_topic' },
+        { name: 'idx_knowledge_revalidation_entry' },
         { name: 'idx_knowledge_review_queue' },
         { name: 'idx_knowledge_revision_entry' },
         { name: 'idx_knowledge_source_unique' },
@@ -85,6 +87,8 @@ describe('enterprise knowledge schema contributor', () => {
           expect.objectContaining({ name: 'source_id' }),
           expect.objectContaining({ name: 'status' }),
           expect.objectContaining({ name: 'version' }),
+          expect.objectContaining({ name: 'review_due_at' }),
+          expect.objectContaining({ name: 'expires_at' }),
           expect.objectContaining({ name: 'updated_at' }),
         ]),
       );

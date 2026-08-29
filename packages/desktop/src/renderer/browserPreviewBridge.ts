@@ -45,6 +45,19 @@ if (!previewWindow.otto) {
     { id: 'preview-tenant-digital', name: '北辰数字科技', slug: 'beichen-digital', parkId: 'preview-park', status: 'active', industry: '软件与信息服务', employeeCount: 24, departmentCount: 3, onlineCount: 8, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
     { id: 'preview-tenant-logistics', name: '远达供应链', slug: 'yuanda-logistics', parkId: 'preview-park', status: 'active', industry: '现代物流', employeeCount: 18, departmentCount: 3, onlineCount: 5, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
   ];
+  let previewPublicProfile = {
+    organizationId: previewAccount.organizationId,
+    organizationName: previewAccount.organizationName,
+    summary: '为园区企业提供运营、资源对接与公共服务。',
+    website: 'https://example.com/hongchuang',
+    industryTags: ['园区运营', '企业服务'],
+    productsServices: ['园区运营服务', '会议与活动空间'],
+    capabilities: ['企业资源对接', '园区数字化运营'],
+    cooperationNeeds: ['智能制造解决方案', '企业数字化服务'],
+    publicContact: '合作邮箱 park@example.com',
+    isPublic: true,
+    updatedAt: new Date().toISOString(),
+  };
   let previewTickets: Array<Record<string, unknown>> = [];
   const previewParkPublications: Array<Record<string, unknown>> = [
     {
@@ -354,6 +367,10 @@ if (!previewWindow.otto) {
       defaultPath: '/Users/demo',
       recentPaths: ['/Users/demo'],
     }),
+    selectWorkspaceDirectory: () => Promise.resolve(null),
+    recruitmentTranscribe: () => Promise.reject(
+      new Error('浏览器预览不支持本地 WhisperX 面试转写'),
+    ),
     openExternal: () => Promise.resolve(),
     openPath: () => Promise.resolve(),
     inspectLocalPath: () =>
@@ -504,6 +521,22 @@ if (!previewWindow.otto) {
       knowledge: true,
       skill_market: true,
     }),
+    enterpriseOrganizationFeatureStateGet: () => {
+      const features = {
+        enterprise_tree: true,
+        park_service: true,
+        feishu_auto_reply: false,
+        direct_messages: true,
+        atoa: true,
+        knowledge: true,
+        skill_market: true,
+      };
+      return Promise.resolve({
+        configured: { ...features },
+        entitled: { ...features },
+        effective: { ...features },
+      });
+    },
     enterpriseParkServices: () => Promise.resolve([]),
     enterpriseParkSpecialists: () => Promise.resolve([]),
     enterpriseParkAnnouncementResults: () => Promise.resolve([]),
@@ -547,6 +580,78 @@ if (!previewWindow.otto) {
       });
     },
     enterpriseParkTenants: () => Promise.resolve(previewTenantOrganizations),
+    enterprisePublicProfile: () => Promise.resolve({ ...previewPublicProfile }),
+    enterprisePublicProfileUpdate: (input: Record<string, unknown>) => {
+      previewPublicProfile = {
+        ...previewPublicProfile,
+        ...input,
+        updatedAt: new Date().toISOString(),
+      } as typeof previewPublicProfile;
+      return Promise.resolve({ ...previewPublicProfile });
+    },
+    enterpriseParkStarMap: () => {
+      const nodes = [
+        previewPublicProfile,
+        {
+          organizationId: 'preview-tenant-smart',
+          organizationName: '宏创智能制造',
+          summary: '提供自动化产线、工业视觉与设备改造。',
+          website: 'https://example.com/smart',
+          industryTags: ['智能制造'],
+          productsServices: ['智能制造解决方案', '自动化产线改造'],
+          capabilities: ['工业视觉', '设备集成'],
+          cooperationNeeds: ['企业数字化服务'],
+          publicContact: '商务合作 smart@example.com',
+          isPublic: true,
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          organizationId: 'preview-tenant-digital',
+          organizationName: '北辰数字科技',
+          summary: '企业数字化和数据平台服务商。',
+          website: 'https://example.com/digital',
+          industryTags: ['软件与信息服务'],
+          productsServices: ['企业数字化服务'],
+          capabilities: ['园区数字化运营', '数据平台建设'],
+          cooperationNeeds: ['智能制造解决方案'],
+          publicContact: '合作邮箱 digital@example.com',
+          isPublic: true,
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+      return Promise.resolve({
+        parkId: 'preview-park',
+        parkName: '北控宏创科技园',
+        currentOrganizationId: previewAccount.organizationId,
+        generatedAt: new Date().toISOString(),
+        nodes,
+        edges: [
+          {
+            id: 'preview-park-admin--preview-tenant-smart',
+            sourceOrganizationId: previewAccount.organizationId,
+            targetOrganizationId: 'preview-tenant-smart',
+            strength: 'promising',
+            ruleConfidence: 0.78,
+            evidence: [
+              '宏创园区管理方公开需求“智能制造解决方案”与宏创智能制造公开产品/服务“智能制造解决方案”存在互补',
+            ],
+            unverifiedQuestions: ['双方需核实交付范围、产能、时间与商务条件。'],
+          },
+          {
+            id: 'preview-park-admin--preview-tenant-digital',
+            sourceOrganizationId: previewAccount.organizationId,
+            targetOrganizationId: 'preview-tenant-digital',
+            strength: 'strong',
+            ruleConfidence: 0.86,
+            evidence: [
+              '宏创园区管理方公开需求“企业数字化服务”与北辰数字科技公开产品/服务“企业数字化服务”存在互补',
+              '北辰数字科技公开需求“智能制造解决方案”与宏创园区管理方公开合作需求存在业务联动线索',
+            ],
+            unverifiedQuestions: ['公开资料是否仍然有效，需由企业联系人确认。'],
+          },
+        ],
+      });
+    },
     enterpriseMessagesList: (peerAccountId: string) => {
       // 与真实后端一致：拉取会话消息即标记该 peer 已读，下轮轮询未读清零
       previewUnread.delete(peerAccountId);
@@ -833,6 +938,7 @@ if (!previewWindow.otto) {
     enterpriseKnowledgeRevise: () =>
       Promise.reject(new Error('预览模式不支持知识修订')),
     enterpriseKnowledgeRevisions: () => Promise.resolve([]),
+    enterpriseKnowledgeEvidence: () => Promise.resolve([]),
   };
 
   previewWindow.otto = new Proxy(bridge, {

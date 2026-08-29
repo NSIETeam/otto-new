@@ -72,7 +72,11 @@ import {
   PARK_CORE_SCHEMA_CONTRIBUTOR,
   PARK_STATISTICS_SCHEMA_CONTRIBUTOR,
 } from '../modules/park_services/index.js';
-import { CUSTOMER_MODULE_SCHEMA_CONTRIBUTOR } from '../modules/tool_skill_platform/index.js';
+import {
+  CustomerModuleMarketplace,
+  CUSTOMER_MODULE_SCHEMA_CONTRIBUTOR,
+  SqliteCustomerModuleMarketplaceStore,
+} from '../modules/tool_skill_platform/index.js';
 import path from 'path';
 import os from 'os';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -249,7 +253,7 @@ const PRIVACY_DELETION_LEDGER_KEY_PATH = path.join(
 );
 
 export const DEFAULT_ORGANIZATION_ID = 'org_default';
-export const ENTERPRISE_SCHEMA_VERSION = 23;
+export const ENTERPRISE_SCHEMA_VERSION = 24;
 export const ORGANIZATION_INVITE_VALIDITY_MS = 7 * 24 * 60 * 60 * 1000;
 const ORGANIZATION_INVITE_ALPHABET =
   'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
@@ -406,6 +410,19 @@ export function closeEnterpriseDatabase(): void {
 }
 
 export const getDB = dataPlatform.getDatabase;
+
+/**
+ * Creates the customer-module marketplace facade for the current enterprise
+ * database. HTTP routes use this facade instead of reaching through the
+ * enterprise storage boundary themselves.
+ */
+export function createCustomerModuleMarketplaceFacade() {
+  const store = new SqliteCustomerModuleMarketplaceStore(getDB());
+  return {
+    market: new CustomerModuleMarketplace(undefined, store),
+    store,
+  };
+}
 
 /** Credential-free storage topology for diagnostics and readiness output. */
 export function getEnterpriseServiceTopology() {
@@ -639,7 +656,9 @@ export type OrganizationDepartmentView = IdentityOrganizationDepartmentView;
 export type OrganizationFeatures = IdentityOrganizationFeatures;
 
 export const {
+  getConfiguredOrganizationFeatures,
   getOrganizationFeatures,
+  getOrganizationFeatureState,
   updateOrganizationFeatures,
   isOrganizationFeatureEnabled,
   requireOrganizationFeature,
@@ -1036,6 +1055,8 @@ export const {
   deleteParkMeetingRoom,
   delegateParkDataStatistics,
   getPark,
+  getEnterpriseParkStarMap,
+  getEnterprisePublicProfile,
   getParkDataStatisticsTemplate,
   getParkForOrganization,
   getParkServiceStatistics,
@@ -1081,6 +1102,7 @@ export const {
   updateParkService,
   updateParkSettings,
   updateParkTenantProfile,
+  updateEnterprisePublicProfile,
   updateTicket,
 } = createParkServicesComposition<AccountView, OrganizationView>({
   db: getDB,
@@ -1177,9 +1199,11 @@ export const {
   getKnowledge,
   getKnowledgeForAdministration,
   getKnowledgeForBackup,
+  getKnowledgeEvidence,
   getKnowledgeRevisions,
   getMemberKnowledge,
   reviewKnowledge,
+  revalidateKnowledge,
   reviseKnowledge,
   saveKnowledge,
   searchKnowledge,

@@ -227,6 +227,31 @@ describe('applyFrame 各帧分支', () => {
     expect(view.result.current.state.activeSessionId).toBeNull();
   });
 
+  it('项目会话在创建确认后立即绑定指定工作目录', () => {
+    const { view, push } = setup();
+    act(() => view.result.current.actions.createSession(undefined, 'D:\\otto\\project-a'));
+    const createFrame = sendSpy.mock.calls
+      .map(([frame]) => frame as { type: string; payload: Record<string, unknown> })
+      .find((frame) => frame.type === 'create_session');
+    expect(createFrame?.payload.clientRequestId).toBeTruthy();
+
+    push({
+      type: 'session_created',
+      payload: {
+        clientRequestId: String(createFrame?.payload.clientRequestId),
+        session: makeSession({ sessionId: 'project-session' }),
+      },
+    });
+
+    expect(sendSpy).toHaveBeenCalledWith({
+      type: 'set_session_workspace',
+      payload: {
+        sessionId: 'project-session',
+        workspacePath: 'D:\\otto\\project-a',
+      },
+    });
+  });
+
   it('history：整列替换该 session 消息', () => {
     const { view, push } = setup();
     push({ type: 'message_start', payload: { message: makeMsg({ id: 'old' }) } });

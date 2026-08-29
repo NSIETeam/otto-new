@@ -7,6 +7,7 @@ import {
   createEnterpriseKnowledgeFacade,
   createEnterpriseKnowledgeSchemaContributor,
   ENTERPRISE_KNOWLEDGE_MAX_SOURCE_ID_LENGTH,
+  refreshEnterpriseKnowledgeEvidenceInRepository,
   type EnterpriseKnowledgeRepositoryStore,
 } from './modules/enterprise_knowledge/index.js';
 import {
@@ -46,7 +47,7 @@ describe('enterprise knowledge kernel', () => {
       const ordinary = {
         organizationId: 'org-a',
         department: '客服部',
-        category: 'research',
+        category: 'convention',
         content: '客户验收前需要先核对交付清单。',
         tags: ['acceptance'],
         contributor: '张三',
@@ -96,7 +97,12 @@ describe('enterprise knowledge kernel', () => {
           contributor_account_id: 'account-2',
         }),
       });
-      expect(promoted.knowledge?.content).toBe('客户验收前需要先核对交付清单。');
+      expect(promoted.knowledge?.content).toContain('## 长期结论');
+      expect(promoted.knowledge?.content).toContain('## 形成依据');
+      expect(promoted.knowledge?.content).toContain('3 条独立证据');
+      expect(promoted.reliabilityScore).toBeGreaterThanOrEqual(0.7);
+      expect(promoted.knowledge!.confidence).toBe(promoted.reliabilityScore);
+      expect(promoted.knowledge!.confidence).toBeLessThan(ordinary.confidence);
 
       const deep = knowledge.observeKnowledge({
         organizationId: 'org-a',
@@ -111,13 +117,497 @@ describe('enterprise knowledge kernel', () => {
         verified: true,
       });
       expect(deep).toMatchObject({
+        outcome: 'observed',
+        promoted: false,
+        reason: 'incubating',
+        evidenceCount: 1,
+      });
+      const corroboratedDeep = knowledge.observeKnowledge({
+        organizationId: 'org-a',
+        department: '研发部',
+        category: 'solution',
+        content: '隔离复测确认：生产事故源于租户缓存键未包含企业编号，修复后验证通过。',
+        contributor: '李工',
+        contributorAccountId: 'account-4',
+        sourceId: 'incident-2',
+        sourceSessionId: 'incident-session-2',
+        confidence: 0.91,
+        verified: true,
+      });
+      expect(corroboratedDeep).toMatchObject({
         outcome: 'promoted',
         reason: 'high_impact_verified',
-        evidenceCount: 1,
+        evidenceCount: 2,
+        verifiedEvidenceCount: 2,
         knowledge: expect.objectContaining({ status: 'pending_review' }),
       });
+      expect(corroboratedDeep.reliabilityScore).toBeGreaterThanOrEqual(0.78);
+      expect(corroboratedDeep.knowledge!.confidence).toBe(corroboratedDeep.reliabilityScore);
+      const refinedDeep = knowledge.observeKnowledge({
+        organizationId: 'org-a',
+        department: '研发部',
+        category: 'solution',
+        content: '生产隔离回归测试再次通过：缓存键必须包含企业编号，避免租户数据串读。',
+        contributor: '王工',
+        contributorAccountId: 'account-3',
+        sourceId: 'incident-3',
+        sourceSessionId: 'incident-session-3',
+        confidence: 0.9,
+        verified: true,
+      });
+      expect(refinedDeep).toMatchObject({
+        promoted: true,
+        evidenceCount: 3,
+        knowledge: expect.objectContaining({
+          status: 'pending_review',
+          version: 2,
+        }),
+      });
+      expect(refinedDeep.knowledge?.content).toContain('3 条独立证据');
       expect(JSON.stringify(knowledge.getKnowledgeForAdministration('', undefined, 'org-b')))
         .not.toContain('租户缓存');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('uses observed time for long-term recurrence and blocks contradictory evidence', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+
+    try {
+      const base = {
+        organizationId: 'org-a',
+        department: '交付部',
+        category: 'convention',
+        tags: ['acceptance'],
+        contributor: '张三',
+        contributorAccountId: 'account-1',
+        confidence: 0.9,
+        verified: true,
+      };
+      knowledge.observeKnowledge({
+        ...base,
+        content: '客户验收前必须完成安全扫描。',
+        sourceId: 'policy-observation-1',
+        sourceSessionId: 'policy-session-1',
+        observedAt: '2026-07-01T00:00:00.000Z',
+      });
+      knowledge.observeKnowledge({
+        ...base,
+        contributor: '李四',
+        contributorAccountId: 'account-2',
+        content: '客户验收前无需完成安全扫描。',
+        sourceId: 'policy-observation-2',
+        sourceSessionId: 'policy-session-2',
+        observedAt: '2026-07-10T00:00:00.000Z',
+      });
+      const contested = knowledge.observeKnowledge({
+        ...base,
+        content: '客户验收前必须先完成安全扫描。',
+        sourceId: 'policy-observation-3',
+        sourceSessionId: 'policy-session-3',
+        observedAt: '2026-07-20T00:00:00.000Z',
+      });
+      expect(contested).toMatchObject({
+        promoted: false,
+        reason: 'contested',
+        evidenceCount: 3,
+        spanDays: 19,
+        contradictoryEvidenceCount: 3,
+      });
+      expect(knowledge.getKnowledgeForAdministration('', undefined, 'org-a')).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('rejects invalid or future evidence time so members cannot extend memory validity', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+    const evidence = {
+      organizationId: 'org-a',
+      department: '交付部',
+      category: 'convention',
+      content: '客户验收前必须完成交付清单核对。',
+      contributor: '张三',
+      contributorAccountId: 'account-1',
+      sourceId: 'observed-time-1',
+      sourceSessionId: 'observed-time-session-1',
+      confidence: 0.9,
+      verified: true,
+    };
+
+    try {
+      expect(() => knowledge.observeKnowledge({
+        ...evidence,
+        observedAt: 'not-a-date',
+      })).toThrow('knowledge observed time is invalid');
+      expect(() => knowledge.observeKnowledge({
+        ...evidence,
+        observedAt: '2099-01-01T00:00:00.000Z',
+      })).toThrow('knowledge observed time cannot be in the future');
+      expect((database.prepare(
+        'SELECT COUNT(*) AS count FROM knowledge_retention_evidence',
+      ).get() as { count: number }).count).toBe(0);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('requires an explicit administrator resolution before publishing a contested candidate', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+
+    try {
+      const base = {
+        organizationId: 'org-a',
+        department: '安全部',
+        category: 'convention',
+        confidence: 0.92,
+        verified: true,
+      };
+      knowledge.observeKnowledge({
+        ...base,
+        content: '生产环境必须启用双因素认证并完成安全验证。',
+        contributor: '张三',
+        contributorAccountId: 'account-1',
+        sourceId: 'mfa-1',
+        sourceSessionId: 'mfa-session-1',
+      });
+      const promoted = knowledge.observeKnowledge({
+        ...base,
+        content: '安全制度要求生产环境必须启用双因素认证，验证通过。',
+        contributor: '李四',
+        contributorAccountId: 'account-2',
+        sourceId: 'mfa-2',
+        sourceSessionId: 'mfa-session-2',
+      });
+      expect(promoted).toMatchObject({ promoted: true });
+
+      const contested = knowledge.observeKnowledge({
+        ...base,
+        content: '生产环境禁止启用双因素认证。',
+        contributor: '王五',
+        contributorAccountId: 'account-3',
+        sourceId: 'mfa-3',
+        sourceSessionId: 'mfa-session-3',
+      });
+      expect(contested).toMatchObject({ reason: 'contested' });
+      expect(contested.knowledge?.source_label).toContain('证据存在冲突');
+      expect(() => knowledge.reviewKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        action: 'approve',
+        reviewer: '管理员',
+      })).toThrow('contested knowledge must be resolved before approval');
+
+      const evidence = knowledge.getKnowledgeEvidence(promoted.knowledge!.id, 'org-a')!;
+      expect(() => knowledge.reviseKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        content: '生产环境必须启用双因素认证；例外情况由安全负责人书面批准。',
+        changedBy: '管理员',
+        resolveConflict: true,
+      })).toThrow('contested knowledge requires an evidence adjudication');
+      expect(() => knowledge.reviseKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        content: '生产环境必须启用双因素认证；例外情况由安全负责人书面批准。',
+        changedBy: '管理员',
+        resolveConflict: true,
+        adjudication: {
+          acceptedEvidenceIds: [evidence[0]!.id],
+          rejectedEvidenceIds: [999_999],
+          rationale: '依据现行安全制度原文，保留强制认证要求。',
+        },
+      })).toThrow('adjudication evidence does not belong to this knowledge');
+
+      const acceptedEvidenceIds = evidence
+        .filter((item) => item.stance === 'affirmative')
+        .map((item) => item.id);
+      const rejectedEvidenceIds = evidence
+        .filter((item) => item.stance === 'negative')
+        .map((item) => item.id);
+      expect(() => knowledge.reviseKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        content: '生产环境必须启用双因素认证；例外情况由安全负责人书面批准。',
+        changedBy: '管理员',
+        resolveConflict: true,
+        adjudication: {
+          acceptedEvidenceIds: acceptedEvidenceIds.slice(0, 1),
+          rejectedEvidenceIds,
+          rationale: '依据现行安全制度原文，保留强制认证要求。',
+        },
+      })).toThrow('every contested evidence item must be adjudicated');
+
+      const resolved = knowledge.reviseKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        title: '生产环境双因素认证规则',
+        content: '生产环境必须启用双因素认证；例外情况由安全负责人书面批准。',
+        changedBy: '管理员',
+        changeNote: '核对安全制度后裁决冲突',
+        resolveConflict: true,
+        adjudication: {
+          acceptedEvidenceIds,
+          rejectedEvidenceIds,
+          rationale: '依据现行安全制度原文，保留强制认证要求并限定书面例外。',
+        },
+      });
+      expect(resolved?.source_label).toContain('管理员已裁决冲突');
+      expect(knowledge.getKnowledgeRevisions(promoted.knowledge!.id, 'org-a')[0])
+        .toMatchObject({
+          adjudication: {
+            acceptedEvidenceIds,
+            rejectedEvidenceIds,
+            rationale: '依据现行安全制度原文，保留强制认证要求并限定书面例外。',
+            adjudicatedBy: '管理员',
+          },
+        });
+      expect(() => knowledge.reviewKnowledge({
+        id: promoted.knowledge!.id,
+        organizationId: 'org-a',
+        action: 'approve',
+        reviewer: '管理员',
+      })).not.toThrow();
+    } finally {
+      database.close();
+    }
+  });
+
+  it('quarantines an active auto memory when later evidence contradicts it', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+
+    try {
+      const base = {
+        organizationId: 'org-a',
+        department: '安全部',
+        category: 'convention',
+        confidence: 0.94,
+        verified: true,
+      };
+      knowledge.observeKnowledge({
+        ...base,
+        content: '生产环境必须启用双因素认证并完成安全验证。',
+        contributor: '张三',
+        contributorAccountId: 'account-1',
+        sourceId: 'active-mfa-1',
+        sourceSessionId: 'active-mfa-session-1',
+      });
+      const candidate = knowledge.observeKnowledge({
+        ...base,
+        content: '安全制度要求生产环境必须启用双因素认证，验证通过。',
+        contributor: '李四',
+        contributorAccountId: 'account-2',
+        sourceId: 'active-mfa-2',
+        sourceSessionId: 'active-mfa-session-2',
+      }).knowledge!;
+      const active = knowledge.reviewKnowledge({
+        id: candidate.id,
+        organizationId: 'org-a',
+        action: 'approve',
+        reviewer: '安全管理员',
+      })!;
+
+      const contested = knowledge.observeKnowledge({
+        ...base,
+        content: '生产环境禁止启用双因素认证。',
+        contributor: '王五',
+        contributorAccountId: 'account-3',
+        sourceId: 'active-mfa-3',
+        sourceSessionId: 'active-mfa-session-3',
+      });
+
+      expect(contested).toMatchObject({
+        reason: 'contested',
+        promoted: true,
+        knowledge: {
+          status: 'pending_review',
+          supersedes_id: active.id,
+          evidence_count: 3,
+        },
+      });
+      expect(contested.knowledge?.id).not.toBe(active.id);
+      expect(contested.knowledge?.source_label).toContain('证据存在冲突');
+      expect(knowledge.getMemberKnowledge('安全部', '', 'org-a')).toEqual([]);
+      expect(knowledge.getKnowledgeForAdministration('', undefined, 'org-a', 'archived'))
+        .toEqual([expect.objectContaining({ id: active.id })]);
+
+      const evidence = knowledge.getKnowledgeEvidence(contested.knowledge!.id, 'org-a');
+      expect(evidence).toHaveLength(3);
+      expect(evidence).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          sourceId: 'active-mfa-1',
+          contributor: '张三',
+          verified: true,
+          stance: 'affirmative',
+          contested: true,
+        }),
+        expect.objectContaining({
+          sourceId: 'active-mfa-3',
+          contributor: '王五',
+          verified: true,
+          stance: 'negative',
+          contested: true,
+        }),
+      ]));
+      expect(JSON.stringify(evidence)).not.toContain('account-1');
+      expect(JSON.stringify(evidence)).not.toContain('active-mfa-session-1');
+      expect(knowledge.getKnowledgeEvidence(contested.knowledge!.id, 'org-b')).toBeNull();
+
+      const resolved = knowledge.reviseKnowledge({
+        id: contested.knowledge!.id,
+        organizationId: 'org-a',
+        content: '生产环境必须启用双因素认证；例外必须经安全负责人书面批准。',
+        changedBy: '安全管理员',
+        changeNote: '核对制度原文后裁决新冲突',
+        resolveConflict: true,
+        adjudication: {
+          acceptedEvidenceIds: evidence
+            .filter((item) => item.stance === 'affirmative')
+            .map((item) => item.id),
+          rejectedEvidenceIds: evidence
+            .filter((item) => item.stance === 'negative')
+            .map((item) => item.id),
+          rationale: '现行制度要求启用双因素认证，禁用说法不符合正式制度。',
+        },
+      })!;
+      knowledge.reviewKnowledge({
+        id: resolved.id,
+        organizationId: 'org-a',
+        action: 'approve',
+        reviewer: '安全管理员',
+      });
+      expect(knowledge.getMemberKnowledge('安全部', '', 'org-a'))
+        .toEqual([expect.objectContaining({ id: resolved.id })]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('refreshes active auto-memory reliability when new supporting evidence arrives', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+
+    try {
+      const base = {
+        organizationId: 'org-a',
+        department: '交付部',
+        category: 'convention',
+        content: '客户上线前必须完成回滚演练并验证通过。',
+        confidence: 0.94,
+        verified: true,
+      };
+      knowledge.observeKnowledge({
+        ...base,
+        contributor: '张三',
+        contributorAccountId: 'account-1',
+        sourceId: 'rollback-1',
+        sourceSessionId: 'rollback-session-1',
+      });
+      const candidate = knowledge.observeKnowledge({
+        ...base,
+        contributor: '李四',
+        contributorAccountId: 'account-2',
+        sourceId: 'rollback-2',
+        sourceSessionId: 'rollback-session-2',
+      }).knowledge!;
+      const active = knowledge.reviewKnowledge({
+        id: candidate.id,
+        organizationId: 'org-a',
+        action: 'approve',
+        reviewer: '交付管理员',
+      })!;
+
+      const refreshed = knowledge.observeKnowledge({
+        ...base,
+        contributor: '王五',
+        contributorAccountId: 'account-3',
+        sourceId: 'rollback-3',
+        sourceSessionId: 'rollback-session-3',
+      });
+
+      expect(refreshed).toMatchObject({
+        reason: 'governed_decision',
+        evidenceCount: 3,
+        knowledge: {
+          id: active.id,
+          status: 'active',
+          version: active.version + 1,
+          evidence_count: 3,
+        },
+      });
+      expect(refreshed.knowledge?.source_label).toContain('3 条证据');
+      expect(refreshed.knowledge?.confidence).toBe(refreshed.reliabilityScore);
+      expect(knowledge.getKnowledgeRevisions(active.id, 'org-a')[0])
+        .toMatchObject({ change_note: '新增支持证据，已刷新组织可靠度' });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('creates a reviewable successor instead of reviving an archived auto memory', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+
+    try {
+      const base = {
+        organizationId: 'org-a',
+        department: '运维部',
+        category: 'convention',
+        content: '生产变更必须先完成备份验证并保留回滚点。',
+        confidence: 0.94,
+        verified: true,
+      };
+      knowledge.observeKnowledge({
+        ...base,
+        contributor: '张三',
+        contributorAccountId: 'account-1',
+        sourceId: 'backup-1',
+        sourceSessionId: 'backup-session-1',
+      });
+      const candidate = knowledge.observeKnowledge({
+        ...base,
+        contributor: '李四',
+        contributorAccountId: 'account-2',
+        sourceId: 'backup-2',
+        sourceSessionId: 'backup-session-2',
+      }).knowledge!;
+      const active = knowledge.reviewKnowledge({
+        id: candidate.id,
+        organizationId: 'org-a',
+        action: 'approve',
+        reviewer: '运维管理员',
+      })!;
+      const archived = knowledge.reviewKnowledge({
+        id: active.id,
+        organizationId: 'org-a',
+        action: 'archive',
+        reviewer: '运维管理员',
+        note: '流程暂时停用',
+      })!;
+
+      const observedAgain = knowledge.observeKnowledge({
+        ...base,
+        contributor: '王五',
+        contributorAccountId: 'account-3',
+        sourceId: 'backup-3',
+        sourceSessionId: 'backup-session-3',
+      });
+
+      expect(observedAgain).toMatchObject({
+        promoted: true,
+        knowledge: {
+          status: 'pending_review',
+          supersedes_id: archived.id,
+          evidence_count: 3,
+        },
+      });
+      expect(observedAgain.knowledge?.id).not.toBe(archived.id);
+      expect(knowledge.getMemberKnowledge('运维部', '', 'org-a')).toEqual([]);
     } finally {
       database.close();
     }
@@ -350,6 +840,146 @@ describe('enterprise knowledge kernel', () => {
         reviewer: '管理员',
       });
       expect(knowledge.searchKnowledge('验收', undefined, 'org-a')).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('fails closed after hard expiry and restores recall only through an audited revalidation', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+
+    try {
+      const saved = knowledge.saveKnowledge({
+        organizationId: 'org-a',
+        title: '客户数据导出制度',
+        category: 'policy',
+        content: '客户数据导出必须由安全负责人审批并保留审计记录。',
+        confidence: 0.98,
+        sourceType: 'manual',
+        status: 'active',
+        reviewedBy: '制度管理员',
+      }).entry;
+      expect(saved.review_due_at).toBeTruthy();
+      expect(saved.expires_at).toBeTruthy();
+
+      database.prepare(
+        `UPDATE knowledge SET review_due_at = datetime('now', '-2 days'),
+         expires_at = datetime('now', '-1 day') WHERE id = ?`,
+      ).run(saved.id);
+      expect(knowledge.getKnowledge(undefined, undefined, 'org-a')).toEqual([]);
+      expect(knowledge.getMemberKnowledge(null, '', 'org-a')).toEqual([]);
+      expect(knowledge.getKnowledgeForAdministration('', undefined, 'org-a', 'active'))
+        .toEqual([expect.objectContaining({
+          id: saved.id,
+          review_due_at: expect.any(String),
+          expires_at: expect.any(String),
+        })]);
+
+      expect(() => knowledge.revalidateKnowledge({
+        id: saved.id,
+        organizationId: 'org-a',
+        reviewer: '制度管理员',
+        rationale: '仍然有效',
+        validForDays: 180,
+      })).toThrow('knowledge revalidation rationale is too short');
+      expect(() => knowledge.revalidateKnowledge({
+        id: saved.id,
+        organizationId: 'org-a',
+        reviewer: '制度管理员',
+        rationale: '已核对现行安全制度和审批记录，确认该规则继续有效。',
+        validForDays: 366,
+      })).toThrow('knowledge validity days must be between 30 and 365');
+      expect(knowledge.revalidateKnowledge({
+        id: saved.id,
+        organizationId: 'org-b',
+        reviewer: '其他企业管理员',
+        rationale: '已核对其他企业制度，确认该规则继续有效。',
+        validForDays: 180,
+      })).toBeNull();
+
+      const revalidated = knowledge.revalidateKnowledge({
+        id: saved.id,
+        organizationId: 'org-a',
+        reviewer: '制度管理员',
+        rationale: '已核对现行安全制度和审批记录，确认该规则继续有效。',
+        validForDays: 180,
+      })!;
+      expect(Date.parse(revalidated.review_due_at!)).toBeGreaterThan(Date.now());
+      expect(Date.parse(revalidated.expires_at!)).toBeGreaterThan(
+        Date.parse(revalidated.review_due_at!),
+      );
+      expect(knowledge.getMemberKnowledge(null, '', 'org-a'))
+        .toEqual([expect.objectContaining({ id: saved.id })]);
+      expect(knowledge.getKnowledgeRevisions(saved.id, 'org-a')[0]).toMatchObject({
+        version: revalidated.version,
+        change_note: '复核确认：已核对现行安全制度和审批记录，确认该规则继续有效。',
+      });
+      expect((database.prepare(
+        'SELECT COUNT(*) AS count FROM knowledge_revalidations WHERE knowledge_id = ?',
+      ).get(saved.id) as { count: number }).count).toBe(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('does not extend lifecycle from today when replaying historical evidence', () => {
+    const database = createDatabase();
+    const store = createStore(database);
+    const knowledge = createEnterpriseKnowledgeFacade(store);
+
+    try {
+      const saved = knowledge.saveKnowledge({
+        organizationId: 'org-a',
+        title: '历史验收规范',
+        category: 'convention',
+        content: '历史项目要求在验收前完成交付清单核对。',
+        confidence: 0.82,
+        sourceType: 'auto_capture',
+        sourceLabel: '历史对话提炼',
+        status: 'active',
+        reviewedBy: '知识管理员',
+      }).entry;
+      const observedAt = '2025-01-01T00:00:00.000Z';
+      database.prepare(
+        `INSERT INTO knowledge_retention_evidence
+          (organization_id, topic_id, evidence_key, source_id, source_session_id,
+           source_fingerprint, department, category, content, contributor_account_id,
+           confidence, verified, impact_score, observed_at, promoted_knowledge_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        'org-a',
+        'historical-acceptance',
+        'historical-evidence-1',
+        'historical-source-1',
+        'historical-session-1',
+        'historical-fingerprint-1',
+        '交付部',
+        'convention',
+        '历史项目要求在验收前完成交付清单核对。',
+        'account-1',
+        0.82,
+        1,
+        0.7,
+        observedAt,
+        saved.id,
+      );
+
+      const refreshed = refreshEnterpriseKnowledgeEvidenceInRepository(store, {
+        id: saved.id,
+        organizationId: 'org-a',
+        confidence: 0.82,
+        sourceLabel: '历史证据重放',
+        changedBy: 'Otto 企业记忆保留策略',
+        changeNote: '导入历史证据，但不得重新起算有效期',
+      })!;
+      const expected = database.prepare(
+        "SELECT datetime(?, '+180 days') AS expires_at",
+      ).get(observedAt) as { expires_at: string };
+      expect(refreshed.expires_at).toBe(expected.expires_at);
+      expect(Date.parse(`${refreshed.expires_at!.replace(' ', 'T')}Z`))
+        .toBeLessThan(Date.now());
+      expect(knowledge.getMemberKnowledge(null, '', 'org-a')).toEqual([]);
     } finally {
       database.close();
     }

@@ -9,6 +9,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   EnterpriseAccount,
   EnterpriseOrganizationDepartment,
+  EnterpriseOrganizationFeatureState,
   EnterpriseOrganizationFeatures,
   EnterprisePark,
   EnterpriseParkInvite,
@@ -26,6 +27,16 @@ const FEATURE_LABELS: Array<[keyof EnterpriseOrganizationFeatures, string]> = [
   ['knowledge', '企业知识库'],
   ['skill_market', '企业 Skill 市场'],
 ];
+
+const NO_EFFECTIVE_FEATURES: EnterpriseOrganizationFeatures = {
+  enterprise_tree: false,
+  park_service: false,
+  feishu_auto_reply: false,
+  direct_messages: false,
+  atoa: false,
+  knowledge: false,
+  skill_market: false,
+};
 
 const ROLE_LABEL: Record<EnterprisePositionRoleMapping, string> = {
   member: '普通成员',
@@ -51,9 +62,10 @@ export function EnterpriseAdministrationPanel({
   /** undefined 保持旧的完整展示；null 仅保留状态、不显示配置区。 */
   activeSection?: EnterpriseAdministrationSection | null;
   onChanged?: () => void;
-  onFeaturesLoaded?: (features: EnterpriseOrganizationFeatures) => void;
+  onFeaturesLoaded?: (features: EnterpriseOrganizationFeatures | null) => void;
 }): React.JSX.Element {
-  const [features, setFeatures] = useState<EnterpriseOrganizationFeatures | null>(null);
+  const [featureState, setFeatureState] = useState<EnterpriseOrganizationFeatureState | null>(null);
+  const features = featureState?.effective ?? null;
   const [departments, setDepartments] = useState<EnterpriseOrganizationDepartment[]>([]);
   const [park, setPark] = useState<EnterprisePark | null>(null);
   const [parkServices, setParkServices] = useState<EnterpriseParkService[]>([]);
@@ -69,10 +81,23 @@ export function EnterpriseAdministrationPanel({
   const [message, setMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
+    setFeatureState(null);
+    setDepartments([]);
+    setPark(null);
+    setParkServices([]);
+    setSpecialists([]);
+    onFeaturesLoaded?.(null);
     if (!window.otto.enterpriseOrganizationFeaturesGet) return;
     try {
-      const nextFeatures = await window.otto.enterpriseOrganizationFeaturesGet();
-      setFeatures(nextFeatures);
+      const nextState = typeof window.otto.enterpriseOrganizationFeatureStateGet === 'function'
+        ? await window.otto.enterpriseOrganizationFeatureStateGet()
+        : await window.otto.enterpriseOrganizationFeaturesGet().then((configured) => ({
+            configured,
+            entitled: { ...NO_EFFECTIVE_FEATURES },
+            effective: { ...NO_EFFECTIVE_FEATURES },
+          }));
+      const nextFeatures = nextState.effective;
+      setFeatureState(nextState);
       onFeaturesLoaded?.(nextFeatures);
       const nextDepartments = nextFeatures.enterprise_tree
         ? await window.otto.enterpriseOrganizationDepartments()
@@ -154,27 +179,32 @@ export function EnterpriseAdministrationPanel({
         </div>
       ) : null}
 
-      {features ? (
+      {featureState ? (
         <div className="otto-enterprise-config__card" hidden={sectionHidden('capabilities')}>
-          <h3>企业能力开关</h3><p>开关决定客户端是否展示对应能力；关闭后服务端接口同时 fail closed。</p>
+          <h3>企业能力开关</h3><p>开关保存企业期望配置；只有许可证已授权的能力才会实际生效并访问对应服务。</p>
           <div className="otto-enterprise-config__switches">
-            {FEATURE_LABELS.map(([key, label]) => (
-              <label key={key} className="otto-enterprise-config__switch">
-                <input
-                  type="checkbox"
-                  checked={features[key]}
-                  disabled={busy}
-                  onChange={(event) => {
-                    const enabled = event.target.checked;
-                    void run(
-                      () => window.otto.enterpriseOrganizationFeaturesUpdate({ [key]: enabled }),
-                      `${label}已${enabled ? '开启' : '关闭'}`,
-                    );
-                  }}
-                />
-                <span>{label}</span>
-              </label>
-            ))}
+            {FEATURE_LABELS.map(([key, label]) => {
+              const entitled = featureState.entitled[key];
+              const effective = featureState.effective[key];
+              return (
+                <label key={key} className="otto-enterprise-config__switch">
+                  <input
+                    type="checkbox"
+                    checked={featureState.configured[key]}
+                    disabled={busy}
+                    onChange={(event) => {
+                      const enabled = event.target.checked;
+                      void run(
+                        () => window.otto.enterpriseOrganizationFeaturesUpdate({ [key]: enabled }),
+                        `${label}配置已${enabled ? '开启' : '关闭'}`,
+                      );
+                    }}
+                  />
+                  <span>{label}</span>
+                  <small>{!entitled ? '未授权' : effective ? '已生效' : '未启用'}</small>
+                </label>
+              );
+            })}
           </div>
         </div>
       ) : null}
@@ -321,8 +351,10 @@ export function EnterpriseAdministrationPanel({
 
       {features && !features.enterprise_tree ? (
         <div className="otto-enterprise-config__card otto-enterprise-config__empty" hidden={sectionHidden('organization')}>
-          <h3>组织结构尚未开启</h3>
-          <p>请前往“企业能力”开启企业组织树，然后再创建部门、职位和权限映射。</p>
+          <h3>{featureState?.entitled.enterprise_tree ? '组织结构尚未开启' : '组织结构未获许可证授权'}</h3>
+          <p>{featureState?.entitled.enterprise_tree
+            ? '请前往“企业能力”开启企业组织树，然后再创建部门、职位和权限映射。'
+            : '当前配置不会生效，请联系平台管理员为当前服务器更新企业组织树授权。'}</p>
         </div>
       ) : null}
 
@@ -448,8 +480,10 @@ export function EnterpriseAdministrationPanel({
 
       {features && !features.park_service ? (
         <div className="otto-enterprise-config__card otto-enterprise-config__empty" hidden={sectionHidden('park')}>
-          <h3>产业园端尚未开启</h3>
-          <p>请前往“企业能力”开启园区服务，再配置入驻信息、服务专员和园区内容。</p>
+          <h3>{featureState?.entitled.park_service ? '产业园端尚未开启' : '园区服务未获许可证授权'}</h3>
+          <p>{featureState?.entitled.park_service
+            ? '请前往“企业能力”开启园区服务，再配置入驻信息、服务专员和园区内容。'
+            : '当前配置不会生效，请联系平台管理员为当前服务器更新园区服务授权。'}</p>
         </div>
       ) : null}
     </section>

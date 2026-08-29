@@ -743,7 +743,8 @@ function mergeTextDelta(
 
 export interface OttoActions {
   selectSession(sessionId: string): void;
-  createSession(title?: string): void;
+  /** 新建普通会话；传入工作目录时，新会话会在服务端确认后立即绑定为项目会话。 */
+  createSession(title?: string, workspacePath?: string): void;
   /** 删除会话（不可逆）。发帧后由 server 广播的 sessions_list 快照落地移除。 */
   deleteSession(sessionId: string): void;
   /** 重命名会话。发帧后由 server 广播的 session_upsert 落地新标题。 */
@@ -864,10 +865,15 @@ export function useOttoStore(
     authorization?: { mode: 'manual' | 'auto'; scope: 'session' | 'all' };
     timeout: ReturnType<typeof setTimeout>;
   }>());
+  const pendingSessionWorkspacesRef = useRef(new Map<string, {
+    workspacePath: string;
+    timeout: ReturnType<typeof setTimeout>;
+  }>());
 
   useEffect(() => {
     let cancelled = false;
     const pendingProfileLaunches = profileLaunchRef.current;
+    const pendingSessionWorkspaces = pendingSessionWorkspacesRef.current;
 
     const unsubFrame = transport.onFrame((frame) => {
       maybeShowChatNotification(frame, activeRef.current, sessionsRef.current);
@@ -907,6 +913,20 @@ export function useOttoStore(
         }
       }
       if (frame.type === 'session_created') {
+        const pendingWorkspace = pendingSessionWorkspaces.get(
+          frame.payload.clientRequestId,
+        );
+        if (pendingWorkspace) {
+          pendingSessionWorkspaces.delete(frame.payload.clientRequestId);
+          clearTimeout(pendingWorkspace.timeout);
+          transport.send({
+            type: 'set_session_workspace',
+            payload: {
+              sessionId: frame.payload.session.sessionId,
+              workspacePath: pendingWorkspace.workspacePath,
+            },
+          });
+        }
         const pending = profileLaunchRef.current.get(frame.payload.clientRequestId);
         if (pending) {
           profileLaunchRef.current.delete(frame.payload.clientRequestId);
@@ -1013,6 +1033,10 @@ export function useOttoStore(
           dispatch({ kind: 'local_error', message: '连接已断开，Agent 任务未发送；请重连后重试。' });
         }
         profileLaunchRef.current.clear();
+        for (const pending of pendingSessionWorkspaces.values()) {
+          clearTimeout(pending.timeout);
+        }
+        pendingSessionWorkspaces.clear();
       }
       dispatch({
         kind: 'connection',
@@ -1035,6 +1059,10 @@ export function useOttoStore(
       cancelled = true;
       for (const pending of pendingProfileLaunches.values()) clearTimeout(pending.timeout);
       pendingProfileLaunches.clear();
+      for (const pending of pendingSessionWorkspaces.values()) {
+        clearTimeout(pending.timeout);
+      }
+      pendingSessionWorkspaces.clear();
       unsubFrame();
       unsubConn();
     };
@@ -1147,8 +1175,18 @@ export function useOttoStore(
     void window.otto.notificationMarkRead?.(sessionId).catch(() => undefined);
   }, []);
 
-  const createSession = useCallback((title?: string) => {
+  const createSession = useCallback((title?: string, workspacePath?: string) => {
     const clientRequestId = crypto.randomUUID();
+    const cleanWorkspacePath = workspacePath?.trim();
+    if (cleanWorkspacePath) {
+      const timeout = setTimeout(() => {
+        pendingSessionWorkspacesRef.current.delete(clientRequestId);
+      }, 30_000);
+      pendingSessionWorkspacesRef.current.set(clientRequestId, {
+        workspacePath: cleanWorkspacePath,
+        timeout,
+      });
+    }
     dispatch({ kind: 'pending_create', clientRequestId });
     transport.send({ type: 'create_session', payload: { title, clientRequestId } });
   }, []);

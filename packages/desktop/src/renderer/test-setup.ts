@@ -10,12 +10,13 @@ import { configure } from '@testing-library/dom';
 configure({ asyncUtilTimeout: 3_000 });
 
 beforeEach(() => {
-  const existing = window.otto ?? {};
   Object.defineProperty(window, 'otto', {
     configurable: true,
     writable: true,
     value: {
-      ...existing,
+      // Every test starts from a fresh bridge. Preserving the previous test's
+      // optional methods leaks resolved promises into later React renders and
+      // produces out-of-act state updates that depend on execution order.
       send: vi.fn(),
       authorizeFileForAttachment: vi.fn(async (file: File) => `/tmp/${file.name}`),
       enterpriseOrganizationView: vi.fn(async () => ({

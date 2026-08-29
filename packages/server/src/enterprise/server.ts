@@ -46,6 +46,7 @@ import {
   type AdminPrincipal,
 } from './enterpriseRouteDispatcher.js';
 import {
+  baselineOrganizationFeatureForEnterpriseRoute,
   commercialFeatureForEnterpriseRoute,
   FEATURE_ADMIN_PREFIX,
   isAdminRoute,
@@ -454,7 +455,30 @@ function makeHandler(
         sendJSON(res, 402, licenseBlockedPayload());
         return;
       }
-      const commercialFeature = commercialFeatureForEnterpriseRoute(path);
+      const requestedOrganizationId =
+        path === '/enterprise/organization/view'
+          ? url.searchParams.get('organizationId')
+          : null;
+      const commercialFeature = commercialFeatureForEnterpriseRoute(path, {
+        method,
+        crossOrganizationView: Boolean(
+          requestedOrganizationId &&
+            requestedOrganizationId !== commercialOrganizationId,
+        ),
+      });
+      const organizationFeature =
+        baselineOrganizationFeatureForEnterpriseRoute(path) ?? commercialFeature;
+      const organizationFeatureEnabled = organizationFeature &&
+        commercialOrganizationId
+        ? baselineOrganizationFeatureForEnterpriseRoute(path)
+          ? db.getConfiguredOrganizationFeatures(commercialOrganizationId)[
+              organizationFeature
+            ] === true
+          : db.isOrganizationFeatureEnabled(
+              commercialOrganizationId,
+              organizationFeature,
+            )
+        : true;
       if (
         commercialFeature &&
         !db.isLicenseUsableForOrganizationFeature(commercialFeature)
@@ -471,24 +495,21 @@ function makeHandler(
         return;
       }
       if (
-        commercialFeature &&
+        organizationFeature &&
         commercialOrganizationId &&
-        !db.isOrganizationFeatureEnabled(
-          commercialOrganizationId,
-          commercialFeature,
-        )
+        !organizationFeatureEnabled
       ) {
         auditCommercialDecision('commercial_module_denied', {
           code: 'organization_feature_disabled',
-          feature: commercialFeature,
+          feature: organizationFeature,
         });
         sendJSON(res, 403, {
           error:
-            commercialFeature === 'knowledge'
+            organizationFeature === 'knowledge'
               ? '企业知识功能已由管理员关闭'
               : 'organization feature is disabled',
           code: 'organization_feature_disabled',
-          feature: commercialFeature,
+          feature: organizationFeature,
         });
         return;
       }

@@ -9,8 +9,44 @@ interface CommercialRouteRule {
   matches(path: string): boolean;
 }
 
+export interface CommercialRouteContext {
+  ticketServiceId?: string;
+  crossOrganizationView?: boolean;
+  method?: string;
+}
+
 const prefix = (value: string) => (path: string): boolean =>
   path === value || path.startsWith(`${value}/`);
+
+const BASELINE_COLLABORATION_ROUTES: ReadonlyArray<
+  (path: string) => boolean
+> = [
+  prefix('/enterprise/messages'),
+  prefix('/enterprise/message-attachments'),
+  prefix('/enterprise/attachments'),
+  prefix('/enterprise/e2ee'),
+  prefix('/enterprise/presence/heartbeat'),
+] as const;
+
+const BASELINE_MEMBER_ADMINISTRATION_ROUTES: ReadonlyArray<
+  (path: string) => boolean
+> = [
+  prefix('/enterprise/accounts'),
+  (path) => path === '/enterprise/organization/invite',
+] as const;
+
+/**
+ * Same-organization messaging is part of the authenticated Otto baseline.
+ * The organization switch still controls availability, while Federation and
+ * A2A remain separately licensed commercial capabilities.
+ */
+export function baselineOrganizationFeatureForEnterpriseRoute(
+  path: string,
+): OrganizationFeatureKey | null {
+  return BASELINE_COLLABORATION_ROUTES.some((matches) => matches(path))
+    ? 'direct_messages'
+    : null;
+}
 
 /**
  * Maps externally callable enterprise routes to the signed License capability
@@ -21,6 +57,8 @@ const prefix = (value: string) => (path: string): boolean =>
  * export its data.
  */
 const COMMERCIAL_ROUTE_RULES: readonly CommercialRouteRule[] = [
+  { feature: 'atoa', matches: prefix('/enterprise/federation/a2a') },
+  { feature: 'direct_messages', matches: prefix('/enterprise/federation') },
   { feature: 'atoa', matches: prefix('/enterprise/atoa') },
   { feature: 'direct_messages', matches: prefix('/enterprise/messages') },
   { feature: 'direct_messages', matches: prefix('/enterprise/message-attachments') },
@@ -32,6 +70,7 @@ const COMMERCIAL_ROUTE_RULES: readonly CommercialRouteRule[] = [
   { feature: 'park_service', matches: prefix('/enterprise/park-services') },
   { feature: 'park_service', matches: prefix('/enterprise/park-resources') },
   { feature: 'park_service', matches: prefix('/enterprise/park-statistics') },
+  { feature: 'park_service', matches: prefix('/enterprise/organization/public-profile') },
   { feature: 'skill_market', matches: prefix('/enterprise/skills') },
   { feature: 'skill_market', matches: prefix('/enterprise/customer-modules') },
   { feature: 'skill_market', matches: prefix('/enterprise/platform/customer-modules') },
@@ -44,6 +83,37 @@ const COMMERCIAL_ROUTE_RULES: readonly CommercialRouteRule[] = [
 
 export function commercialFeatureForEnterpriseRoute(
   path: string,
+  context: CommercialRouteContext = {},
 ): OrganizationFeatureKey | null {
+  // A private enterprise deployment must always be able to onboard and manage
+  // its own members. Authentication and enterprise-admin authorization still
+  // protect these routes; enterprise_tree is reserved for advanced structure
+  // editing and cross-organization directory access.
+  if (BASELINE_MEMBER_ADMINISTRATION_ROUTES.some((matches) => matches(path))) {
+    return null;
+  }
+  // A signed deployment always exposes each member's own directory. Editing
+  // structure or reading another organization remains a paid capability.
+  if (
+    (path === '/enterprise/organization/view' ||
+      path === '/enterprise/organization/sync') &&
+    !context.crossOrganizationView
+  ) {
+    return null;
+  }
+  if (
+    path === '/enterprise/organization/features' &&
+    ['GET', 'PATCH', 'PUT'].includes((context.method ?? 'GET').toUpperCase())
+  ) {
+    return null;
+  }
+  if (baselineOrganizationFeatureForEnterpriseRoute(path)) {
+    return null;
+  }
+  if (path === '/enterprise/tickets') {
+    return context.ticketServiceId && context.ticketServiceId !== 'it'
+      ? 'park_service'
+      : null;
+  }
   return COMMERCIAL_ROUTE_RULES.find((rule) => rule.matches(path))?.feature ?? null;
 }

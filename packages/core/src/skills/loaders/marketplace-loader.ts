@@ -135,9 +135,14 @@ export class MarketplaceLoader implements IPluginLoader {
     return plugins;
   }
 
-  async loadPlugin(_pluginId: string): Promise<UnifiedPlugin | null> {
-    // TODO: Implement single plugin loading
-    return null;
+  async loadPlugin(pluginId: string): Promise<UnifiedPlugin | null> {
+    if (!pluginId) return null;
+
+    // Keep single-plugin loading on exactly the same discovery path as bulk
+    // loading. This preserves marketplace enablement, installation state,
+    // manifest parsing and Claude Code marketplace compatibility in one place.
+    const plugins = await this.loadPlugins();
+    return plugins.find(plugin => plugin.id === pluginId) ?? null;
   }
 
   // ==========================================================================

@@ -22,6 +22,34 @@ import type { EnterpriseUnreadCounts } from '../enterpriseUnreadNotifications.js
 const ORGANIZATION_REFRESH_MS = 10_000;
 const DIRECT_CHAT_CASCADE_PX = 28;
 
+function organizationLoadErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/commercial module is not entitled|commercial_module_not_entitled/i.test(message)) {
+    return '当前服务器版本或授权配置不支持组织架构，请联系管理员更新服务器';
+  }
+  if (/deployment license is not active|deployment_license_inactive/i.test(message)) {
+    return '企业服务器授权已失效，请联系管理员恢复授权';
+  }
+  return message
+    .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+    .replace(/^Error:\s*/i, '')
+    .trim() || '服务器暂不可用，请稍后重试';
+}
+
+export function enterpriseCollaborationErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/commercial module is not entitled|commercial_module_not_entitled/i.test(message)) {
+    return '当前企业服务器尚未提供基础私聊，请联系管理员更新服务器授权配置';
+  }
+  if (/deployment license is not active|deployment_license_inactive/i.test(message)) {
+    return '企业服务器授权已失效，请联系管理员恢复授权';
+  }
+  return message
+    .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+    .replace(/^Error:\s*/i, '')
+    .trim() || '消息服务暂不可用，请稍后重试';
+}
+
 export interface EnterpriseDirectChatOpenRequest {
   peerAccountId: string;
   requestId: number;
@@ -145,6 +173,8 @@ export function OrganizationTree({
   unreadCounts = {},
   directChatOpenRequest,
   onMessageRead,
+  effectiveAtoa = false,
+  effectiveKnowledge = false,
 }: {
   workspace: ProductWorkspaceSnapshot | null;
   schedules?: readonly ScheduleItemInfo[];
@@ -153,7 +183,11 @@ export function OrganizationTree({
   refreshRevision?: number;
   unreadCounts?: EnterpriseUnreadCounts;
   directChatOpenRequest?: EnterpriseDirectChatOpenRequest;
-  onMessageRead?: (peerAccountId: string) => void;
+  onMessageRead?: (peerAccountId: string, messageIds?: readonly string[]) => void;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveAtoa?: boolean;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveKnowledge?: boolean;
 }): React.JSX.Element | null {
   const [open, setOpen] = useState(true);
   const [orgView, setOrgView] = useState<EnterpriseOrganizationView | null>(null);
@@ -205,12 +239,11 @@ export function OrganizationTree({
     return result;
   }, [enterpriseAccount?.id, orgView?.members]);
   const openDirectChat = useCallback((member: EnterpriseOrganizationView['members'][number]): void => {
-    onMessageRead?.(member.id);
     setChatMembers((current) => [
       ...current.filter((candidate) => candidate.id !== member.id),
       member,
     ]);
-  }, [onMessageRead]);
+  }, []);
   const activateDirectChat = useCallback((memberId: string): void => {
     setChatMembers((current) => {
       const activeIndex = current.findIndex((candidate) => candidate.id === memberId);
@@ -257,8 +290,7 @@ export function OrganizationTree({
         setOrgError(null);
       } catch (error: unknown) {
         if (cancelled) return;
-        const message = error instanceof Error ? error.message : String(error);
-        setOrgError(`组织信息加载失败：${message}`);
+        setOrgError(`组织信息加载失败：${organizationLoadErrorMessage(error)}`);
       } finally {
         if (!cancelled) setOrgLoading(false);
       }
@@ -420,6 +452,8 @@ export function OrganizationTree({
           member={member}
           currentAccount={enterpriseAccount}
           schedules={schedules}
+          effectiveAtoa={effectiveAtoa}
+          effectiveKnowledge={effectiveKnowledge}
           initialPosition={directChatInitialPosition(index)}
           stackOrder={50 + index}
           onActivate={() => activateDirectChat(member.id)}
@@ -731,6 +765,8 @@ export function DirectMessagePanel({
   member,
   currentAccount,
   schedules = [],
+  effectiveAtoa = false,
+  effectiveKnowledge = false,
   initialPosition,
   stackOrder,
   onActivate,
@@ -740,10 +776,14 @@ export function DirectMessagePanel({
   member: EnterpriseOrganizationView['members'][number];
   currentAccount?: EnterpriseAccount;
   schedules?: readonly ScheduleItemInfo[];
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveAtoa?: boolean;
+  /** Server-computed effective capability. Undefined is deliberately fail-closed. */
+  effectiveKnowledge?: boolean;
   initialPosition: { left: number; top: number };
   stackOrder: number;
   onActivate: () => void;
-  onMessageRead?: (peerAccountId: string) => void;
+  onMessageRead?: (peerAccountId: string, messageIds?: readonly string[]) => void;
   onClose: () => void;
 }): React.JSX.Element {
   const [messages, setMessages] = useState<EnterpriseDirectMessage[]>([]);
@@ -824,16 +864,23 @@ export function DirectMessagePanel({
           setError('');
           knownMessageIds.current = new Set(next.map((message) => message.id));
           if (
-            previousIds
-            && next.some((message) => (
+            previousIds === null
+            || next.some((message) => (
               message.senderAccountId === member.id && !previousIds.has(message.id)
             ))
           ) {
-            onMessageRead?.(member.id);
+            const inboundMessageIds = next
+              .filter((message) => message.senderAccountId === member.id)
+              .map((message) => message.id);
+            if (inboundMessageIds.length > 0) {
+              onMessageRead?.(member.id, inboundMessageIds);
+            } else {
+              onMessageRead?.(member.id);
+            }
           }
         }
       } catch (reason) {
-        if (active) setError(reason instanceof Error ? reason.message : String(reason));
+        if (active) setError(enterpriseCollaborationErrorMessage(reason));
       }
     };
     void load();
@@ -954,14 +1001,14 @@ export function DirectMessagePanel({
       setDraft('');
       setError('');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(enterpriseCollaborationErrorMessage(reason));
     } finally {
       setAskingOwnOtto(false);
     }
   };
 
   const askPeerOtto = async (question?: string) => {
-    if (attachments.length > 0) return;
+    if (!effectiveAtoa || attachments.length > 0) return;
     const content = buildAtoaRequest(question?.trim() || draft.trim());
     setAskingPeerOtto(true);
     try {
@@ -971,7 +1018,7 @@ export function DirectMessagePanel({
       setDraft('');
       setError('');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(enterpriseCollaborationErrorMessage(reason));
     } finally {
       setAskingPeerOtto(false);
     }
@@ -1006,7 +1053,7 @@ export function DirectMessagePanel({
       setAttachmentError('');
       setError('');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(enterpriseCollaborationErrorMessage(reason));
     } finally {
       setSending(false);
     }
@@ -1028,7 +1075,7 @@ export function DirectMessagePanel({
       setError('');
     } catch (reason) {
       setSecurityNotice('');
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(enterpriseCollaborationErrorMessage(reason));
     } finally {
       setResettingSecurity(false);
     }
@@ -1172,16 +1219,18 @@ export function DirectMessagePanel({
         >
           {askingOwnOtto ? '询问中' : '问 Otto'}
         </button>
-        <button
-          type="button"
-          className="otto-direct-chat__otto"
-          disabled={askingPeerOtto || attachments.length > 0}
-          onClick={() => void askPeerOtto(draft)}
-          title={attachments.length > 0 ? '附件不会自动交给对方 Otto，请先发送或移除附件' : undefined}
-        >
-          问对方 Otto
-        </button>
-        {currentAccount ? (
+        {effectiveAtoa ? (
+          <button
+            type="button"
+            className="otto-direct-chat__otto"
+            disabled={askingPeerOtto || attachments.length > 0}
+            onClick={() => void askPeerOtto(draft)}
+            title={attachments.length > 0 ? '附件不会自动交给对方 Otto，请先发送或移除附件' : undefined}
+          >
+            问对方 Otto
+          </button>
+        ) : null}
+        {currentAccount && effectiveAtoa ? (
           <div className="otto-direct-chat__a2a-menu">
             <button
               type="button"
@@ -1379,11 +1428,12 @@ export function DirectMessagePanel({
           }}
         />
       </form>
-      {consultOpen && currentAccount ? (
+      {consultOpen && currentAccount && effectiveAtoa ? (
         <AtoaConsultDialog
           account={currentAccount}
           member={member}
           schedules={schedules}
+          effectiveKnowledge={effectiveKnowledge}
           initialQuestion={draft}
           onClose={() => setConsultOpen(false)}
           onSent={(message) => {

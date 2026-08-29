@@ -15,6 +15,16 @@ afterEach(() => {
 });
 
 describe('pet widget preference', () => {
+  it('切换设置时同步显示或隐藏独立桌面窗口', () => {
+    const desktopPetSetEnabled = vi.fn().mockResolvedValue(true);
+    window.otto = { desktopPetSetEnabled } as unknown as typeof window.otto;
+
+    writePetWidgetEnabled(true);
+
+    expect(desktopPetSetEnabled).toHaveBeenCalledWith(true);
+    expect(readPetWidgetEnabled()).toBe(true);
+  });
+
   it('fails closed and still publishes the change event when storage is blocked', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('storage blocked');

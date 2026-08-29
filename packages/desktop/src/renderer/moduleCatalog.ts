@@ -7,9 +7,20 @@ import type { AgentProfile } from './agents/departmentAgents.js';
 import type { CustomAgentDefinition } from './customAgents.js';
 import { customAgentIconToModuleIcon } from './customAgentIcons.js';
 import type { ModuleIconKey, ModuleIconSource } from './components/ModuleIcon.js';
+import {
+  LOCAL_USER_PUBLISHER_ID,
+  OTTO_OFFICIAL_PUBLISHER_ID,
+  type ComponentPackageReference,
+} from './modulePackages.js';
 
 export type ModuleAvailability = 'available' | 'disabled' | 'hidden';
-export type ModuleCategory = 'common' | 'park' | 'capability' | 'custom-agent' | 'customer-module';
+export type ModuleCategory =
+  | 'common'
+  | 'park'
+  | 'recruitment'
+  | 'capability'
+  | 'custom-agent'
+  | 'customer-module';
 
 export interface InstalledCustomerModuleSummary {
   id: string;
@@ -32,11 +43,20 @@ export type ParkModuleTarget =
   | 'electric-card'
   | 'repair'
   | 'vehicle-visit'
+  | 'enterprise-star-map'
   | 'staff-tasks'
   | 'my-applications';
 
+export type RecruitmentModuleTarget =
+  | 'resume-analysis'
+  | 'candidate-screening'
+  | 'interview-audio'
+  | 'interview-kit'
+  | 'privacy-audit';
+
 export type ModuleActivation =
   | { kind: 'dialog'; dialog: 'park'; target: ParkModuleTarget }
+  | { kind: 'dialog'; dialog: 'recruitment'; target: RecruitmentModuleTarget }
   | { kind: 'dialog'; dialog: 'enterprise-memory' | 'auto-skill' }
   | { kind: 'route'; route: 'skill-zone' }
   | { kind: 'agent'; profileId: string; customAgentId?: string }
@@ -46,6 +66,7 @@ export interface ParkModuleAuthorization {
   hasParkContext: boolean;
   canViewStatistics: boolean;
   canViewStaffTasks: boolean;
+  disabledReason?: string;
 }
 
 export interface ModuleCatalogContext {
@@ -66,17 +87,19 @@ export interface ModuleDefinition {
   activation: ModuleActivation;
   availability: ModuleAvailability;
   disabledReason?: string;
+  package?: ComponentPackageReference;
 }
 
 type StaticAvailabilityRule =
   | 'park'
   | 'park-statistics'
   | 'park-staff'
+  | 'recruitment'
   | 'enterprise-memory'
   | 'auto-skill'
   | 'skill-zone';
 
-interface StaticModuleSpec extends Omit<ModuleDefinition, 'availability' | 'disabledReason'> {
+interface StaticModuleSpec extends Omit<ModuleDefinition, 'availability' | 'disabledReason' | 'package'> {
   availabilityRule: StaticAvailabilityRule;
 }
 
@@ -132,6 +155,12 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
     availabilityRule: 'park',
   },
   {
+    id: 'park-enterprise-star-map', label: '企业星链图', category: 'park', icon: 'park-overview',
+    description: '根据同园区企业主动公开的能力、产品与合作需求，生成可解释的合作线索。',
+    activation: { kind: 'dialog', dialog: 'park', target: 'enterprise-star-map' },
+    availabilityRule: 'park',
+  },
+  {
     id: 'park-staff-tasks', label: '园区待办', category: 'park', icon: 'park-staff-tasks',
     activation: { kind: 'dialog', dialog: 'park', target: 'staff-tasks' },
     availabilityRule: 'park-staff',
@@ -140,6 +169,41 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
     id: 'park-my-applications', label: '我的申请', category: 'park', icon: 'park-my-applications',
     activation: { kind: 'dialog', dialog: 'park', target: 'my-applications' },
     availabilityRule: 'park',
+  },
+  {
+    id: 'recruitment-resume-analysis', label: '简历分析', category: 'recruitment',
+    description: '解析 PDF/DOCX，按岗位要求提取可核验的匹配与缺失证据。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'resume-analysis' },
+    availabilityRule: 'recruitment',
+  },
+  {
+    id: 'recruitment-candidate-screening', label: '人员初步分析', category: 'recruitment',
+    description: '逐条展示简历原文、匹配规则和可信度，由招聘人员最终确认。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'candidate-screening' },
+    availabilityRule: 'recruitment',
+  },
+  {
+    id: 'recruitment-interview-audio', label: '音频面试分析', category: 'recruitment',
+    description: '使用 WhisperX 时间戳与说话人分离结果分析回答内容和证据。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'interview-audio' },
+    availabilityRule: 'recruitment',
+  },
+  {
+    id: 'recruitment-interview-kit', label: '面试材料', category: 'recruitment',
+    description: '根据缺失证据生成结构化问题、追问、记录和候选人对比报告。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'interview-kit' },
+    availabilityRule: 'recruitment',
+  },
+  {
+    id: 'recruitment-privacy-audit', label: '隐私与审计', category: 'recruitment',
+    description: '管理授权、保存期限、模型版本、人工判断和敏感字段隔离。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'privacy-audit' },
+    availabilityRule: 'recruitment',
   },
   {
     id: 'enterprise-memory', label: '企业记忆', category: 'capability', icon: 'enterprise-memory',
@@ -179,6 +243,8 @@ function staticAvailability(
   if (rule === 'auto-skill') return 'available';
   if (context.edition !== 'enterprise') return 'hidden';
 
+  if (rule === 'recruitment') return 'available';
+
   if (rule === 'enterprise-memory') {
     return context.organizationFeatures?.knowledge ? 'available' : 'hidden';
   }
@@ -186,7 +252,7 @@ function staticAvailability(
     return context.organizationFeatures?.skill_market ? 'available' : 'hidden';
   }
   if (!context.organizationFeatures?.park_service || !context.parkAuthorization.hasParkContext) {
-    return 'hidden';
+    return rule === 'park' ? 'disabled' : 'hidden';
   }
   if (rule === 'park-statistics' && !context.parkAuthorization.canViewStatistics) {
     return 'hidden';
@@ -195,6 +261,18 @@ function staticAvailability(
     return 'hidden';
   }
   return 'available';
+}
+
+function staticDisabledReason(
+  rule: StaticAvailabilityRule,
+  context: ModuleCatalogContext,
+): string | undefined {
+  if (rule !== 'park' || context.edition !== 'enterprise') return undefined;
+  if (!context.organizationFeatures?.park_service) return '当前企业尚未启用园区服务';
+  if (!context.parkAuthorization.hasParkContext) {
+    return context.parkAuthorization.disabledReason ?? '当前企业尚未绑定园区服务空间';
+  }
+  return undefined;
 }
 
 function profileIcon(profile: AgentProfile): ModuleIconKey {
@@ -223,6 +301,12 @@ function agentModules(context: ModuleCatalogContext): ModuleDefinition[] {
         icon: profileIcon(profile),
         activation: { kind: 'agent' as const, profileId: profile.id },
         availability: 'available' as const,
+        package: {
+          source: 'official' as const,
+          packageId: `otto.module.${moduleId}`,
+          publisherId: OTTO_OFFICIAL_PUBLISHER_ID,
+          version: '1.0.0',
+        },
       }];
     });
 }
@@ -243,6 +327,12 @@ function customAgentModules(context: ModuleCatalogContext): ModuleDefinition[] {
       customAgentId: agent.id,
     },
     availability: 'available',
+    package: {
+      source: 'user',
+      packageId: `user.module.agent.${agent.id}`,
+      publisherId: LOCAL_USER_PUBLISHER_ID,
+      version: '1.0.0',
+    },
   }));
 }
 
@@ -263,6 +353,13 @@ export function buildModuleCatalog(context: ModuleCatalogContext): ModuleDefinit
   const staticModules = STATIC_MODULE_SPECS.map(({ availabilityRule, ...module }) => ({
     ...module,
     availability: staticAvailability(availabilityRule, context),
+    disabledReason: staticDisabledReason(availabilityRule, context),
+    package: {
+      source: 'official' as const,
+      packageId: `otto.module.${module.id}`,
+      publisherId: OTTO_OFFICIAL_PUBLISHER_ID,
+      version: '1.0.0',
+    },
   }));
   const result = [...staticModules, ...agentModules(context), ...customAgentModules(context), ...customerModules(context)];
   const seen = new Set<string>();

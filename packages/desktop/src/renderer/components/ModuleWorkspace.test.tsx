@@ -65,6 +65,7 @@ function renderWorkspace(
   layout: ModuleWorkspaceLayout = enterpriseLayout,
 ) {
   const onActivate = vi.fn();
+  const onUnavailableModule = vi.fn();
   const onOpenMarketplace = vi.fn();
   const onLayoutChange = vi.fn();
   const view = render(
@@ -73,15 +74,22 @@ function renderWorkspace(
       layout={layout}
       modules={modules}
       onActivate={onActivate}
+      onUnavailableModule={onUnavailableModule}
       onOpenMarketplace={onOpenMarketplace}
       onLayoutChange={onLayoutChange}
     />,
   );
-  return { ...view, onActivate, onOpenMarketplace, onLayoutChange };
+  return { ...view, onActivate, onUnavailableModule, onOpenMarketplace, onLayoutChange };
 }
 
-function ControlledWorkspace({ scopeKey = 'scope-a' }: { scopeKey?: string }) {
-  const [layout, setLayout] = React.useState(enterpriseLayout);
+function ControlledWorkspace({
+  scopeKey = 'scope-a',
+  initialLayout = enterpriseLayout,
+}: {
+  scopeKey?: string;
+  initialLayout?: ModuleWorkspaceLayout;
+}) {
+  const [layout, setLayout] = React.useState(initialLayout);
   return (
     <ModuleWorkspace
       presentation="panel"
@@ -124,15 +132,50 @@ describe('ModuleWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开 PPT 创作专家' }));
     expect(onActivate).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent-ppt' }));
 
-    fireEvent.click(screen.getByRole('button', { name: '向园区服务添加模块' }));
+    fireEvent.click(screen.getByRole('button', { name: '管理“园区服务”中的模块' }));
     expect(onOpenMarketplace).toHaveBeenCalledWith('park-services');
+  });
+
+  it('keeps unavailable modules selectable for an explanation without activating them', () => {
+    const unavailableModules = modules.map((module) => module.id === 'park-announcement'
+      ? {
+        ...module,
+        availability: 'disabled' as const,
+        disabledReason: '当前服务器尚未授权园区服务模块',
+      }
+      : module);
+    const onActivate = vi.fn();
+    const onUnavailableModule = vi.fn();
+    render(
+      <ModuleWorkspace
+        presentation="panel"
+        layout={enterpriseLayout}
+        modules={unavailableModules}
+        onActivate={onActivate}
+        onUnavailableModule={onUnavailableModule}
+        onOpenMarketplace={vi.fn()}
+        onLayoutChange={vi.fn()}
+      />,
+    );
+
+    const announcement = screen.getByRole('button', { name: '打开 园区公告' });
+    expect(announcement.getAttribute('aria-disabled')).toBeNull();
+    expect(announcement.getAttribute('aria-haspopup')).toBe('dialog');
+    expect((announcement as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(announcement);
+
+    expect(onActivate).not.toHaveBeenCalled();
+    expect(onUnavailableModule).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'park-announcement',
+      disabledReason: '当前服务器尚未授权园区服务模块',
+    }));
   });
 
   it('renders module addition as the next grid tile and group addition after all groups', () => {
     const { container } = renderWorkspace();
     const parkGrid = container.querySelector('[data-group-id="park-services"] .otto-module-group__grid');
     const parkChildren = parkGrid?.children ?? [];
-    const addModule = screen.getByRole('button', { name: '向园区服务添加模块' });
+    const addModule = screen.getByRole('button', { name: '管理“园区服务”中的模块' });
     const workspace = container.querySelector('.otto-module-workspace');
     const addGroup = screen.getByRole('button', { name: '添加功能组' });
 
@@ -208,8 +251,8 @@ describe('ModuleWorkspace', () => {
     expect(container.querySelector('.otto-module-workspace__floating-scrollbar')).toBeNull();
   });
 
-  it('uses a focusable internal scroller for overflowing groups', () => {
-    const overflowModules = Array.from({ length: 9 }, (_, index): ModuleDefinition => ({
+  it('keeps a full nine-module group fixed and moves add-module outside the grid', () => {
+    const fullModules = Array.from({ length: 9 }, (_, index): ModuleDefinition => ({
       id: `module-${index}`,
       label: `模块 ${index + 1}`,
       category: 'common',
@@ -223,22 +266,31 @@ describe('ModuleWorkspace', () => {
         layout={{
           version: 1,
           groups: [{
-            id: 'overflow',
-            name: '超出容量',
+            id: 'full-group',
+            name: '完整九项',
             rows: 2,
-            moduleIds: overflowModules.map((module) => module.id),
+            moduleIds: fullModules.map((module) => module.id),
           }],
         }}
-        modules={overflowModules}
+        modules={fullModules}
         onActivate={vi.fn()}
         onOpenMarketplace={vi.fn()}
         onLayoutChange={vi.fn()}
       />,
     );
 
-    const grid = container.querySelector('.otto-module-group__grid');
-    expect(grid?.classList.contains('is-overflowing')).toBe(true);
-    expect(grid?.getAttribute('tabindex')).toBe('0');
+    const grid = container.querySelector<HTMLElement>('.otto-module-group__grid');
+    const addModule = screen.getByRole('button', { name: '向完整九项添加模块' });
+    expect(grid?.classList.contains('is-overflowing')).toBe(false);
+    expect(grid?.getAttribute('tabindex')).toBeNull();
+    expect(grid?.children).toHaveLength(9);
+    expect(grid?.contains(addModule)).toBe(false);
+    expect(addModule.classList.contains('otto-module-group__add--compact')).toBe(true);
+
+    if (!grid) throw new Error('missing full module grid');
+    Object.defineProperty(grid, 'scrollTop', { configurable: true, writable: true, value: 24 });
+    fireEvent.pointerMove(grid, { clientY: 999 });
+    expect(grid.scrollTop).toBe(24);
   });
 
   it('places add module in the seventh slot and expands a full two-row group to three rows', () => {
@@ -271,7 +323,7 @@ describe('ModuleWorkspace', () => {
 
     const grid = container.querySelector('.otto-module-group__grid');
     expect(grid?.children).toHaveLength(7);
-    expect(grid?.children[6]).toBe(screen.getByRole('button', { name: '向六个模块添加模块' }));
+    expect(grid?.children[6]).toBe(screen.getByRole('button', { name: '管理“六个模块”中的模块' }));
     expect(grid?.classList.contains('otto-module-group__grid--rows-3')).toBe(true);
     expect(grid?.classList.contains('is-overflowing')).toBe(false);
   });
@@ -279,8 +331,11 @@ describe('ModuleWorkspace', () => {
   it('creates a group and supports rename validation', () => {
     renderControlledWorkspace();
     fireEvent.click(screen.getByRole('button', { name: '添加功能组' }));
+    expect(screen.getByRole('heading', { name: '新功能组' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '功能组菜单：新功能组' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }));
     const input = screen.getByRole('textbox', { name: '功能组名称' });
-    expect(document.activeElement).toBe(input);
     expect((input as HTMLInputElement).value).toBe('新功能组');
     fireEvent.change(input, { target: { value: '日常办公' } });
     fireEvent.click(screen.getByRole('button', { name: '保存名称' }));
@@ -291,6 +346,24 @@ describe('ModuleWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：项目协作' }));
     expect(screen.queryByRole('menuitem', { name: /显示[两三]行/ })).toBeNull();
+  });
+
+  it('delegates add-group selection to the official group catalog when provided', () => {
+    const onAddGroup = vi.fn();
+    render(
+      <ModuleWorkspace
+        presentation="panel"
+        layout={{ version: 1, groups: [{ id: 'daily-office', name: '日常办公', rows: 2, moduleIds: [] }] }}
+        modules={modules}
+        onActivate={vi.fn()}
+        onOpenMarketplace={vi.fn()}
+        onAddGroup={onAddGroup}
+        onLayoutChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '添加功能组' }));
+    expect(onAddGroup).toHaveBeenCalledTimes(1);
   });
 
   it('adjusts panel density from group count and collapses inactive groups in condensed mode', () => {
@@ -362,7 +435,7 @@ describe('ModuleWorkspace', () => {
   it('removes a module in edit mode and can undo for five seconds', () => {
     renderControlledWorkspace();
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     fireEvent.click(screen.getByRole('button', { name: '移除 园区公告' }));
     expect(screen.queryByRole('button', { name: '打开 园区公告' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '撤销移除' }));
@@ -376,7 +449,7 @@ describe('ModuleWorkspace', () => {
   it('invalidates stale undo after another layout edit', () => {
     renderControlledWorkspace();
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     fireEvent.click(screen.getByRole('button', { name: '移除 园区公告' }));
     expect(screen.getByRole('button', { name: '撤销移除' })).toBeTruthy();
 
@@ -393,7 +466,7 @@ describe('ModuleWorkspace', () => {
   it('clears transient editing and undo state when the storage scope changes', () => {
     const view = renderControlledWorkspace('scope-a');
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     fireEvent.click(screen.getByRole('button', { name: '移除 园区公告' }));
     expect(screen.getByRole('button', { name: '撤销移除' })).toBeTruthy();
 
@@ -431,7 +504,7 @@ describe('ModuleWorkspace', () => {
       .toEqual(['日常办公', '园区服务']);
 
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
     const satisfaction = screen.getByRole('button', { name: '打开 满意度调查' });
     fireEvent.keyDown(satisfaction, { key: 'ArrowLeft' });
     const grid = document.querySelector('[data-group-id="park-services"] .otto-module-group__grid');
@@ -460,7 +533,7 @@ describe('ModuleWorkspace', () => {
   it('keeps editing visuals limited to remove controls', () => {
     renderControlledWorkspace();
     fireEvent.click(screen.getByRole('button', { name: '功能组菜单：园区服务' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: '编辑模块' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '调整/移除模块' }));
 
     expect(screen.getByRole('button', { name: '移除 园区公告' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '拖动模块：园区公告' })).toBeNull();

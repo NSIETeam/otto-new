@@ -472,10 +472,17 @@ const CRASH_RELOAD_MAX = 3;
 const DEFAULT_ENTERPRISE_SERVER_URL = defaultEnterpriseServerUrl(
   process.env.OTTO_ENTERPRISE_SERVER_URL,
 );
+const desktopRecurringTasks = new RecurringTaskRegistry({
+  allowPaidBackground: false,
+  onError: (taskName, error) => {
+    console.warn(`[otto-desktop] 后台任务 ${taskName} 失败:`, error);
+  },
+});
 /** server 生命周期管理器（发现/拉起/探活/退出清理）。 */
 const serverManager = new ServerManager({
   enterpriseServerUrl: DEFAULT_ENTERPRISE_SERVER_URL,
   kernelUpdateRoot: resolveKernelUpdateRoot(app.getPath('userData')),
+  recurringTasks: desktopRecurringTasks,
   onHealthChange: (status) => {
     tracer.updateStatus(status);
   },
@@ -522,12 +529,6 @@ let enterpriseTrayContacts: EnterpriseTrayContact[] = [];
 let isQuitting = false;
 /** Ephemeral private keys for in-progress provider pairings; never exposed to renderer. */
 const channelPairingPrivateKeys = new Map<string, string>();
-const desktopRecurringTasks = new RecurringTaskRegistry({
-  allowPaidBackground: false,
-  onError: (taskName, error) => {
-    console.warn(`[otto-desktop] 后台任务 ${taskName} 失败:`, error);
-  },
-});
 const desktopRpaAppGrants = new Map<string, 'inspect' | 'interact'>();
 let unregisterDesktopRpaHost: (() => void) | undefined;
 

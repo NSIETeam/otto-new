@@ -10,7 +10,6 @@ const legacyMaximums = new Map(Object.entries({
   'packages/core/src/services/mcpResponseGuard.ts': 1,
   'packages/core/src/tools/generate-document.ts': 1,
   'packages/core/src/tools/shell.ts': 1,
-  'packages/desktop/src/main/server-manager.ts': 1,
   'packages/desktop/src/renderer/App.tsx': 4,
   'packages/desktop/src/renderer/components/AccountManagementPage.tsx': 1,
   'packages/desktop/src/renderer/components/Composer.tsx': 1,

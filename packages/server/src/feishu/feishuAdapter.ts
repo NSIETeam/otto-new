@@ -34,6 +34,7 @@ import { createHash } from 'node:crypto';
 
 import { loadCredentials, isSenderAuthorized } from './vendor/credentials.js';
 import type { FeishuCredentials } from './vendor/credentials.js';
+import { RecurringTaskRegistry } from 'otto-core';
 import { FeishuGateway, FeishuGatewayLockError } from './vendor/gateway.js';
 import type { FeishuMessage, OnMeetingEndedCallback } from './vendor/gateway.js';
 import {
@@ -141,6 +142,8 @@ export interface FeishuAdapterDeps {
   gatewayFactory?: FeishuGatewayFactory;
   /** Durable inbound queue path. null keeps isolated tests in memory. */
   inboundQueuePath?: string | null;
+  /** Host-owned scheduler; tests may inject an isolated registry. */
+  taskRegistry?: RecurringTaskRegistry;
 }
 
 /**
@@ -161,6 +164,7 @@ export class FeishuAdapter {
   private readonly injectedCreds?: FeishuCredentials | null;
   private readonly gatewayFactory: FeishuGatewayFactory;
   private readonly inboundQueue: FeishuInboundQueue;
+  private readonly taskRegistry: RecurringTaskRegistry;
   private inboundDraining = false;
   private inboundRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -175,8 +179,8 @@ export class FeishuAdapter {
   private sdkReconnectingSince: number | null = null;
   /** adapter 层重连排程句柄；无排程为 null。stop() 必须清干净，杜绝幽灵重连。 */
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  /** 心跳句柄（僵尸探测 + 守护兜底）。 */
-  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** 已登记心跳任务的停止函数（僵尸探测 + 守护兜底）。 */
+  private stopHeartbeatTask: (() => void) | undefined;
   /** 自上次成功以来 adapter 层已发起的重连尝试次数（成功归零 → 退避归零）。 */
   private reconnectAttempts = 0;
   /** 僵尸判定连击计数（连续 ZOMBIE_STRIKE_LIMIT 次探到 socket 已死才动手）。 */
@@ -214,6 +218,7 @@ export class FeishuAdapter {
       ((creds) =>
         new FeishuGateway(creds.appId, creds.appSecret, creds.domain));
     this.inboundQueue = new FeishuInboundQueue(deps.inboundQueuePath ?? null);
+    this.taskRegistry = deps.taskRegistry ?? new RecurringTaskRegistry();
   }
 
   isConnected(): boolean {
@@ -334,12 +339,14 @@ export class FeishuAdapter {
     this.scheduleInboundDrain();
 
     // 4) 心跳守护：僵尸探测 + 悬挂接管 + 兜底补排（详见 heartbeatTick）。
-    this.heartbeatTimer = setInterval(
-      () => this.heartbeatTick(),
-      HEARTBEAT_INTERVAL_MS,
-    );
-    // 心跳不该拽住进程退出（Node 环境才有 unref；类型上防御 fake timer）。
-    (this.heartbeatTimer as { unref?: () => void }).unref?.();
+    this.stopHeartbeatTask = this.taskRegistry.register({
+      name: 'server.feishu-connection-heartbeat',
+      source: 'packages/server/src/feishu/feishuAdapter.ts',
+      intervalMs: HEARTBEAT_INTERVAL_MS,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => String(Math.floor(Date.now() / HEARTBEAT_INTERVAL_MS)),
+      run: () => this.heartbeatTick(),
+    });
 
     // 5) 发起首次建连（不 await：失败/悬挂都由守护循环接管，见方法注释）。
     void this.attemptConnect();
@@ -826,10 +833,8 @@ export class FeishuAdapter {
       clearTimeout(this.inboundRetryTimer);
       this.inboundRetryTimer = null;
     }
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
+    this.stopHeartbeatTask?.();
+    this.stopHeartbeatTask = undefined;
     this.connecting = false;
     this.connectStartedAt = null;
     this.sdkReconnectingSince = null;

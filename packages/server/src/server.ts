@@ -656,6 +656,7 @@ export class OttoServer {
         ensureRuntime: (sessionId) => this.ensureRuntime(sessionId),
         shouldAutoReply: isFeishuAutoReplyEnabledForOpenId,
         mock: this.mock,
+        taskRegistry: this.recurringTaskRegistry,
         ...this.feishuDeps,
       });
     }
@@ -2730,6 +2731,7 @@ export class OttoServer {
           ensureRuntime: (sessionId) => this.ensureRuntime(sessionId),
           shouldAutoReply: isFeishuAutoReplyEnabledForOpenId,
           mock: this.mock,
+          taskRegistry: this.recurringTaskRegistry,
           ...this.feishuDeps,
         });
       } else {

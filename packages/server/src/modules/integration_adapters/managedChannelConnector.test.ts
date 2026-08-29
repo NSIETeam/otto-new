@@ -13,6 +13,8 @@ import {
 } from './channelConnector.js';
 import {
   ManagedChannelConnectorV1,
+  type ChannelPairingBrokerStatus,
+  type ChannelPairingBrokerV1,
   type ChannelRuntimeAdapterV1,
 } from './managedChannelConnector.js';
 
@@ -63,14 +65,25 @@ function setup() {
     randomToken: () => 'single-use-pairing-nonce-with-enough-entropy',
     audit: () => undefined,
   });
+  let brokerStatus: ChannelPairingBrokerStatus = { status: 'waiting' };
+  const broker: ChannelPairingBrokerV1 = {
+    register: vi.fn(async () => undefined),
+    poll: vi.fn(async () => brokerStatus),
+    cancel: vi.fn(async () => undefined),
+  };
   return {
     vault,
     runtime,
+    broker,
+    setBrokerStatus(status: ChannelPairingBrokerStatus) {
+      brokerStatus = status;
+    },
     connector: new ManagedChannelConnectorV1({
       provider: 'lark',
       coordinator,
       vault,
       runtime,
+      broker,
     }),
   };
 }
@@ -82,7 +95,7 @@ describe('ManagedChannelConnectorV1', () => {
     const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
     const pairing = await connector.beginPairing({
       provider: 'lark',
-      installationPublicKey: publicKey,
+      installationPublicKey: publicKey.trim(),
       requestedScopes: ['im:message'],
     });
     await connector.acceptProviderAuthorization({
@@ -169,5 +182,38 @@ describe('ManagedChannelConnectorV1', () => {
       ).toString('base64url'),
     })).rejects.toThrow('credential is unavailable');
     expect(vault.commit).not.toHaveBeenCalled();
+  });
+
+  it('registers outbound and consumes an authorized broker result without a public local callback', async () => {
+    const { connector, broker, setBrokerStatus } = setup();
+    const keys = generateKeyPairSync('ed25519');
+    const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const pairing = await connector.beginPairing({
+      provider: 'lark',
+      installationPublicKey: publicKey,
+      requestedScopes: ['im:message'],
+    });
+    expect(broker.register).toHaveBeenCalledWith(expect.objectContaining({
+      pairingId: pairing.pairingId,
+      provider: 'lark',
+      installationPublicKey: publicKey.trim(),
+      nonce: 'single-use-pairing-nonce-with-enough-entropy',
+    }));
+    setBrokerStatus({
+      status: 'authorized',
+      plaintextCredential: 'broker-refresh-token',
+      authorization: {
+        tenantId: 'tenant-1',
+        tenantName: 'Acme',
+        botName: 'Otto',
+        grantedScopes: ['im:message'],
+      },
+    });
+
+    expect((await connector.getPairingStatus(pairing.pairingId)).status)
+      .toBe('user_authorized');
+    expect((await connector.getPairingStatus(pairing.pairingId)).status)
+      .toBe('user_authorized');
+    expect(broker.poll).toHaveBeenCalledTimes(1);
   });
 });

@@ -44,6 +44,16 @@ export interface PairingSession {
   failureReason?: string;
 }
 
+export interface ChannelBrokerPairingRegistration {
+  pairingId: string;
+  provider: ChannelProvider;
+  nonce: string;
+  installationPublicKey: string;
+  requestedScopes: readonly string[];
+  expiresAtMs: number;
+  qrPayload: string;
+}
+
 export interface ChannelInstallation {
   installationId: string;
   provider: ChannelProvider;
@@ -186,6 +196,17 @@ export class ChannelPairingCoordinator {
   }
 
   async begin(input: BeginPairingInput): Promise<PairingSession> {
+    return (await this.beginForBroker(input)).session;
+  }
+
+  /**
+   * Trusted connector entrypoint. The nonce is returned only to the outbound
+   * broker adapter and must never be exposed through Desktop/REST responses.
+   */
+  async beginForBroker(input: BeginPairingInput): Promise<{
+    session: PairingSession;
+    registration: ChannelBrokerPairingRegistration;
+  }> {
     if (!input.installationPublicKey.trim()) {
       throw new Error('installation public key is required');
     }
@@ -204,7 +225,19 @@ export class ChannelPairingCoordinator {
     };
     this.pairings.set(pairingId, pairing);
     await this.emit(pairing, 'created', 'waiting_scan');
-    return this.toPublic(pairing, nonce);
+    const session = this.toPublic(pairing, nonce);
+    return {
+      session,
+      registration: {
+        pairingId,
+        provider: input.provider,
+        nonce,
+        installationPublicKey: input.installationPublicKey.trim(),
+        requestedScopes: [...requestedScopes],
+        expiresAtMs: pairing.expiresAtMs,
+        qrPayload: session.qrPayload,
+      },
+    };
   }
 
   async get(pairingId: string): Promise<PairingSession> {

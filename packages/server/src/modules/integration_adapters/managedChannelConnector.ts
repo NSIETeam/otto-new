@@ -11,6 +11,7 @@ import {
   type BeginPairingInput,
   type ChannelConnectorV1,
   type ChannelHealth,
+  type ChannelBrokerPairingRegistration,
   type ChannelInstallation,
   type ChannelInstallationProof,
   ChannelPairingCoordinator,
@@ -40,29 +41,80 @@ export interface ManagedProviderAuthorization {
   plaintextCredential: string;
 }
 
+export type ChannelPairingBrokerStatus =
+  | { status: 'waiting' }
+  | {
+      status: 'authorized';
+      authorization: PairingAuthorization;
+      plaintextCredential: string;
+    }
+  | { status: 'denied'; reason?: string };
+
+export interface ChannelPairingBrokerV1 {
+  register(registration: ChannelBrokerPairingRegistration): Promise<void>;
+  poll(pairingId: string): Promise<ChannelPairingBrokerStatus>;
+  cancel(pairingId: string): Promise<void>;
+}
+
 export interface ManagedChannelConnectorOptions {
   provider: ChannelProvider;
   coordinator: ChannelPairingCoordinator;
   vault: ChannelCredentialVaultV1;
   runtime: ChannelRuntimeAdapterV1;
+  broker: ChannelPairingBrokerV1;
 }
 
 export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
   private readonly pendingCredentials = new Map<string, string>();
+  private readonly brokerRegistrations = new Map<
+    string,
+    ChannelBrokerPairingRegistration
+  >();
 
   constructor(private readonly options: ManagedChannelConnectorOptions) {}
 
-  beginPairing(input: BeginPairingInput): Promise<PairingSession> {
+  async beginPairing(input: BeginPairingInput): Promise<PairingSession> {
     if (input.provider !== this.options.provider) {
       throw new Error('channel connector provider mismatch');
     }
-    return this.options.coordinator.begin(input);
+    const { session, registration } =
+      await this.options.coordinator.beginForBroker(input);
+    try {
+      await this.options.broker.register(registration);
+    } catch (error) {
+      await this.options.coordinator.deny(
+        session.pairingId,
+        'pairing broker registration failed',
+      );
+      throw error;
+    }
+    this.brokerRegistrations.set(session.pairingId, registration);
+    return session;
   }
 
   async getPairingStatus(pairingId: string): Promise<PairingSession> {
-    const pairing = await this.options.coordinator.get(pairingId);
+    let pairing = await this.options.coordinator.get(pairingId);
+    if (pairing.status === 'waiting_scan') {
+      const remote = await this.options.broker.poll(pairingId);
+      if (remote.status === 'authorized') {
+        const nonce = this.requireBrokerNonce(pairingId);
+        pairing = await this.acceptProviderAuthorization({
+          pairingId,
+          nonce,
+          authorization: remote.authorization,
+          plaintextCredential: remote.plaintextCredential,
+        });
+      } else if (remote.status === 'denied') {
+        pairing = await this.options.coordinator.deny(
+          pairingId,
+          remote.reason ?? 'provider authorization denied',
+        );
+      }
+    }
     if (['expired', 'denied', 'failed', 'revoked', 'connected'].includes(pairing.status)) {
       this.pendingCredentials.delete(pairingId);
+      this.brokerRegistrations.delete(pairingId);
+      await this.options.broker.cancel(pairingId).catch(() => undefined);
     }
     return pairing;
   }
@@ -89,6 +141,8 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
   async denyPairing(pairingId: string, reason?: string): Promise<PairingSession> {
     const pairing = await this.options.coordinator.deny(pairingId, reason);
     this.pendingCredentials.delete(pairingId);
+    this.brokerRegistrations.delete(pairingId);
+    await this.options.broker.cancel(pairingId).catch(() => undefined);
     const installationId = `channel_${this.options.provider}_${pairingId.slice(5)}`;
     const partial = this.options.vault
       .listInstallations()
@@ -116,6 +170,8 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
         this.options.vault.commit(pendingInstallation, credential),
     );
     this.pendingCredentials.delete(pairingId);
+    this.brokerRegistrations.delete(pairingId);
+    await this.options.broker.cancel(pairingId).catch(() => undefined);
     return installation;
   }
 
@@ -159,5 +215,11 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
       throw new Error('channel installation was not found');
     }
     return installation;
+  }
+
+  private requireBrokerNonce(pairingId: string): string {
+    const registration = this.brokerRegistrations.get(pairingId);
+    if (!registration) throw new Error('channel broker registration is unavailable');
+    return registration.nonce;
   }
 }

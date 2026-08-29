@@ -70,8 +70,15 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
     string,
     ChannelBrokerPairingRegistration
   >();
+  private readonly lifecycleTails = new Map<string, Promise<unknown>>();
 
   constructor(private readonly options: ManagedChannelConnectorOptions) {}
+
+  listInstallations(): ChannelInstallation[] {
+    return this.options.vault
+      .listInstallations()
+      .filter((installation) => installation.provider === this.options.provider);
+  }
 
   async beginPairing(input: BeginPairingInput): Promise<PairingSession> {
     if (input.provider !== this.options.provider) {
@@ -176,30 +183,36 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
   }
 
   async start(installationId: string): Promise<ChannelHealth> {
-    const installation = this.requireInstallation(installationId);
-    const credential = await this.options.vault.loadCredential({
-      installationId,
-      provider: installation.provider,
-      tenantId: installation.tenantId,
+    return this.serializeLifecycle(installationId, async () => {
+      const installation = this.requireInstallation(installationId);
+      const credential = await this.options.vault.loadCredential({
+        installationId,
+        provider: installation.provider,
+        tenantId: installation.tenantId,
+      });
+      return this.options.runtime.start(installation, credential);
     });
-    return this.options.runtime.start(installation, credential);
   }
 
   stop(installationId: string): Promise<ChannelHealth> {
-    this.requireInstallation(installationId);
-    return this.options.runtime.stop(installationId);
+    return this.serializeLifecycle(installationId, () => {
+      this.requireInstallation(installationId);
+      return this.options.runtime.stop(installationId);
+    });
   }
 
   async revoke(installationId: string): Promise<void> {
-    const installation = this.requireInstallation(installationId);
-    const lookup = {
-      installationId,
-      provider: installation.provider,
-      tenantId: installation.tenantId,
-    };
-    const credential = await this.options.vault.loadCredential(lookup);
-    await this.options.runtime.revoke(installation, credential);
-    await this.options.vault.remove(lookup);
+    return this.serializeLifecycle(installationId, async () => {
+      const installation = this.requireInstallation(installationId);
+      const lookup = {
+        installationId,
+        provider: installation.provider,
+        tenantId: installation.tenantId,
+      };
+      const credential = await this.options.vault.loadCredential(lookup);
+      await this.options.runtime.revoke(installation, credential);
+      await this.options.vault.remove(lookup);
+    });
   }
 
   health(installationId: string): Promise<ChannelHealth> {
@@ -221,5 +234,20 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
     const registration = this.brokerRegistrations.get(pairingId);
     if (!registration) throw new Error('channel broker registration is unavailable');
     return registration.nonce;
+  }
+
+  private serializeLifecycle<T>(
+    installationId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.lifecycleTails.get(installationId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    this.lifecycleTails.set(installationId, current);
+    void current.finally(() => {
+      if (this.lifecycleTails.get(installationId) === current) {
+        this.lifecycleTails.delete(installationId);
+      }
+    }).catch(() => undefined);
+    return current;
   }
 }

@@ -24,20 +24,22 @@ const pairing: PairingSession = {
 };
 
 function fakeConnector(): ChannelConnectorV1 {
+  const installation = {
+    installationId: 'channel_feishu_0123456789abcdef01234567',
+    provider: 'feishu' as const,
+    tenantId: 'tenant-1',
+    tenantName: 'Example tenant',
+    botName: 'Otto',
+    grantedScopes: ['im:message'],
+    connectedAtMs: Date.now(),
+  };
   return {
+    listInstallations: vi.fn(() => [installation]),
     beginPairing: vi.fn(async () => pairing),
     getPairingStatus: vi.fn(async () => pairing),
     approveAdmin: vi.fn(async () => ({ ...pairing, status: 'user_authorized' })),
     denyPairing: vi.fn(async () => ({ ...pairing, status: 'denied' })),
-    completeInstallation: vi.fn(async () => ({
-      installationId: 'channel_feishu_0123456789abcdef01234567',
-      provider: 'feishu',
-      tenantId: 'tenant-1',
-      tenantName: 'Example tenant',
-      botName: 'Otto',
-      grantedScopes: ['im:message'],
-      connectedAtMs: Date.now(),
-    })),
+    completeInstallation: vi.fn(async () => installation),
     start: vi.fn(async () => ({ installationId: 'install-1', running: true, state: 'connected', reconnectCount: 0 })),
     stop: vi.fn(async () => ({ installationId: 'install-1', running: false, state: 'stopped', reconnectCount: 0 })),
     revoke: vi.fn(async () => undefined),
@@ -146,5 +148,36 @@ describe('channel pairing REST routes', () => {
       { installationPublicKey: 'public-key', signature: 'A'.repeat(86) },
     );
     expect(connector.denyPairing).toHaveBeenCalledOnce();
+  });
+
+  it('uses one authenticated installation control surface for Desktop and CLI', async () => {
+    const connector = fakeConnector();
+    const { baseUrl, token } = await start({ feishu: connector });
+    const auth = { authorization: `Bearer ${token}` };
+    const installationId = connector.listInstallations()[0].installationId;
+
+    expect((await fetch(`${baseUrl}/channels/installations`)).status).toBe(401);
+    const listed = await fetch(`${baseUrl}/channels/installations`, { headers: auth });
+    expect(await listed.json()).toMatchObject({
+      ok: true,
+      data: [{ installationId, provider: 'feishu', tenantId: 'tenant-1' }],
+    });
+    for (const [suffix, method] of [
+      ['', 'GET'],
+      ['/health', 'GET'],
+      ['/start', 'POST'],
+      ['/stop', 'POST'],
+      ['', 'DELETE'],
+    ] as const) {
+      const response = await fetch(
+        `${baseUrl}/channels/installations/${installationId}${suffix}`,
+        { method, headers: auth },
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(connector.health).toHaveBeenCalledWith(installationId);
+    expect(connector.start).toHaveBeenCalledWith(installationId);
+    expect(connector.stop).toHaveBeenCalledWith(installationId);
+    expect(connector.revoke).toHaveBeenCalledWith(installationId);
   });
 });

@@ -2575,6 +2575,52 @@ export class OttoServer {
         });
       return;
     }
+    if (path === HTTP_ROUTES.channelInstallations && req.method === 'GET') {
+      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+        return sendJson(res, 401, err('unauthorized'));
+      }
+      const installations = Object.values(this.channelConnectors)
+        .filter((connector): connector is ChannelConnectorV1 => connector !== undefined)
+        .flatMap((connector) => connector.listInstallations());
+      return sendJson(res, 200, ok(installations));
+    }
+    const channelInstallationMatch = path.match(
+      /^\/channels\/installations\/(channel_(feishu|lark|wecom)_[a-f0-9]{24})(?:\/(start|stop|health))?$/,
+    );
+    if (channelInstallationMatch) {
+      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+        return sendJson(res, 401, err('unauthorized'));
+      }
+      const installationId = channelInstallationMatch[1];
+      const provider = channelInstallationMatch[2] as ChannelProvider;
+      const action = channelInstallationMatch[3];
+      const connector = this.channelConnectors[provider];
+      if (!connector) return sendJson(res, 404, err('channel_installation_not_found'));
+      const installation = connector
+        .listInstallations()
+        .find((candidate) => candidate.installationId === installationId);
+      if (!installation) return sendJson(res, 404, err('channel_installation_not_found'));
+      let operation: Promise<unknown>;
+      if (req.method === 'GET' && !action) {
+        operation = Promise.resolve(installation);
+      } else if (req.method === 'GET' && action === 'health') {
+        operation = connector.health(installationId);
+      } else if (req.method === 'POST' && action === 'start') {
+        operation = connector.start(installationId);
+      } else if (req.method === 'POST' && action === 'stop') {
+        operation = connector.stop(installationId);
+      } else if (req.method === 'DELETE' && !action) {
+        operation = connector.revoke(installationId).then(() => ({ revoked: true }));
+      } else {
+        return sendJson(res, 405, err('method_not_allowed'));
+      }
+      void operation
+        .then((result) => sendJson(res, 200, ok(result)))
+        .catch((error) => {
+          sendJson(res, 409, err(error instanceof Error ? error.message : String(error)));
+        });
+      return;
+    }
     if (path === HTTP_ROUTES.sessions && req.method === 'GET') {
       return sendJson(res, 200, ok(this.visibleSessions()));
     }

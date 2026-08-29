@@ -216,4 +216,41 @@ describe('ManagedChannelConnectorV1', () => {
       .toBe('user_authorized');
     expect(broker.poll).toHaveBeenCalledTimes(1);
   });
+
+  it('serializes competing lifecycle writes for one installation', async () => {
+    const { connector, runtime, vault } = setup();
+    const installation = {
+      installationId: 'channel_lark_0123456789abcdef01234567',
+      provider: 'lark' as const,
+      tenantId: 'tenant-1',
+      tenantName: 'Acme',
+      botName: 'Otto',
+      grantedScopes: ['im:message'],
+      connectedAtMs: 100,
+    };
+    await vault.commit(installation, 'credential');
+    let releaseStart: (() => void) | undefined;
+    const startMock = vi.mocked(runtime.start);
+    const stopMock = vi.mocked(runtime.stop);
+    startMock.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        releaseStart = () => resolve({
+          installationId: installation.installationId,
+          running: true,
+          state: 'connected',
+          reconnectCount: 0,
+        });
+      }),
+    );
+
+    const starting = connector.start(installation.installationId);
+    const stopping = connector.stop(installation.installationId);
+    await vi.waitFor(() => expect(releaseStart).toBeTypeOf('function'));
+    expect(stopMock).not.toHaveBeenCalled();
+    releaseStart!();
+    await starting;
+    await stopping;
+    expect(startMock.mock.invocationCallOrder[0])
+      .toBeLessThan(stopMock.mock.invocationCallOrder[0]);
+  });
 });

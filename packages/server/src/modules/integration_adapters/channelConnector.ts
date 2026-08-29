@@ -94,6 +94,7 @@ export function channelInstallationProofPayload(pairingId: string): Buffer {
 }
 
 export interface ChannelConnectorV1 {
+  listInstallations(): ChannelInstallation[];
   beginPairing(input: BeginPairingInput): Promise<PairingSession>;
   getPairingStatus(pairingId: string): Promise<PairingSession>;
   approveAdmin(pairingId: string): Promise<PairingSession>;

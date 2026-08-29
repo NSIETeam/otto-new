@@ -1615,6 +1615,8 @@ export const HTTP_ROUTES = {
   feishuConfig: '/feishu/config',
   channelPairings: '/channels/pairings',
   channelPairing: (id: string) => `/channels/pairings/${id}`,
+  channelInstallations: '/channels/installations',
+  channelInstallation: (id: string) => `/channels/installations/${id}`,
   incrementalUpdatePush: '/internal/incremental-update/push',
   ws: '/ws',
 } as const;

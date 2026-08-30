@@ -20,6 +20,12 @@ async function onlyRun(root: string): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(path.join(root, 'runs', names[0]), 'utf8')) as Record<string, unknown>;
 }
 
+async function traceKinds(root: string): Promise<string[]> {
+  const names = await readdir(path.join(root, 'traces'));
+  const content = await readFile(path.join(root, 'traces', names[0]), 'utf8');
+  return content.trim().split('\n').map((line) => (JSON.parse(line) as { kind: string }).kind);
+}
+
 describe('FileExternalTaskWorkflowJournalV1', () => {
   it('persists an approved external agent step before execution and settles success', async () => {
     const { root, value } = await journal();
@@ -40,7 +46,12 @@ describe('FileExternalTaskWorkflowJournalV1', () => {
     const { root, value } = await journal();
     const runId = await value.start({ taskId: 'task-3', agent: 'codex', cwd: '/project' });
     await value.settle(runId, { status: 'cancelled', sessionId: 'session-3' });
-    expect(await onlyRun(root)).toMatchObject({ status: 'cancelled' });
+    expect(await onlyRun(root)).toMatchObject({
+      status: 'cancelled',
+      steps: [{ status: 'cancelled', output: { status: 'cancelled', sessionId: 'session-3' } }],
+    });
+    expect(await traceKinds(root)).toContain('step_cancelled');
+    expect(await traceKinds(root)).not.toContain('step_succeeded');
   });
 
   it('journals a background shell as the same approved external lifecycle', async () => {

@@ -117,11 +117,17 @@ export class FileExternalTaskWorkflowJournalV1 implements ExternalTaskWorkflowJo
       runId: run.id,
       stepId: step.stepId,
       expectedRevision: run.revision,
+      ...(outcome.status === 'cancelled' ? { cancelled: true } : {}),
       ...(outcome.status === 'failed'
         ? { error: outcome.error.slice(0, 1_000) }
         : { output: { status: outcome.status, sessionId: outcome.sessionId } }),
     });
-    await this.trace.append({ runId: run.id, stepId: step.stepId, attempt: step.attempt, idempotencyKey: step.idempotencyKey, kind: outcome.status === 'failed' ? 'step_failed' : 'step_succeeded', status: completed.status, summary: `External task ${outcome.status}` });
+    const traceKind = outcome.status === 'failed'
+      ? 'step_failed'
+      : outcome.status === 'cancelled'
+        ? 'step_cancelled'
+        : 'step_succeeded';
+    await this.trace.append({ runId: run.id, stepId: step.stepId, attempt: step.attempt, idempotencyKey: step.idempotencyKey, kind: traceKind, status: completed.status, summary: `External task ${outcome.status}` });
   }
 
   async recover(runId: string): Promise<WorkflowRun | null> {

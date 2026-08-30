@@ -163,6 +163,7 @@ export class FileWorkflowStore implements WorkflowStore {
     expectedRevision: number;
     output?: unknown;
     error?: string;
+    cancelled?: boolean;
   }): Promise<WorkflowRun> {
     return this.withLease(input.runId, async () => {
       const run = await this.readRun(input.runId);
@@ -181,11 +182,23 @@ export class FileWorkflowStore implements WorkflowStore {
       if (!step || step.status !== 'running') {
         throw new WorkflowConflictError(`Workflow step is not running: ${input.stepId}`);
       }
-      step.status = input.error ? 'failed' : 'succeeded';
+      if (input.cancelled && input.error) {
+        throw new WorkflowConflictError('Workflow step cannot be cancelled and failed together.');
+      }
+      step.status = input.cancelled ? 'cancelled' : input.error ? 'failed' : 'succeeded';
       step.output = input.output === undefined ? undefined : structuredClone(input.output);
       step.error = input.error;
       step.completedAt = now();
-      if (input.error) {
+      if (input.cancelled) {
+        for (const candidate of run.steps) {
+          if (candidate.status === 'queued' || candidate.status === 'waiting_approval') {
+            candidate.status = 'cancelled';
+            candidate.completedAt = now();
+          }
+        }
+        run.status = 'cancelled';
+        run.cancelRequestedAt = run.cancelRequestedAt ?? now();
+      } else if (input.error) {
         run.status = 'failed';
       } else if (run.cancelRequestedAt) {
         for (const candidate of run.steps) {

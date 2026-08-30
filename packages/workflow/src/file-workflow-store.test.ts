@@ -96,6 +96,30 @@ describe('FileWorkflowStore', () => {
     expect(running?.step).toMatchObject({ status: 'running', approvedAt: expect.any(String) });
   });
 
+  it('records worker-acknowledged cancellation without calling the active step succeeded', async () => {
+    const store = await createStore();
+    const run = await store.createRun({
+      id: 'cancel-active',
+      version: 1,
+      steps: [{ id: 'work', kind: 'agent', input: {}, sideEffect: 'none' }],
+    });
+    const running = await store.claimNextStep(run.id, run.revision);
+    await store.cancelRun(run.id, running!.run.revision);
+
+    const cancelled = await store.completeStep({
+      runId: run.id,
+      stepId: 'work',
+      expectedRevision: running!.run.revision,
+      cancelled: true,
+      output: { stopReason: 'user' },
+    });
+
+    expect(cancelled).toMatchObject({
+      status: 'cancelled',
+      steps: [{ status: 'cancelled', output: { stopReason: 'user' } }],
+    });
+  });
+
   it('requires human takeover to end an unknown external outcome', async () => {
     const store = await createStore();
     const run = await store.createRun({ id: 'external-only', version: 1, steps: [{ id: 'send', kind: 'tool', input: {}, sideEffect: 'external' }] });

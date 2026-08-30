@@ -13,6 +13,7 @@ export interface WorkflowStore {
     expectedRevision: number;
     output?: unknown;
     error?: string;
+    cancelled?: boolean;
   }): Promise<WorkflowRun>;
   approveStep(input: { runId: string; stepId: string; approvalId: string; expectedRevision: number }): Promise<WorkflowRun>;
   recoverInterruptedRun(runId: string, expectedRevision: number): Promise<WorkflowRun>;

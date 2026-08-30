@@ -351,6 +351,7 @@ means no source-level substitute is accepted.
 | Non-overlapping workflow worker skips unchanged persisted revisions | `recurringTaskRegistry.ts`, `server.residentTasks.test.ts` | Automated |
 | Workflow traces serialize concurrent appends, retain a valid rolling 5 MiB JSONL tail per run, cap trace files at 10,000, and only prune files older than 30 days | `workflow/src/trace.ts`, focused trace tests | Automated |
 | Workflow run files are capped at 10,000; creation is serialized, expired or oldest terminal runs are pruned first, while active, paused, approval-waiting and unknown-outcome runs are never automatically removed | `file-workflow-store.ts`, focused capacity tests | Automated |
+| A worker that acknowledges cancellation records both the run and active step as `cancelled`, preserves a bounded stop receipt and emits `step_cancelled`; it cannot masquerade as `step_succeeded` | `file-workflow-store.ts`, `externalTaskWorkflowJournal.ts`, focused Workflow/Core tests | Automated |
 | ACP delegate session handle is persisted before work; every background turn links to a durable external Workflow step; restart becomes `interrupted`/`unknown_outcome`, never silent replay | `externalTaskWorkflowJournal.ts`, `acpAgentClient.ts`, `backgroundTaskManager.ts`, delegate status and restart tests | Automated; BackgroundTaskManager remains a compatibility UI mirror |
 | The compatibility task mirror uses collision-resistant IDs, caps records at 1,000, preserves running tasks under pressure, bounds stdout/stderr/final answers/plan snapshots, removes direct result mutation, and rejects unsafe persisted filenames/symlinks | `backgroundTaskManager.ts`, `delegate-agent.ts`, focused compatibility tests | Automated |
 | Starting a local external coding agent requires explicit approval and declares its affected working directory | `delegate-agent.ts`, focused confirmation tests | Automated |
@@ -410,6 +411,10 @@ means no source-level substitute is accepted.
   Compatibility bots now reject `/...` control text before session creation or
   runtime/model contact and direct users to managed QR pairing; remote control
   has one authoritative identity/device/policy/approval/workflow path.
+- Corrected external-task cancellation settlement: the old compatibility flow
+  requested run cancellation and then completed the active step as succeeded.
+  Workflow now accepts an explicit worker cancellation acknowledgement, marks
+  the active step cancelled and writes a truthful `step_cancelled` trace.
 - Replaced renderer feature `setInterval` calls with either non-overlapping
   async polling or deadline-based one-shot timers. Core protocol watchdogs and
   Server generated admin pages now use named process watchdogs or non-overlap

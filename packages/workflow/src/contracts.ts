@@ -76,7 +76,7 @@ export interface WorkflowTraceEvent {
   stepId?: string;
   attempt?: number;
   idempotencyKey?: string;
-  kind: 'run_started' | 'step_claimed' | 'step_succeeded' | 'step_failed' | 'approval_recorded' | 'recovery_unknown_outcome' | 'human_takeover' | 'run_paused' | 'run_resumed' | 'run_cancelled';
+  kind: 'run_started' | 'step_claimed' | 'step_succeeded' | 'step_failed' | 'step_cancelled' | 'approval_recorded' | 'recovery_unknown_outcome' | 'human_takeover' | 'run_paused' | 'run_resumed' | 'run_cancelled';
   status: WorkflowRunStatus | WorkflowStepStatus;
   summary: string;
 }

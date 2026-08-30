@@ -8,13 +8,56 @@
  */
 
 const { execFileSync } = require('node:child_process');
-const { copyFileSync, existsSync, mkdirSync, readdirSync } = require('node:fs');
+const { createHash } = require('node:crypto');
+const {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} = require('node:fs');
 const path = require('node:path');
 
 function electronBuilderArchName(value) {
   if (value === 'x64' || value === 1) return 'x64';
   if (value === 'arm64' || value === 3) return 'arm64';
   throw new Error(`[after-pack] unsupported SQLCipher architecture: ${value}`);
+}
+
+function findOpenSslRuntimeLibrary(env = process.env) {
+  const candidates = [
+    env.OTTO_OPENSSL_RUNTIME_DIR
+      ? path.join(env.OTTO_OPENSSL_RUNTIME_DIR, 'libcrypto.3.dylib')
+      : null,
+    '/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib',
+    '/usr/local/opt/openssl@3/lib/libcrypto.3.dylib',
+  ].filter(Boolean);
+  return candidates.find(existsSync) ?? null;
+}
+
+function sha256File(filePath) {
+  return createHash('sha256').update(readFileSync(filePath)).digest('hex');
+}
+
+function updatePackagedSqlCipherMetadata(directory) {
+  const bindingPath = path.join(directory, 'better_sqlite3.node');
+  const manifestPath = path.join(directory, 'manifest.json');
+  const sbomPath = path.join(directory, 'sbom.cdx.json');
+  const bindingSha256 = sha256File(bindingPath);
+  const sbom = JSON.parse(readFileSync(sbomPath, 'utf8'));
+  const component = sbom.metadata?.component?.name === 'better_sqlite3.node'
+    ? sbom.metadata.component
+    : sbom.components?.find((item) => item.name === 'better_sqlite3.node');
+  const hash = component?.hashes?.find((item) => item.alg === 'SHA-256');
+  if (!hash) throw new Error('[after-pack] SQLCipher SBOM binding hash is missing');
+  hash.content = bindingSha256;
+  writeFileSync(sbomPath, `${JSON.stringify(sbom, null, 2)}\n`);
+
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  manifest.sha256 = bindingSha256;
+  manifest.sbom.sha256 = sha256File(sbomPath);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function copySqlCipherNativeAsset(context) {
@@ -71,6 +114,29 @@ function copySqlCipherNativeAsset(context) {
       path.join(destination, name),
     );
   }
+  if (platform === 'darwin') {
+    const openSslRuntime = findOpenSslRuntimeLibrary();
+    if (!openSslRuntime) {
+      throw new Error(
+        '[after-pack] OpenSSL 3 runtime is required to make SQLCipher portable; '
+        + 'install openssl@3 or set OTTO_OPENSSL_RUNTIME_DIR',
+      );
+    }
+    const packagedRuntime = path.join(destination, 'libcrypto.3.dylib');
+    const packagedBinding = path.join(destination, 'better_sqlite3.node');
+    copyFileSync(openSslRuntime, packagedRuntime);
+    execFileSync(
+      'install_name_tool',
+      [
+        '-change',
+        '/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib',
+        '@loader_path/libcrypto.3.dylib',
+        packagedBinding,
+      ],
+      { stdio: 'inherit' },
+    );
+    updatePackagedSqlCipherMetadata(destination);
+  }
   console.log(`[after-pack] SQLCipher native asset copied: ${target}`);
 }
 
@@ -123,3 +189,5 @@ module.exports = afterPack;
 module.exports.findNestedLibreOfficeBundles = findNestedLibreOfficeBundles;
 module.exports.copySqlCipherNativeAsset = copySqlCipherNativeAsset;
 module.exports.electronBuilderArchName = electronBuilderArchName;
+module.exports.findOpenSslRuntimeLibrary = findOpenSslRuntimeLibrary;
+module.exports.updatePackagedSqlCipherMetadata = updatePackagedSqlCipherMetadata;

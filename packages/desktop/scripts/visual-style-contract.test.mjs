@@ -37,6 +37,19 @@ describe('desktop visual style contract', () => {
     }
   });
 
+  it('uses a neutral product accent in both appearance modes', async () => {
+    const tokens = await readFile(
+      path.join(packageRoot, 'src', 'renderer', 'styles', 'tokens.css'),
+      'utf8',
+    );
+
+    expect(tokens).toMatch(/:root\s*\{[^}]*--otto-accent: #1d1d1f;/su);
+    expect(tokens).toMatch(/:root\[data-otto-theme='dark'\]\s*\{[^}]*--otto-accent: #f5f5f7;/su);
+    for (const legacyBlue of ['#007aff', '#0066d6', '#0a84ff', '#409cff']) {
+      expect(tokens.toLowerCase()).not.toContain(legacyBlue);
+    }
+  });
+
   it('defines every Otto theme variable referenced by production styles', async () => {
     const styles = await Promise.all(
       ['tokens.css', 'app.css', 'module-workspace.css'].map((file) =>

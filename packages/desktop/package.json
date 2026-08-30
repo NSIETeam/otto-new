@@ -1,6 +1,7 @@
 {
   "name": "otto-desktop",
-  "version": "1.15.3",
+  "version": "1.9.14-beta.0",
+  "ottoDisplayVersion": "1.9.14beta",
   "description": "Otto Desktop - Electron app shell (main + preload + renderer reusing webview DOM UI)",
   "author": "Otto",
   "license": "Apache-2.0",
@@ -140,7 +141,8 @@
       "!**/__tests__/**"
     ],
     "extraMetadata": {
-      "main": "dist/main/index.js"
+      "main": "dist/main/index.js",
+      "ottoDisplayVersion": "1.9.14beta"
     },
     "asar": true,
     "asarUnpack": [

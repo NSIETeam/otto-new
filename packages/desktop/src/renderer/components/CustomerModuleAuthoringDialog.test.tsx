@@ -8,6 +8,10 @@ describe('CustomerModuleAuthoringDialog', () => {
     const onClose = vi.fn();
     const view = render(<CustomerModuleAuthoringDialog open publisher={{ id: 'publisher', name: 'King' }} onSubmit={vi.fn()} onClose={onClose} />);
     expect(screen.getByText(/步骤 1\/6/)).toBeTruthy();
+    expect(screen.getByLabelText('稳定模块 ID').closest('label')?.parentElement?.classList
+      .contains('otto-customer-module-authoring__form')).toBe(true);
+    expect(screen.getByLabelText('模块说明').classList
+      .contains('otto-customer-module-authoring__textarea')).toBe(true);
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '关闭创建模块' }));
     fireEvent.keyDown(screen.getByRole('dialog', { name: '创建客户模块' }), { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);

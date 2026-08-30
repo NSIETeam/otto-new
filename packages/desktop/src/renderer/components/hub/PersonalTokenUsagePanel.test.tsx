@@ -79,4 +79,15 @@ describe('PersonalTokenUsagePanel', () => {
     expect(await screen.findByText(/当前周期还没有 Token 使用记录/)).toBeTruthy();
     expect(screen.queryByText('qwen-max')).toBeNull();
   });
+
+  it('does not expose Electron IPC or missing-route details to the user', async () => {
+    const loadProfile = vi.fn().mockRejectedValue(new Error(
+      "Error invoking remote method 'otto:enterprise-usage-profile': Error: Not found: GET /enterprise/usage/profile",
+    ));
+    render(<PersonalTokenUsagePanel loadProfile={loadProfile} />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('当前企业服务尚未支持个人 Token 画像');
+    expect(alert.textContent).not.toMatch(/invoking remote|Not found|enterprise\/usage/iu);
+  });
 });

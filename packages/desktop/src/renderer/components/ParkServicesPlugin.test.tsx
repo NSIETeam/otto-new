@@ -591,6 +591,20 @@ describe('ParkServicesPlugin', () => {
     expect(screen.queryByText(/模拟发布/)).toBeNull();
   });
 
+  it('园区服务未授权时显示可理解的中文提示而非后端原文', async () => {
+    Object.assign(window.otto, {
+      enterpriseParkPublications: vi.fn().mockRejectedValue(new Error(
+        "Error invoking remote method 'otto:enterprise-park-publications': Error: commercial module is not entitled",
+      )),
+    });
+    render(<ParkServicesPlugin />);
+    openDialog('announcement');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('当前账号尚未开通园区服务');
+    expect(alert.textContent).not.toContain('commercial module is not entitled');
+  });
+
   it('满意度调查实名提交一次，界面不包含发布端', async () => {
     const bridge = installPublicationBridge('satisfaction');
     render(<ParkServicesPlugin />);

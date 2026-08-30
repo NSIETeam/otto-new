@@ -31,7 +31,7 @@ function mlsErrorStatus(error: unknown): number {
   return 400;
 }
 
-export function organizationViewPayload(organizationId: string) {
+function buildOrganizationViewPayload(organizationId: string) {
   const organization = db.getOrganization(organizationId);
   const accounts = db.listAccounts(organizationId);
   const employees = db.listEmployees(undefined, organizationId);
@@ -78,6 +78,24 @@ export function organizationViewPayload(organizationId: string) {
         }
       : null,
   };
+}
+
+type OrganizationViewPayload = ReturnType<typeof buildOrganizationViewPayload>;
+const organizationViewTurnCache = new Map<string, OrganizationViewPayload>();
+
+/**
+ * A burst of organization reads otherwise repeats the same synchronous SQLite
+ * joins hundreds of times in one event-loop turn and can starve queued HTTP
+ * requests. Share the immutable response only for the current turn; clearing
+ * it with setImmediate keeps writes visible on the next turn without a TTL.
+ */
+export function organizationViewPayload(organizationId: string): OrganizationViewPayload {
+  const cached = organizationViewTurnCache.get(organizationId);
+  if (cached) return cached;
+  const payload = buildOrganizationViewPayload(organizationId);
+  organizationViewTurnCache.set(organizationId, payload);
+  setImmediate(() => organizationViewTurnCache.delete(organizationId));
+  return payload;
 }
 
 export async function handleCommunicationRoute({

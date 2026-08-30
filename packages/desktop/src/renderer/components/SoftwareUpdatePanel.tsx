@@ -19,6 +19,7 @@
  */
 
 import React from 'react';
+import { displayOttoVersion } from '../versionDisplay.js';
 import type { UseSoftwareUpdate } from '../state/useSoftwareUpdate.js';
 import { GeneratedIcon } from './GeneratedIcon.js';
 import { Prose } from './Prose.js';
@@ -61,7 +62,7 @@ export function SoftwareUpdatePanel({
       <div className="otto-hub__field">
         <div className="otto-hub__field-label">当前版本</div>
         <div className="otto-hub__field-hint">
-          Otto 桌面版 v{state.currentVersion ?? '…'}
+          Otto 桌面版 v{state.currentVersion ? displayOttoVersion(state.currentVersion) : '…'}
           {checkedAt ? ` · 上次检查 ${checkedAt}` : ''}
         </div>
         {state.phase !== 'downloading' && state.phase !== 'downloaded' ? (

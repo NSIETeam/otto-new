@@ -484,7 +484,13 @@ export function useParkBrand(): string {
 
 function errorMessage(cause: unknown): string {
   const value = cause instanceof Error ? cause.message : String(cause);
-  return value.replace(/^Error invoking remote method '[^']+':\s*/, '').replace(/^Error:\s*/, '');
+  if (/commercial module is not entitled/iu.test(value)) {
+    return '当前账号尚未开通园区服务，请联系企业管理员。';
+  }
+  const sanitized = value.replace(/^Error invoking remote method '[^']+':\s*/, '').replace(/^Error:\s*/, '');
+  return /Not found:\s*(?:GET|POST|PUT|PATCH|DELETE)|\/enterprise\//iu.test(sanitized)
+    ? '园区服务暂时不可用，请稍后重试。'
+    : sanitized;
 }
 
 function AnnouncementView({ onBack }: { onBack: () => void }): React.JSX.Element {

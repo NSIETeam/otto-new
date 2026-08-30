@@ -845,6 +845,43 @@
   padding: 10px 18px 18px;
 }
 
+.otto-customer-module-authoring__form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+  align-items: start;
+}
+
+.otto-customer-module-authoring__form label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--otto-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.otto-customer-module-authoring__form input,
+.otto-customer-module-authoring__form textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--otto-border);
+  border-radius: 10px;
+  background: var(--otto-surface-raised);
+  color: var(--otto-text);
+  font: 400 13px var(--otto-font);
+}
+
+.otto-customer-module-authoring__form label:has(.otto-customer-module-authoring__textarea) {
+  grid-column: 1 / -1;
+}
+
+.otto-customer-module-authoring__textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
 .otto-module-marketplace__category + .otto-module-marketplace__category {
   margin-top: 18px;
 }
@@ -929,7 +966,7 @@
 .otto-module-marketplace__confirm {
   border: 1px solid var(--otto-accent);
   background: var(--otto-accent);
-  color: white;
+  color: var(--otto-accent-contrast);
 }
 
 .otto-module-marketplace__confirm:disabled {
@@ -938,6 +975,13 @@
 }
 
 @media (max-width: 760px) {
+  .otto-customer-module-authoring__form {
+    grid-template-columns: 1fr;
+  }
+
+  .otto-customer-module-authoring__form label:has(.otto-customer-module-authoring__textarea) {
+    grid-column: auto;
+  }
   .otto-module-marketplace__modules {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

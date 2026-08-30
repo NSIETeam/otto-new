@@ -47,7 +47,14 @@ function formatTokens(value: number): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : '暂时无法读取 Token 画像';
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  if (/Not found:\s*GET \/enterprise\/usage\/profile/iu.test(message)) {
+    return '当前企业服务尚未支持个人 Token 画像，请升级服务端后重试。';
+  }
+  if (/Error invoking remote method|Not found:\s*(?:GET|POST|PUT|PATCH|DELETE)|\/enterprise\//iu.test(message)) {
+    return '暂时无法读取 Token 画像，请稍后重试。';
+  }
+  return message.trim() || '暂时无法读取 Token 画像，请稍后重试。';
 }
 
 export function PersonalTokenUsagePanel({

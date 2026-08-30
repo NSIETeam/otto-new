@@ -9,7 +9,7 @@
  * 数据与动作全部来自 useSettingsData，本文件只负责排版。
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { SessionSummary } from 'otto-server';
 import type { UseSettingsData } from '../../state/useSettingsData.js';
 import { Panel, Card, Caption, Dot, Badge, Empty } from './HubUI.js';
@@ -93,8 +93,10 @@ export function MemoryPanel({ data }: { data: UseSettingsData }): React.JSX.Elem
         </button>
       </div>
 
-      {state.memoryFiles.length === 0 ? (
+      {!state.memoryLoaded ? (
         <Empty>正在加载记忆文件…</Empty>
+      ) : state.memoryFiles.length === 0 ? (
+        <Empty>当前没有记忆文件。</Empty>
       ) : (
         state.memoryFiles.map((f) => (
           <React.Fragment key={f.path}>
@@ -156,6 +158,24 @@ export function ToolsPanel({
   activeSession: SessionSummary | null;
 }): React.JSX.Element {
   const { state, actions } = data;
+  const [timedOut, setTimedOut] = useState(false);
+  const activeSessionId = activeSession?.sessionId ?? null;
+  const loaded = Boolean(
+    activeSessionId && state.toolsLoadedSessionId === activeSessionId,
+  );
+
+  useEffect(() => {
+    setTimedOut(false);
+    if (!activeSessionId || loaded) return undefined;
+    const timeout = window.setTimeout(() => setTimedOut(true), 10_000);
+    return () => window.clearTimeout(timeout);
+  }, [activeSessionId, loaded]);
+
+  const retry = (): void => {
+    if (!activeSession) return;
+    setTimedOut(false);
+    actions.refreshTools(activeSession.sessionId);
+  };
 
   return (
     <Panel
@@ -166,7 +186,7 @@ export function ToolsPanel({
           <button
             type="button"
             className="otto-hub__btn"
-            onClick={() => actions.refreshTools(activeSession.sessionId)}
+            onClick={retry}
           >
             刷新
           </button>
@@ -175,8 +195,15 @@ export function ToolsPanel({
     >
       {!activeSession ? (
         <Empty>请先选择一个会话。</Empty>
-      ) : state.tools.length === 0 ? (
+      ) : timedOut && !loaded ? (
+        <Empty>
+          工具清单读取超时，请检查当前会话连接。
+          <button type="button" className="otto-hub__btn" onClick={retry}>重试</button>
+        </Empty>
+      ) : !loaded ? (
         <Empty>正在加载工具清单…</Empty>
+      ) : state.tools.length === 0 ? (
+        <Empty>当前会话没有可用工具。</Empty>
       ) : (
         <Card>
           {state.tools.map((t) => (

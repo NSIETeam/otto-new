@@ -18,6 +18,12 @@ if (!previewWindow.otto) {
   const modelStorageKey = 'otto:browser-preview-models';
   let connected = false;
   let currentModel: string | null = 'preview-model';
+  let previewSettings = {
+    agentStyle: 'professional',
+    healthyUse: true,
+    backgroundModelTasksEnabled: false,
+    preferredLanguage: 'zh-CN',
+  };
   let sessions = [makeSession('preview-session', '园区服务本地演示')];
   let models = readModels();
   const previewAccount = {
@@ -261,6 +267,60 @@ if (!previewWindow.otto) {
     },
     send: (frame: { type?: string; payload?: Record<string, unknown> }) => {
       const payload = frame.payload ?? {};
+      if (frame.type === 'get_settings') emit('settings', previewSettings);
+      if (frame.type === 'set_setting') {
+        const key = String(payload.key);
+        if (key in previewSettings) {
+          previewSettings = { ...previewSettings, [key]: payload.value };
+        }
+        emit('settings', previewSettings);
+      }
+      if (frame.type === 'get_search_config') {
+        emit('search_config', {
+          provider: 'bing', apiUrl: '', model: '', hasApiKey: false,
+          configuredProviders: [],
+          diagnostics: {
+            tenantId: 'browser-preview', cacheEntries: 0, cacheHits: 0,
+            totalAttempts: 0, totalSuccesses: 0, estimatedCostCny: 0,
+            updatedAt: Date.now(), providers: [],
+          },
+        });
+      }
+      if (frame.type === 'mcp_list') emit('mcp_servers', { servers: [] });
+      if (frame.type === 'get_context_breakdown') {
+        emit('context_breakdown', {
+          sessionId: String(payload.sessionId ?? 'preview-session'),
+          modelDisplayName: 'GPT-5.1', maxTokens: 128_000,
+          systemPromptTokens: 2_400, systemToolsTokens: 1_800,
+          memoryFilesTokens: 320, messagesTokens: 4_200,
+          totalInputTokens: 8_720, freeSpaceTokens: 119_280,
+        });
+      }
+      if (frame.type === 'run_doctor') {
+        emit('doctor_report', {
+          platform: '浏览器预览', checks: [], presentCount: 0,
+          missingCount: 0, affectedCapabilities: [],
+        });
+      }
+      if (frame.type === 'get_todos') emit('todos_list', { todos: [] });
+      if (frame.type === 'get_memory') emit('memory_snapshot', { files: [] });
+      if (frame.type === 'get_skills') emit('skills_list', { skills: [] });
+      if (frame.type === 'get_tools') {
+        emit('tools_list', {
+          sessionId: String(payload.sessionId ?? 'preview-session'),
+          tools: [],
+        });
+      }
+      if (frame.type === 'get_workflows') emit('workflows_list', { workflows: [] });
+      if (frame.type === 'get_extensions') emit('extensions_list', { extensions: [] });
+      if (frame.type === 'get_ide_status') emit('ide_status', { status: 'disconnected' });
+      if (frame.type === 'get_stats') {
+        emit('stats_snapshot', {
+          models: {}, tools: { totalCalls: 0, totalSuccess: 0, totalFail: 0, byName: {} },
+          sessions: { total: sessions.length, active: 0, idle: sessions.length, archived: 0, frozen: 0 },
+        });
+      }
+      if (frame.type === 'get_knowledge') emit('knowledge_data', { entries: [] });
       if (frame.type === 'list_sessions') emit('sessions_list', { sessions });
       if (frame.type === 'get_models' || frame.type === 'list_models')
         emitModels();
@@ -349,7 +409,7 @@ if (!previewWindow.otto) {
     notificationShow: () => Promise.resolve(),
     notificationMarkRead: () => Promise.resolve(),
     notificationGetUnread: () => Promise.resolve([]),
-    appVersion: () => Promise.resolve('1.15.3-browser-preview'),
+    appVersion: () => Promise.resolve('1.9.14beta'),
     getWorkspaceDirectories: () => Promise.resolve({
       defaultPath: '/Users/demo',
       recentPaths: ['/Users/demo'],
@@ -372,7 +432,7 @@ if (!previewWindow.otto) {
     updateCheck: () =>
       Promise.resolve({
         status: 'up-to-date',
-        currentVersion: '1.15.3',
+        currentVersion: '1.9.14beta',
         latestVersion: null,
       }),
     updateDownload: () =>
@@ -833,6 +893,8 @@ if (!previewWindow.otto) {
     enterpriseKnowledgeRevise: () =>
       Promise.reject(new Error('预览模式不支持知识修订')),
     enterpriseKnowledgeRevisions: () => Promise.resolve([]),
+    customerModuleList: () => Promise.resolve([]),
+    customerModuleInstalledList: () => Promise.resolve([]),
   };
 
   previewWindow.otto = new Proxy(bridge, {

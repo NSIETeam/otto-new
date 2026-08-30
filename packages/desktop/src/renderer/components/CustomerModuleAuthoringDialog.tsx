@@ -22,7 +22,7 @@ export function CustomerModuleAuthoringDialog({
 }): React.JSX.Element | null {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<CustomerModuleAuthoringDraft>({
-    id: '', name: '', version: '1.0.0', description: '', releaseNotes: '', minimumOttoVersion: '1.15.3',
+    id: '', name: '', version: '1.0.0', description: '', releaseNotes: '', minimumOttoVersion: '1.9.14-beta.0',
     permissions: [], inputSchema: { type: 'object', properties: {} },
   });
   const [wasm, setWasm] = useState<Uint8Array | null>(null);
@@ -107,12 +107,12 @@ export function CustomerModuleAuthoringDialog({
           <button ref={modal.closeRef} type="button" aria-label="关闭创建模块" disabled={busy} onClick={onClose}>×</button>
         </header>
         <div className="otto-module-marketplace__catalog">
-          {step === 0 ? <div className="otto-settings-form">
+          {step === 0 ? <div className="otto-customer-module-authoring__form">
             <label>稳定模块 ID<input aria-label="稳定模块 ID" value={draft.id} onChange={(event) => setDraft({ ...draft, id: event.target.value })} placeholder="com.company.module" /></label>
             <label>模块名称<input aria-label="模块名称" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
             <label>版本<input aria-label="版本" value={draft.version} onChange={(event) => setDraft({ ...draft, version: event.target.value })} placeholder="1.0.0" /></label>
-            <label>模块说明<textarea aria-label="模块说明" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
-            <label>本版本变更说明<textarea aria-label="本版本变更说明" value={draft.releaseNotes} onChange={(event) => setDraft({ ...draft, releaseNotes: event.target.value })} /></label>
+            <label>模块说明<textarea className="otto-customer-module-authoring__textarea" aria-label="模块说明" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+            <label>本版本变更说明<textarea className="otto-customer-module-authoring__textarea" aria-label="本版本变更说明" value={draft.releaseNotes} onChange={(event) => setDraft({ ...draft, releaseNotes: event.target.value })} /></label>
           </div> : null}
           {step === 1 ? <label>WASM 文件<input aria-label="WASM 文件" type="file" accept=".wasm,application/wasm" onChange={(event) => {
             const file = event.target.files?.[0];

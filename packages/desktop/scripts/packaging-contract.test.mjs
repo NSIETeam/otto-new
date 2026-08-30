@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -379,6 +379,42 @@ describe('desktop packaging contract', () => {
       ]);
     } finally {
       await rm(appPath, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves an explicit OpenSSL runtime for portable macOS SQLCipher', async () => {
+    const runtimeDir = await mkdtemp(path.join(os.tmpdir(), 'otto-openssl-runtime-'));
+    const library = path.join(runtimeDir, 'libcrypto.3.dylib');
+    try {
+      await writeFile(library, 'test');
+      expect(
+        afterPack.findOpenSslRuntimeLibrary({ OTTO_OPENSSL_RUNTIME_DIR: runtimeDir }),
+      ).toBe(library);
+    } finally {
+      await rm(runtimeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('updates SQLCipher manifest and SBOM after making the binding portable', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'otto-sqlcipher-package-'));
+    try {
+      await Promise.all([
+        writeFile(path.join(directory, 'better_sqlite3.node'), 'patched-binding'),
+        writeFile(path.join(directory, 'manifest.json'), JSON.stringify({
+          sha256: 'old', sbom: { sha256: 'old' },
+        })),
+        writeFile(path.join(directory, 'sbom.cdx.json'), JSON.stringify({
+          metadata: { component: { name: 'better_sqlite3.node', hashes: [{ alg: 'SHA-256', content: 'old' }] } },
+        })),
+      ]);
+      afterPack.updatePackagedSqlCipherMetadata(directory);
+      const manifest = JSON.parse(await readFile(path.join(directory, 'manifest.json'), 'utf8'));
+      const sbom = JSON.parse(await readFile(path.join(directory, 'sbom.cdx.json'), 'utf8'));
+      expect(manifest.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(sbom.metadata.component.hashes[0].content).toBe(manifest.sha256);
+      expect(manifest.sbom.sha256).toMatch(/^[a-f0-9]{64}$/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
     }
   });
 });

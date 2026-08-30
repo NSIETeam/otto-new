@@ -15,6 +15,7 @@
  */
 
 import React, { useEffect, useId, useState } from 'react';
+import { displayOttoVersion } from '../versionDisplay.js';
 import { IconSparkle, IconClose } from './icons.js';
 
 interface ChangelogEntry {
@@ -25,6 +26,15 @@ interface ChangelogEntry {
 
 /** 版本更新说明（最新在前；只有列在这里的版本会触发弹窗）。 */
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.9.14-beta.0',
+    date: '2026-08-31',
+    items: [
+      '桌面界面统一为随系统切换的中性色主题，清理园区、企业协作和功能模块中的遗留蓝色强调',
+      '客户模块创建向导修复表单拥挤与重叠，并继续使用声明式权限和本地沙箱测试流程',
+      'Token 画像与园区服务不再展示底层 IPC 或接口原文；工具清单连接异常会超时并提供重试入口',
+    ],
+  },
   {
     version: '1.9.10',
     date: '2026-07-30',
@@ -379,7 +389,7 @@ export function WhatsNewDialog(): React.JSX.Element | null {
           </span>
           <div className="otto-park-dialog__headtext">
             <h2 className="otto-park-dialog__title" id={titleId}>
-              Otto 更新到 v{entry.version}
+              Otto 更新到 v{displayOttoVersion(entry.version)}
             </h2>
             <div className="otto-park-dialog__subtitle">{entry.date} · 本次更新内容</div>
           </div>

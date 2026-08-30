@@ -54,8 +54,10 @@ export interface SettingsDataState {
   doctorRunning: boolean;
   todos: TodoItemInfo[];
   memoryFiles: MemoryFileInfo[];
+  memoryLoaded: boolean;
   skills: SkillSummary[];
   tools: ToolSummary[];
+  toolsLoadedSessionId: string | null;
   compressRunning: boolean;
   compressMessage: string | null;
   /** 最近一次导出结果提示（成功给保存路径，取消/失败给说明）；null = 未导出过。 */
@@ -77,8 +79,10 @@ const initialState: SettingsDataState = {
   doctorRunning: false,
   todos: [],
   memoryFiles: [],
+  memoryLoaded: false,
   skills: [],
   tools: [],
+  toolsLoadedSessionId: null,
   compressRunning: false,
   compressMessage: null,
   exportMessage: null,
@@ -123,11 +127,15 @@ function reducer(state: SettingsDataState, action: Action): SettingsDataState {
         case 'todos_list':
           return { ...state, todos: frame.payload.todos };
         case 'memory_snapshot':
-          return { ...state, memoryFiles: frame.payload.files };
+          return { ...state, memoryFiles: frame.payload.files, memoryLoaded: true };
         case 'skills_list':
           return { ...state, skills: frame.payload.skills };
         case 'tools_list':
-          return { ...state, tools: frame.payload.tools };
+          return {
+            ...state,
+            tools: frame.payload.tools,
+            toolsLoadedSessionId: frame.payload.sessionId,
+          };
         case 'compress_result':
           return {
             ...state,

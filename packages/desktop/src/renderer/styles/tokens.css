@@ -5,7 +5,7 @@
  */
 
 /*
- * Otto Desktop 渲染层设计 token（浅色主题 + amber 强调）。
+ * Otto Desktop 渲染层设计 token（浅色主题 + 中性强调）。
  * 唯一基准：docs/otto-desktop-ui-spec.md。
  * 所有组件只引用这些变量，不硬编码颜色 / 间距 / 圆角。
  */
@@ -32,17 +32,17 @@
   --otto-border-subtle: var(--otto-border);
   --otto-shadow-soft: var(--otto-shadow-card);
 
-  /* —— amber 强调 —— */
-  --otto-accent: #007aff;
-  --otto-accent-hover: #0066d6;
-  --otto-accent-soft: rgba(0, 122, 255, 0.1);
+  /* —— 中性强调 —— */
+  --otto-accent: #1d1d1f;
+  --otto-accent-hover: #3a3a3c;
+  --otto-accent-soft: rgba(29, 29, 31, 0.09);
   --otto-accent-gradient: var(--otto-accent);
   --otto-accent-contrast: #ffffff;
   --otto-amber: var(--otto-accent);
 
   /* —— 语义来源徽章 —— */
-  --otto-feishu-fg: #0284c7;
-  --otto-feishu-bg: #e0f2fe;
+  --otto-feishu-fg: #4b5563;
+  --otto-feishu-bg: #f3f4f6;
   --otto-local-fg: #4b5563;
   --otto-local-bg: #f3f4f6;
 
@@ -66,10 +66,10 @@
   /* —— 状态 —— */
   --otto-success: #4b5563;
   --otto-danger: #4b5563;
-  --otto-running: #0284c7;
+  --otto-running: #4b5563;
   --otto-warning: #9a6700;
   --otto-warning-soft: color-mix(in srgb, var(--otto-warning) 11%, var(--otto-surface));
-  --otto-data-system: #0284c7;
+  --otto-data-system: #4b5563;
   --otto-data-tools: #7c5ac7;
   --otto-data-memory: #2f8f68;
   --otto-data-messages: #9a6700;
@@ -136,15 +136,16 @@
     --otto-border: #3a3a3c;
     --otto-border-strong: #636366;
 
-    /* —— amber 强调（暗底略提亮，防橙色发闷）—— */
-    --otto-accent: #0a84ff;
-    --otto-accent-hover: #409cff;
-    --otto-accent-soft: rgba(10, 132, 255, 0.18);
+    /* —— 中性强调 —— */
+    --otto-accent: #f5f5f7;
+    --otto-accent-hover: #d1d1d6;
+    --otto-accent-soft: rgba(245, 245, 247, 0.12);
     --otto-accent-gradient: var(--otto-accent);
+    --otto-accent-contrast: #1c1c1e;
 
     /* —— 语义来源徽章（暗底低饱和底 + 提亮前景）—— */
-    --otto-feishu-fg: #7dd3fc;
-    --otto-feishu-bg: rgba(56, 132, 214, 0.18);
+    --otto-feishu-fg: #d1d1d6;
+    --otto-feishu-bg: rgba(209, 209, 214, 0.14);
     --otto-local-fg: #a3a29d;
     --otto-local-bg: rgba(163, 162, 157, 0.18);
 
@@ -168,9 +169,9 @@
     /* —— 状态 —— */
     --otto-success: #a3a29d;
     --otto-danger: #a3a29d;
-    --otto-running: #7dd3fc;
+    --otto-running: #d1d1d6;
     --otto-warning: #e6b450;
-    --otto-data-system: #7dd3fc;
+    --otto-data-system: #d1d1d6;
     --otto-data-tools: #c4b5fd;
     --otto-data-memory: #6ee7b7;
     --otto-data-messages: #fcd34d;
@@ -252,16 +253,16 @@ button {
   --otto-text-tertiary: #aeaeb2;
   --otto-border: #e5e5ea;
   --otto-border-strong: #d1d1d6;
-  --otto-accent: #007aff;
-  --otto-accent-hover: #0066d6;
-  --otto-accent-soft: rgba(0, 122, 255, 0.1);
+  --otto-accent: #1d1d1f;
+  --otto-accent-hover: #3a3a3c;
+  --otto-accent-soft: rgba(29, 29, 31, 0.09);
   --otto-accent-gradient: var(--otto-accent);
   --otto-accent-contrast: #ffffff;
   --otto-success: #4b5563;
   --otto-danger: #4b5563;
-  --otto-running: #0284c7;
+  --otto-running: #4b5563;
   --otto-warning: #9a6700;
-  --otto-data-system: #0284c7;
+  --otto-data-system: #4b5563;
   --otto-data-tools: #7c5ac7;
   --otto-data-memory: #2f8f68;
   --otto-data-messages: #9a6700;
@@ -287,16 +288,16 @@ button {
   --otto-text-tertiary: #8e8e93;
   --otto-border: #3a3a3c;
   --otto-border-strong: #636366;
-  --otto-accent: #0a84ff;
-  --otto-accent-hover: #409cff;
-  --otto-accent-soft: rgba(10, 132, 255, 0.18);
+  --otto-accent: #f5f5f7;
+  --otto-accent-hover: #d1d1d6;
+  --otto-accent-soft: rgba(245, 245, 247, 0.12);
   --otto-accent-gradient: var(--otto-accent);
-  --otto-accent-contrast: #ffffff;
+  --otto-accent-contrast: #1c1c1e;
   --otto-success: #a3a29d;
   --otto-danger: #a3a29d;
-  --otto-running: #7dd3fc;
+  --otto-running: #d1d1d6;
   --otto-warning: #e6b450;
-  --otto-data-system: #7dd3fc;
+  --otto-data-system: #d1d1d6;
   --otto-data-tools: #c4b5fd;
   --otto-data-memory: #6ee7b7;
   --otto-data-messages: #fcd34d;

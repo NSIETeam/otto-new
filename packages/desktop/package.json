@@ -96,6 +96,13 @@
       "!**/*.map",
       "!**/*.md",
       "!**/*.markdown",
+      {
+        "from": "../core/skills-seed",
+        "to": "node_modules/otto-core/skills-seed",
+        "filter": [
+          "**/SKILL.md"
+        ]
+      },
       "!**/*.ts",
       "!**/*.d.ts",
       "!**/*.d.cts",
@@ -145,6 +152,9 @@
       "!**/node_modules/@otto/native/Cargo.*",
       "!**/node_modules/@otto/native/tsconfig*.json",
       "!**/node_modules/@otto/native/bin/**",
+      "!**/dist/src/utils/testUtils.js",
+      "!**/dist/src/utils/test-helpers.js",
+      "!**/dist/src/enterprise/fixtures/**",
       "!**/coverage/**",
       "!**/junit.xml",
       "!**/*.tsbuildinfo",

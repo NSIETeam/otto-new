@@ -5,15 +5,15 @@
  */
 
 /**
- * Otto Desktop 交付包聚合 + 自动发布脚本（Issue #8）。
+ * Otto Desktop 交付包构建与聚合脚本（Issue #8）。
  *
- * 产出 macOS 双架构与 Windows x64 安装包和更新清单，并可发布到 GitHub Releases。
+ * 产出 macOS 双架构与 Windows x64 安装包和更新清单。公开 Release、
+ * 更新镜像、兼容仓库与企业服务只能由受保护的 release.yml 工作流处理。
  *
  * 用法：
  *   node scripts/make-delivery-zip.mjs                  # 仅聚合
  *   node scripts/make-delivery-zip.mjs --build          # 先构建再聚合
- *   node scripts/make-delivery-zip.mjs --publish        # 聚合 + 发布到 GitHub
- *   node scripts/make-delivery-zip.mjs --build --publish # 全流程
+ *   --publish 已永久禁用，防止绕过签名与多目标发布事务门禁。
  *
  * 产物（release/ 目录）：
  *   Otto-<version>-arm64.dmg          — Mac ARM64 安装包
@@ -87,7 +87,12 @@ const RELEASE_ASSET_NAMES = [...BUILD_ASSET_NAMES, 'latest.json'];
 
 const ARGS = process.argv.slice(2);
 const SHOULD_BUILD = ARGS.includes('--build');
-const SHOULD_PUBLISH = ARGS.includes('--publish');
+const PUBLISH_REQUESTED = ARGS.includes('--publish');
+if (PUBLISH_REQUESTED) {
+  throw new Error(
+    '本地 --publish 已禁用；只能通过受保护的 .github/workflows/release.yml 创建或公开 Release。',
+  );
+}
 const ALLOW_UNSIGNED_MAC = process.env.OTTO_ALLOW_UNSIGNED_MAC === '1';
 const GITHUB_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
 const NPM_BIN = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -1129,13 +1134,13 @@ async function publishToGithub(localAssets, sourceCommit) {
 
 async function main() {
   console.log('');
-  log('OTTO', `Otto Desktop v${VERSION} 构建发布工具`);
+  log('OTTO', `Otto Desktop v${VERSION} 构建聚合工具`);
   log('OTTO', `工作目录: ${DESKTOP_DIR}`);
   console.log('');
 
   const sourceState = inspectSourceState({
-    requireClean: SHOULD_BUILD || SHOULD_PUBLISH,
-    requirePushed: SHOULD_PUBLISH,
+    requireClean: SHOULD_BUILD,
+    requirePushed: false,
   });
   log('CHECK', `源码提交: ${sourceState.sourceCommit}`);
 
@@ -1153,19 +1158,6 @@ async function main() {
     'CHECK',
     `本地固定 7 个 Release 资产及双更新清单 v${VERSION} 全部核验通过`,
   );
-
-  if (SHOULD_PUBLISH) {
-    assertSourceStateUnchanged(sourceState.sourceCommit, {
-      requirePushed: true,
-      phase: '发布前核验',
-    });
-    await readAndVerifyBuildProvenance(localAssets, sourceState.sourceCommit);
-    log(
-      'CHECK',
-      `6 个安装资产均来自已推送源码提交 ${sourceState.sourceCommit}`,
-    );
-    await publishToGithub(localAssets, sourceState.sourceCommit);
-  }
 
   console.log('');
   log('DONE', '全部流程完成');

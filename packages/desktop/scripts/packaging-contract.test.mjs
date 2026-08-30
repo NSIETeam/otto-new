@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -264,6 +265,9 @@ describe('desktop packaging contract', () => {
   });
 
   it('runs the shared app.asar content and size gate on every packaged platform', async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+    );
     const verifier = await readFile(
       path.join(packageRoot, 'scripts', 'verify-packaged-content.mjs'),
       'utf8',
@@ -281,6 +285,24 @@ describe('desktop packaging contract', () => {
     expect(verifier).toContain('app.asar exceeds size budget');
     expect(runtimeVerifier).toContain('verifyPackagedContent(archivePath)');
     expect(runtimeVerifier).toContain('verifyPackagedOttoNative({');
+    expect(packageJson.build.files).toContainEqual({
+      from: '../core/skills-seed',
+      to: 'node_modules/otto-core/skills-seed',
+      filter: ['**/SKILL.md'],
+    });
+    expect(packageJson.build.files).toContain(
+      '!**/dist/src/utils/testUtils.js',
+    );
+    expect(packageJson.build.files).toContain(
+      '!**/dist/src/utils/test-helpers.js',
+    );
+    expect(packageJson.build.files).toContain(
+      '!**/dist/src/enterprise/fixtures/**',
+    );
+    expect(runtimeVerifier).toContain("'skills-seed'");
+    expect(runtimeVerifier).toContain(
+      'node_modules/otto-core/skills-seed/${skillName}/SKILL.md',
+    );
     expect(runtimeVerifier).toContain("'node_modules/otto-server/dist/bin.js'");
     expect(runtimeVerifier).toContain(
       "'node_modules/qrcode-terminal/lib/main.js'",
@@ -391,6 +413,44 @@ describe('desktop packaging contract', () => {
       'utf8',
     );
     expect(script).toMatch(/'--publish',\s*'never'/);
+  });
+
+  it('rejects local direct publication before inspecting or uploading artifacts', async () => {
+    const scriptPath = path.join(
+      packageRoot,
+      'scripts',
+      'make-delivery-zip.mjs',
+    );
+    const [script, packageJson, workflow] = await Promise.all([
+      readFile(scriptPath, 'utf8'),
+      readFile(path.join(packageRoot, 'package.json'), 'utf8').then(JSON.parse),
+      readFile(
+        path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+        'utf8',
+      ),
+    ]);
+    const guardIndex = script.indexOf('if (PUBLISH_REQUESTED) {');
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(guardIndex).toBeLessThan(script.indexOf('const GITHUB_TOKEN'));
+    expect(script).not.toContain('await publishToGithub(');
+    expect(packageJson.scripts.package).toBe(
+      'node scripts/make-delivery-zip.mjs',
+    );
+    expect(packageJson.scripts.release).toBe(
+      'node scripts/make-delivery-zip.mjs --build',
+    );
+    expect(workflow).toContain(
+      'run: node scripts/make-delivery-zip.mjs --build',
+    );
+    expect(workflow).not.toContain('make-delivery-zip.mjs --publish');
+    const result = spawnSync(process.execPath, [scriptPath, '--publish'], {
+      cwd: packageRoot,
+      encoding: 'utf8',
+    });
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain(
+      '本地 --publish 已禁用',
+    );
   });
 
   it('requires an explicit transition flag before disabling macOS signing', async () => {

@@ -24,6 +24,9 @@ export const FORBIDDEN_ASAR_PREFIXES = Object.freeze([
   'node_modules/pdf-parse/lib/pdf.js/v1.10.88',
   'node_modules/pdf-parse/lib/pdf.js/v2.0.550',
   'node_modules/playwright-core/lib/vite',
+  'node_modules/otto-core/dist/src/utils/testUtils.js',
+  'node_modules/otto-core/dist/src/utils/test-helpers.js',
+  'node_modules/otto-server/dist/src/enterprise/fixtures',
   'node_modules/electron',
 ]);
 

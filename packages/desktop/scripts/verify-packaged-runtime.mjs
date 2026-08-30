@@ -141,6 +141,33 @@ export function verifyPackagedRuntime(
     requireAsarEntry(entries, entry);
   }
 
+  const builtinSkillSource = path.join(
+    repoRoot,
+    'packages',
+    'core',
+    'skills-seed',
+  );
+  const builtinSkillNames = readdirSync(builtinSkillSource, {
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  if (builtinSkillNames.length === 0) {
+    throw new Error('built-in skill source is unexpectedly empty');
+  }
+  for (const skillName of builtinSkillNames) {
+    const skillEntry = `node_modules/otto-core/skills-seed/${skillName}/SKILL.md`;
+    requireAsarEntry(entries, skillEntry);
+    const instructions = asar
+      .extractFile(archivePath, skillEntry.split('/').join(path.sep))
+      .toString('utf8')
+      .trim();
+    if (instructions.length === 0) {
+      throw new Error(`packaged built-in skill is empty: ${skillName}`);
+    }
+  }
+
   const packagedDesktop = readAsarJson(archivePath, 'package.json');
   const packagedServer = readAsarJson(
     archivePath,

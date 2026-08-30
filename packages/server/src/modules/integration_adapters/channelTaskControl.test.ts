@@ -11,6 +11,7 @@ import {
 const NOW = 2_000_000;
 const context: ChannelTaskMessageContext = {
   provider: 'feishu', installationId: 'installation-1', tenantId: 'tenant-1',
+  providerUserId: 'provider-user-1',
   userId: 'user-1', deviceId: 'device-1', messageId: 'message-1', receivedAtMs: NOW,
   signatureVerified: true, installationConnected: true,
   identityBound: true, identityActive: true,

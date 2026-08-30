@@ -110,6 +110,7 @@ export class DurableChannelTaskProposalBackendV1 implements ChannelTaskProposalB
             provider: input.context.provider,
             installationId: input.context.installationId,
             tenantId: input.context.tenantId,
+            providerUserId: input.context.providerUserId,
             userId: input.context.userId,
             deviceId: input.context.deviceId,
             messageId: input.context.messageId,

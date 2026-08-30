@@ -27,6 +27,8 @@ export interface ChannelTaskMessageContext {
   provider: 'feishu' | 'lark' | 'wecom';
   installationId: string;
   tenantId: string;
+  /** Provider-native reply target, distinct from the canonical Otto user id. */
+  providerUserId: string;
   userId: string;
   deviceId?: string;
   messageId: string;

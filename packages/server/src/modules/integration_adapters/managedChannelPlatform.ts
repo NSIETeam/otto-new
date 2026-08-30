@@ -27,6 +27,7 @@ import {
 } from './channelTaskControl.js';
 import { HttpChannelPairingBrokerV1 } from './httpChannelPairingBroker.js';
 import { ManagedChannelConnectorV1 } from './managedChannelConnector.js';
+import { ChannelWorkflowMilestoneNotifierV1 } from './channelWorkflowMilestones.js';
 import {
   WorkflowTaskControlPort,
   type ChannelTaskProposalBackend,
@@ -50,6 +51,7 @@ export interface ManagedChannelPlatformOptions {
   fetchImpl?: typeof fetch;
   createSocket?: BrokerChannelRuntimeOptions['createSocket'];
   now?: () => number;
+  milestoneFilePath?: string;
 }
 
 export interface ManagedChannelPlatformStartResult {
@@ -62,6 +64,7 @@ export interface ManagedChannelPlatformStartResult {
 export class ManagedChannelPlatformV1 {
   readonly connectors: Readonly<Partial<Record<ChannelProvider, ChannelConnectorV1>>>;
   private readonly managedConnectors: readonly ManagedChannelConnectorV1[];
+  private readonly milestones: ChannelWorkflowMilestoneNotifierV1;
 
   constructor(private readonly options: ManagedChannelPlatformOptions) {
     const connectorMap: Partial<Record<ChannelProvider, ManagedChannelConnectorV1>> = {};
@@ -110,6 +113,25 @@ export class ManagedChannelPlatformV1 {
     }
     this.connectors = connectorMap;
     this.managedConnectors = Object.values(connectorMap);
+    this.milestones = new ChannelWorkflowMilestoneNotifierV1(
+      options.workflowBackend,
+      {
+        send: async ({ provider, installationId, target, text, idempotencyKey }) => {
+          const connector = connectorMap[provider];
+          if (!connector) throw new Error('managed channel connector is unavailable');
+          await connector.send(installationId, { target, text, idempotencyKey });
+        },
+      },
+      { ...(options.milestoneFilePath ? { filePath: options.milestoneFilePath } : {}) },
+    );
+  }
+
+  milestoneInputVersion(): Promise<string | undefined> {
+    return this.milestones.inputVersion();
+  }
+
+  flushMilestones(): Promise<void> {
+    return this.milestones.flush();
   }
 
   async startInstalled(): Promise<ManagedChannelPlatformStartResult[]> {

@@ -61,6 +61,7 @@ export class BrokerChannelTaskBridgeV1 {
       provider: installation.provider,
       installationId: installation.installationId,
       tenantId: installation.tenantId,
+      providerUserId: message.userId,
       userId: identity.canonicalUserId,
       deviceId: message.deviceId,
       messageId: message.messageId,

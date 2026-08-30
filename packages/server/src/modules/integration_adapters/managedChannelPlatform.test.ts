@@ -27,10 +27,17 @@ const installation = {
 describe('ManagedChannelPlatformV1', () => {
   it('connects an installed channel and routes an authenticated message through workflow and reply', async () => {
     const socket = new FakeSocket();
-    const cancel = vi.fn(async () => ({
+    const task = {
       id: 'task-1', definitionId: 'daily-check', status: 'cancelled',
-      updatedAt: new Date(2_000).toISOString(), steps: [],
-    }));
+      updatedAt: new Date(2_000).toISOString(), steps: [{
+        stepId: 'execute', status: 'running', input: { origin: {
+          provider: 'lark', installationId: installation.installationId,
+          tenantId: 'tenant-1', providerUserId: 'provider-user-1',
+          userId: 'otto-user-1', deviceId: 'device-1',
+        } },
+      }],
+    };
+    const cancel = vi.fn(async () => task);
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       providerMessageId: 'om_reply_1',
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
@@ -72,7 +79,7 @@ describe('ManagedChannelPlatformV1', () => {
         resolve: async () => ({ canonicalUserId: 'otto-user-1', active: true }),
       },
       workflowBackend: {
-        list: async () => [], get: async () => null,
+        list: async () => [task], get: async () => task,
         pause: async () => null, resume: async () => null, cancel,
         takeOver: async () => null, approve: async () => null,
       },

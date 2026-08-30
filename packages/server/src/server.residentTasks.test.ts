@@ -3,13 +3,18 @@ import { InMemoryRecurringTaskStateStore } from 'otto-core';
 
 import { OttoServer } from './server.js';
 import type { ResidentWorkflowSupervisor } from 'otto-workflow';
+import type { ManagedChannelPlatformV1 } from './modules/integration_adapters/managedChannelPlatform.js';
 
-function createServer(residentWorkflowSupervisor?: ResidentWorkflowSupervisor): OttoServer {
+function createServer(
+  residentWorkflowSupervisor?: ResidentWorkflowSupervisor,
+  managedChannelPlatform?: ManagedChannelPlatformV1,
+): OttoServer {
   return new OttoServer({
     port: 0,
     mock: true,
     recurringTaskStateStore: new InMemoryRecurringTaskStateStore(),
     residentWorkflowSupervisor,
+    managedChannelPlatform,
   });
 }
 
@@ -107,6 +112,37 @@ describe('OttoServer resident task registration', () => {
     inputVersion = 'wf-1:2';
     await vi.advanceTimersByTimeAsync(1_000);
     expect(tick).toHaveBeenCalledTimes(2);
+    await server.stop();
+    vi.useRealTimers();
+  });
+
+  it('registers zero-cost channel milestones and skips unchanged workflow state', async () => {
+    vi.useFakeTimers();
+    let inputVersion = 'wf-1:running:1';
+    const flushMilestones = vi.fn(async () => undefined);
+    const platform = {
+      connectors: {},
+      milestoneInputVersion: vi.fn(async () => inputVersion),
+      flushMilestones,
+      stopAll: vi.fn(async () => undefined),
+    } as unknown as ManagedChannelPlatformV1;
+    const server = createServer(undefined, platform);
+    configureMaintenance(server, false);
+
+    expect(server.residentTasks()).toEqual(expect.arrayContaining([expect.objectContaining({
+      name: 'server-channel-workflow-milestones',
+      source: 'packages/server/src/server.ts#channel-workflow-milestones',
+      estimatedCostUsdPerRun: 0,
+      paid: false,
+      intervalMs: 2_000,
+    })]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(flushMilestones).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(flushMilestones).toHaveBeenCalledOnce();
+    inputVersion = 'wf-1:succeeded:2';
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(flushMilestones).toHaveBeenCalledTimes(2);
     await server.stop();
     vi.useRealTimers();
   });

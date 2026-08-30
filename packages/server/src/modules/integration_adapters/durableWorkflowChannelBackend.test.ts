@@ -23,7 +23,7 @@ afterEach(async () => {
 const context = {
   provider: 'lark' as const,
   installationId: 'channel_lark_0123456789abcdef01234567',
-  tenantId: 'tenant-1', userId: 'otto-user-1', messageId: 'message-1',
+  tenantId: 'tenant-1', providerUserId: 'provider-user-1', userId: 'otto-user-1', messageId: 'message-1',
   deviceId: 'device-1',
   receivedAtMs: 2_000, signatureVerified: true, installationConnected: true,
   identityBound: true, identityActive: true,
@@ -60,7 +60,7 @@ describe('durable channel workflow adapters', () => {
         input: expect.objectContaining({
           request: '巡检销售后台并汇报异常',
           approvalExpiresAtMs: 610_000,
-          origin: expect.objectContaining({ tenantId: 'tenant-1', userId: 'otto-user-1', deviceId: 'device-1' }),
+          origin: expect.objectContaining({ tenantId: 'tenant-1', providerUserId: 'provider-user-1', userId: 'otto-user-1', deviceId: 'device-1' }),
         }),
       })],
     });

@@ -501,6 +501,7 @@ export class OttoServer {
   private readonly managedChannelPlatform?: ManagedChannelPlatformV1;
   private readonly residentWorkflowSupervisor?: ResidentWorkflowSupervisor;
   private stopResidentWorkflowWorker?: () => void;
+  private stopChannelWorkflowMilestones?: () => void;
   private readonly channelIdentityRegistry: ChannelIdentityRegistryV1;
   private readonly channelPairingProviders = new Map<string, ChannelProvider>();
 
@@ -737,6 +738,8 @@ export class OttoServer {
     this.stopAutoCompression = undefined;
     this.stopResidentWorkflowWorker?.();
     this.stopResidentWorkflowWorker = undefined;
+    this.stopChannelWorkflowMilestones?.();
+    this.stopChannelWorkflowMilestones = undefined;
     getHabitAnalyzer().stop();
     this.recurringTaskRegistry.stopAll();
     this.sessionEvictUnsub?.();
@@ -2123,6 +2126,19 @@ export class OttoServer {
         missedRunPolicy: 'run-once',
         getInputVersion: () => this.residentWorkflowSupervisor!.inputVersion(),
         run: () => this.residentWorkflowSupervisor!.tick().then(() => undefined),
+      });
+    }
+    if (this.managedChannelPlatform && !this.stopChannelWorkflowMilestones) {
+      this.stopChannelWorkflowMilestones = this.recurringTaskRegistry.register({
+        name: 'server-channel-workflow-milestones',
+        source: 'packages/server/src/server.ts#channel-workflow-milestones',
+        definitionVersion: 1,
+        intervalMs: 2_000,
+        initialDelayMs: 0,
+        estimatedCostUsdPerRun: 0,
+        missedRunPolicy: 'run-once',
+        getInputVersion: () => this.managedChannelPlatform!.milestoneInputVersion(),
+        run: () => this.managedChannelPlatform!.flushMilestones(),
       });
     }
     if (!this.stopMemoryMaintenance) {

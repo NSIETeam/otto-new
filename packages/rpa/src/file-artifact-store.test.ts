@@ -41,4 +41,30 @@ describe('FileRpaArtifactStore', () => {
     })).rejects.toThrow('exceeds 2 bytes');
     await expect(readdir(root)).resolves.toEqual([]);
   });
+
+  it('bounds cumulative bytes without deleting referenced evidence', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-rpa-artifact-'));
+    roots.push(root);
+    const store = new FileRpaArtifactStore(root, 3, { maxTotalBytes: 4, maxArtifacts: 10 });
+    await store.put({ mediaType: 'image/png', bytes: new Uint8Array([1, 2, 3]), redactedSummary: 'first' });
+
+    await expect(store.put({
+      mediaType: 'image/png', bytes: new Uint8Array([4, 5]), redactedSummary: 'over total quota',
+    })).rejects.toThrow('4 byte limit');
+    expect(await readdir(root)).toHaveLength(1);
+  });
+
+  it('serializes concurrent writes so the file-count quota cannot race', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-rpa-artifact-'));
+    roots.push(root);
+    const store = new FileRpaArtifactStore(root, 2, { maxTotalBytes: 4, maxArtifacts: 1 });
+    const outcomes = await Promise.allSettled([
+      store.put({ mediaType: 'image/png', bytes: new Uint8Array([1]), redactedSummary: 'one' }),
+      store.put({ mediaType: 'image/png', bytes: new Uint8Array([2]), redactedSummary: 'two' }),
+    ]);
+
+    expect(outcomes.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(await readdir(root)).toHaveLength(1);
+  });
 });

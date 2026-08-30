@@ -245,4 +245,23 @@ describe('RpaRunner', () => {
     });
     expect(put).not.toHaveBeenCalled();
   });
+
+  it('persists earlier evidence references when a later artifact write hits quota', async () => {
+    const store = memoryStore();
+    const put = vi.fn()
+      .mockResolvedValueOnce({ id: 'artifact-1', sha256: 'a'.repeat(64), mediaType: 'image/png', redactedSummary: 'first' })
+      .mockRejectedValueOnce(new Error('RPA artifact store exceeds its byte limit.'));
+    const runner = new RpaRunner([workflow], store, {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute: vi.fn().mockResolvedValue({ artifacts: [
+      { mediaType: 'image/png', bytes: new Uint8Array([1]), redactedSummary: 'first' },
+      { mediaType: 'image/png', bytes: new Uint8Array([2]), redactedSummary: 'second' },
+    ] }) }, { put });
+    const run = await runner.start(workflow.id);
+
+    await expect(runner.runNext(run.id)).resolves.toMatchObject({
+      state: 'failed',
+      receipts: [{ state: 'failed', artifactIds: ['artifact-1'], error: expect.stringContaining('byte limit') }],
+    });
+  });
 });

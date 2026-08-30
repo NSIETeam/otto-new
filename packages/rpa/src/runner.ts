@@ -105,18 +105,22 @@ export class RpaRunner {
       } finally {
         if (signal && abortListener) signal.removeEventListener('abort', abortListener);
       }
-      const saved = await this.store.get(runId);
+      let saved = await this.store.get(runId);
       if (!saved) return null;
-      const completed = receiptFor(saved, step.id)!;
       const output = boundedOutput(outcome.output);
-      completed.artifactIds = [];
+      receiptFor(saved, step.id)!.artifactIds = [];
       const artifacts = outcome.artifacts ?? [];
       if (artifacts.length > MAX_STEP_ARTIFACTS) {
         throw new Error(`RPA step produced more than ${MAX_STEP_ARTIFACTS} artifacts.`);
       }
       for (const artifact of artifacts) {
-        completed.artifactIds.push((await this.artifacts.put(artifact)).id);
+        receiptFor(saved, step.id)!.artifactIds.push((await this.artifacts.put(artifact)).id);
+        // Persist each evidence reference before accepting another artifact.
+        // If a later quota/disk write fails, already-written evidence remains
+        // reachable from the failed receipt instead of becoming an orphan.
+        saved = await this.store.save(saved, saved.revision);
       }
+      const completed = receiptFor(saved, step.id)!;
       completed.output = output;
       completed.state = 'succeeded';
       saved.currentStepId = null;

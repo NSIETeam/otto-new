@@ -354,6 +354,7 @@ means no source-level substitute is accepted.
 | Active Ctrl+B/auto-background shell path registers a process-group stop function, persists a durable external Workflow step, and uses truthful success/failure/cancelled terminal states | `shell.ts`, `externalTaskWorkflowJournal.ts`, `backgroundTaskManager.ts`, focused journal/shell tests | Automated |
 | Durable RPA supports persisted pause/resume/cancel, propagates abort signals, and converts interrupted external actions to non-replayable `unknown_outcome` | `rpa/src/runner.ts`, `core/src/tools/rpa-run.ts`, focused runner/tool tests | Automated |
 | RPA resource bounds limit workflows to 100 steps, step output to 64 KiB, artifacts to 10 per step and 10 MiB each with atomic writes | `runner.ts`, `file-artifact-store.ts`, focused overflow tests | Automated |
+| RPA evidence storage is globally bounded to 512 MiB and 10,000 files with incrementally cached accounting; concurrent writes are serialized, and quota/disk failure retains earlier evidence references on the visible failed receipt instead of deleting or orphaning them | `file-artifact-store.ts`, `runner.ts`, focused quota tests | Automated |
 | Real managed Feishu/Lark installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | Real managed WeCom installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | macOS Accessibility RPA control and recovery | Signed local build and isolated macOS account | Pending smoke |

@@ -640,9 +640,9 @@ Reserve this tool for system commands and terminal operations that have no dedic
         };
       }
 
-      taskManager.killTask(taskId);
+      taskManager.cancelTask(taskId);
 
-      const msg = `Successfully terminated background task "${taskId}" (Command: \`${task.command}\`).`;
+      const msg = `Cancellation requested for background task "${taskId}" (Command: \`${task.command}\`).`;
       return {
         llmContent: msg,
         returnDisplay: msg,
@@ -925,8 +925,9 @@ Reserve this tool for system commands and terminal operations that have no dedic
 
             // Create a background task to track this process
             const taskManager = getBackgroundTaskManager();
-            const task = taskManager.createTask(params.command, params.directory);
+            const task = taskManager.createTask(params.command, params.directory, 'shell');
             backgroundTaskId = task.id;
+            taskManager.registerStop(task.id, () => { void abortHandler(); });
 
             if (shell.pid) {
               taskManager.setTaskPid(task.id, shell.pid);
@@ -1173,121 +1174,4 @@ Reserve this tool for system commands and terminal operations that have no dedic
     };
   }
 
-  /**
-   * 在后台执行 shell 命令，立即返回任务ID
-   * 用于支持 Ctrl+B 快捷键让用户取消等待
-   */
-  executeBackground(
-    params: ShellToolParams,
-    signal: AbortSignal,
-  ): ToolResult {
-    const strippedCommand = stripShellWrapper(params.command);
-    const validationError = this.validateToolParams({
-      ...params,
-      command: strippedCommand,
-    });
-    if (validationError) {
-      return {
-        llmContent: validationError,
-        returnDisplay: validationError,
-      };
-    }
-
-    if (signal.aborted) {
-      return {
-        llmContent: 'Command was cancelled by user before it could start.',
-        returnDisplay: 'Command cancelled by user.',
-      };
-    }
-
-    const taskManager = getBackgroundTaskManager();
-    const task = taskManager.createTask(strippedCommand, params.directory);
-
-    const isWindows = os.platform() === 'win32';
-    const tempFileName = `shell_pgrep_${crypto
-      .randomBytes(6)
-      .toString('hex')}.tmp`;
-    const tempFilePath = path.join(os.tmpdir(), tempFileName);
-
-    const commandToExecute = isWindows
-      ? strippedCommand
-      : (() => {
-          let command = strippedCommand.trim();
-          if (!command.endsWith('&')) command += ';';
-          return `{ ${command} }; __code=$?; pgrep -g 0 >${tempFilePath} 2>&1; exit $__code;`;
-        })();
-
-    const shell = isWindows
-      ? spawn('cmd.exe', ['/c', commandToExecute], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          cwd: path.resolve(this.config.getTargetDir(), params.directory || ''),
-          env: {
-            ...process.env,
-            // New marker for tools that detect they run inside Otto's shell.
-            // Legacy GEMINI_CLI kept so existing user scripts keep working.
-            OTTO_CLI: '1',
-            GEMINI_CLI: '1',
-          },
-          shell: false,
-          windowsVerbatimArguments: true,
-          detached: true, // 后台任务需要 detached
-        })
-      : spawn('bash', ['-c', commandToExecute], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          detached: true,
-          cwd: path.resolve(this.config.getTargetDir(), params.directory || ''),
-          env: {
-            ...process.env,
-            // New marker for tools that detect they run inside Otto's shell.
-            // Legacy GEMINI_CLI kept so existing user scripts keep working.
-            OTTO_CLI: '1',
-            GEMINI_CLI: '1',
-          },
-        });
-
-    if (shell.pid) {
-      taskManager.setTaskPid(task.id, shell.pid);
-    }
-
-    shell.stdout.on('data', (data: Buffer) => {
-      const decodedStr = decodeWindowsCommandOutput(data, strippedCommand);
-      const str = sanitizeShellOutput(decodedStr);
-      taskManager.appendOutput(task.id, str);
-    });
-
-    shell.stderr.on('data', (data: Buffer) => {
-      const decodedStr = decodeWindowsCommandOutput(data, strippedCommand);
-      const str = sanitizeShellOutput(decodedStr);
-      taskManager.appendStderr(task.id, str);
-    });
-
-    shell.on('error', (err: Error) => {
-      taskManager.failTask(task.id, err.message);
-    });
-
-    shell.on('exit', (exitCode: number | null, signal: NodeJS.Signals | null) => {
-      taskManager.completeTask(task.id, {
-        exitCode: exitCode ?? undefined,
-        signal: signal ?? undefined,
-        error: signal ? `Process terminated by external signal: ${signal} (user may have cancelled it)` : undefined,
-      });
-
-      // 清理临时文件
-      if (fs.existsSync(tempFilePath)) {
-        try {
-          fs.unlinkSync(tempFilePath);
-        } catch {
-          // ignore
-        }
-      }
-    });
-
-    // 返回任务ID给 AI 和用户
-    const taskDescription = `${strippedCommand}${params.directory ? ` [in ${params.directory}]` : ''}`;
-    return {
-      llmContent: `Background task started (Task ID: ${task.id}). Command: ${taskDescription}`,
-      returnDisplay: `Running in background (Task ID: ${task.id})`,
-      backgroundTaskId: task.id, // 新增字段，用于 CLI 层感知
-    };
-  }
 }

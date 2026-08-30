@@ -11,12 +11,14 @@ import * as summarizer from '../utils/summarizer.js';
 import { OttoClient } from '../core/client.js';
 import { ToolExecuteConfirmationDetails } from './tools.js';
 import os from 'os';
+import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
 
 describe('ShellTool Bug Reproduction', () => {
   let shellTool: ShellTool;
   let config: Config;
 
   beforeEach(() => {
+    getBackgroundTaskManager().clearAllTasks();
     config = {
       getCoreTools: () => undefined,
       getExcludeTools: () => undefined,
@@ -195,6 +197,7 @@ describe('ShellTool - Background Task Actions', () => {
   let config: Config;
 
   beforeEach(() => {
+    getBackgroundTaskManager().clearAllTasks();
     config = {
       getCoreTools: () => undefined,
       getExcludeTools: () => undefined,
@@ -226,5 +229,22 @@ describe('ShellTool - Background Task Actions', () => {
 
     const confirmStop = await shellTool.shouldConfirmExecute({ command: '', action: 'stop_background_task', backgroundTaskId: 'abc' }, signal);
     expect(confirmStop).toBe(false);
+  });
+
+  it('stops a background shell through its registered process teardown', async () => {
+    const manager = getBackgroundTaskManager();
+    const task = manager.createTask('long-running-server', '.', 'shell');
+    const stop = vi.fn();
+    manager.registerStop(task.id, stop);
+
+    const result = await shellTool.execute({
+      command: '',
+      action: 'stop_background_task',
+      backgroundTaskId: task.id,
+    }, new AbortController().signal);
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(manager.getTask(task.id)?.status).toBe('cancelled');
+    expect(result.llmContent).toContain('Cancellation requested');
   });
 });

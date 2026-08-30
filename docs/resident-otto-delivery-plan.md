@@ -346,6 +346,7 @@ means no source-level substitute is accepted.
 | ACP delegate session handle is persisted before work; every background turn links to a durable external Workflow step; restart becomes `interrupted`/`unknown_outcome`, never silent replay | `delegateWorkflowJournal.ts`, `acpAgentClient.ts`, `backgroundTaskManager.ts`, delegate status and restart tests | Automated; BackgroundTaskManager remains a compatibility UI mirror |
 | Starting a local external coding agent requires explicit approval and declares its affected working directory | `delegate-agent.ts`, focused confirmation tests | Automated |
 | Background delegate owns a registered stop function; parent-turn cancellation cannot kill it, while explicit cancellation and clear-all stop the ACP turn exactly once | `backgroundTaskManager.ts`, `delegate-agent.ts`, focused lifecycle tests | Automated |
+| Active Ctrl+B/auto-background shell path registers a process-group stop function and uses the shared cancelled terminal state | `shell.ts`, `backgroundTaskManager.ts`, focused shell stop tests | Automated; durable Workflow link pending |
 | Real managed Feishu/Lark installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | Real managed WeCom installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | macOS Accessibility RPA control and recovery | Signed local build and isolated macOS account | Pending smoke |
@@ -410,3 +411,9 @@ means no source-level substitute is accepted.
   clear-all invoke it exactly once, while late output or completion cannot
   overwrite a cancelled terminal state. This is the process-local stop half of
   the window-close policy; the Desktop choice UI still remains separate.
+- Removed the unreferenced `ShellTool.executeBackground()` implementation and
+  the PID-only `BackgroundTaskManager.killTask()` branch. They duplicated the
+  live Ctrl+B/auto-background spawn path and terminated a different process
+  scope on Unix. The live path now registers its existing process-group abort
+  function and uses the shared `cancelled` transition; durable shell Workflow
+  journaling remains the next migration step.

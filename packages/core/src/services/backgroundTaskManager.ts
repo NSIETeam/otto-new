@@ -6,7 +6,6 @@
 
 
 import { EventEmitter } from 'events';
-import { spawn } from 'child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -325,33 +324,6 @@ export class BackgroundTaskManager extends EventEmitter {
       task.endTime = Date.now();
       this.persist(task);
       this.emit('task-cancelled', { type: 'task-cancelled', task });
-    }
-    return task;
-  }
-
-  /**
-   * 强制终止任务进程
-   */
-  killTask(taskId: string): BackgroundTask | undefined {
-    const task = this.tasks.get(taskId);
-    if (task && task.status === 'running' && task.pid) {
-      try {
-        // 尝试终止进程
-        if (process.platform === 'win32') {
-          // Windows: 使用 taskkill
-          spawn('taskkill', ['/pid', task.pid.toString(), '/f', '/t']);
-        } else {
-          // Unix: 发送 SIGTERM
-          process.kill(task.pid, 'SIGTERM');
-        }
-
-        task.status = 'failed';
-        task.endTime = Date.now();
-        task.error = 'Killed by user';
-        this.emit('task-killed', { type: 'task-killed', task });
-      } catch (error) {
-        console.error(`Failed to kill task ${taskId}:`, error);
-      }
     }
     return task;
   }

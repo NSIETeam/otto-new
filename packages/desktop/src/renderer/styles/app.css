@@ -5681,7 +5681,7 @@ h6.otto-prose__h {
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--otto-accent-contrast);
   box-shadow: var(--otto-shadow-xs);
   transition: transform var(--otto-dur-fast) var(--otto-ease);
 }
@@ -5754,7 +5754,7 @@ h6.otto-prose__h {
 }
 .otto-hub__btn--primary:hover {
   background: var(--otto-accent);
-  color: #fff;
+  color: var(--otto-accent-contrast);
 }
 
 .otto-hub__toolbar {
@@ -6039,7 +6039,7 @@ h6.otto-prose__h {
   line-height: 1.25;
 }
 .otto-hub__stat-value--warn {
-  color: #ef4444;
+  color: var(--otto-danger);
 }
 .otto-hub__stat-value--text {
   font-size: 15px;
@@ -6059,16 +6059,16 @@ h6.otto-prose__h {
   flex-shrink: 0;
 }
 .otto-hub__dot--on {
-  background: #34c759;
+  background: var(--otto-success);
 }
 .otto-hub__dot--busy {
-  background: #f5a623;
+  background: var(--otto-warning);
 }
 .otto-hub__dot--off {
   background: var(--otto-text-tertiary);
 }
 .otto-hub__dot--err {
-  background: #ef4444;
+  background: var(--otto-danger);
 }
 
 /* 小徽章：分类 / 版本 / 来源等次要元信息。 */
@@ -6180,16 +6180,16 @@ h6.otto-prose__h {
   transition: width var(--otto-dur) var(--otto-ease);
 }
 .otto-hub__ctx-seg--sys {
-  background: #38bdf8;
+  background: var(--otto-data-system);
 }
 .otto-hub__ctx-seg--tools {
-  background: #a78bfa;
+  background: var(--otto-data-tools);
 }
 .otto-hub__ctx-seg--memory {
-  background: #34d399;
+  background: var(--otto-data-memory);
 }
 .otto-hub__ctx-seg--msgs {
-  background: #fbbf24;
+  background: var(--otto-data-messages);
 }
 .otto-hub__ctx-legend {
   display: flex;
@@ -6210,24 +6210,24 @@ h6.otto-prose__h {
   flex-shrink: 0;
 }
 .otto-hub__ctx-dot--sys {
-  background: #38bdf8;
+  background: var(--otto-data-system);
 }
 .otto-hub__ctx-dot--tools {
-  background: #a78bfa;
+  background: var(--otto-data-tools);
 }
 .otto-hub__ctx-dot--memory {
-  background: #34d399;
+  background: var(--otto-data-memory);
 }
 .otto-hub__ctx-dot--msgs {
-  background: #fbbf24;
+  background: var(--otto-data-messages);
 }
 
 /* 依赖体检 */
 .otto-hub__doctor-ok {
-  color: #34c759;
+  color: var(--otto-success);
 }
 .otto-hub__doctor-missing {
-  color: #ef4444;
+  color: var(--otto-danger);
   font-weight: 700;
 }
 
@@ -6319,16 +6319,16 @@ h6.otto-prose__h {
   color: var(--otto-text-secondary);
 }
 .otto-hub__wfstatus--done {
-  background: color-mix(in srgb, #34c759 14%, transparent);
-  color: #1f9d45;
+  background: color-mix(in srgb, var(--otto-success) 14%, transparent);
+  color: var(--otto-success);
 }
 .otto-hub__wfstatus--run {
   background: color-mix(in srgb, var(--otto-running) 14%, transparent);
   color: var(--otto-running);
 }
 .otto-hub__wfstatus--fail {
-  background: color-mix(in srgb, #ef4444 12%, transparent);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--otto-danger) 12%, transparent);
+  color: var(--otto-danger);
 }
 
 /* 偏好语言等行内紧凑输入组（设置行右侧，不抢整行宽）。 */
@@ -6469,17 +6469,17 @@ h6.otto-prose__h {
   }
 }
 .otto-hub__btn--danger {
-  border-color: #ef4444;
-  color: #ef4444;
+  border-color: var(--otto-danger);
+  color: var(--otto-danger);
 }
 .otto-hub__btn--danger:hover {
-  background: color-mix(in srgb, #ef4444 10%, transparent);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--otto-danger) 10%, transparent);
+  color: var(--otto-danger);
 }
 .otto-hub__privacy-notice,.otto-hub__privacy-error,.otto-hub__privacy-warning{padding:11px 13px;border:1px solid var(--otto-border);border-radius:var(--otto-radius-sm);font-size:12px;line-height:1.5}
 .otto-hub__privacy-notice{color:var(--otto-accent-hover);background:var(--otto-accent-soft)}
-.otto-hub__privacy-error{color:#b42318;background:color-mix(in srgb,#ef4444 9%,var(--otto-surface))}
-.otto-hub__privacy-warning{color:#854d0e;background:color-mix(in srgb,#f59e0b 11%,var(--otto-surface));border-color:color-mix(in srgb,#f59e0b 30%,var(--otto-border))}
+.otto-hub__privacy-error{color:var(--otto-danger);background:color-mix(in srgb,var(--otto-danger) 9%,var(--otto-surface))}
+.otto-hub__privacy-warning{color:var(--otto-warning);background:color-mix(in srgb,var(--otto-warning) 11%,var(--otto-surface));border-color:color-mix(in srgb,var(--otto-warning) 30%,var(--otto-border))}
 .otto-hub__privacy-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}
 .otto-hub__privacy-summary>div{min-width:0;display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:16px 18px;border-right:1px solid var(--otto-border);border-bottom:1px solid var(--otto-border)}
 .otto-hub__privacy-summary>div:nth-child(2n){border-right:0}.otto-hub__privacy-summary>div:nth-last-child(-n+2){border-bottom:0}

@@ -2,7 +2,7 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -126,15 +126,29 @@ describe('desktop visual style contract', () => {
   });
 
   it('keeps Hub subpages free of fixed inline colour themes', async () => {
-    const localAgentPanel = await readFile(
-      path.join(packageRoot, 'src', 'renderer', 'components', 'hub', 'LocalAgentPanel.tsx'),
+    const hubDirectory = path.join(packageRoot, 'src', 'renderer', 'components', 'hub');
+    const productionFiles = (await readdir(hubDirectory))
+      .filter((file) => file.endsWith('.tsx') && !file.includes('.test.'));
+    const functionalQrFiles = new Set(['ChannelPairingCard.tsx', 'PrivacyDataPanel.tsx']);
+
+    for (const file of productionFiles) {
+      const source = await readFile(path.join(hubDirectory, file), 'utf8');
+      const fixedPaint = source.match(/#[0-9a-f]{3,8}/giu) ?? [];
+      if (functionalQrFiles.has(file)) {
+        expect([...new Set(fixedPaint)].sort()).toEqual(['#111', '#fff']);
+      } else {
+        expect(fixedPaint, `${file} contains fixed paint`).toEqual([]);
+      }
+    }
+
+    const css = await readFile(
+      path.join(packageRoot, 'src', 'renderer', 'styles', 'app.css'),
       'utf8',
     );
-
-    expect(localAgentPanel).not.toMatch(/#[0-9a-f]{3,8}/iu);
-    expect(localAgentPanel).not.toContain('style={{');
-    expect(localAgentPanel).toContain('otto-local-agent__token');
-    expect(localAgentPanel).toContain('otto-hub__btn--primary');
+    const fixedHubRules = [...css.matchAll(/\.otto-hub[^{}]*\{[^}]*#[0-9a-f]{3,8}[^}]*\}/giu)]
+      .map(([rule]) => rule)
+      .filter((rule) => !rule.startsWith('.otto-hub__e2ee-qr'));
+    expect(fixedHubRules).toEqual([]);
   });
 
   it('keeps both browser previews on the desktop React instance for visual audits', async () => {

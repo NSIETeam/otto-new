@@ -397,6 +397,11 @@ means no source-level substitute is accepted.
   `otto-hub__btn-primary` class. Enterprise pairing now uses the shared Hub
   control classes, appearance tokens, focus ring and narrow-layout behavior;
   only functional black-on-white QR matrices retain fixed paint in Hub pages.
+- Replaced the remaining Hub-local status, chart, diagnostic, warning and
+  action colours with explicit shared palette tokens, including complete
+  light/dark overrides. The visual contract now scans every production Hub
+  TSX file and every Hub CSS rule; only the two classified QR renderers may
+  keep fixed black-on-white paint for scanner reliability.
 - Replaced renderer feature `setInterval` calls with either non-overlapping
   async polling or deadline-based one-shot timers. Core protocol watchdogs and
   Server generated admin pages now use named process watchdogs or non-overlap

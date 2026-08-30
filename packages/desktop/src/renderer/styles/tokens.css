@@ -69,6 +69,10 @@
   --otto-running: #0284c7;
   --otto-warning: #9a6700;
   --otto-warning-soft: color-mix(in srgb, var(--otto-warning) 11%, var(--otto-surface));
+  --otto-data-system: #0284c7;
+  --otto-data-tools: #7c5ac7;
+  --otto-data-memory: #2f8f68;
+  --otto-data-messages: #9a6700;
 
   /* —— 行内代码 —— */
   --otto-code-bg: #f1f1f3;
@@ -164,6 +168,11 @@
     --otto-success: #a3a29d;
     --otto-danger: #a3a29d;
     --otto-running: #7dd3fc;
+    --otto-warning: #e6b450;
+    --otto-data-system: #7dd3fc;
+    --otto-data-tools: #c4b5fd;
+    --otto-data-memory: #6ee7b7;
+    --otto-data-messages: #fcd34d;
 
     /* —— 行内代码（暗底 + 提亮暖橙文字，保对比）—— */
     --otto-code-bg: #2a2825;
@@ -245,6 +254,15 @@ button {
   --otto-accent-hover: #0066d6;
   --otto-accent-soft: rgba(0, 122, 255, 0.1);
   --otto-accent-gradient: var(--otto-accent);
+  --otto-accent-contrast: #ffffff;
+  --otto-success: #4b5563;
+  --otto-danger: #4b5563;
+  --otto-running: #0284c7;
+  --otto-warning: #9a6700;
+  --otto-data-system: #0284c7;
+  --otto-data-tools: #7c5ac7;
+  --otto-data-memory: #2f8f68;
+  --otto-data-messages: #9a6700;
   --otto-user-bubble: #f2f2f3;
   --otto-user-bubble-border: #dedee0;
   --otto-user-bubble-text: #1d1d1f;
@@ -270,6 +288,15 @@ button {
   --otto-accent-hover: #409cff;
   --otto-accent-soft: rgba(10, 132, 255, 0.18);
   --otto-accent-gradient: var(--otto-accent);
+  --otto-accent-contrast: #ffffff;
+  --otto-success: #a3a29d;
+  --otto-danger: #a3a29d;
+  --otto-running: #7dd3fc;
+  --otto-warning: #e6b450;
+  --otto-data-system: #7dd3fc;
+  --otto-data-tools: #c4b5fd;
+  --otto-data-memory: #6ee7b7;
+  --otto-data-messages: #fcd34d;
   --otto-user-bubble: #3a2c20;
   --otto-user-bubble-border: #55402e;
   --otto-user-bubble-text: #f2dcc7;

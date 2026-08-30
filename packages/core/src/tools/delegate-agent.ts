@@ -280,6 +280,8 @@ export class DelegateToAgentTool extends BaseTool<
       cwd,
       agent,
     );
+    const backgroundController = new AbortController();
+    taskManager.registerStop(bgTask.id, () => backgroundController.abort());
 
     let workflowRunId: string;
     try {
@@ -303,7 +305,15 @@ export class DelegateToAgentTool extends BaseTool<
 
     // Fire-and-forget: run the ACP session in the background and update
     // the BackgroundTaskManager on completion.
-    this.runAsync(params, agent, cwd, bgTask.id, workflowRunId, signal, updateOutput).catch(() => {
+    this.runAsync(
+      params,
+      agent,
+      cwd,
+      bgTask.id,
+      workflowRunId,
+      backgroundController.signal,
+      updateOutput,
+    ).catch(() => {
       // Should never happen — errors are handled inside runAsync.
     });
 

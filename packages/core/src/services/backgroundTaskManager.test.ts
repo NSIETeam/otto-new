@@ -117,6 +117,33 @@ describe('BackgroundTaskManager persistence', () => {
   });
 });
 
+describe('BackgroundTaskManager stop ownership', () => {
+  it('invokes a registered stop function exactly once on explicit cancellation', () => {
+    const mgr = new BackgroundTaskManager({ storageDir: null });
+    const task = mgr.createTask('[Codex] long job', '/proj', 'codex');
+    let stops = 0;
+    mgr.registerStop(task.id, () => { stops += 1; });
+    mgr.cancelTask(task.id);
+    mgr.cancelTask(task.id);
+    mgr.completeTask(task.id, { exitCode: 0 });
+    mgr.failTask(task.id, 'late process error');
+    expect(stops).toBe(1);
+    expect(mgr.getTask(task.id)?.status).toBe('cancelled');
+  });
+
+  it('stops every running task before clearing its records', () => {
+    const mgr = new BackgroundTaskManager({ storageDir: null });
+    const first = mgr.createTask('[Codex] first', '/one', 'codex');
+    const second = mgr.createTask('[Claude Code] second', '/two', 'claude-code');
+    const stopped: string[] = [];
+    mgr.registerStop(first.id, () => stopped.push(first.id));
+    mgr.registerStop(second.id, () => stopped.push(second.id));
+    mgr.clearAllTasks();
+    expect(stopped.sort()).toEqual([first.id, second.id].sort());
+    expect(mgr.getAllTasks()).toEqual([]);
+  });
+});
+
 describe('BackgroundTaskManager conflict detection (multi-agent parallelism)', () => {
   it('detects a conflict when a new task targets the exact same directory as a running ACP delegate task', () => {
     const mgr = new BackgroundTaskManager({ storageDir: null });

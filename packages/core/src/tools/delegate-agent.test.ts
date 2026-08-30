@@ -100,6 +100,18 @@ describe('DelegateToAgentTool', () => {
     }));
   });
 
+  it('does not bind a background task to the parent turn abort signal', async () => {
+    runDelegatedTask.mockReturnValue(new Promise(() => {}));
+    const parent = new AbortController();
+    const tool = makeTool('/my/project');
+    await tool.execute({ task: 'long work' }, parent.signal);
+    await vi.waitFor(() => expect(runDelegatedTask).toHaveBeenCalledOnce());
+    const backgroundSignal = runDelegatedTask.mock.calls[0][0].signal;
+
+    parent.abort();
+    expect(backgroundSignal.aborted).toBe(false);
+  });
+
   it('defaults cwd to the project target dir', async () => {
     runDelegatedTask.mockResolvedValue({
       status: 'success',
@@ -410,6 +422,32 @@ describe('DelegateToAgentTool', () => {
       status: 'cancelled',
       sessionId: undefined,
     });
+  });
+
+  it('aborts the ACP turn when its registered background task is explicitly cancelled', async () => {
+    runDelegatedTask.mockImplementation(({ signal }) => new Promise((resolve) => {
+      signal.addEventListener('abort', () => resolve({
+        status: 'cancelled',
+        label: 'Codex',
+        answer: '',
+        transcript: '',
+        error: 'Delegated task was cancelled.',
+      }), { once: true });
+    }));
+    const tool = makeTool();
+    const res = await tool.execute(
+      { task: 'long work', agent: 'codex' },
+      new AbortController().signal,
+    );
+    const llmStr = typeof res.llmContent === 'string' ? res.llmContent : JSON.stringify(res.llmContent);
+    const taskId = llmStr.match(/"taskId":"([^"]+)"/)![1];
+
+    getBackgroundTaskManager().cancelTask(taskId);
+    await vi.waitFor(() => expect(workflowJournal.settle).toHaveBeenCalledWith(
+      `wf-${taskId}`,
+      { status: 'cancelled', sessionId: undefined },
+    ));
+    expect(runDelegatedTask.mock.calls[0][0].signal.aborted).toBe(true);
   });
 
   describe('multi-agent conflict detection', () => {

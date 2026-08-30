@@ -105,6 +105,7 @@ export interface BackgroundTaskManagerOptions {
 
 export class BackgroundTaskManager extends EventEmitter {
   private tasks: Map<string, BackgroundTask> = new Map();
+  private readonly stopFunctions = new Map<string, () => void>();
   /** Resolved persistence directory, or null when persistence is disabled. */
   private readonly storageDir: string | null;
 
@@ -173,6 +174,18 @@ export class BackgroundTaskManager extends EventEmitter {
     return task;
   }
 
+  /** Register the process-local stop function for a running task. */
+  registerStop(taskId: string, stop: () => void): void {
+    const task = this.tasks.get(taskId);
+    if (!task || task.status !== 'running') {
+      throw new Error(`cannot register stop function for inactive task: ${taskId}`);
+    }
+    if (this.stopFunctions.has(taskId)) {
+      throw new Error(`task stop function is already registered: ${taskId}`);
+    }
+    this.stopFunctions.set(taskId, stop);
+  }
+
   /**
    * 获取任务信息
    */
@@ -237,7 +250,7 @@ export class BackgroundTaskManager extends EventEmitter {
    */
   appendOutput(taskId: string, output: string): void {
     const task = this.tasks.get(taskId);
-    if (task) {
+    if (task?.status === 'running') {
       task.output += output;
       // Prune if exceeding cap — keep the tail (most recent output).
       if (task.output.length > BackgroundTaskManager.OUTPUT_CAP) {
@@ -253,7 +266,7 @@ export class BackgroundTaskManager extends EventEmitter {
    */
   appendStderr(taskId: string, stderr: string): void {
     const task = this.tasks.get(taskId);
-    if (task) {
+    if (task?.status === 'running') {
       task.stderr += stderr;
       this.emit('task-stderr', { type: 'task-stderr', taskId, stderr });
     }
@@ -267,12 +280,13 @@ export class BackgroundTaskManager extends EventEmitter {
     options: { exitCode?: number; signal?: string; error?: string } = {},
   ): BackgroundTask | undefined {
     const task = this.tasks.get(taskId);
-    if (task) {
+    if (task?.status === 'running') {
       task.status = 'completed';
       task.endTime = Date.now();
       task.exitCode = options.exitCode;
       task.signal = options.signal;
       task.error = options.error;
+      this.stopFunctions.delete(taskId);
       this.persist(task);
       this.emit('task-completed', { type: 'task-completed', task });
     }
@@ -287,10 +301,11 @@ export class BackgroundTaskManager extends EventEmitter {
     error: string,
   ): BackgroundTask | undefined {
     const task = this.tasks.get(taskId);
-    if (task) {
+    if (task?.status === 'running') {
       task.status = 'failed';
       task.endTime = Date.now();
       task.error = error;
+      this.stopFunctions.delete(taskId);
       this.persist(task);
       this.emit('task-failed', { type: 'task-failed', task });
     }
@@ -303,6 +318,9 @@ export class BackgroundTaskManager extends EventEmitter {
   cancelTask(taskId: string): BackgroundTask | undefined {
     const task = this.tasks.get(taskId);
     if (task && task.status === 'running') {
+      const stop = this.stopFunctions.get(taskId);
+      this.stopFunctions.delete(taskId);
+      try { stop?.(); } catch { /* cancellation remains visible even if teardown fails */ }
       task.status = 'cancelled';
       task.endTime = Date.now();
       this.persist(task);
@@ -364,7 +382,14 @@ export class BackgroundTaskManager extends EventEmitter {
    * 清空所有任务
    */
   clearAllTasks(): void {
-    for (const id of this.tasks.keys()) this.removePersisted(id);
+    for (const [id, task] of this.tasks) {
+      if (task.status === 'running') {
+        const stop = this.stopFunctions.get(id);
+        try { stop?.(); } catch { /* continue stopping the remaining tasks */ }
+      }
+      this.removePersisted(id);
+    }
+    this.stopFunctions.clear();
     this.tasks.clear();
   }
 

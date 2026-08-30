@@ -1251,7 +1251,7 @@ describe('受保护 vs 公开路由边界', () => {
     });
   }, 60_000);
 
-  it('enforces Control credit admission before a paid mutation and finalizes it once', async () => {
+  it('enforces Control credit admission and rejects a paid-mutation replay without charging twice', async () => {
     process.env.OTTO_LICENSE_ENFORCE = 'true';
     process.env.OTTO_LICENSE_PUBLIC_KEY = LICENSE_PUBLIC_KEY;
     let availableCredits = false;
@@ -1366,15 +1366,27 @@ describe('受保护 vs 公开路由边界', () => {
     expect(accepted.headers.get('x-otto-billing-admission')).toBe(
       'hold_servere2e123456',
     );
+    await expect(accepted.json()).resolves.toMatchObject({
+      status: 'observed',
+      added: false,
+      retention: { evidenceCount: 1 },
+    });
     await vi.waitFor(() => {
       expect(billingCalls.filter((url) => url.endsWith('/capture'))).toHaveLength(1);
     });
     expect(db.getKnowledge(undefined, undefined, 'org_default')).toHaveLength(0);
+    expect(billingCalls.filter((url) => url.endsWith('/v1/billing/holds'))).toHaveLength(2);
 
     const replay = await request('knowledge:e2e:2');
-    expect(replay.status).toBe(200);
+    expect(replay.status).toBe(409);
+    await expect(replay.json()).resolves.toMatchObject({
+      code: 'billing_operation_replayed',
+      module: 'enterprise_knowledge',
+    });
     await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(billingCalls.filter((url) => url.endsWith('/v1/billing/holds'))).toHaveLength(2);
     expect(billingCalls.filter((url) => url.endsWith('/capture'))).toHaveLength(1);
+    expect(db.getKnowledge(undefined, undefined, 'org_default')).toHaveLength(0);
   }, 60_000);
 
   it('admin publishes modular updates without exposing deployment details in public health', async () => {

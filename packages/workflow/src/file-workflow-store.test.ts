@@ -29,6 +29,40 @@ async function createStore(): Promise<FileWorkflowStore> {
 }
 
 describe('FileWorkflowStore', () => {
+  it('atomically persists a bounded checkpoint only for the claimed revision', async () => {
+    const store = await createStore();
+    const run = await store.createRun(definition);
+    const claimed = await store.claimNextStep(run.id, run.revision);
+    const checkpointed = await store.checkpointRunningStep({
+      runId: run.id,
+      stepId: 'read',
+      expectedRevision: claimed!.run.revision,
+      checkpoint: { sessionId: 'native-session', currentTool: 'read_file', tokenUsed: 42 },
+    });
+    expect(checkpointed.steps[0]).toMatchObject({
+      status: 'running',
+      checkpoint: { sessionId: 'native-session', currentTool: 'read_file', tokenUsed: 42 },
+    });
+    expect(checkpointed.steps[0].checkpointedAt).toBeTruthy();
+    await expect(store.checkpointRunningStep({
+      runId: run.id,
+      stepId: 'read',
+      expectedRevision: claimed!.run.revision,
+      checkpoint: { sessionId: 'stale' },
+    })).rejects.toThrow('revision conflict');
+  });
+
+  it('rejects oversized running-step checkpoints', async () => {
+    const store = await createStore();
+    const run = await store.createRun(definition);
+    const claimed = await store.claimNextStep(run.id, run.revision);
+    await expect(store.checkpointRunningStep({
+      runId: run.id,
+      stepId: 'read',
+      expectedRevision: claimed!.run.revision,
+      checkpoint: { output: 'x'.repeat(70 * 1024) },
+    })).rejects.toThrow('64 KiB');
+  });
   it('creates and atomically advances a run one step at a time', async () => {
     const store = await createStore();
     const run = await store.createRun(definition);

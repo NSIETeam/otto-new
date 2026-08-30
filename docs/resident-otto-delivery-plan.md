@@ -352,7 +352,7 @@ means no source-level substitute is accepted.
 | Workflow traces serialize concurrent appends, retain a valid rolling 5 MiB JSONL tail per run, cap trace files at 10,000, and only prune files older than 30 days | `workflow/src/trace.ts`, focused trace tests | Automated |
 | Workflow run files are capped at 10,000; creation is serialized, expired or oldest terminal runs are pruned first, while active, paused, approval-waiting and unknown-outcome runs are never automatically removed | `file-workflow-store.ts`, focused capacity tests | Automated |
 | A worker that acknowledges cancellation records both the run and active step as `cancelled`, preserves a bounded stop receipt and emits `step_cancelled`; it cannot masquerade as `step_succeeded` | `file-workflow-store.ts`, `externalTaskWorkflowJournal.ts`, focused Workflow/Core tests | Automated |
-| ACP delegate session handle is persisted before work; every background turn links to a durable external Workflow step; restart becomes `interrupted`/`unknown_outcome`, never silent replay | `externalTaskWorkflowJournal.ts`, `acpAgentClient.ts`, `backgroundTaskManager.ts`, delegate status and restart tests | Automated; BackgroundTaskManager remains a compatibility UI mirror |
+| ACP delegate session handle and bounded structured progress are revision-checked into the running Workflow step; every background turn links to a durable external Workflow step; restart becomes `interrupted`/`unknown_outcome`, never silent replay | `workflow/src/file-workflow-store.ts`, `externalTaskWorkflowJournal.ts`, `acpAgentClient.ts`, delegate status and restart tests | Automated; BackgroundTaskManager remains a compatibility UI mirror |
 | The compatibility task mirror uses collision-resistant IDs, caps records at 1,000, preserves running tasks under pressure, bounds stdout/stderr/final answers/plan snapshots, removes direct result mutation, and rejects unsafe persisted filenames/symlinks | `backgroundTaskManager.ts`, `delegate-agent.ts`, focused compatibility tests | Automated |
 | Starting a local external coding agent requires explicit approval and declares its affected working directory | `delegate-agent.ts`, focused confirmation tests | Automated |
 | Background delegate owns a registered stop function; parent-turn cancellation cannot kill it, while explicit cancellation and clear-all stop the ACP turn exactly once | `backgroundTaskManager.ts`, `delegate-agent.ts`, focused lifecycle tests | Automated |
@@ -452,6 +452,12 @@ means no source-level substitute is accepted.
   an explicit resume. If the Workflow journal cannot be written, the agent is
   not launched. `BackgroundTaskManager` is still retained for existing UI and
   notification consumers and is not claimed as fully removed yet.
+- Moved ACP resume handles, current-tool/plan progress and token snapshots into
+  a bounded 64 KiB running-step Workflow checkpoint. Checkpoint writers are
+  serialized per run and guarded by the run revision; terminal settlement
+  waits for the latest snapshot. `BackgroundTaskManager` still mirrors this
+  state for existing event consumers, but its disk record is no longer the
+  only durable source for resuming or explaining an interrupted agent turn.
 - Background delegate execution no longer borrows the parent tool call's abort
   signal. Each task registers its own stop function; explicit cancellation and
   clear-all invoke it exactly once, while late output or completion cannot

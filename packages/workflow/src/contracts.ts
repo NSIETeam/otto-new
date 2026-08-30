@@ -46,6 +46,9 @@ export interface WorkflowStepRun {
   approvalId?: string;
   approvedAt?: string;
   output?: unknown;
+  /** Bounded durable resume/progress state for a currently running step. */
+  checkpoint?: Record<string, unknown>;
+  checkpointedAt?: string;
   error?: string;
   startedAt?: string;
   completedAt?: string;

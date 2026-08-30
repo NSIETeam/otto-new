@@ -13,6 +13,7 @@ import type { ExternalTaskWorkflowJournalV1 } from '../services/externalTaskWork
 const workflowJournal: ExternalTaskWorkflowJournalV1 = {
   start: async ({ taskId }) => `wf-${taskId}`,
   startShell: async ({ taskId }) => `wf-shell-${taskId}`,
+  checkpoint: async () => undefined,
   settle: async () => undefined,
   recover: vi.fn(async () => ({ status: 'unknown_outcome' } as never)),
 };

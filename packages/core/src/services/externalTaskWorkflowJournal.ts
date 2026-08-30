@@ -13,6 +13,16 @@ export type ExternalTaskWorkflowOutcome =
   | { status: 'failed'; error: string; sessionId?: string }
   | { status: 'cancelled'; sessionId?: string };
 
+export interface ExternalTaskWorkflowCheckpoint {
+  sessionId?: string;
+  currentTool?: string;
+  toolCallCount?: number;
+  plan?: ReadonlyArray<{ content: string; status?: string }>;
+  tokenUsed?: number;
+  tokenSize?: number;
+  lastActivityAt?: number;
+}
+
 export interface ExternalTaskWorkflowJournalV1 {
   start(input: {
     taskId: string;
@@ -21,6 +31,7 @@ export interface ExternalTaskWorkflowJournalV1 {
     resumedSessionId?: string;
   }): Promise<string>;
   startShell(input: { taskId: string; cwd: string }): Promise<string>;
+  checkpoint(runId: string, checkpoint: ExternalTaskWorkflowCheckpoint): Promise<void>;
   settle(runId: string, outcome: ExternalTaskWorkflowOutcome): Promise<void>;
   recover(runId: string): Promise<WorkflowRun | null>;
 }
@@ -34,6 +45,7 @@ function defaultRoot(): string {
 export class FileExternalTaskWorkflowJournalV1 implements ExternalTaskWorkflowJournalV1 {
   private readonly store: FileWorkflowStore;
   private readonly trace: FileWorkflowTraceSink;
+  private readonly checkpointTails = new Map<string, Promise<void>>();
 
   constructor(root = defaultRoot()) {
     this.store = new FileWorkflowStore(path.join(root, 'runs'));
@@ -109,6 +121,8 @@ export class FileExternalTaskWorkflowJournalV1 implements ExternalTaskWorkflowJo
   }
 
   async settle(runId: string, outcome: ExternalTaskWorkflowOutcome): Promise<void> {
+    await this.checkpointTails.get(runId)?.catch(() => undefined);
+    this.checkpointTails.delete(runId);
     const run = await this.store.getRun(runId);
     const step = run?.steps.find((candidate) => candidate.status === 'running');
     if (!run || !step) throw new Error(`external task workflow is not running: ${runId}`);
@@ -128,6 +142,42 @@ export class FileExternalTaskWorkflowJournalV1 implements ExternalTaskWorkflowJo
         ? 'step_cancelled'
         : 'step_succeeded';
     await this.trace.append({ runId: run.id, stepId: step.stepId, attempt: step.attempt, idempotencyKey: step.idempotencyKey, kind: traceKind, status: completed.status, summary: `External task ${outcome.status}` });
+  }
+
+  async checkpoint(runId: string, checkpoint: ExternalTaskWorkflowCheckpoint): Promise<void> {
+    const previous = this.checkpointTails.get(runId) ?? Promise.resolve();
+    const pending = previous.then(async () => {
+      const run = await this.store.getRun(runId);
+      const step = run?.steps.find((candidate) => candidate.status === 'running');
+      if (!run || !step) throw new Error(`external task workflow is not running: ${runId}`);
+      await this.store.checkpointRunningStep({
+        runId,
+        stepId: step.stepId,
+        expectedRevision: run.revision,
+        checkpoint: {
+          ...(checkpoint.sessionId ? { sessionId: checkpoint.sessionId.slice(0, 500) } : {}),
+          ...(checkpoint.currentTool ? { currentTool: checkpoint.currentTool.slice(0, 500) } : {}),
+          ...(Number.isSafeInteger(checkpoint.toolCallCount) && checkpoint.toolCallCount! >= 0
+            ? { toolCallCount: checkpoint.toolCallCount }
+            : {}),
+          ...(checkpoint.plan ? {
+            plan: checkpoint.plan.slice(0, 100).map((entry) => ({
+              content: entry.content.slice(0, 1_000),
+              ...(entry.status ? { status: entry.status.slice(0, 100) } : {}),
+            })),
+          } : {}),
+          ...(Number.isFinite(checkpoint.tokenUsed) && checkpoint.tokenUsed! >= 0 ? { tokenUsed: checkpoint.tokenUsed } : {}),
+          ...(Number.isFinite(checkpoint.tokenSize) && checkpoint.tokenSize! >= 0 ? { tokenSize: checkpoint.tokenSize } : {}),
+          ...(Number.isFinite(checkpoint.lastActivityAt) ? { lastActivityAt: checkpoint.lastActivityAt } : {}),
+        },
+      });
+    });
+    this.checkpointTails.set(runId, pending);
+    try {
+      await pending;
+    } finally {
+      if (this.checkpointTails.get(runId) === pending) this.checkpointTails.delete(runId);
+    }
   }
 
   async recover(runId: string): Promise<WorkflowRun | null> {

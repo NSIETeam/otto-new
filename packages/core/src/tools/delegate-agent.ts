@@ -453,8 +453,12 @@ export class DelegateToAgentTool extends BaseTool<
         cwd,
         signal,
         onUpdate: onStreamUpdate,
-        // Structured progress → persisted task record (drives the /acp-session card).
-        onProgress: (progress) => taskManager.updateProgress(taskId, progress),
+        // Workflow owns durable resume/progress state. BackgroundTaskManager is
+        // retained as a bounded compatibility mirror for existing UI events.
+        onProgress: (progress) => {
+          taskManager.updateProgress(taskId, progress);
+          void this.workflowJournal.checkpoint(workflowRunId, progress).catch(() => undefined);
+        },
         autoApprove: true,
         timeoutMs: DelegateToAgentTool.DEFAULT_TIMEOUT_MS,
         resumeSessionId: params.resumeSessionId,
@@ -465,7 +469,10 @@ export class DelegateToAgentTool extends BaseTool<
         answer: result.answer || result.transcript,
         ...(result.sessionId ? { sessionId: result.sessionId } : {}),
       });
-      if (result.progress) taskManager.updateProgress(taskId, result.progress);
+      if (result.progress) {
+        taskManager.updateProgress(taskId, result.progress);
+        await this.workflowJournal.checkpoint(workflowRunId, result.progress).catch(() => undefined);
+      }
 
       if (result.status === 'success') {
         await this.workflowJournal.settle(workflowRunId, {

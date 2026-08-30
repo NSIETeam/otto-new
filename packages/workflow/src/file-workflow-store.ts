@@ -35,6 +35,7 @@ function createStepRun(runId: string, step: WorkflowDefinition['steps'][number])
  * two local workers from claiming or completing the same step.
  */
 export class FileWorkflowStore implements WorkflowStore {
+  private static readonly CHECKPOINT_BYTE_LIMIT = 64 * 1024;
   private readonly maxRuns: number;
   private readonly terminalRetentionMs: number;
   private createTail: Promise<void> = Promise.resolve();
@@ -214,6 +215,34 @@ export class FileWorkflowStore implements WorkflowStore {
       } else {
         run.status = nextQueuedStep(run) ? 'queued' : 'succeeded';
       }
+      return cloneRun(await this.saveRevision(run));
+    });
+  }
+
+  async checkpointRunningStep(input: {
+    runId: string;
+    stepId: string;
+    expectedRevision: number;
+    checkpoint: Record<string, unknown>;
+  }): Promise<WorkflowRun> {
+    return this.withLease(input.runId, async () => {
+      const run = await this.readRun(input.runId);
+      this.assertRevision(run, input.expectedRevision);
+      const step = run.steps.find((candidate) => candidate.stepId === input.stepId);
+      if (run.status !== 'running' || !step || step.status !== 'running') {
+        throw new WorkflowConflictError(`Workflow step is not running: ${input.stepId}`);
+      }
+      let encoded: string;
+      try {
+        encoded = JSON.stringify(input.checkpoint);
+      } catch {
+        throw new WorkflowConflictError('Workflow checkpoint must be JSON serializable.');
+      }
+      if (encoded === undefined || Buffer.byteLength(encoded, 'utf8') > FileWorkflowStore.CHECKPOINT_BYTE_LIMIT) {
+        throw new WorkflowConflictError('Workflow checkpoint exceeds the 64 KiB limit.');
+      }
+      step.checkpoint = structuredClone(input.checkpoint);
+      step.checkpointedAt = now();
       return cloneRun(await this.saveRevision(run));
     });
   }

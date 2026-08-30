@@ -25,6 +25,7 @@ const runDelegatedTask = vi.mocked(acpClient.runDelegatedTask);
 const workflowJournal: ExternalTaskWorkflowJournalV1 = {
   start: vi.fn(async ({ taskId }) => `wf-${taskId}`),
   startShell: vi.fn(async ({ taskId }) => `wf-shell-${taskId}`),
+  checkpoint: vi.fn(async () => undefined),
   settle: vi.fn(async () => undefined),
   recover: vi.fn(async () => null),
 };
@@ -40,6 +41,7 @@ describe('DelegateToAgentTool', () => {
   beforeEach(() => {
     runDelegatedTask.mockReset();
     vi.mocked(workflowJournal.start).mockClear();
+    vi.mocked(workflowJournal.checkpoint).mockClear();
     vi.mocked(workflowJournal.settle).mockClear();
     // Clear the singleton between tests so tasks don't accumulate.
     const mgr = getBackgroundTaskManager();
@@ -184,6 +186,44 @@ describe('DelegateToAgentTool', () => {
       status: 'succeeded',
       sessionId: undefined,
     });
+  });
+
+  it('checkpoints structured ACP progress into the durable workflow', async () => {
+    runDelegatedTask.mockImplementation(async ({ onProgress }) => {
+      const progress = {
+        sessionId: 'native-session',
+        currentTool: 'edit_file',
+        toolCallCount: 2,
+        tokenUsed: 120,
+        lastActivityAt: Date.now(),
+      };
+      onProgress?.(progress);
+      return {
+        status: 'success',
+        label: 'Codex',
+        answer: 'done',
+        transcript: 'done',
+        sessionId: 'native-session',
+        progress,
+      };
+    });
+
+    const tool = makeTool();
+    const result = await tool.execute(
+      { task: 'edit safely', agent: 'codex' },
+      new AbortController().signal,
+    );
+    const taskId = String(result.llmContent).match(/"taskId":"([^"]+)"/)![1];
+    await vi.waitFor(() => expect(getBackgroundTaskManager().getTask(taskId)?.status).toBe('completed'));
+
+    expect(workflowJournal.checkpoint).toHaveBeenCalledWith(
+      `wf-${taskId}`,
+      expect.objectContaining({ sessionId: 'native-session', currentTool: 'edit_file', toolCallCount: 2 }),
+    );
+    expect(workflowJournal.settle).toHaveBeenCalledWith(
+      `wf-${taskId}`,
+      { status: 'succeeded', sessionId: 'native-session' },
+    );
   });
 
   it('fails the background task when runDelegatedTask fails', async () => {

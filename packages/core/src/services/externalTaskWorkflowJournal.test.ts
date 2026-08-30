@@ -35,6 +35,23 @@ describe('FileExternalTaskWorkflowJournalV1', () => {
     expect(await onlyRun(root)).toMatchObject({ status: 'succeeded', steps: [{ status: 'succeeded', output: { status: 'succeeded', sessionId: 'session-1' } }] });
   });
 
+  it('serializes durable ACP progress checkpoints before terminal settlement', async () => {
+    const { root, value } = await journal();
+    const runId = await value.start({ taskId: 'task-progress', agent: 'codex', cwd: '/project' });
+    const first = value.checkpoint(runId, { sessionId: 'native-1', currentTool: 'read_file', toolCallCount: 1 });
+    const second = value.checkpoint(runId, { sessionId: 'native-1', currentTool: 'edit_file', toolCallCount: 2, tokenUsed: 120 });
+    await Promise.all([first, second]);
+    await value.settle(runId, { status: 'succeeded', sessionId: 'native-1' });
+    expect(await onlyRun(root)).toMatchObject({
+      status: 'succeeded',
+      steps: [{
+        status: 'succeeded',
+        checkpoint: { sessionId: 'native-1', currentTool: 'edit_file', toolCallCount: 2, tokenUsed: 120 },
+        output: { status: 'succeeded', sessionId: 'native-1' },
+      }],
+    });
+  });
+
   it('recovers an interrupted external agent as unknown without replaying it', async () => {
     const { root, value } = await journal();
     const runId = await value.start({ taskId: 'task-2', agent: 'claude-code', cwd: '/project' });

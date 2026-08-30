@@ -28,6 +28,7 @@ import React, {
 } from 'react';
 import './styles/tokens.css';
 import './styles/app.css';
+import { startNonOverlappingPoll } from './lib/nonOverlappingPoll.js';
 import type {
   MessageSource,
   ToolCall,
@@ -89,6 +90,7 @@ import { AccountManagementPage } from './components/AccountManagementPage.js';
 import { OrganizationPage } from './components/OrganizationPage.js';
 import { InboxPage } from './components/InboxPage.js';
 import { WorkPage } from './components/WorkPage.js';
+import { IconClose } from './components/icons.js';
 import { useEnterpriseAuth } from './state/useEnterpriseAuth.js';
 import { localDateKey } from './localDateKey.js';
 import { isProjectSession, sameWorkspacePath } from './sessionListView.js';
@@ -453,7 +455,6 @@ function OttoWorkspaceApp({
       !baselineDirectMessagesAvailable
     ) return undefined;
     let cancelled = false;
-    let polling = false;
     let localUnreadCounts: EnterpriseUnreadCounts = {};
     const federationMarkers = new Map<string, string>();
     const tracker = new EnterpriseUnreadNotificationTracker({
@@ -464,8 +465,7 @@ function OttoWorkspaceApp({
     enterpriseUnreadTrackerRef.current = tracker;
 
     const poll = async (): Promise<void> => {
-      if (polling || cancelled) return;
-      polling = true;
+      if (cancelled) return;
       try {
         const [response, federationContacts] = await Promise.all([
           window.otto.enterpriseMessagesUnread(),
@@ -503,17 +503,13 @@ function OttoWorkspaceApp({
         if (!cancelled) {
           setEnterpriseUnreadCounts({ ...localUnreadCounts, ...federationCounts });
         }
-      } catch {
-      } finally {
-        polling = false;
-      }
+      } catch {}
     };
 
-    void poll();
-    const timer = window.setInterval(() => void poll(), ENTERPRISE_UNREAD_POLL_INTERVAL_MS);
+    const stopPolling = startNonOverlappingPoll(poll, ENTERPRISE_UNREAD_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stopPolling();
       setEnterpriseUnreadCounts({});
       for (const sessionId of federationMarkers.keys()) {
         void window.otto.notificationMarkRead(sessionId).catch(() => undefined);
@@ -539,7 +535,6 @@ function OttoWorkspaceApp({
       account.accountType === 'personal' ||
       !baselineDirectMessagesAvailable
     ) return undefined;
-    let cancelled = false;
     const beat = async (): Promise<void> => {
       try {
         await window.otto.enterprisePresenceHeartbeat?.();
@@ -547,14 +542,7 @@ function OttoWorkspaceApp({
       }
     };
 
-    void beat();
-    const timer = window.setInterval(() => {
-      if (!cancelled) void beat();
-    }, ENTERPRISE_PRESENCE_HEARTBEAT_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
+    return startNonOverlappingPoll(beat, ENTERPRISE_PRESENCE_HEARTBEAT_MS);
   }, [
     account.accountType,
     account.id,
@@ -601,7 +589,6 @@ function OttoWorkspaceApp({
     ) return undefined;
     const processing = new Set<string>();
     const abortController = new AbortController();
-    let polling = false;
     let cancelled = false;
 
     const handleRequest = async (
@@ -653,8 +640,7 @@ function OttoWorkspaceApp({
     };
 
     const poll = async (): Promise<void> => {
-      if (polling || cancelled) return;
-      polling = true;
+      if (cancelled) return;
       try {
         const requests = await window.otto.enterpriseAtoaInbox();
         for (const request of requests) {
@@ -664,20 +650,16 @@ function OttoWorkspaceApp({
           } catch {
           }
         }
-      } catch {
-      } finally {
-        polling = false;
-      }
+      } catch {}
     };
 
-    void poll();
-    const timer = window.setInterval(() => void poll(), 8_000);
+    const stopPolling = startNonOverlappingPoll(poll, 8_000);
     return () => {
       cancelled = true;
       abortController.abort();
       permissionResolver.current?.({ kind: 'deny' });
       permissionResolver.current = null;
-      window.clearInterval(timer);
+      stopPolling();
     };
   }, [
     account.accountType,
@@ -701,7 +683,6 @@ function OttoWorkspaceApp({
     const abortController = new AbortController();
     const contextCache = federationAtoaContextCache.current;
     let cancelled = false;
-    let polling = false;
 
     const taskKey = (task: EnterpriseFederationAtoaTask): string =>
       `${task.kind}:${task.contact.id}:${task.message.id}`;
@@ -864,27 +845,22 @@ function OttoWorkspaceApp({
     };
 
     const poll = async (): Promise<void> => {
-      if (polling || cancelled) return;
-      polling = true;
+      if (cancelled) return;
       try {
         const tasks = await window.otto.enterpriseFederationAtoaTasks();
         for (const task of tasks) {
           if (cancelled) break;
           await processTask(task);
         }
-      } catch {
-      } finally {
-        polling = false;
-      }
+      } catch {}
     };
 
-    void poll();
-    const timer = window.setInterval(() => void poll(), 8_000);
+    const stopPolling = startNonOverlappingPoll(poll, 8_000);
     return () => {
       cancelled = true;
       abortController.abort();
       contextCache.clear();
-      window.clearInterval(timer);
+      stopPolling();
     };
   }, [
     account.accountType,
@@ -1960,14 +1936,7 @@ function ErrorToast({
         aria-label="关闭提示"
         title="关闭"
       >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M6 6l12 12M18 6L6 18"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
+        <IconClose size={13} />
       </button>
     </div>
   );

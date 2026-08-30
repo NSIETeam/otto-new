@@ -12,6 +12,7 @@ import * as path from 'node:path';
 import type { Server as HttpServer } from 'node:http';
 import { describe, expect, it, vi } from 'vitest';
 import type { ServerEndpoint } from 'otto-server';
+import type { RecurringTaskDefinition } from 'otto-core';
 import {
   prepareDesktopSqlCipherRuntime,
   ServerManager,
@@ -220,6 +221,46 @@ function embeddedMainModule(setAuthenticatedEnterpriseAccount: ReturnType<typeof
     OttoServer: FakeOttoServer,
   } as unknown as Awaited<ReturnType<ServerManagerDependencies['loadOttoServer']>>;
 }
+
+describe('ServerManager resident health task', () => {
+  it('registers one zero-cost non-overlapping health task and stops it on shutdown', async () => {
+    const definitions: RecurringTaskDefinition[] = [];
+    const stop = vi.fn();
+    const register = vi.fn((definition: RecurringTaskDefinition) => {
+      definitions.push(definition);
+      return stop;
+    });
+    const probeHealth = vi.fn(async () => true);
+    const mod = embeddedMainModule(vi.fn());
+    const manager = new ServerManager({
+      recurringTasks: { register },
+      dependencies: dependencies({
+        loadOttoServer: async () => mod,
+        pidAlive: () => false,
+        probeHealth,
+      }),
+    });
+
+    await manager.ensure();
+    await manager.ensure();
+
+    expect(register).toHaveBeenCalledTimes(1);
+    expect(definitions[0]).toMatchObject({
+      name: 'desktop.server-health-check',
+      source: 'packages/desktop/src/main/server-manager.ts',
+      intervalMs: 30_000,
+      estimatedCostUsdPerRun: 0,
+    });
+    const firstVersion = definitions[0].getInputVersion();
+    expect(firstVersion).toContain('127.0.0.1:7637:');
+    await definitions[0].run();
+    expect(probeHealth).toHaveBeenCalledTimes(1);
+
+    await manager.shutdown();
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(definitions[0].getInputVersion()).toBeUndefined();
+  });
+});
 
 describe('ServerManager desktop runtime diagnostics', () => {
   it('reports the real selected server ownership without exposing endpoint credentials', async () => {

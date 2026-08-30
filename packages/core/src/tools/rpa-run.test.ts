@@ -31,12 +31,67 @@ describe('RpaRunTool', () => {
     })).toContain('not declared');
   });
 
+  it('accepts semantic desktop inspection but requires approval for interaction', () => {
+    expect(tool.validateToolParams({
+      action: 'start',
+      workflow: {
+        id: 'inspect-mail',
+        version: 1,
+        allowedHosts: [],
+        steps: [{
+          id: 'inspect',
+          action: 'desktop.inspect',
+          args: { appId: 'com.apple.mail' },
+          sideEffect: 'none',
+        }],
+      },
+    })).toBeNull();
+    expect(tool.validateToolParams({
+      action: 'start',
+      workflow: {
+        id: 'click-mail',
+        version: 1,
+        allowedHosts: [],
+        steps: [{
+          id: 'click',
+          action: 'desktop.click',
+          args: { appId: 'com.apple.mail', target: { role: 'button', name: '发送' } },
+          sideEffect: 'none',
+        }],
+      },
+    })).toContain('explicit approval');
+  });
+
+  it('requires both an external declaration and explicit approval for legacy desktop input', () => {
+    const legacyWorkflow = {
+      id: 'type-note',
+      version: 1 as const,
+      allowedHosts: [],
+      steps: [{
+        id: 'type',
+        action: 'desktop.type_text' as const,
+        args: { text: 'approved text' },
+        sideEffect: 'external' as const,
+      }],
+    };
+    expect(tool.validateToolParams({ action: 'start', workflow: legacyWorkflow })).toContain('explicit approval');
+    expect(tool.validateToolParams({
+      action: 'start',
+      workflow: {
+        ...legacyWorkflow,
+        steps: [{ ...legacyWorkflow.steps[0], requiresApproval: true }],
+      },
+    })).toBeNull();
+  });
+
   it('requires an explicit approval identifier', () => {
     expect(tool.validateToolParams({ action: 'approve', run_id: 'run-1' })).toContain('approval_id');
   });
 
   it('requires confirmation for every state-changing operation', async () => {
     expect(await tool.shouldConfirmExecute({ action: 'start', workflow }, new AbortController().signal)).not.toBe(false);
+    expect(await tool.shouldConfirmExecute({ action: 'pause', run_id: 'run-1' }, new AbortController().signal)).not.toBe(false);
+    expect(await tool.shouldConfirmExecute({ action: 'cancel', run_id: 'run-1' }, new AbortController().signal)).not.toBe(false);
     expect(await tool.shouldConfirmExecute({ action: 'status', run_id: 'run-1' }, new AbortController().signal)).toBe(false);
   });
 

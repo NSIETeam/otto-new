@@ -13,6 +13,7 @@
 
 import type { WorkLogEntry } from './workLog.js';
 import { formatLocalDate, getWorkLogger } from './workLog.js';
+import { RecurringTaskRegistry } from '../services/recurringTaskRegistry.js';
 
 /** 智能洞察：一条从工作日志分析出的可执行提醒 */
 export interface WisdomNudge {
@@ -406,7 +407,7 @@ export class ProactiveService {
   private triggeredDate = formatLocalDate(new Date());
   private feishuSender: ProactiveFeishuSender | null = null;
   private localNotifier: ProactiveLocalNotifier | null = null;
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private stopScheduledCheck?: () => void;
   private calendarChecker: CalendarCheckerFn | null = null;
   private processedMeetings: Set<string> = new Set();
   /** 已提醒过的日程ID集合（防重复） */
@@ -427,9 +428,23 @@ export class ProactiveService {
     console.log('[ProactiveService] Calendar checker injected');
   }
 
-  startScheduler(getContext: () => ProactiveContext): void {
-    if (this.timer) return;
-    this.timer = setInterval(async () => {
+  startScheduler(
+    getContext: () => ProactiveContext,
+    taskRegistry = new RecurringTaskRegistry(),
+  ): void {
+    if (this.stopScheduledCheck) return;
+    this.stopScheduledCheck = taskRegistry.register({
+      name: 'proactive-service-scheduler',
+      source: 'packages/core/src/orchestration/proactiveService.ts#scheduler',
+      definitionVersion: 1,
+      intervalMs: 60 * 1000,
+      initialDelayMs: 60 * 1000,
+      missedRunPolicy: 'skip',
+      estimatedCostUsdPerRun: 0,
+      // Cron and near-term schedule reminders are time-based inputs. The
+      // minute bucket also prevents duplicate work within the same minute.
+      getInputVersion: () => `minute:${Math.floor(Date.now() / 60_000)}`,
+      run: async () => {
       try {
         const ctx = getContext();
 
@@ -503,14 +518,15 @@ export class ProactiveService {
       } catch (err) {
         console.warn(`[ProactiveService] Scheduler error: ${err instanceof Error ? err.message : String(err)}`);
       }
-    }, 60 * 1000);
+      },
+    });
     console.log('[ProactiveService] Scheduler started (1min interval)');
   }
 
   stopScheduler(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
+    if (this.stopScheduledCheck) {
+      this.stopScheduledCheck();
+      this.stopScheduledCheck = undefined;
       console.log('[ProactiveService] Scheduler stopped');
     }
   }

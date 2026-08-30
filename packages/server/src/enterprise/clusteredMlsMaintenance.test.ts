@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { RecurringTaskRegistry } from 'otto-core';
 
 import type { EnterpriseSharedCache } from '../modules/data_platform/index.js';
 import { createClusteredMlsMaintenance } from './clusteredMlsMaintenance.js';
@@ -50,5 +51,24 @@ describe('clustered MLS resource maintenance', () => {
     await expect(maintenance.runOnce()).resolves.toBe(false);
     expect(authority.cleanupExpiredMlsResources).not.toHaveBeenCalled();
     expect(cache.releaseLease).not.toHaveBeenCalled();
+  });
+
+  it('registers named zero-cost work and stops it on close', () => {
+    const registry = new RecurringTaskRegistry();
+    const maintenance = createClusteredMlsMaintenance({
+      cache: {} as EnterpriseSharedCache,
+      authority: { cleanupExpiredMlsResources: vi.fn() },
+      owner: 'replica-registered',
+      taskRegistry: registry,
+    });
+
+    maintenance.start();
+    expect(registry.list()).toMatchObject([{
+      name: 'enterprise.mls-resource-maintenance.replica-registered',
+      estimatedCostUsdPerRun: 0,
+      paid: false,
+    }]);
+    maintenance.close();
+    expect(registry.list()).toEqual([]);
   });
 });

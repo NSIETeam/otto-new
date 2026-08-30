@@ -13,6 +13,7 @@ import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { RecurringTaskRegistry } from 'otto-core';
 import { canonicalJson } from '../modules/commercial_control/signedEnvelope.js';
 import { currentLegalDocumentReferences } from '../modules/data_governance/index.js';
 import {
@@ -222,6 +223,35 @@ beforeEach(() => {
   process.env.OTTO_ENTERPRISE_DIR = tmpDir;
   servers = [];
   closeDatabases = [];
+});
+
+describe('企业常驻任务注册', () => {
+  it('登记 MLS 清理和通知投递，并在服务关闭时全部停止', async () => {
+    process.env.OTTO_ENTERPRISE_DIR = tmpDir;
+    vi.resetModules();
+    const mod: ServerModule = await import('./server.js');
+    const database: DatabaseModule = await import('./db.js');
+    closeDatabases.push(database.closeEnterpriseDatabase);
+    const registry = new RecurringTaskRegistry({ allowPaidBackground: true });
+    const server = mod.startEnterpriseServer({
+      host: '127.0.0.1',
+      port: 0,
+      adminToken: ADMIN_TOKEN,
+      smsSender: null,
+      repairSmsSender: null,
+      repairFeishuSender: null,
+      taskRegistry: registry,
+    });
+    servers.push(server);
+
+    expect(registry.list()).toMatchObject([
+      { name: 'enterprise.local-mls-resource-maintenance', estimatedCostUsdPerRun: 0 },
+      { name: 'enterprise.ticket-notification-delivery', estimatedCostUsdPerRun: 0 },
+    ]);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    servers = servers.filter((item) => item !== server);
+    expect(registry.list()).toEqual([]);
+  });
 });
 
 describe('数据治理自助闭环', { timeout: 60_000 }, () => {
@@ -2210,6 +2240,8 @@ describe('report/dashboard 路由基本可达', () => {
     expect(html).toContain('sessionStorage.getItem(KEY)');
     expect(html).toContain('id="dashboardToken"');
     expect(html).toContain("authorization:'Bearer '+TOKEN");
+    expect(html).not.toContain('setInterval(');
+    expect(html).toContain('setTimeout(async function refresh()');
     expect(html).not.toContain(ADMIN_TOKEN);
 
     const queryToken = await fetch(

@@ -68,6 +68,22 @@ GitHub Release 草稿，最后依次部署企业服务器、公开双仓 Release
 - Release 默认先创建为 draft；创建前锁定并上传 SHA-256 绑定的完整创建意图和双仓发布前 `latest` 快照。企业部署和安装包验签通过后，工作流先公开并复核正式仓，再把兼容仓作为最后一个 Release 端点公开，随后事务性更新旧客户端镜像。镜像失败时先回滚镜像，再校验同一快照摘要并精确恢复此前 `latest`；已经公开的目标 Release 与资产保持可下载，不会退回 draft。
 - root 网关 `preflight` 必须返回且仅返回与本次源码和固定安装配置完全一致的 `protocol`、`gateway`、`publish`、`rollback`、`key`、`config`、`deploy_user`、`rollback_user`；旧网关、helper、信任锚、配置路径或账号身份漂移都会在上传前失败。
 
+## macOS Preview Build
+
+文件：`.github/workflows/macos-preview.yml`
+
+这是不进入正式更新渠道的手动测试构建。它只接受远端 `internal` 的
+精确最新提交，并执行仓库质量门禁与 SQLCipher 来源验证。Apple custody
+齐全时继续执行 Developer ID 签名、公证和 Gatekeeper 校验，文件名为
+`Otto-macOS-Preview-arm64.dmg` 与 `Otto-macOS-Preview-x64.dmg`；缺少 custody
+时只生成明确标记的 `Otto-macOS-Preview-Unsigned-<arch>.dmg`，使用 ad-hoc
+应用签名和 DMG 完整性校验，不能冒充正式分发包。文件名均不带产品版本；
+`provenance.json` 保存内部版本、来源提交、工作流运行编号和签名状态。
+任一 DMG 超过 120 MiB 时工作流直接失败，不上传超限测试包。
+
+产物仅作为保留 14 天的 Actions artifact，不创建 tag、GitHub Release、
+`latest.json`，也不触碰正式或兼容下载仓库及更新镜像。
+
 ## Deploy Server
 
 文件：`.github/workflows/deploy-server.yml`

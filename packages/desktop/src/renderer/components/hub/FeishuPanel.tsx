@@ -24,11 +24,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { FeishuConfigPublic } from '../../../preload/index.js';
 import {
   deriveFeishuBadgeState,
+  FeishuStatusIcon,
   type FeishuStatusResult,
 } from '../FeishuStatusBadge.js';
-import { GeneratedIcon } from '../GeneratedIcon.js';
 import { IconExternalLink } from '../icons.js';
 import { Panel, Card, Badge, Empty } from './HubUI.js';
+import { ChannelPairingCard } from './ChannelPairingCard.js';
+import { ChannelInstallationList } from './ChannelInstallationList.js';
 
 /** 状态轮询周期：面板打开时用户正在等连接结果，比常驻徽标（5s）稍勤。 */
 const POLL_INTERVAL_MS = 3_000;
@@ -66,6 +68,7 @@ export function FeishuPanel(): React.JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     void loadConfig();
     const poll = async (): Promise<void> => {
       try {
@@ -73,13 +76,14 @@ export function FeishuPanel(): React.JSX.Element {
         if (!cancelled && res) setStatus(res);
       } catch {
         // 查询失败保留上一帧，下轮再试。
+      } finally {
+        if (!cancelled) timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
       }
     };
     void poll();
-    const timer = setInterval(() => void poll(), POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
       if (confirmTimer.current) clearTimeout(confirmTimer.current);
     };
   }, []);
@@ -180,22 +184,13 @@ export function FeishuPanel(): React.JSX.Element {
         </button>
       }
     >
+      <ChannelPairingCard provider={domain} />
+      <ChannelInstallationList provider={domain} />
+
       {/* 连接状态：与徽标同一套推导（诚实：重连中/锁冲突/离线各是各）。 */}
       <Card className="otto-hub__card--pad">
-        <div className="otto-hub__feishu-status">
-          {view.icon ? (
-            <GeneratedIcon
-              name={view.icon}
-              size={20}
-              className={view.kind === 'reconnecting' ? 'otto-generated-icon--spin' : undefined}
-            />
-          ) : (
-            <span
-              className="otto-hub__dot"
-              style={{ background: view.dotColor }}
-              aria-hidden
-            />
-          )}
+        <div className="otto-hub__feishu-status" data-feishu-state={view.kind}>
+          <FeishuStatusIcon view={view} size={20} />
           <span className="otto-hub__row-name">{view.label}</span>
           {cfg?.botName ? <Badge>Bot · {cfg.botName}</Badge> : null}
           {cfg?.tenantName ? <Badge>{cfg.tenantName}</Badge> : null}
@@ -207,6 +202,7 @@ export function FeishuPanel(): React.JSX.Element {
 
       {message ? <div className="otto-hub__feishu-message">{message}</div> : null}
 
+      <div className="otto-hub__section-title">高级配置与兼容模式</div>
       {/* 凭证表单：真配置，不发提示词。 */}
       {cfg?.corrupted ? (
         <Empty>

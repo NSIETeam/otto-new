@@ -41,11 +41,11 @@ describe('createCoreConfig v1.7 模式隔离', () => {
       model: 'otto:deepseek',
       customModels: [],
       userRules: '你是会议发起 Agent。',
-      excludeTools: ['multi_channel', 'feishu_project_collab'],
+      excludeTools: ['memory_manager', 'feishu_project_collab'],
     });
 
     expect(config.getUserRules()).toContain('会议发起 Agent');
-    expect(config.getExcludeTools()).toEqual(['multi_channel', 'feishu_project_collab']);
+    expect(config.getExcludeTools()).toEqual(['memory_manager', 'feishu_project_collab']);
   });
 
   it('飞书会话把 channel context 注入 core 配置', () => {

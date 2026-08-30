@@ -7,7 +7,7 @@ import { Config } from '../config/config.js';
 import { ToolRegistry } from './tool-registry.js';
 import { BaseTool, Icon, type ToolCallConfirmationDetails, type ToolResult } from './tools.js';
 
-const OPERATIONS = ['start', 'run_next', 'recover', 'approve', 'take_over', 'status'] as const;
+const OPERATIONS = ['start', 'run_next', 'recover', 'approve', 'take_over', 'status', 'list', 'pause', 'resume', 'cancel'] as const;
 const KINDS = ['condition', 'approval', 'tool'] as const;
 type Operation = (typeof OPERATIONS)[number];
 type StepKind = (typeof KINDS)[number];
@@ -51,6 +51,8 @@ interface RunSummarySource {
   definitionVersion: number;
   status: string;
   steps: StepSummary[];
+  pauseRequestedAt?: string;
+  cancelRequestedAt?: string;
 }
 
 interface RuntimePort {
@@ -59,6 +61,9 @@ interface RuntimePort {
   recover(runId: string): Promise<RunSummarySource | null>;
   approve(runId: string, stepId: string, approvalId: string): Promise<RunSummarySource | null>;
   takeOver(runId: string, note: string): Promise<RunSummarySource | null>;
+  pause(runId: string): Promise<RunSummarySource | null>;
+  resume(runId: string): Promise<RunSummarySource | null>;
+  cancel(runId: string): Promise<RunSummarySource | null>;
 }
 
 interface WorkflowModule {
@@ -69,7 +74,10 @@ interface WorkflowModule {
 
 interface WorkflowPersistence {
   module: WorkflowModule;
-  store: { getRun(id: string): Promise<RunSummarySource | null> };
+  store: {
+    getRun(id: string): Promise<RunSummarySource | null>;
+    listRuns(): Promise<RunSummarySource[]>;
+  };
   trace: unknown;
 }
 
@@ -84,6 +92,8 @@ function summarize(run: RunSummarySource | null): Record<string, unknown> {
     definitionId: run.definitionId,
     definitionVersion: run.definitionVersion,
     status: run.status,
+    pauseRequestedAt: run.pauseRequestedAt,
+    cancelRequestedAt: run.cancelRequestedAt,
     steps: run.steps.map(({ stepId, kind, attempt, status, approvalId, approvedAt, error }) => ({
       stepId,
       kind,
@@ -133,6 +143,7 @@ export class DurableWorkflowTool extends BaseTool<DurableWorkflowToolParams, Too
   validateToolParams(params: DurableWorkflowToolParams): string | null {
     if (!OPERATIONS.includes(params.action)) return 'durable_workflow: unsupported action.';
     if (params.action === 'start') return this.validateDefinition(params.definition);
+    if (params.action === 'list') return null;
     if (!params.run_id?.trim()) return `durable_workflow/${params.action}: run_id is required.`;
     if (params.action === 'approve' && (!params.step_id?.trim() || !params.approval_id?.trim())) {
       return 'durable_workflow/approve: step_id and approval_id are required.';
@@ -146,7 +157,7 @@ export class DurableWorkflowTool extends BaseTool<DurableWorkflowToolParams, Too
   }
 
   async shouldConfirmExecute(params: DurableWorkflowToolParams, _signal: AbortSignal): Promise<ToolCallConfirmationDetails | false> {
-    if (this.validateToolParams(params) || params.action === 'status') return false;
+    if (this.validateToolParams(params) || params.action === 'status' || params.action === 'list') return false;
     return { type: 'exec', title: `[WARN] Confirm: ${this.getDescription(params)}`, command: `durable_workflow(${params.action})`, rootCommand: 'durable_workflow', onConfirm: async () => {} };
   }
 
@@ -161,6 +172,11 @@ export class DurableWorkflowTool extends BaseTool<DurableWorkflowToolParams, Too
         persistence.trace,
       );
       let run: RunSummarySource | null;
+      if (params.action === 'list') {
+        const runs = await persistence.store.listRuns();
+        const output = JSON.stringify({ runs: runs.map((item) => summarize(item)) });
+        return { llmContent: `durable_workflow OK: ${output}`, returnDisplay: `durable_workflow OK: ${output}` };
+      }
       switch (params.action) {
         case 'start': run = await runtime.start(params.definition!); break;
         case 'run_next': run = await runtime.runNext(params.run_id!); break;
@@ -168,6 +184,9 @@ export class DurableWorkflowTool extends BaseTool<DurableWorkflowToolParams, Too
         case 'approve': run = await runtime.approve(params.run_id!, params.step_id!, params.approval_id!); break;
         case 'take_over': run = await runtime.takeOver(params.run_id!, params.takeover_note!); break;
         case 'status': run = await persistence.store.getRun(params.run_id!); break;
+        case 'pause': run = await runtime.pause(params.run_id!); break;
+        case 'resume': run = await runtime.resume(params.run_id!); break;
+        case 'cancel': run = await runtime.cancel(params.run_id!); break;
         default: throw new Error(`Unsupported workflow operation: ${params.action}`);
       }
       const output = JSON.stringify(summarize(run));

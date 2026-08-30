@@ -48,4 +48,20 @@ describe('HabitAnalyzer background safety', () => {
     analyzer.setBackgroundModelCallsEnabled(false);
     expect(registry.list()).toEqual([]);
   });
+
+  it('moves an opted-in task to a durable registry without leaving duplicates', () => {
+    const first = new RecurringTaskRegistry({ allowPaidBackground: true });
+    const durable = new RecurringTaskRegistry({ allowPaidBackground: true });
+    const analyzer = new HabitAnalyzer({
+      backgroundModelCallsEnabled: true,
+      taskRegistry: first,
+    });
+    analyzer.start();
+
+    analyzer.setTaskRegistry(durable, true);
+
+    expect(first.list()).toEqual([]);
+    expect(durable.list()).toHaveLength(1);
+    analyzer.stop();
+  });
 });

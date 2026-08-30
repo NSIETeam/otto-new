@@ -13,6 +13,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { request } from 'undici';
 import JSZip from 'jszip';
 import { getUserAgent } from '../utils/userAgent.js';
+import { startProcessWatchdog } from '../utils/processWatchdog.js';
 
 /**
  * 递归删除目录
@@ -356,7 +357,10 @@ export class BinaryManager {
         let stderrOutput = '';
 
         // 进度监控：定期检查文件大小
-        const progressInterval = setInterval(() => {
+        const stopProgressWatchdog = startProcessWatchdog({
+          name: 'lsp-binary-download-progress', source: 'binaryManager',
+          intervalMs: 2_000, cost: 'none',
+        }, () => {
           if (fs.existsSync(tempDownloadPath)) {
             const currentSize = fs.statSync(tempDownloadPath).size;
             const downloaded = ((currentSize / (asset.size || 1)) * 100).toFixed(1);
@@ -364,14 +368,14 @@ export class BinaryManager {
             const totalMB = (asset.size / 1024 / 1024).toFixed(1);
             console.log(`[LSP] ⬇️  ${asset.name}: ${currentMB}MB / ${totalMB}MB (${downloaded}%)`);
           }
-        }, 2000); // 每2秒输出一次进度
+        });
 
         curlProcess.stderr.on('data', (data) => {
           stderrOutput += data.toString();
         });
 
         curlProcess.on('close', (code) => {
-          clearInterval(progressInterval);
+          stopProgressWatchdog();
           if (code === 0) {
             resolve();
           } else {
@@ -383,7 +387,7 @@ export class BinaryManager {
         });
 
         curlProcess.on('error', (err) => {
-          clearInterval(progressInterval);
+          stopProgressWatchdog();
           if (fs.existsSync(tempDownloadPath)) {
             fs.unlinkSync(tempDownloadPath);
           }

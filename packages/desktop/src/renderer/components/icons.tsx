@@ -407,7 +407,12 @@ export function IconFeishuPetal({ size = 14, className }: IconProps): React.JSX.
       <circle cx="12" cy="17.6" r="4.1" />
       <circle cx="6.4" cy="12" r="4.1" />
       {/* 中心留白点，制造花蕊层次 */}
-      <circle cx="12" cy="12" r="2.5" fill="#fff" />
+      <circle
+        cx="12"
+        cy="12"
+        r="2.5"
+        fill="var(--otto-icon-cutout, var(--otto-surface))"
+      />
     </svg>
   );
 }
@@ -448,6 +453,25 @@ export function IconClose({ size, className }: IconProps): React.JSX.Element {
   return (
     <svg {...base(size)} className={className} strokeWidth={2}>
       <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  );
+}
+
+export function IconTrash({ size, className }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
+export function IconMoreHorizontal({ size, className }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(size)} className={className} fill="currentColor" stroke="none">
+      <circle cx="5" cy="12" r="1.7" />
+      <circle cx="12" cy="12" r="1.7" />
+      <circle cx="19" cy="12" r="1.7" />
     </svg>
   );
 }

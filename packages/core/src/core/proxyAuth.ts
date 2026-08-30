@@ -69,7 +69,6 @@ export class ProxyAuthManager {
   private usageStatsFilePath: string;
   private refreshPromise: Promise<string> | null = null;
   private cliVersion: string = 'unknown';
-  private periodicStatusCheckIntervalId: NodeJS.Timeout | null = null;
   private onLoginSuccessCallbacks: Array<() => void> = [];
 
   /**
@@ -154,30 +153,6 @@ export class ProxyAuthManager {
     this.loadJwtToken();
     this.loadUsageStats();
 
-    // 启动定期状态检查（每10分钟打印一次状态）
-    this.startPeriodicStatusCheck();
-  }
-
-  /**
-   * 启动定期状态检查
-   * ⚠️ 关键：保存 intervalId 以支持后续清理，防止内存泄漏
-   */
-  private startPeriodicStatusCheck(): void {
-    this.periodicStatusCheckIntervalId = setInterval(() => {
-      if (this.jwtTokenData) {
-        const now = Date.now();
-        const timeRemaining = this.jwtTokenData.expiresAt - now;
-        const timeRemainingFormatted = this.formatTimeRemaining(timeRemaining);
-        const expiresAtFormatted = this.formatAbsoluteTime(this.jwtTokenData.expiresAt);
-
-        if (timeRemaining > 0) {
-          const nextRefreshFormatted = this.formatAbsoluteTime(this.jwtTokenData.expiresAt - TOKEN_REFRESH_THRESHOLD_SECONDS * 1000);
-          if (process.env.OTTO_CODE_DEBUG === "1") console.log(`[Login Check] 📊 Periodic status check - Credential remaining: ${timeRemainingFormatted} (until ${expiresAtFormatted}), next renewal: ${nextRefreshFormatted}`);
-        } else {
-          if (process.env.OTTO_CODE_DEBUG === "1") console.log(`[Login Check] ⚠️  Periodic status check - Credential expired at: ${expiresAtFormatted}`);
-        }
-      }
-    }, 10 * 60 * 1000); // 每10分钟检查一次
   }
 
   /**
@@ -714,17 +689,10 @@ export class ProxyAuthManager {
 
   /**
    * 清除认证信息及资源
-   * ⚠️ 关键：清理 periodicStatusCheckIntervalId 防止内存泄漏
    */
   clear(): void {
     this.userInfo = null;
     this.jwtTokenData = null;
-
-    // 🔑 清理定期检查的 interval
-    if (this.periodicStatusCheckIntervalId !== null) {
-      clearInterval(this.periodicStatusCheckIntervalId);
-      this.periodicStatusCheckIntervalId = null;
-    }
 
     // 删除本地用户信息文件
     try {

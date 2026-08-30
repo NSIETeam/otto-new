@@ -29,6 +29,7 @@ import {
   type ExternalAgentType,
   resolveExternalAgentSpec,
 } from './externalAgentRegistry.js';
+import { startProcessWatchdog } from '../utils/processWatchdog.js';
 
 /** Throttle interval for pushing live output to the UI/card. */
 const OUTPUT_UPDATE_INTERVAL_MS = 500;
@@ -121,6 +122,8 @@ export interface DelegatePlanEntry {
  * card). All fields are cumulative for the current turn.
  */
 export interface DelegateProgress {
+  /** Native ACP session handle, persisted as soon as the session is created. */
+  sessionId?: string;
   /** Title of the tool call currently in flight, if any. */
   currentTool?: string;
   /** Number of tool calls started so far this turn. */
@@ -276,6 +279,12 @@ class DelegateClient implements acp.Client {
     if (!force && now - this.lastProgressFlush < OUTPUT_UPDATE_INTERVAL_MS) return;
     this.lastProgressFlush = now;
     onProgress({ ...this.progress, plan: this.progress.plan ? [...this.progress.plan] : undefined });
+  }
+
+  /** Persist the resume handle before the first potentially long agent turn. */
+  setSessionId(sessionId: string): void {
+    this.progress.sessionId = sessionId;
+    this.flushProgress(true);
   }
 
   /** Push the cumulative transcript to the caller, throttled. */
@@ -614,7 +623,10 @@ export async function runDelegatedTask(
   // Liveness heartbeat: while the transcript is still empty (or quiet) push an
   // elapsed-time line plus the tail of the child's stderr (npm/npx download
   // progress lands here), so the card never looks frozen.
-  const heartbeat = setInterval(() => {
+  const stopHeartbeat = startProcessWatchdog({
+    name: `acp-${agentType}-progress`, source: 'acpAgentClient',
+    intervalMs: HEARTBEAT_INTERVAL_MS, cost: 'none',
+  }, () => {
     if (settled || !opts.onUpdate) return;
     const elapsed = Math.round((Date.now() - startedAt) / 1000);
     if (handler.transcript.trim()) {
@@ -625,7 +637,7 @@ export async function runDelegatedTask(
     opts.onUpdate(
       `🚀 ${phase} ${elapsed}s` + (tail ? `\n\n\`\`\`\n${tail}\n\`\`\`` : ''),
     );
-  }, HEARTBEAT_INTERVAL_MS);
+  });
 
   const timeout = setTimeout(() => {
     if (settled) return;
@@ -638,7 +650,11 @@ export async function runDelegatedTask(
   // completely silent. Catches the unauthenticated / first-run / offline bridge
   // that emits one update and then hangs forever, instead of waiting out the
   // full task timeout.
-  const idleWatch = setInterval(() => {
+  const stopIdleWatch = startProcessWatchdog({
+    name: `acp-${agentType}-idle`, source: 'acpAgentClient',
+    intervalMs: Math.min(HEARTBEAT_INTERVAL_MS, Math.max(1000, Math.floor(idleTimeoutMs / 4))),
+    cost: 'none',
+  }, () => {
     if (settled || promptSentAt === 0) return;
     const sinceActivity = Date.now() - handler.lastActivityAt;
     const sincePrompt = Date.now() - promptSentAt;
@@ -647,7 +663,7 @@ export async function runDelegatedTask(
       killChildProcess(child);
       interruptTurn?.(new Error('Delegated task went idle.'));
     }
-  }, Math.min(HEARTBEAT_INTERVAL_MS, Math.max(1000, Math.floor(idleTimeoutMs / 4))));
+  });
 
   const onAbort = () => {
     if (settled) return;
@@ -667,8 +683,8 @@ export async function runDelegatedTask(
   const finish = (result: DelegateResult): DelegateResult => {
     settled = true;
     clearTimeout(timeout);
-    clearInterval(heartbeat);
-    clearInterval(idleWatch);
+    stopHeartbeat();
+    stopIdleWatch();
     signal.removeEventListener('abort', onAbort);
     handler.flush(true);
     killChildProcess(child);
@@ -718,6 +734,8 @@ export async function runDelegatedTask(
       const session = await connection.newSession({ cwd, mcpServers: [] });
       sessionId = session.sessionId;
     }
+    if (!sessionId) throw new Error(`${label} returned an empty session id.`);
+    handler.setSessionId(sessionId);
 
     phase = `已连接 ${label}，等待响应…`;
     handler.lastActivityAt = Date.now();

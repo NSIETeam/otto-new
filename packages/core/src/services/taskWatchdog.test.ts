@@ -57,6 +57,37 @@ describe('TaskWatchdog', () => {
       expect(s.state).toBe('active');
       expect(s.idleDurationMs).toBeLessThan(5000);
     });
+
+    it('marks a task stalled when periodic checks see no real output', async () => {
+      const onStalled = vi.fn();
+      const wd = new TaskWatchdog(
+        { stallTimeoutMs: 5000, heartbeatIntervalMs: 1000, autoCheckpoint: false, lowMemoryThresholdMB: 10000 },
+        { onStalled },
+      );
+      wd.start('session-stalled');
+
+      await vi.advanceTimersByTimeAsync(6000);
+
+      expect(wd.getStatus().state).toBe('stalled');
+      expect(onStalled).toHaveBeenCalledOnce();
+      wd.stop(false);
+    });
+
+    it('recovers a stalled task only after a real output heartbeat', async () => {
+      const onRecovered = vi.fn();
+      const wd = new TaskWatchdog(
+        { stallTimeoutMs: 5000, heartbeatIntervalMs: 1000, autoCheckpoint: false, lowMemoryThresholdMB: 10000 },
+        { onRecovered },
+      );
+      wd.start('session-recovered');
+      await vi.advanceTimersByTimeAsync(6000);
+
+      wd.heartbeat('new output');
+
+      expect(wd.getStatus().state).toBe('active');
+      expect(onRecovered).toHaveBeenCalledOnce();
+      wd.stop(false);
+    });
   });
 
   describe('formatStatus', () => {

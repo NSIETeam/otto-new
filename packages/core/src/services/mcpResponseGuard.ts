@@ -196,6 +196,8 @@ export class MCPResponseGuard {
     currentContextUsage: number = 50,
     contentGenerator?: ContentGenerator
   ): Promise<MCPResponseGuardResult> {
+    // No idle timer: expired files are reclaimed on the next real MCP use.
+    this.cleanupExpiredTempFiles();
     // 简化后的参数处理
     const actualToolName = toolName || 'unknown';
     const actualContextUsage = currentContextUsage ?? 50;

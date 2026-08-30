@@ -44,6 +44,33 @@ export * from './modules/data_platform/index.js';
 export * from './modules/authorization/index.js';
 export * from './modules/identity_organization/index.js';
 export * from './modules/data_governance/index.js';
+export {
+  ChannelPairingCoordinator,
+  channelInstallationProofPayload,
+} from './modules/integration_adapters/channelConnector.js';
+export type {
+  BeginPairingInput,
+  PairingSession,
+  ChannelInstallation,
+  ChannelHealth,
+  ChannelConnectorV1,
+  PairingAuthorization,
+  ChannelPairingAuditEvent,
+  ChannelPairingCoordinatorOptions,
+  ChannelInstallationProof,
+  ChannelInstallationCommitContext,
+} from './modules/integration_adapters/channelConnector.js';
+export * from './modules/integration_adapters/channelTaskControl.js';
+export * from './modules/integration_adapters/channelCredentialVault.js';
+export * from './modules/integration_adapters/managedChannelConnector.js';
+export * from './modules/integration_adapters/httpChannelPairingBroker.js';
+export * from './modules/integration_adapters/channelOutboundLedger.js';
+export * from './modules/integration_adapters/brokerChannelRuntime.js';
+export * from './modules/integration_adapters/brokerChannelTaskBridge.js';
+export * from './modules/integration_adapters/channelIdentityRegistry.js';
+export * from './modules/integration_adapters/managedChannelPlatform.js';
+export * from './modules/integration_adapters/workflowTaskControlPort.js';
+export * from './modules/integration_adapters/jsonChannelMessageJournal.js';
 export * from './productModules.js';
 export * from './productWorkspace.js';
 export * from './productWorkspaceStore.js';

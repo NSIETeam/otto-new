@@ -3,6 +3,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { RecurringTaskRegistry } from 'otto-core';
 
 import type { EnvelopedSqlCipherKeyProvider } from './envelopedSqlCipherKeyProvider.js';
 
@@ -329,6 +330,8 @@ export function createAutomaticKeyRotationTask(input: {
   isDekMaintenanceWindow(): boolean | Promise<boolean>;
   now?: () => Date;
   onError?: (error: unknown) => void;
+  taskRegistry?: RecurringTaskRegistry;
+  estimatedCostUsdPerRun?: number;
 }): AutomaticKeyRotationTask {
   const actorId = requiredIdentifier(input.actorId, 'automatic rotation actor');
   for (const [label, value] of [
@@ -340,6 +343,10 @@ export function createAutomaticKeyRotationTask(input: {
     }
   }
   const now = input.now ?? (() => new Date());
+  const taskRegistry = input.taskRegistry ?? new RecurringTaskRegistry({
+    allowPaidBackground: true,
+    onError: (_taskName, error) => input.onError?.(error),
+  });
 
   async function isDue(key: string, intervalMs: number, time: Date) {
     const stored = await input.state.get(key);
@@ -378,11 +385,14 @@ export function createAutomaticKeyRotationTask(input: {
       if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 10_000) {
         throw new Error('automatic rotation poll interval is invalid');
       }
-      const timer = setInterval(() => {
-        void runOnce().catch((error) => input.onError?.(error));
-      }, pollIntervalMs);
-      timer.unref?.();
-      return () => clearInterval(timer);
+      return taskRegistry.register({
+        name: `server.automatic-key-rotation.${actorId}`,
+        source: 'packages/server/src/modules/data_platform/keyRotationCoordinator.ts',
+        intervalMs: pollIntervalMs,
+        estimatedCostUsdPerRun: input.estimatedCostUsdPerRun ?? 0.01,
+        getInputVersion: () => String(Math.floor(now().getTime() / pollIntervalMs)),
+        run: runOnce,
+      }) ?? (() => undefined);
     },
   };
 }

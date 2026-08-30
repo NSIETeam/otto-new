@@ -316,9 +316,10 @@ export function AccountManagementPage({
 
   useEffect(() => {
     if (!invite) return undefined;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [invite]);
+    const delay = Math.max(1, 1_000 - (Date.now() - now));
+    const timer = window.setTimeout(() => setNow(Date.now()), delay);
+    return () => window.clearTimeout(timer);
+  }, [invite, now]);
 
   useEffect(() => {
     if (invite) {

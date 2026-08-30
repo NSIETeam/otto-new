@@ -23,6 +23,7 @@ import {
   type DocumentRuntimeResolution,
   type ResolveDocumentRuntimeOptions,
 } from '../services/bundledRuntime.js';
+import { startProcessWatchdog } from '../utils/processWatchdog.js';
 
 type ExecFileCallback = (
   error: NodeJS.ErrnoException | null,
@@ -521,7 +522,7 @@ export function runBrowserScreenshotProcess(
     let hardSettleTimer: ReturnType<typeof setTimeout> | undefined;
 
     const cleanup = () => {
-      clearInterval(pngPollTimer);
+      stopPngPoll();
       clearTimeout(commandTimeout);
       if (forceKillTimer) clearTimeout(forceKillTimer);
       if (hardSettleTimer) clearTimeout(hardSettleTimer);
@@ -583,7 +584,7 @@ export function runBrowserScreenshotProcess(
     const finishFirst = (nextOutcome: BrowserProcessOutcome) => {
       if (outcome || settled) return;
       outcome = nextOutcome;
-      clearInterval(pngPollTimer);
+      stopPngPoll();
       clearTimeout(commandTimeout);
       signal.removeEventListener('abort', abort);
       requestTermination();
@@ -619,10 +620,13 @@ export function runBrowserScreenshotProcess(
       settle();
     });
 
-    const pngPollTimer = setInterval(() => {
+    const stopPngPoll = startProcessWatchdog({
+      name: 'document-browser-screenshot-completion', source: 'generate-document',
+      intervalMs: pollIntervalMs, cost: 'none',
+    }, () => {
       if (!isScreenshotComplete(screenshotPath)) return;
       finishFirst({ kind: 'success' });
-    }, pollIntervalMs);
+    });
     const commandTimeout = setTimeout(() => {
       const timeoutError = Object.assign(
         new Error(`浏览器截图超时（${timeoutMs} 毫秒）。`),

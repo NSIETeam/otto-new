@@ -1567,6 +1567,37 @@ export interface FeishuConfigSaveRequest {
   ownerOpenId?: string;
 }
 
+export type ChannelProvider = 'feishu' | 'lark' | 'wecom';
+export type ChannelPairingStatus =
+  | 'waiting_scan'
+  | 'user_authorized'
+  | 'waiting_admin'
+  | 'installing'
+  | 'verifying'
+  | 'connected'
+  | 'expired'
+  | 'denied'
+  | 'failed'
+  | 'revoked';
+
+export interface ChannelPairingPublic {
+  pairingId: string;
+  provider: ChannelProvider;
+  status: ChannelPairingStatus;
+  qrPayload: string;
+  expiresAtMs: number;
+  requestedScopes: readonly string[];
+  pollAfterMs: number;
+  tenantName?: string;
+  failureReason?: string;
+}
+
+export interface ChannelPairingBeginRequest {
+  provider: ChannelProvider;
+  installationPublicKey: string;
+  requestedScopes: readonly string[];
+}
+
 /**
  * REST 路由约定（server.ts 实现）：
  *   GET  /health                      → ApiResponse<HealthInfo>
@@ -1592,6 +1623,11 @@ export const HTTP_ROUTES = {
   feishuStart: '/feishu/start',
   feishuStop: '/feishu/stop',
   feishuConfig: '/feishu/config',
+  channelPairings: '/channels/pairings',
+  channelPairing: (id: string) => `/channels/pairings/${id}`,
+  channelInstallations: '/channels/installations',
+  channelInstallation: (id: string) => `/channels/installations/${id}`,
+  channelIdentities: (id: string) => `/channels/installations/${id}/identities`,
   incrementalUpdatePush: '/internal/incremental-update/push',
   ws: '/ws',
 } as const;

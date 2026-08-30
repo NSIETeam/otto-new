@@ -7,3 +7,6 @@ export * from './file-run-store.js';
 export * from './web-driver.js';
 export * from './playwright-session-factory.js';
 export * from './file-artifact-store.js';
+export * from './desktop-driver.js';
+export * from './composite-driver.js';
+export * from './macos-accessibility-port.js';

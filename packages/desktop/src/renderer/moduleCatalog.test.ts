@@ -89,6 +89,7 @@ describe('static module catalog', () => {
 
     expect(ppt).toMatchObject({
       label: COMMON_EXPERT_PROFILES.find((profile) => profile.id === 'ppt')?.name,
+      icon: 'office-presentation',
       activation: { kind: 'agent', profileId: 'ppt' },
       availability: 'available',
     });
@@ -183,7 +184,7 @@ describe('custom expert modules', () => {
         profileId: 'otto-enterprise-work',
         customAgentId: 'custom-bid-helper',
       },
-      icon: 'generated:agent-customer-success',
+      icon: 'agent',
       availability: 'available',
     });
     expect(customAgent).toEqual(before);
@@ -203,5 +204,18 @@ describe('installed customer modules', () => {
       disabledReason: '市场已暂停此版本',
       activation: { kind: 'customer-module', moduleId: 'com.acme.report', version: '1.2.0' },
     });
+  });
+
+  it('uses the shared semantic icon even when the package contains custom artwork', () => {
+    const catalog = buildModuleCatalog(enterpriseContext({
+      customerModules: [{
+        id: 'com.acme.report', version: '1.2.0', name: '月报模块',
+        description: '生成月报', enabled: true,
+        iconSrc: 'data:image/png;base64,not-rendered-in-the-right-rail',
+      }],
+    }));
+
+    expect(catalog.find((module) => module.id === 'customer-module:com.acme.report')?.icon)
+      .toBe('customer-module');
   });
 });

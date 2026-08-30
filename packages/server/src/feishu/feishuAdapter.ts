@@ -27,13 +27,15 @@
  *     由 WS 协议帧承载（双向同步视图 Issue #6 用 session_upsert / message_start）。
  *   - `isolatedSessions: Map<chatId, {config, geminiClient}>` → 提升为 store 的
  *     getOrCreateFeishuSession（store 本就是唯一会话源，天然就是隔离会话表）。
- *   - 工具确认 / slash 命令分发（CommandService 等强 CLI 耦合）→ 暂不迁，留 TODO。
+ *   - 旧 CLI slash 命令不迁移。兼容接入明确拒绝控制命令；远程控制只走托管渠道的
+ *     身份、设备、策略、审批和 durable Workflow 链路。
  */
 
 import { createHash } from 'node:crypto';
 
 import { loadCredentials, isSenderAuthorized } from './vendor/credentials.js';
 import type { FeishuCredentials } from './vendor/credentials.js';
+import { RecurringTaskRegistry } from 'otto-core';
 import { FeishuGateway, FeishuGatewayLockError } from './vendor/gateway.js';
 import type { FeishuMessage, OnMeetingEndedCallback } from './vendor/gateway.js';
 import {
@@ -141,6 +143,8 @@ export interface FeishuAdapterDeps {
   gatewayFactory?: FeishuGatewayFactory;
   /** Durable inbound queue path. null keeps isolated tests in memory. */
   inboundQueuePath?: string | null;
+  /** Host-owned scheduler; tests may inject an isolated registry. */
+  taskRegistry?: RecurringTaskRegistry;
 }
 
 /**
@@ -161,6 +165,7 @@ export class FeishuAdapter {
   private readonly injectedCreds?: FeishuCredentials | null;
   private readonly gatewayFactory: FeishuGatewayFactory;
   private readonly inboundQueue: FeishuInboundQueue;
+  private readonly taskRegistry: RecurringTaskRegistry;
   private inboundDraining = false;
   private inboundRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -175,8 +180,8 @@ export class FeishuAdapter {
   private sdkReconnectingSince: number | null = null;
   /** adapter 层重连排程句柄；无排程为 null。stop() 必须清干净，杜绝幽灵重连。 */
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  /** 心跳句柄（僵尸探测 + 守护兜底）。 */
-  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** 已登记心跳任务的停止函数（僵尸探测 + 守护兜底）。 */
+  private stopHeartbeatTask: (() => void) | undefined;
   /** 自上次成功以来 adapter 层已发起的重连尝试次数（成功归零 → 退避归零）。 */
   private reconnectAttempts = 0;
   /** 僵尸判定连击计数（连续 ZOMBIE_STRIKE_LIMIT 次探到 socket 已死才动手）。 */
@@ -214,6 +219,7 @@ export class FeishuAdapter {
       ((creds) =>
         new FeishuGateway(creds.appId, creds.appSecret, creds.domain));
     this.inboundQueue = new FeishuInboundQueue(deps.inboundQueuePath ?? null);
+    this.taskRegistry = deps.taskRegistry ?? new RecurringTaskRegistry();
   }
 
   isConnected(): boolean {
@@ -334,12 +340,14 @@ export class FeishuAdapter {
     this.scheduleInboundDrain();
 
     // 4) 心跳守护：僵尸探测 + 悬挂接管 + 兜底补排（详见 heartbeatTick）。
-    this.heartbeatTimer = setInterval(
-      () => this.heartbeatTick(),
-      HEARTBEAT_INTERVAL_MS,
-    );
-    // 心跳不该拽住进程退出（Node 环境才有 unref；类型上防御 fake timer）。
-    (this.heartbeatTimer as { unref?: () => void }).unref?.();
+    this.stopHeartbeatTask = this.taskRegistry.register({
+      name: 'server.feishu-connection-heartbeat',
+      source: 'packages/server/src/feishu/feishuAdapter.ts',
+      intervalMs: HEARTBEAT_INTERVAL_MS,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => String(Math.floor(Date.now() / HEARTBEAT_INTERVAL_MS)),
+      run: () => this.heartbeatTick(),
+    });
 
     // 5) 发起首次建连（不 await：失败/悬挂都由守护循环接管，见方法注释）。
     void this.attemptConnect();
@@ -552,10 +560,16 @@ export class FeishuAdapter {
       return null;
     }
 
-    // TODO(Issue #3 增强): 生命周期 / /bind / /restart / slash 命令拦截。
-    //   cli feishuCommand 在这里拦截 `/feishu start|stop`、`/bind`、`/restart`、
-    //   slash 命令。server 版暂不迁这些强 CLI 耦合命令（它们依赖 CommandService /
-    //   进程自重启），先让普通对话走通。命中这些前缀时当前按普通消息透传给 core。
+    if (text.startsWith('/')) {
+      if (this.gateway) {
+        await this.gateway.sendMarkdown(
+          msg.chatId,
+          '此 Bot 使用旧兼容接入，不执行远程控制命令。请在 Otto「渠道连接」中完成扫码托管连接后，再使用经过身份、设备和审批校验的控制命令。',
+          msg.messageId,
+        ).catch(() => undefined);
+      }
+      return null;
+    }
 
     const eventId = this.feishuEventId(msg);
     const alreadyAccepted = this.inboundQueue.get(eventId);
@@ -826,10 +840,8 @@ export class FeishuAdapter {
       clearTimeout(this.inboundRetryTimer);
       this.inboundRetryTimer = null;
     }
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
+    this.stopHeartbeatTask?.();
+    this.stopHeartbeatTask = undefined;
     this.connecting = false;
     this.connectStartedAt = null;
     this.sdkReconnectingSince = null;

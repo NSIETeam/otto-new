@@ -18,6 +18,7 @@ import {
   RendererErrorBoundary,
   RendererRecoveryScreen,
 } from './components/RendererErrorBoundary.js';
+import { startRendererThemeSync } from './themeSync.js';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('找不到 #root 容器');
@@ -66,5 +67,5 @@ async function mountRenderer(): Promise<void> {
     root.render(<RendererRecoveryScreen />);
   }
 }
-
+startRendererThemeSync();
 void mountRenderer();

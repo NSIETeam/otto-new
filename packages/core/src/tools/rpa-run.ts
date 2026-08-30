@@ -21,11 +21,16 @@ const ACTIONS = [
   'desktop.launch',
   'desktop.type_text',
   'desktop.hotkey',
+  'desktop.inspect',
   'desktop.click',
+  'desktop.fill',
+  'desktop.select',
+  'desktop.scroll',
+  'desktop.wait',
   'desktop.screenshot',
   'checkpoint',
 ] as const;
-const OPERATIONS = ['start', 'run_next', 'run_all', 'pause', 'resume', 'recover', 'approve', 'take_over', 'cancel', 'status'] as const;
+const OPERATIONS = ['start', 'run_next', 'run_all', 'recover', 'approve', 'take_over', 'status', 'pause', 'resume', 'cancel'] as const;
 type RpaAction = (typeof ACTIONS)[number];
 type RpaOperation = (typeof OPERATIONS)[number];
 
@@ -69,6 +74,8 @@ interface RpaRunSummarySource {
   currentStepId: string | null;
   approvalId?: string;
   takeoverNote?: string;
+  pauseRequestedAt?: string;
+  cancelRequestedAt?: string;
   receipts: RpaReceipt[];
 }
 
@@ -96,6 +103,9 @@ interface RpaRuntimeModule {
   ) => RpaRunnerPort;
   RunScopedWebDriver: new (factory: unknown) => unknown;
   PlaywrightWebSessionFactory: new () => unknown;
+  DesktopRpaDriverV1?: new (port: unknown) => unknown;
+  CompositeRpaDriver: new (web: unknown, desktop?: unknown) => unknown;
+  getDesktopRpaPortV1?(): unknown;
 }
 
 interface RuntimeDriverInput {
@@ -139,6 +149,8 @@ function summarize(run: RpaRunSummarySource | null): Record<string, unknown> {
     currentStepId: run.currentStepId,
     approvalId: run.approvalId,
     takeoverNote: run.takeoverNote,
+    pauseRequestedAt: run.pauseRequestedAt,
+    cancelRequestedAt: run.cancelRequestedAt,
     receipts: run.receipts.map((receipt) => ({
       stepId: receipt.stepId,
       attempt: receipt.attempt,
@@ -195,10 +207,24 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
         if (!step.id || !ACTIONS.includes(step.action) || !step.args || !['none', 'external'].includes(step.sideEffect)) {
           return 'rpa_run/start: each step requires id, supported action, args, and sideEffect.';
         }
-        if (step.action.startsWith('desktop.') && step.action !== 'desktop.screenshot' && step.sideEffect !== 'external') {
-          return `rpa_run/start: ${step.action} must be declared as an external side effect.`;
+        if (
+          [
+            'desktop.launch',
+            'desktop.type_text',
+            'desktop.hotkey',
+            'desktop.click',
+            'desktop.fill',
+            'desktop.select',
+            'desktop.scroll',
+          ].includes(step.action)
+          && (step.sideEffect !== 'external' || step.requiresApproval !== true)
+        ) {
+          return `rpa_run/start: ${step.action} requires an external side effect and explicit approval.`;
         }
-        if (step.action === 'web.navigate' && typeof step.args['url'] === 'string') {
+        if (step.action === 'web.navigate') {
+          if (typeof step.args['url'] !== 'string') {
+            return 'rpa_run/start: web.navigate requires a valid declared URL.';
+          }
           try {
             const hostname = new URL(step.args['url']).hostname.toLowerCase();
             const declared = workflow.allowedHosts.some((entry) => entry.toLowerCase() === hostname || (entry.startsWith('*.') && hostname.endsWith(entry.slice(1))));
@@ -247,12 +273,6 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
         case 'run_all':
           run = await runner.runUntilBlocked(params.run_id!, signal);
           break;
-        case 'pause':
-          run = await runner.pause(params.run_id!, params.takeover_note);
-          break;
-        case 'resume':
-          run = await runner.resume(params.run_id!);
-          break;
         case 'recover':
           run = await runner.recover(params.run_id!);
           break;
@@ -262,11 +282,17 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
         case 'take_over':
           run = await runner.takeOver(params.run_id!, params.takeover_note!);
           break;
-        case 'cancel':
-          run = await runner.cancel(params.run_id!);
-          break;
         case 'status':
           run = await this.status(params.run_id!);
+          break;
+        case 'pause':
+          run = await runner.pause(params.run_id!, params.takeover_note);
+          break;
+        case 'resume':
+          run = await runner.resume(params.run_id!);
+          break;
+        case 'cancel':
+          run = await runner.cancel(params.run_id!);
           break;
         default:
           throw new Error(`Unsupported RPA operation: ${params.action}`);
@@ -322,6 +348,10 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
 
   private async createDriver(module: RpaRuntimeModule): Promise<RuntimeDriver> {
     const web = new module.RunScopedWebDriver(new module.PlaywrightWebSessionFactory()) as RuntimeDriver;
+    const desktopPort = module.getDesktopRpaPortV1?.();
+    const semanticDesktop = desktopPort && module.DesktopRpaDriverV1
+      ? new module.DesktopRpaDriverV1(desktopPort) as RuntimeDriver
+      : undefined;
     const { DesktopAutomationTool } = await import('./desktop-automation.js');
     const desktop = new DesktopAutomationTool(this.config);
     return {
@@ -329,15 +359,30 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
         if (!input.step.action.startsWith('desktop.')) return web.execute(input);
         const args = input.step.args;
         const action = input.step.action;
+
+        if (['desktop.inspect', 'desktop.click', 'desktop.fill', 'desktop.select', 'desktop.scroll', 'desktop.wait'].includes(action)) {
+          if (!semanticDesktop) {
+            throw new Error('Desktop RPA is unavailable: the signed accessibility host is not registered.');
+          }
+          return semanticDesktop.execute(input);
+        }
+        if (action === 'desktop.screenshot' && typeof args['appId'] === 'string') {
+          if (!semanticDesktop) {
+            throw new Error('App-scoped desktop screenshots require the signed accessibility host.');
+          }
+          return semanticDesktop.execute(input);
+        }
+
         const parameters = action === 'desktop.launch'
           ? { action: 'launch_app' as const, app_name: String(args['appName'] ?? '') }
           : action === 'desktop.type_text'
             ? { action: 'type_text' as const, text: String(args['text'] ?? '') }
             : action === 'desktop.hotkey'
               ? { action: 'hotkey' as const, keys: String(args['keys'] ?? '') }
-              : action === 'desktop.click'
-                ? { action: 'mouse' as const, x: Number(args['x']), y: Number(args['y']), button: 'left' as const, click_type: 'single' as const }
-                : { action: 'screenshot' as const, output_path: typeof args['outputPath'] === 'string' ? args['outputPath'] : undefined };
+              : action === 'desktop.screenshot'
+                ? { action: 'screenshot' as const, output_path: typeof args['outputPath'] === 'string' ? args['outputPath'] : undefined }
+                : undefined;
+        if (!parameters) throw new Error(`Desktop driver cannot execute ${action}.`);
         const result = await desktop.execute(parameters, input.signal ?? new AbortController().signal);
         const message = String(result.llmContent);
         if (message.includes(' FAIL: ')) throw new Error(message);

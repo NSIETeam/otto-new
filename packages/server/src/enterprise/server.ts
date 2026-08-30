@@ -30,7 +30,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createAliyunLoginSmsFromEnv } from 'otto-core';
+import { createAliyunLoginSmsFromEnv, RecurringTaskRegistry } from 'otto-core';
 import * as db from './db.js';
 import { e2eeProductionCapabilities } from './e2eeProductionReleasePolicy.js';
 
@@ -131,6 +131,8 @@ export interface EnterpriseServerOptions {
   loginRateLimit?: PasswordLoginRateLimitOptions;
   /** Test seam; production derives bootstrap credentials from server-side environment only. */
   privateDeploymentBootstrapCoordinator?: PrivateDeploymentBootstrapCoordinator;
+  /** Host-owned resident scheduler; injectable for deterministic tests. */
+  taskRegistry?: RecurringTaskRegistry;
 }
 
 /** 与 control_command 边界的信封/执行结果类型对齐（避免 server.ts 循环依赖）。 */
@@ -671,22 +673,30 @@ function startTicketNotificationRuntime(options: {
   feishuSender: RepairNotificationSender | null;
   intervalMs?: number;
   onError?: (error: unknown) => void;
+  taskRegistry: RecurringTaskRegistry;
 }): () => void {
-  const timer = setInterval(() => {
-    db.processTicketNotificationTasks({
-      smsSender: options.smsSender,
-      feishuSender: options.feishuSender,
-      resolveRecipientChannel: (accountId) => {
-        const account = db.getAccount(accountId);
-        return {
-          phone: account?.phone ?? null,
-          feishuOpenId: account?.feishuOpenId ?? null,
-        };
-      },
-    }).catch((error) => options.onError?.(error));
-  }, options.intervalMs ?? 15_000);
-  timer.unref?.();
-  return () => clearInterval(timer);
+  const intervalMs = options.intervalMs ?? 15_000;
+  const stop = options.taskRegistry.register({
+    name: 'enterprise.ticket-notification-delivery',
+    source: 'packages/server/src/enterprise/server.ts#ticket-notifications',
+    intervalMs,
+    estimatedCostUsdPerRun: options.smsSender ? 0.01 : 0,
+    getInputVersion: () => String(Math.floor(Date.now() / intervalMs)),
+    run: async () => {
+      await db.processTicketNotificationTasks({
+        smsSender: options.smsSender,
+        feishuSender: options.feishuSender,
+        resolveRecipientChannel: (accountId) => {
+          const account = db.getAccount(accountId);
+          return {
+            phone: account?.phone ?? null,
+            feishuOpenId: account?.feishuOpenId ?? null,
+          };
+        },
+      });
+    },
+  });
+  return stop ?? (() => undefined);
 }
 
 /**
@@ -911,6 +921,11 @@ export function startEnterpriseServer(
   opts: EnterpriseServerOptions = {},
 ): Server {
   const validatedOptions = validatedStartOptions(opts);
+  const taskRegistry = validatedOptions.taskRegistry ?? new RecurringTaskRegistry({
+    allowPaidBackground: true,
+    onError: (taskName, error) =>
+      console.error(`[Otto Enterprise] resident task ${taskName} failed`, error),
+  });
   db.getDatabaseReadiness();
   db.ensureDirectMessageContentEncrypted();
   db.ensureDeploymentLicenseSecretsEncrypted();
@@ -1008,8 +1023,15 @@ export function startEnterpriseServer(
       mlsCleanupRunning = false;
     }
   };
-  const mlsCleanupTimer = setInterval(runMlsCleanup, 15 * 60 * 1_000);
-  mlsCleanupTimer.unref();
+  const mlsCleanupIntervalMs = 15 * 60 * 1_000;
+  const stopMlsCleanup = taskRegistry.register({
+    name: 'enterprise.local-mls-resource-maintenance',
+    source: 'packages/server/src/enterprise/server.ts#mls-cleanup',
+    intervalMs: mlsCleanupIntervalMs,
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => String(Math.floor(Date.now() / mlsCleanupIntervalMs)),
+    run: runMlsCleanup,
+  }) ?? (() => undefined);
   const initialMlsCleanup = setImmediate(runMlsCleanup);
   initialMlsCleanup.unref();
   let stopTicketNotificationRuntime: () => void;
@@ -1017,12 +1039,13 @@ export function startEnterpriseServer(
     stopTicketNotificationRuntime = startTicketNotificationRuntime({
       smsSender: repairSmsSender,
       feishuSender: repairFeishuSender,
+      taskRegistry,
       onError: (error) =>
         console.error('[Otto Enterprise] 工单通知升级任务失败', error),
     });
   } catch (error) {
     clearImmediate(initialMlsCleanup);
-    clearInterval(mlsCleanupTimer);
+    stopMlsCleanup();
     stopPrivateDeploymentRuntime();
     stopPrivateDeploymentBootstrapRuntime();
     stopFederationRuntime();
@@ -1032,7 +1055,7 @@ export function startEnterpriseServer(
   }
   server.once('close', () => {
     clearImmediate(initialMlsCleanup);
-    clearInterval(mlsCleanupTimer);
+    stopMlsCleanup();
     stopPrivateDeploymentRuntime();
     stopPrivateDeploymentBootstrapRuntime();
     stopFederationRuntime();

@@ -18,7 +18,6 @@ const HEAVY_STATIC_IMPORTS = [
   '../tools/web-automation.js',
   '../tools/rpa-run.js',
   '../tools/durable-workflow.js',
-  '../tools/multi-channel.js',
   '../tools/memory-manager.js',
   '../tools/feishu-project-collab.js',
   '../tools/enterprise-collaboration.js',

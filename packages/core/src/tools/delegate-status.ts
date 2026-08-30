@@ -9,6 +9,10 @@ import { BaseTool, Icon, type ToolResult } from './tools.js';
 import { type Config } from '../config/config.js';
 import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
 import { extractCompactSummary, isAcpDelegateTask } from './delegate-agent.js';
+import {
+  FileExternalTaskWorkflowJournalV1,
+  type ExternalTaskWorkflowJournalV1,
+} from '../services/externalTaskWorkflowJournal.js';
 
 /** Parameters for {@link CheckDelegateStatusTool}. */
 export interface CheckDelegateStatusParams {
@@ -18,7 +22,7 @@ export interface CheckDelegateStatusParams {
 
 /** Result shape for {@link CheckDelegateStatusTool}. */
 export interface CheckDelegateStatusResult extends ToolResult {
-  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'not_found';
+  status: 'running' | 'interrupted' | 'completed' | 'failed' | 'cancelled' | 'not_found';
 }
 
 /**
@@ -31,7 +35,10 @@ export class CheckDelegateStatusTool extends BaseTool<
 > {
   static readonly Name: string = 'check_delegate_status';
 
-  constructor(_config: Config) {
+  constructor(
+    _config: Config,
+    private readonly workflowJournal: ExternalTaskWorkflowJournalV1 = new FileExternalTaskWorkflowJournalV1(),
+  ) {
     super(
       CheckDelegateStatusTool.Name,
       'CheckDelegateStatus',
@@ -42,7 +49,7 @@ export class CheckDelegateStatusTool extends BaseTool<
         'You do NOT need to check repeatedly — the system will notify you when the task completes.',
         'Only use this if you specifically need to know the current progress before continuing your work.',
         '',
-        'Returns: task status (running/completed/failed/cancelled) + recent activity summary.',
+        'Returns: task status (running/interrupted/completed/failed/cancelled) + recent activity summary.',
       ].join('\n'),
       Icon.Info,
       {
@@ -106,6 +113,9 @@ export class CheckDelegateStatusTool extends BaseTool<
 
     const duration = Math.round((Date.now() - task.startTime) / 1000);
     const isFinished = task.status !== 'running';
+    const recoveredWorkflow = task.status === 'interrupted' && task.workflowRunId
+      ? await this.workflowJournal.recover(task.workflowRunId).catch(() => null)
+      : null;
 
     let progressText = '';
     if (isFinished) {
@@ -129,6 +139,7 @@ export class CheckDelegateStatusTool extends BaseTool<
     const icon = isFinished
       ? task.status === 'completed' ? '✅'
         : task.status === 'failed' ? '❌'
+        : task.status === 'interrupted' ? '⚠️'
         : '⏹️'
       : '⏳';
 
@@ -140,6 +151,9 @@ export class CheckDelegateStatusTool extends BaseTool<
         duration,
         answer: isFinished ? task.answer : undefined,
         error: task.error,
+        sessionId: task.sessionId,
+        workflowRunId: task.workflowRunId,
+        workflowStatus: recoveredWorkflow?.status,
       }),
       returnDisplay:
         `${icon} Claude Code Task ${task.id} — ${task.status} (${duration}s)\n\n${progressText || '(no output yet)'}`,

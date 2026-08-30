@@ -45,6 +45,7 @@ import {
 } from './incremental-kernel-store.js';
 import type { OttoServer as OttoServerType, ServerEndpoint } from 'otto-server';
 import type { AuthenticatedEnterpriseAccountInput } from './enterprise-identity.js';
+import type { RecurringTaskDefinition } from 'otto-core';
 
 type ServerEndpointRecord = ServerEndpoint & { controlToken?: string };
 type TrustedOttoServer = OttoServerType & {
@@ -279,6 +280,10 @@ export interface ServerManagerOptions {
   onHealthChange?: (status: string) => void;
   /** 已签名 kernel 增量更新的本地 store root；存在 active kernel 时优先加载。 */
   kernelUpdateRoot?: string;
+  /** Desktop-owned scheduler used for all long-lived background work. */
+  recurringTasks?: {
+    register(definition: RecurringTaskDefinition): (() => void) | undefined;
+  };
 }
 
 export class ServerManager {
@@ -308,8 +313,8 @@ export class ServerManager {
    * 不检查就会留下一个没人管的孤儿 server。
    */
   private shuttingDown = false;
-  /** 健康检查定时器。 */
-  private healthCheckTimer?: ReturnType<typeof setInterval>;
+  /** Stops the registered health task without owning a raw timer here. */
+  private stopHealthCheckTask?: () => void;
   /** 健康检查连续失败计数。 */
   private consecutiveHealthFailures = 0;
   /** 已自动重启的次数（防无限循环）。 */
@@ -318,6 +323,7 @@ export class ServerManager {
   private readonly localEnterpriseServerUrl: string | null;
   private readonly kernelUpdateRoot?: string;
   private readonly onHealthChange?: (status: string) => void;
+  private readonly recurringTasks?: ServerManagerOptions['recurringTasks'];
 
   constructor(options: ServerManagerOptions = {}) {
     if (process.env.NODE_ENV !== 'test') {
@@ -344,6 +350,7 @@ export class ServerManager {
       options.enterpriseServerUrl,
     );
     this.onHealthChange = options.onHealthChange;
+    this.recurringTasks = options.recurringTasks;
     if (!this.localEnterpriseServerUrl && options.enterpriseServerUrl) {
       this.enterpriseOwnership = 'external';
     }
@@ -706,18 +713,25 @@ export class ServerManager {
 
   /** 启动定期健康检查（embedded 和 detached 模式）。 */
   private startHealthCheck(): void {
-    if (this.healthCheckTimer) return;
+    if (this.stopHealthCheckTask || !this.recurringTasks) return;
     this.consecutiveHealthFailures = 0;
-    this.healthCheckTimer = setInterval(() => {
-      void this.runHealthCheck();
-    }, HEALTH_CHECK_INTERVAL_MS);
+    this.stopHealthCheckTask = this.recurringTasks.register({
+      name: 'desktop.server-health-check',
+      source: 'packages/desktop/src/main/server-manager.ts',
+      intervalMs: HEALTH_CHECK_INTERVAL_MS,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => {
+        const endpoint = this.currentEndpointRecord;
+        if (!endpoint || this.shuttingDown) return undefined;
+        return `${endpoint.host}:${endpoint.port}:${Math.floor(Date.now() / HEALTH_CHECK_INTERVAL_MS)}`;
+      },
+      run: () => this.runHealthCheck(),
+    });
   }
 
   private stopHealthCheck(): void {
-    if (this.healthCheckTimer) {
-      clearInterval(this.healthCheckTimer);
-      this.healthCheckTimer = undefined;
-    }
+    this.stopHealthCheckTask?.();
+    this.stopHealthCheckTask = undefined;
   }
 
   private async runHealthCheck(): Promise<void> {

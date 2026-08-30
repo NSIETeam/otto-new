@@ -5,7 +5,6 @@
 import type { EnterpriseOrganizationFeatures } from '../preload/index.js';
 import type { AgentProfile } from './agents/departmentAgents.js';
 import type { CustomAgentDefinition } from './customAgents.js';
-import { customAgentIconToModuleIcon } from './customAgentIcons.js';
 import type { ModuleIconKey, ModuleIconSource } from './components/ModuleIcon.js';
 import {
   LOCAL_USER_PUBLISHER_ID,
@@ -275,11 +274,28 @@ function staticDisabledReason(
   return undefined;
 }
 
-function profileIcon(profile: AgentProfile): ModuleIconKey {
-  if (profile.icon) return `generated:${profile.icon}`;
+const PROFILE_LINE_ICONS: Readonly<Record<string, ModuleIconKey>> = {
+  'otto-enterprise-work': 'office-work',
+  ppt: 'office-presentation',
+  meeting: 'office-meeting',
+  doc: 'office-document',
+  sheet: 'office-spreadsheet',
+  pdf: 'office-pdf',
+  dataviz: 'office-dataviz',
+  research: 'office-research',
+  copy: 'office-copywriting',
+};
+
+/**
+ * Workspace modules deliberately use one theme-aware line-icon family.
+ * Rich generated artwork remains available in galleries and custom-agent
+ * pickers, but mixing it into the compact right rail causes inconsistent
+ * optical weight and cannot follow system appearance reliably.
+ */
+export function profileModuleIcon(profile: AgentProfile): ModuleIconKey {
   if (profile.id === 'otto-personal') return 'otto-avatar';
   if (profile.id === 'self-development') return 'self-development';
-  return 'agent';
+  return PROFILE_LINE_ICONS[profile.id] ?? 'agent';
 }
 
 function profileIsAllowed(profile: AgentProfile, edition: ModuleCatalogContext['edition']): boolean {
@@ -298,7 +314,7 @@ function agentModules(context: ModuleCatalogContext): ModuleDefinition[] {
         label: profile.name,
         description: profile.tagline,
         category: 'common' as const,
-        icon: profileIcon(profile),
+        icon: profileModuleIcon(profile),
         activation: { kind: 'agent' as const, profileId: profile.id },
         availability: 'available' as const,
         package: {
@@ -320,7 +336,9 @@ function customAgentModules(context: ModuleCatalogContext): ModuleDefinition[] {
     label: agent.name,
     description: agent.instructions,
     category: 'custom-agent',
-    icon: customAgentIconToModuleIcon(agent.icon),
+    // Rich custom artwork stays in the editor/gallery. Compact workspace tiles
+    // deliberately use the shared theme-aware semantic icon family.
+    icon: 'agent',
     activation: {
       kind: 'agent',
       profileId: baseProfileId,
@@ -342,7 +360,7 @@ function customerModules(context: ModuleCatalogContext): ModuleDefinition[] {
     label: module.name,
     description: module.description,
     category: 'customer-module',
-    icon: module.iconSrc ? { kind: 'image', src: module.iconSrc } : 'custom-agent',
+    icon: 'customer-module',
     activation: { kind: 'customer-module', moduleId: module.id, version: module.version },
     availability: module.enabled ? 'available' : 'disabled',
     ...(module.suspendedReason ? { disabledReason: module.suspendedReason } : {}),

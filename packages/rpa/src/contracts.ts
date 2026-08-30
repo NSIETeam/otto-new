@@ -10,9 +10,22 @@ export type RpaActionKind =
   | 'desktop.launch'
   | 'desktop.type_text'
   | 'desktop.hotkey'
+  | 'desktop.inspect'
   | 'desktop.click'
+  | 'desktop.fill'
+  | 'desktop.select'
+  | 'desktop.scroll'
+  | 'desktop.wait'
   | 'desktop.screenshot'
   | 'checkpoint';
+
+export interface DesktopRpaTargetV1 {
+  /** Semantic accessibility role, for example button or text-field. */
+  role: string;
+  /** Accessible name; exact matching is the default. */
+  name: string;
+  windowTitle?: string;
+}
 export type RpaRunState =
   | 'pending'
   | 'running'
@@ -70,6 +83,8 @@ export interface RpaRun {
   currentStepId: string | null;
   approvalId?: string;
   takeoverNote?: string;
+  pauseRequestedAt?: string;
+  cancelRequestedAt?: string;
   createdAt: string;
   updatedAt: string;
   receipts: RpaStepReceipt[];

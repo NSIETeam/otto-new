@@ -13,21 +13,11 @@ export const IDLE_EXTERNAL_ORIGINS = [
 ] as const;
 
 export type IdleExternalOrigin = (typeof IDLE_EXTERNAL_ORIGINS)[number];
-export type IdleFailure =
-  | 'offline'
-  | '429'
-  | '5xx'
-  | 'timeout'
-  | 'crash-recovery'
-  | 'missing-key'
-  | 'disk-full'
-  | 'reconnect';
 
 export interface IdleSimulationResult {
   durationHours: 24 | 72;
   paidCalls: number;
   intercepted: Record<IdleExternalOrigin, number>;
-  failures: Record<IdleFailure, 'contained'>;
 }
 
 /**
@@ -41,19 +31,6 @@ export function simulateFreshInstallIdle(
   const intercepted = Object.fromEntries(
     IDLE_EXTERNAL_ORIGINS.map((origin) => [origin, 0]),
   ) as Record<IdleExternalOrigin, number>;
-  const failures = Object.fromEntries(
-    [
-      'offline',
-      '429',
-      '5xx',
-      'timeout',
-      'crash-recovery',
-      'missing-key',
-      'disk-full',
-      'reconnect',
-    ].map((failure) => [failure, 'contained']),
-  ) as Record<IdleFailure, 'contained'>;
-
   // Advance a virtual minute clock. Fresh-install paid analysis is disabled,
   // so unchanged input schedules no work and reaches no outbound boundary.
   for (let minute = 0; minute < durationHours * 60; minute += 1) {
@@ -66,5 +43,5 @@ export function simulateFreshInstallIdle(
     }
   }
 
-  return { durationHours, paidCalls: 0, intercepted, failures };
+  return { durationHours, paidCalls: 0, intercepted };
 }

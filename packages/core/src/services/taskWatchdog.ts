@@ -18,6 +18,7 @@
 
 import { getCheckpointService, type SessionCheckpoint } from '../sessions/sessionCheckpointService.js';
 import { getMemoryPressureMonitor } from './memoryPressureMonitor.js';
+import { recurringTaskRegistry, type RecurringTaskRegistry } from './recurringTaskRegistry.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -86,7 +87,7 @@ export class TaskWatchdog {
   private state: WatchdogState = 'idle';
   private sessionId: string | null = null;
   private lastOutputAt: number = 0;
-  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private stopMonitorTask: (() => void) | undefined;
   private lowMemoryMode = false;
   private lastCheckpointAt: string | null = null;
   private stallNotified = false;
@@ -94,6 +95,7 @@ export class TaskWatchdog {
   constructor(
     config?: Partial<WatchdogConfig>,
     callbacks?: WatchdogCallbacks,
+    private readonly taskRegistry: RecurringTaskRegistry = recurringTaskRegistry,
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.callbacks = callbacks ?? {};
@@ -110,13 +112,15 @@ export class TaskWatchdog {
     this.stallNotified = false;
     this.transitionTo('active');
 
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-    }
-
-    this.heartbeatTimer = setInterval(() => {
-      this.heartbeat();
-    }, this.config.heartbeatIntervalMs);
+    this.stopMonitorTask?.();
+    this.stopMonitorTask = this.taskRegistry.register({
+      name: `core.task-watchdog.${sessionId}`,
+      source: 'packages/core/src/services/taskWatchdog.ts',
+      intervalMs: this.config.heartbeatIntervalMs,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => `${this.sessionId ?? 'stopped'}:${Math.floor(Date.now() / this.config.heartbeatIntervalMs)}`,
+      run: () => this.checkActivity(),
+    });
 
     // 首次保存检查点
     if (this.config.autoCheckpoint) {
@@ -133,9 +137,11 @@ export class TaskWatchdog {
   heartbeat(_message?: string): void {
     this.lastOutputAt = Date.now();
 
-    if (this.state === 'stalled' && !this.stallNotified) {
+    if (this.state === 'stalled') {
       this.transitionTo('recovering');
       this.callbacks.onRecovered?.();
+      this.transitionTo('active');
+      this.stallNotified = false;
     }
 
     // 检查内存
@@ -148,10 +154,8 @@ export class TaskWatchdog {
    * 停止 watchdog。
    */
   stop(completed: boolean = true): void {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
+    this.stopMonitorTask?.();
+    this.stopMonitorTask = undefined;
 
     if (completed) {
       this.transitionTo('idle');
@@ -298,6 +302,18 @@ export class TaskWatchdog {
     } else if (!underPressure && memMB < this.config.lowMemoryThresholdMB * 0.8 && this.lowMemoryMode) {
       this.disableLowMemoryMode();
     }
+  }
+
+  private async checkActivity(): Promise<void> {
+    if (this.state === 'idle' || !this.sessionId) return;
+    const idleDurationMs = Date.now() - this.lastOutputAt;
+    if (idleDurationMs >= this.config.stallTimeoutMs && !this.stallNotified) {
+      this.stallNotified = true;
+      this.transitionTo('stalled');
+      this.callbacks.onStalled?.(idleDurationMs);
+      if (this.config.autoCheckpoint) await this.saveCheckpoint();
+    }
+    this.checkMemory();
   }
 
   /**

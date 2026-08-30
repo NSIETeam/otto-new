@@ -23,8 +23,9 @@ import {
   type Server as HttpServer,
   type ServerResponse,
 } from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import * as path from 'node:path';
 import { homedir } from 'node:os';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -60,6 +61,7 @@ import {
   type ExtensionSummary,
   type AutoSkillCandidateInfo,
   type LocalAgentPingResponse,
+  type ChannelPairingBeginRequest,
 } from './protocol.js';
 import {
   TRUSTED_ORIGINS,
@@ -113,6 +115,17 @@ import {
   savePreferredModel,
 } from './customModels.js';
 import { externalInboundNotificationFromFrame } from './externalInboundNotification.js';
+import type {
+  ChannelConnectorV1,
+  ChannelProvider,
+} from './modules/integration_adapters/channelConnector.js';
+import {
+  JsonChannelIdentityRegistryV1,
+  createJsonChannelIdentityAuditSink,
+  type ChannelIdentityRegistryV1,
+} from './modules/integration_adapters/channelIdentityRegistry.js';
+import type { ManagedChannelPlatformV1 } from './modules/integration_adapters/managedChannelPlatform.js';
+import type { ResidentWorkflowSupervisor } from 'otto-workflow';
 import {
   loadUserSettingsSubset,
   patchUserSettings,
@@ -158,6 +171,8 @@ import {
   AutoSkillRealtimeWatcher,
   setRealtimeWatcher,
   getHabitAnalyzer,
+  RecurringTaskRegistry,
+  type RecurringTaskStateStore,
   type WorkflowAgentRecord,
   type SkillCandidate,
   type Config as CoreConfig,
@@ -167,10 +182,12 @@ import {
   type SimpleMessage,
   getSessionManager,
   getAutoMemoryEngine,
+  resolveDefaultWorklogDir,
   loadBuiltinSkillInstructions,
   getWebSearchDiagnostics,
 } from 'otto-core';
 import type { CustomModelConfig } from 'otto-core';
+import { JsonRecurringTaskStateStore } from './recurringTaskStateStore.js';
 
 /** server 版本（实装时可从 package.json 注入）。 */
 const SERVER_VERSION = '0.1.0';
@@ -358,7 +375,6 @@ const defaultRuntimeFactory: RuntimeFactory = async (
     ...(summary?.productEdition !== 'enterprise'
       ? {
           excludeTools: [
-            'multi_channel',
             'memory_manager',
             'feishu_project_collab',
             'delegate_to_agent',
@@ -413,6 +429,16 @@ export interface OttoServerOptions {
   chatFileCacheDir?: string;
   /** 后台标题生成超时；测试可缩短，生产默认 15 秒。 */
   sessionTitleTimeoutMs?: number;
+  /** Durable scheduler state; tests inject memory storage to avoid user files. */
+  recurringTaskStateStore?: RecurringTaskStateStore;
+  /** Real provider adapters. Missing providers stay visibly unavailable. */
+  channelConnectors?: Partial<Record<ChannelProvider, ChannelConnectorV1>>;
+  /** Shared, revision-checked provider identity bindings. */
+  channelIdentityRegistry?: ChannelIdentityRegistryV1;
+  /** Fully composed managed-channel runtime; deployment supplies secure stores and workflow backend. */
+  managedChannelPlatform?: ManagedChannelPlatformV1;
+  /** Authoritative durable workflow worker used by Desktop and remote channels. */
+  residentWorkflowSupervisor?: ResidentWorkflowSupervisor;
 }
 
 /** 飞书凭证存取接口（可注入；默认实现走 feishu/vendor/credentials.ts）。 */
@@ -521,11 +547,20 @@ export class OttoServer {
   private externalInboundUnsub?: () => void;
   /** 进程级自动 Skill 扫描器由当前 server 实例启动时，停机时负责释放。 */
   private autoSkillScannerStarted = false;
-  /** 付费后台维护默认不创建定时器；仅在用户明确开启后存在。 */
-  private maintenanceTimer?: ReturnType<typeof setTimeout>;
+  private autoSkillScannerConfig?: CoreConfig;
   private readonly productWorkspace: ProductWorkspaceStore;
   private readonly chatFileCacheDir?: string;
   private readonly sessionTitleTimeoutMs: number;
+  private readonly recurringTaskRegistry: RecurringTaskRegistry;
+  private stopMemoryMaintenance?: () => void;
+  private stopAutoCompression?: () => void;
+  private readonly channelConnectors: Partial<Record<ChannelProvider, ChannelConnectorV1>>;
+  private readonly managedChannelPlatform?: ManagedChannelPlatformV1;
+  private readonly residentWorkflowSupervisor?: ResidentWorkflowSupervisor;
+  private stopResidentWorkflowWorker?: () => void;
+  private stopChannelWorkflowMilestones?: () => void;
+  private readonly channelIdentityRegistry: ChannelIdentityRegistryV1;
+  private readonly channelPairingProviders = new Map<string, ChannelProvider>();
 
   constructor(opts: OttoServerOptions = {}) {
     this.host = opts.host ?? DEFAULT_HOST;
@@ -552,6 +587,22 @@ export class OttoServer {
     this.chatFileCacheDir = opts.chatFileCacheDir;
     this.sessionTitleTimeoutMs =
       opts.sessionTitleTimeoutMs ?? DEFAULT_SESSION_TITLE_TIMEOUT_MS;
+    this.recurringTaskRegistry = new RecurringTaskRegistry({
+      allowPaidBackground: true,
+      stateStore: opts.recurringTaskStateStore ?? new JsonRecurringTaskStateStore(),
+      onError: (taskName, error) => {
+        console.warn(`[ResidentTask] ${taskName} failed:`, error);
+      },
+    });
+    this.managedChannelPlatform = opts.managedChannelPlatform;
+    this.residentWorkflowSupervisor = opts.residentWorkflowSupervisor;
+    this.channelConnectors = {
+      ...opts.managedChannelPlatform?.connectors,
+      ...opts.channelConnectors,
+    };
+    this.channelIdentityRegistry = opts.channelIdentityRegistry
+      ?? new JsonChannelIdentityRegistryV1({ audit: createJsonChannelIdentityAuditSink() });
+    getHabitAnalyzer().setTaskRegistry(this.recurringTaskRegistry);
     this.globalAuthorizationMode =
       loadUserSettingsSubset().authorizationMode ?? 'manual';
   }
@@ -621,16 +672,20 @@ export class OttoServer {
       console.warn('[Server] OttoSessionManager init failed (non-fatal):', e);
     }
 
-    this.setBackgroundMaintenanceEnabled(
-      loadUserSettingsSubset().backgroundModelTasksEnabled === true,
-    );
+    // 无付费的本地记忆维护与可能调用模型的上下文压缩必须分开登记。
+    // 新安装只会注册前者；后者严格跟随用户的显式后台模型开关。
+    const backgroundModelTasksEnabled =
+      loadUserSettingsSubset().backgroundModelTasksEnabled === true;
+    await this.residentWorkflowSupervisor?.recoverInterrupted();
+    this.startResidentMaintenanceTasks(backgroundModelTasksEnabled);
 
     // 自动 Skill 只分析本地工作日志并暂存“待确认候选”，不会直接写 SKILL.md。
-    // 延迟首扫 15 秒，避免与桌面首屏初始化争抢磁盘；定时器 unref，不阻塞进程退出。
+    // 它可能调用模型，因此仅在显式开启后台模型任务后登记；输入日志不变时跳过。
     try {
       const scannerConfig = createCoreConfig({
         sessionId: 'auto-skill-scanner',
       });
+      this.autoSkillScannerConfig = scannerConfig;
       setAutoSkillConfigForProfile(scannerConfig);
 
       // 实时触发监视器：每完成一个操作就检查是否达到重复阈值
@@ -664,18 +719,7 @@ export class OttoServer {
       habitAnalyzer.start();
 
 
-      this.autoSkillScannerStarted = startAutoSkillScanner(
-        scannerConfig,
-        () => this.productWorkspace.snapshot().context.userId,
-        {
-          onCandidatesStaged: (candidates) => {
-            this.broadcastAll({
-              type: 'pending_auto_skills',
-              payload: { candidates: candidates.map(publicAutoSkillCandidate) },
-            });
-          },
-        },
-      );
+      this.setAutoSkillScannerEnabled(backgroundModelTasksEnabled);
     } catch (error) {
       console.warn(
         `[AutoSkill] Scanner startup skipped: ${error instanceof Error ? error.message : String(error)}`,
@@ -694,6 +738,7 @@ export class OttoServer {
         ensureRuntime: (sessionId) => this.ensureRuntime(sessionId),
         shouldAutoReply: isFeishuAutoReplyEnabledForOpenId,
         mock: this.mock,
+        taskRegistry: this.recurringTaskRegistry,
         ...this.feishuDeps,
       });
     }
@@ -735,7 +780,7 @@ export class OttoServer {
         recentActions: [],
         pendingTasks: 0,
         hasUpcomingMeeting: false,
-      }));
+      }), this.recurringTaskRegistry);
       console.log('[Server] ProactiveService started (local mode)');
     } catch (err) {
       console.warn('[Server] ProactiveService init failed (non-fatal):', err);
@@ -744,6 +789,16 @@ export class OttoServer {
 
   /** 停止服务（取消并释放所有活跃 runtime，再关 WS、HTTP、飞书）。 */
   async stop(): Promise<void> {
+    this.stopMemoryMaintenance?.();
+    this.stopMemoryMaintenance = undefined;
+    this.stopAutoCompression?.();
+    this.stopAutoCompression = undefined;
+    this.stopResidentWorkflowWorker?.();
+    this.stopResidentWorkflowWorker = undefined;
+    this.stopChannelWorkflowMilestones?.();
+    this.stopChannelWorkflowMilestones = undefined;
+    getHabitAnalyzer().stop();
+    this.recurringTaskRegistry.stopAll();
     this.sessionEvictUnsub?.();
     this.sessionEvictUnsub = undefined;
     this.pendingSessionTitles.clear();
@@ -752,7 +807,6 @@ export class OttoServer {
     this.manuallyRenamedSessions.clear();
     this.externalInboundUnsub?.();
     this.externalInboundUnsub = undefined;
-    this.setBackgroundMaintenanceEnabled(false);
     if (this.enterpriseLeaseTimer) {
       clearTimeout(this.enterpriseLeaseTimer);
       this.enterpriseLeaseTimer = undefined;
@@ -778,6 +832,7 @@ export class OttoServer {
       }
     }
     await this.feishu?.stop().catch(() => undefined);
+    await this.managedChannelPlatform?.stopAll().catch(() => undefined);
     // 停机不留孤儿轮次：cancel + dispose 所有已 attach 的 runtime，
     // 否则 server 关了 agent 还在后台烧 token / 跑工具（maxTurns=-1 不限回合）。
     await Promise.all(
@@ -824,6 +879,22 @@ export class OttoServer {
       port: this.port,
       clientToken: this.localClientToken,
     };
+  }
+
+  /** User-visible scheduler inventory; never exposes executable stop handles. */
+  residentTasks(): Array<{
+    name: string;
+    source: string;
+    definitionVersion: number;
+    intervalMs: number;
+    estimatedCostUsdPerRun: number;
+    paid: boolean;
+    running: boolean;
+    inputVersion?: string;
+    lastCompletedInputVersion?: string;
+    nextRunAtMs?: number;
+  }> {
+    return this.recurringTaskRegistry.list().map(({ stop: _stop, ...task }) => ({ ...task }));
   }
 
   /** 供 Electron main / CLI 端点文件写入；renderer 和 WS 客户端不应获得。 */
@@ -1586,7 +1657,8 @@ export class OttoServer {
         }
         patchUserSettings({ backgroundModelTasksEnabled: value });
         getHabitAnalyzer().setBackgroundModelCallsEnabled(value);
-        this.setBackgroundMaintenanceEnabled(value);
+        this.setAutoCompressionEnabled(value);
+        this.setAutoSkillScannerEnabled(value);
       } else if (key === 'preferredLanguage') {
         if (typeof value !== 'string') {
           throw new Error('preferredLanguage 的值必须是字符串');
@@ -2123,38 +2195,118 @@ export class OttoServer {
     }
   }
 
-  /**
-   * 自动上下文压缩 — 后台定时扫描 idle 会话，对消息数超阈值的会话
-   * 触发 LLM 摘要压缩。每轮最多压缩 3 个会话，避免并发 LLM 调用过多。
-   *
-   * 设计原则：
-   *   - 只压 idle 会话（不影响用户正在活跃对话的）
-   *   - 消息数 ≥ AUTO_COMPRESS_MIN_MESSAGES 才触发
-   *   - 每个会话在一次周期内最多压一次（isCompressionInProgress 防重入）
-   *   - 静默失败：压缩异常不影响其他会话和主对话流
-   */
-  private setBackgroundMaintenanceEnabled(enabled: boolean): void {
+  private startResidentMaintenanceTasks(backgroundModelTasksEnabled: boolean): void {
+    if (this.residentWorkflowSupervisor && !this.stopResidentWorkflowWorker) {
+      this.stopResidentWorkflowWorker = this.recurringTaskRegistry.register({
+        name: 'server-durable-workflow-worker',
+        source: 'packages/server/src/server.ts#resident-workflow',
+        definitionVersion: 1,
+        intervalMs: 1_000,
+        initialDelayMs: 0,
+        estimatedCostUsdPerRun: 0,
+        missedRunPolicy: 'run-once',
+        getInputVersion: () => this.residentWorkflowSupervisor!.inputVersion(),
+        run: () => this.residentWorkflowSupervisor!.tick().then(() => undefined),
+      });
+    }
+    if (this.managedChannelPlatform && !this.stopChannelWorkflowMilestones) {
+      this.stopChannelWorkflowMilestones = this.recurringTaskRegistry.register({
+        name: 'server-channel-workflow-milestones',
+        source: 'packages/server/src/server.ts#channel-workflow-milestones',
+        definitionVersion: 1,
+        intervalMs: 2_000,
+        initialDelayMs: 0,
+        estimatedCostUsdPerRun: 0,
+        missedRunPolicy: 'run-once',
+        getInputVersion: () => this.managedChannelPlatform!.milestoneInputVersion(),
+        run: () => this.managedChannelPlatform!.flushMilestones(),
+      });
+    }
+    if (!this.stopMemoryMaintenance) {
+      this.stopMemoryMaintenance = this.recurringTaskRegistry.register({
+        name: 'server-local-memory-maintenance',
+        source: 'packages/server/src/server.ts#memory-maintenance',
+        definitionVersion: 1,
+        intervalMs: MAINTENANCE_INTERVAL_MS,
+        estimatedCostUsdPerRun: 0,
+        missedRunPolicy: 'skip',
+        // Maintenance includes time-based expiry, so each cadence bucket is a
+        // real deterministic input even when user content did not change.
+        getInputVersion: () => `bucket:${Math.floor(Date.now() / MAINTENANCE_INTERVAL_MS)}`,
+        run: async () => {
+          await getAutoMemoryEngine().runMaintenanceCycle();
+        },
+      });
+    }
+    this.setAutoCompressionEnabled(backgroundModelTasksEnabled);
+  }
+
+  private setAutoCompressionEnabled(enabled: boolean): void {
     if (!enabled) {
-      if (this.maintenanceTimer) clearTimeout(this.maintenanceTimer);
-      this.maintenanceTimer = undefined;
+      this.stopAutoCompression?.();
+      this.stopAutoCompression = undefined;
       return;
     }
-    if (this.maintenanceTimer) return;
-    const schedule = () => {
-      this.maintenanceTimer = setTimeout(() => void tick(), MAINTENANCE_INTERVAL_MS);
-      this.maintenanceTimer.unref?.();
-    };
-    const tick = async () => {
-      try {
-        await getAutoMemoryEngine().runMaintenanceCycle();
-        await this.runAutoCompressionCycle();
-      } catch (error) {
-        console.warn('[Server] Background maintenance failed:', error);
-      } finally {
-        if (this.maintenanceTimer) schedule();
-      }
-    };
-    schedule();
+    if (this.stopAutoCompression) return;
+    this.stopAutoCompression = this.recurringTaskRegistry.register({
+      name: 'server-background-context-compression',
+      source: 'packages/server/src/server.ts#auto-compression',
+      definitionVersion: 1,
+      intervalMs: MAINTENANCE_INTERVAL_MS,
+      estimatedCostUsdPerRun: 0.01,
+      missedRunPolicy: 'skip',
+      getInputVersion: () => {
+        const candidates = this.store.listSessions()
+          .filter((session) => (
+            session.status === 'idle'
+            && session.messageCount >= AUTO_COMPRESS_MIN_MESSAGES
+          ))
+          .map((session) => `${session.sessionId}:${session.messageCount}`)
+          .sort();
+        return candidates.length > 0 ? candidates.join('|') : undefined;
+      },
+      run: () => this.runAutoCompressionCycle(),
+    });
+  }
+
+  private autoSkillWorkLogVersion(): string | undefined {
+    const dailyDir = path.join(resolveDefaultWorklogDir(), 'daily');
+    try {
+      const inputs = readdirSync(dailyDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
+        .map((entry) => {
+          const stats = statSync(path.join(dailyDir, entry.name));
+          return `${entry.name}:${stats.size}:${stats.mtimeMs}`;
+        })
+        .sort();
+      if (inputs.length === 0) return undefined;
+      return createHash('sha256').update(inputs.join('|')).digest('hex');
+    } catch {
+      return undefined;
+    }
+  }
+
+  private setAutoSkillScannerEnabled(enabled: boolean): void {
+    if (!enabled) {
+      if (this.autoSkillScannerStarted) stopAutoSkillScanner();
+      this.autoSkillScannerStarted = false;
+      return;
+    }
+    if (this.autoSkillScannerStarted || !this.autoSkillScannerConfig) return;
+    this.autoSkillScannerStarted = startAutoSkillScanner(
+      this.autoSkillScannerConfig,
+      () => this.productWorkspace.snapshot().context.userId,
+      {
+        taskRegistry: this.recurringTaskRegistry,
+        getInputVersion: () => this.autoSkillWorkLogVersion(),
+        onCandidatesStaged: (candidates) => {
+          this.broadcastAll({
+            type: 'pending_auto_skills',
+            payload: { candidates: candidates.map(publicAutoSkillCandidate) },
+          });
+        },
+      },
+    );
   }
 
   private async runAutoCompressionCycle(): Promise<void> {
@@ -2496,6 +2648,150 @@ export class OttoServer {
       };
       return sendJsonWithCors(res, 200, ok(pingResponse), req.headers.origin);
     }
+    if (path === HTTP_ROUTES.channelPairings && req.method === 'POST') {
+      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+        return sendJson(res, 401, err('unauthorized'));
+      }
+      void readJsonBody(req)
+        .then((body) => parseChannelPairingBeginRequest(body))
+        .then(async (input) => {
+          const connector = this.channelConnectors[input.provider];
+          if (!connector) {
+            sendJson(res, 503, err(`channel_connector_unavailable:${input.provider}`));
+            return;
+          }
+          const pairing = await connector.beginPairing(input);
+          this.channelPairingProviders.set(pairing.pairingId, input.provider);
+          sendJson(res, 201, ok(pairing));
+        })
+        .catch((error) => {
+          sendJson(res, 400, err(error instanceof Error ? error.message : String(error)));
+        });
+      return;
+    }
+    const channelPairingMatch = path.match(
+      /^\/channels\/pairings\/(pair_[a-f0-9]{24})(?:\/(install))?$/,
+    );
+    if (channelPairingMatch) {
+      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+        return sendJson(res, 401, err('unauthorized'));
+      }
+      const pairingId = channelPairingMatch[1];
+      const action = channelPairingMatch[2];
+      const provider = this.channelPairingProviders.get(pairingId);
+      const connector = provider ? this.channelConnectors[provider] : undefined;
+      if (!connector) return sendJson(res, 404, err('channel_pairing_not_found'));
+      let operation: Promise<unknown>;
+      if (req.method === 'GET' && !action) {
+        operation = connector.getPairingStatus(pairingId);
+      } else if (req.method === 'POST' && action === 'install') {
+        operation = readJsonBody(req)
+          .then((body) => parseChannelInstallationProof(body))
+          .then((proof) => connector.completeInstallation(pairingId, proof));
+      } else if (req.method === 'DELETE' && !action) {
+        operation = connector.denyPairing(pairingId, 'cancelled by local user');
+      } else {
+        return sendJson(res, 405, err('method_not_allowed'));
+      }
+      void operation
+        .then((result) => {
+          const status = result && typeof result === 'object' && 'status' in result
+            ? String((result as { status: unknown }).status)
+            : undefined;
+          if (
+            req.method === 'DELETE'
+            || action === 'install'
+            || (status !== undefined
+              && ['connected', 'expired', 'denied', 'failed', 'revoked'].includes(status))
+          ) {
+            this.channelPairingProviders.delete(pairingId);
+          }
+          sendJson(res, 200, ok(result));
+        })
+        .catch((error) => {
+          sendJson(res, 409, err(error instanceof Error ? error.message : String(error)));
+        });
+      return;
+    }
+    if (path === HTTP_ROUTES.channelInstallations && req.method === 'GET') {
+      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+        return sendJson(res, 401, err('unauthorized'));
+      }
+      const installations = Object.values(this.channelConnectors)
+        .filter((connector): connector is ChannelConnectorV1 => connector !== undefined)
+        .flatMap((connector) => connector.listInstallations());
+      return sendJson(res, 200, ok(installations));
+    }
+    const channelInstallationMatch = path.match(
+      /^\/channels\/installations\/(channel_(feishu|lark|wecom)_[a-f0-9]{24})(?:\/(start|stop|health|send|identities))?$/,
+    );
+    if (channelInstallationMatch) {
+      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+        return sendJson(res, 401, err('unauthorized'));
+      }
+      const installationId = channelInstallationMatch[1];
+      const provider = channelInstallationMatch[2] as ChannelProvider;
+      const action = channelInstallationMatch[3];
+      const connector = this.channelConnectors[provider];
+      if (!connector) return sendJson(res, 404, err('channel_installation_not_found'));
+      const installation = connector
+        .listInstallations()
+        .find((candidate) => candidate.installationId === installationId);
+      if (!installation) return sendJson(res, 404, err('channel_installation_not_found'));
+      let operation: Promise<unknown>;
+      if (req.method === 'GET' && action === 'identities') {
+        operation = Promise.resolve(this.channelIdentityRegistry.list(installationId));
+      } else if (req.method === 'POST' && action === 'identities') {
+        const actor = this.productWorkspace.snapshot().context;
+        if (actor.edition === 'enterprise' && !actor.capabilities.includes('organization:manage')) {
+          return sendJson(res, 403, err('channel_identity_admin_required'));
+        }
+        operation = readJsonBody(req)
+          .then((body) => parseChannelIdentityMutation(body))
+          .then((input) => input.action === 'bind'
+            ? this.channelIdentityRegistry.bind({
+              provider,
+              installationId,
+              tenantId: installation.tenantId,
+              providerUserId: input.providerUserId,
+              canonicalUserId: input.canonicalUserId,
+              approvalId: input.approvalId,
+              approvedBy: actor.userId,
+              expectedRevision: input.expectedRevision,
+            })
+            : this.channelIdentityRegistry.revoke({
+              provider,
+              installationId,
+              tenantId: installation.tenantId,
+              providerUserId: input.providerUserId,
+              approvalId: input.approvalId,
+              approvedBy: actor.userId,
+              expectedRevision: input.expectedRevision,
+            }));
+      } else if (req.method === 'GET' && !action) {
+        operation = Promise.resolve(installation);
+      } else if (req.method === 'GET' && action === 'health') {
+        operation = connector.health(installationId);
+      } else if (req.method === 'POST' && action === 'start') {
+        operation = connector.start(installationId);
+      } else if (req.method === 'POST' && action === 'stop') {
+        operation = connector.stop(installationId);
+      } else if (req.method === 'POST' && action === 'send') {
+        operation = readJsonBody(req)
+          .then((body) => parseChannelSendInput(body))
+          .then((input) => connector.send(installationId, input));
+      } else if (req.method === 'DELETE' && !action) {
+        operation = connector.revoke(installationId).then(() => ({ revoked: true }));
+      } else {
+        return sendJson(res, 405, err('method_not_allowed'));
+      }
+      void operation
+        .then((result) => sendJson(res, 200, ok(result)))
+        .catch((error) => {
+          sendJson(res, 409, err(error instanceof Error ? error.message : String(error)));
+        });
+      return;
+    }
     if (path === HTTP_ROUTES.sessions && req.method === 'GET') {
       return sendJson(res, 200, ok(this.visibleSessions()));
     }
@@ -2654,6 +2950,7 @@ export class OttoServer {
           ensureRuntime: (sessionId) => this.ensureRuntime(sessionId),
           shouldAutoReply: isFeishuAutoReplyEnabledForOpenId,
           mock: this.mock,
+          taskRegistry: this.recurringTaskRegistry,
           ...this.feishuDeps,
         });
       } else {
@@ -5028,6 +5325,118 @@ function parseFeishuConfigSaveRequest(
     ...(appSecret ? { appSecret } : {}),
     ...(ownerOpenId ? { ownerOpenId } : {}),
   };
+}
+
+function parseChannelPairingBeginRequest(body: unknown): ChannelPairingBeginRequest {
+  if (typeof body !== 'object' || body === null) {
+    throw new Error('channel pairing body must be a JSON object');
+  }
+  const input = body as Record<string, unknown>;
+  const provider = input.provider;
+  if (provider !== 'feishu' && provider !== 'lark' && provider !== 'wecom') {
+    throw new Error('unsupported channel provider');
+  }
+  const installationPublicKey =
+    typeof input.installationPublicKey === 'string'
+      ? input.installationPublicKey.trim()
+      : '';
+  if (!installationPublicKey || installationPublicKey.length > 16_384) {
+    throw new Error('installation public key is required');
+  }
+  if (!Array.isArray(input.requestedScopes)) {
+    throw new Error('requestedScopes must be an array');
+  }
+  const requestedScopes = input.requestedScopes.map((scope) => {
+    if (typeof scope !== 'string' || !scope.trim() || scope.length > 100) {
+      throw new Error('invalid channel scope');
+    }
+    return scope.trim();
+  });
+  if (requestedScopes.length === 0 || requestedScopes.length > 50) {
+    throw new Error('channel scope request is empty or too large');
+  }
+  return { provider, installationPublicKey, requestedScopes };
+}
+
+function parseChannelInstallationProof(body: unknown): {
+  installationPublicKey: string;
+  signature: string;
+} {
+  if (typeof body !== 'object' || body === null) {
+    throw new Error('channel installation proof must be a JSON object');
+  }
+  const input = body as Record<string, unknown>;
+  const installationPublicKey =
+    typeof input.installationPublicKey === 'string'
+      ? input.installationPublicKey.trim()
+      : '';
+  const signature =
+    typeof input.signature === 'string' ? input.signature.trim() : '';
+  if (!installationPublicKey || installationPublicKey.length > 16_384) {
+    throw new Error('installation public key is required');
+  }
+  if (!/^[A-Za-z0-9_-]{80,100}$/.test(signature)) {
+    throw new Error('channel installation signature is invalid');
+  }
+  return { installationPublicKey, signature };
+}
+
+function parseChannelSendInput(body: unknown): {
+  target: string;
+  text: string;
+  idempotencyKey: string;
+} {
+  if (typeof body !== 'object' || body === null) {
+    throw new Error('channel message body must be a JSON object');
+  }
+  const input = body as Record<string, unknown>;
+  const target = typeof input.target === 'string' ? input.target.trim() : '';
+  const text = typeof input.text === 'string' ? input.text.trim() : '';
+  const idempotencyKey =
+    typeof input.idempotencyKey === 'string' ? input.idempotencyKey.trim() : '';
+  if (!target || target.length > 500) throw new Error('channel message target is invalid');
+  if (!text || text.length > 20_000) throw new Error('channel message text is invalid');
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)) {
+    throw new Error('channel message idempotency key is invalid');
+  }
+  return { target, text, idempotencyKey };
+}
+
+type ChannelIdentityMutationCommon = {
+  providerUserId: string;
+  approvalId: string;
+  expectedRevision: number;
+};
+type ChannelIdentityMutation =
+  | (ChannelIdentityMutationCommon & { action: 'bind'; canonicalUserId: string })
+  | (ChannelIdentityMutationCommon & { action: 'revoke' });
+
+function parseChannelIdentityMutation(body: unknown): ChannelIdentityMutation {
+  if (typeof body !== 'object' || body === null) {
+    throw new Error('channel identity body must be a JSON object');
+  }
+  const input = body as Record<string, unknown>;
+  if (input.action !== 'bind' && input.action !== 'revoke') {
+    throw new Error('channel identity action is invalid');
+  }
+  const readId = (name: string): string => {
+    const value = typeof input[name] === 'string' ? input[name].trim() : '';
+    if (!value || value.length > 200) throw new Error(`${name} is invalid`);
+    return value;
+  };
+  const expectedRevision = input.expectedRevision;
+  if (!Number.isSafeInteger(expectedRevision) || (expectedRevision as number) < 0) {
+    throw new Error('expectedRevision is invalid');
+  }
+  const common = {
+    action: input.action,
+    providerUserId: readId('providerUserId'),
+    approvalId: readId('approvalId'),
+    expectedRevision: expectedRevision as number,
+  };
+  return input.action === 'bind'
+    ? { ...common, action: 'bind', canonicalUserId: readId('canonicalUserId') }
+    : { ...common, action: 'revoke' };
 }
 /** core WorkflowAgentRecord → 协议 WorkflowAgentSummary（裁掉 prompt/recentToolCalls 等大字段）。 */
 function toWorkflowAgentSummary(a: WorkflowAgentRecord): WorkflowAgentSummary {

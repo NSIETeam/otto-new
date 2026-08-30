@@ -1,7 +1,7 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   WorkflowConflictError,
@@ -35,11 +35,39 @@ function createStepRun(runId: string, step: WorkflowDefinition['steps'][number])
  * two local workers from claiming or completing the same step.
  */
 export class FileWorkflowStore implements WorkflowStore {
-  constructor(private readonly rootDir: string) {}
+  private static readonly CHECKPOINT_BYTE_LIMIT = 64 * 1024;
+  private readonly maxRuns: number;
+  private readonly terminalRetentionMs: number;
+  private createTail: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly rootDir: string,
+    options: { maxRuns?: number; terminalRetentionMs?: number } = {},
+  ) {
+    this.maxRuns = options.maxRuns ?? 10_000;
+    this.terminalRetentionMs = options.terminalRetentionMs ?? 30 * 24 * 60 * 60_000;
+    if (!Number.isSafeInteger(this.maxRuns) || this.maxRuns < 1 || this.maxRuns > 100_000) {
+      throw new Error('workflow run file limit is invalid');
+    }
+    if (!Number.isSafeInteger(this.terminalRetentionMs) || this.terminalRetentionMs < 60_000) {
+      throw new Error('workflow terminal retention is invalid');
+    }
+  }
 
   async createRun(definition: WorkflowDefinition): Promise<WorkflowRun> {
     this.assertDefinition(definition);
+    let result!: WorkflowRun;
+    const pending = this.createTail.then(async () => {
+      result = await this.createRunExclusive(definition);
+    });
+    this.createTail = pending.catch(() => undefined);
+    await pending;
+    return result;
+  }
+
+  private async createRunExclusive(definition: WorkflowDefinition): Promise<WorkflowRun> {
     await mkdir(this.rootDir, { recursive: true, mode: 0o700 });
+    await this.maintainRunCapacity();
     const id = `wf-${randomUUID()}`;
     const timestamp = now();
     const run: WorkflowRun = {
@@ -56,6 +84,36 @@ export class FileWorkflowStore implements WorkflowStore {
     return cloneRun(run);
   }
 
+  private async maintainRunCapacity(): Promise<void> {
+    const names = (await readdir(this.rootDir))
+      .filter((entry) => /^wf-[0-9a-f-]{36}\.json$/u.test(entry));
+    // Stay on the cheap directory-count path during ordinary operation. Full
+    // run parsing is reserved for actual capacity pressure.
+    if (names.length < this.maxRuns) return;
+    const runs = await Promise.all(names.map((name) => this.readRun(name.slice(0, -5))));
+    const terminal = runs
+      .filter((run) => ['succeeded', 'failed', 'cancelled'].includes(run.status))
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt) || a.id.localeCompare(b.id));
+    const cutoff = Date.now() - this.terminalRetentionMs;
+    const removed = new Set<string>();
+    for (const run of terminal) {
+      if (Date.parse(run.updatedAt) >= cutoff) continue;
+      await unlink(path.join(this.rootDir, `${run.id}.json`));
+      removed.add(run.id);
+    }
+    let count = runs.length - removed.size;
+    for (const run of terminal) {
+      if (count < this.maxRuns) break;
+      if (removed.has(run.id)) continue;
+      await unlink(path.join(this.rootDir, `${run.id}.json`));
+      removed.add(run.id);
+      count -= 1;
+    }
+    if (count >= this.maxRuns) {
+      throw new Error('workflow run file limit reached with no terminal run to prune');
+    }
+  }
+
   async getRun(runId: string): Promise<WorkflowRun | null> {
     this.assertRunId(runId);
     try {
@@ -66,11 +124,26 @@ export class FileWorkflowStore implements WorkflowStore {
     }
   }
 
+  async listRuns(): Promise<WorkflowRun[]> {
+    let names: string[];
+    try {
+      names = await readdir(this.rootDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+    const runs: WorkflowRun[] = [];
+    for (const name of names.filter((entry) => /^wf-[0-9a-f-]{36}\.json$/u.test(entry)).sort()) {
+      runs.push(cloneRun(await this.readRun(name.slice(0, -5))));
+    }
+    return runs;
+  }
+
   async claimNextStep(runId: string, expectedRevision: number): Promise<ClaimedWorkflowStep | null> {
     return this.withLease(runId, async () => {
       const run = await this.readRun(runId);
       this.assertRevision(run, expectedRevision);
-      if (run.status === 'unknown_outcome' || run.status === 'cancelled' || run.status === 'failed') return null;
+      if (run.status !== 'queued') return null;
       const step = nextQueuedStep(run);
       if (!step) return null;
 
@@ -91,19 +164,85 @@ export class FileWorkflowStore implements WorkflowStore {
     expectedRevision: number;
     output?: unknown;
     error?: string;
+    cancelled?: boolean;
+  }): Promise<WorkflowRun> {
+    return this.withLease(input.runId, async () => {
+      const run = await this.readRun(input.runId);
+      // Pause/cancel requests may advance the run revision while the claimed
+      // step is executing. The running step identity remains the completion
+      // lease; a duplicate completion is rejected by its status below.
+      const revisionAdvancedOnlyByControl =
+        input.expectedRevision < run.revision
+        && Boolean(run.pauseRequestedAt || run.cancelRequestedAt);
+      if (input.expectedRevision !== run.revision && !revisionAdvancedOnlyByControl) {
+        throw new WorkflowConflictError(
+          `Workflow revision conflict: expected ${input.expectedRevision}, found ${run.revision}.`,
+        );
+      }
+      const step = run.steps.find((candidate) => candidate.stepId === input.stepId);
+      if (!step || step.status !== 'running') {
+        throw new WorkflowConflictError(`Workflow step is not running: ${input.stepId}`);
+      }
+      if (input.cancelled && input.error) {
+        throw new WorkflowConflictError('Workflow step cannot be cancelled and failed together.');
+      }
+      step.status = input.cancelled ? 'cancelled' : input.error ? 'failed' : 'succeeded';
+      step.output = input.output === undefined ? undefined : structuredClone(input.output);
+      step.error = input.error;
+      step.completedAt = now();
+      if (input.cancelled) {
+        for (const candidate of run.steps) {
+          if (candidate.status === 'queued' || candidate.status === 'waiting_approval') {
+            candidate.status = 'cancelled';
+            candidate.completedAt = now();
+          }
+        }
+        run.status = 'cancelled';
+        run.cancelRequestedAt = run.cancelRequestedAt ?? now();
+      } else if (input.error) {
+        run.status = 'failed';
+      } else if (run.cancelRequestedAt) {
+        for (const candidate of run.steps) {
+          if (candidate.status === 'queued' || candidate.status === 'waiting_approval') {
+            candidate.status = 'cancelled';
+            candidate.completedAt = now();
+          }
+        }
+        run.status = 'cancelled';
+      } else if (run.pauseRequestedAt && nextQueuedStep(run)) {
+        run.status = 'paused';
+        run.pauseRequestedAt = undefined;
+      } else {
+        run.status = nextQueuedStep(run) ? 'queued' : 'succeeded';
+      }
+      return cloneRun(await this.saveRevision(run));
+    });
+  }
+
+  async checkpointRunningStep(input: {
+    runId: string;
+    stepId: string;
+    expectedRevision: number;
+    checkpoint: Record<string, unknown>;
   }): Promise<WorkflowRun> {
     return this.withLease(input.runId, async () => {
       const run = await this.readRun(input.runId);
       this.assertRevision(run, input.expectedRevision);
       const step = run.steps.find((candidate) => candidate.stepId === input.stepId);
-      if (!step || step.status !== 'running') {
+      if (run.status !== 'running' || !step || step.status !== 'running') {
         throw new WorkflowConflictError(`Workflow step is not running: ${input.stepId}`);
       }
-      step.status = input.error ? 'failed' : 'succeeded';
-      step.output = input.output === undefined ? undefined : structuredClone(input.output);
-      step.error = input.error;
-      step.completedAt = now();
-      run.status = input.error ? 'failed' : nextQueuedStep(run) ? 'queued' : 'succeeded';
+      let encoded: string;
+      try {
+        encoded = JSON.stringify(input.checkpoint);
+      } catch {
+        throw new WorkflowConflictError('Workflow checkpoint must be JSON serializable.');
+      }
+      if (encoded === undefined || Buffer.byteLength(encoded, 'utf8') > FileWorkflowStore.CHECKPOINT_BYTE_LIMIT) {
+        throw new WorkflowConflictError('Workflow checkpoint exceeds the 64 KiB limit.');
+      }
+      step.checkpoint = structuredClone(input.checkpoint);
+      step.checkpointedAt = now();
       return cloneRun(await this.saveRevision(run));
     });
   }
@@ -113,7 +252,7 @@ export class FileWorkflowStore implements WorkflowStore {
       const run = await this.readRun(input.runId);
       this.assertRevision(run, input.expectedRevision);
       const step = run.steps.find((candidate) => candidate.stepId === input.stepId);
-      if (!step || step.status !== 'waiting_approval' || step.approvalId !== input.approvalId) {
+      if (run.status !== 'waiting_approval' || !step || step.status !== 'waiting_approval' || step.approvalId !== input.approvalId) {
         throw new WorkflowConflictError(`Workflow step is not waiting for this approval: ${input.stepId}`);
       }
       step.status = 'queued';
@@ -160,6 +299,64 @@ export class FileWorkflowStore implements WorkflowStore {
     });
   }
 
+  async pauseRun(runId: string, expectedRevision: number): Promise<WorkflowRun> {
+    return this.withLease(runId, async () => {
+      const run = await this.readRun(runId);
+      this.assertRevision(run, expectedRevision);
+      if (run.status === 'paused') return cloneRun(run);
+      if (run.status === 'running') {
+        run.pauseRequestedAt = now();
+        return cloneRun(await this.saveRevision(run));
+      }
+      if (run.status !== 'queued' && run.status !== 'waiting_approval') {
+        throw new WorkflowConflictError(`Workflow run cannot be paused from ${run.status}.`);
+      }
+      run.status = 'paused';
+      return cloneRun(await this.saveRevision(run));
+    });
+  }
+
+  async resumeRun(runId: string, expectedRevision: number): Promise<WorkflowRun> {
+    return this.withLease(runId, async () => {
+      const run = await this.readRun(runId);
+      this.assertRevision(run, expectedRevision);
+      if (run.status !== 'paused') {
+        throw new WorkflowConflictError(`Workflow run cannot be resumed from ${run.status}.`);
+      }
+      run.pauseRequestedAt = undefined;
+      run.status = run.steps.some((step) => step.status === 'waiting_approval')
+        ? 'waiting_approval'
+        : 'queued';
+      return cloneRun(await this.saveRevision(run));
+    });
+  }
+
+  async cancelRun(runId: string, expectedRevision: number): Promise<WorkflowRun> {
+    return this.withLease(runId, async () => {
+      const run = await this.readRun(runId);
+      this.assertRevision(run, expectedRevision);
+      if (run.status === 'cancelled') return cloneRun(run);
+      if (run.status === 'running') {
+        run.cancelRequestedAt = now();
+        run.pauseRequestedAt = undefined;
+        return cloneRun(await this.saveRevision(run));
+      }
+      if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'unknown_outcome') {
+        throw new WorkflowConflictError(`Workflow run cannot be cancelled from ${run.status}.`);
+      }
+      for (const step of run.steps) {
+        if (step.status === 'queued' || step.status === 'waiting_approval') {
+          step.status = 'cancelled';
+          step.completedAt = now();
+        }
+      }
+      run.status = 'cancelled';
+      run.pauseRequestedAt = undefined;
+      run.cancelRequestedAt = now();
+      return cloneRun(await this.saveRevision(run));
+    });
+  }
+
   private async withLease<T>(runId: string, action: () => Promise<T>): Promise<T> {
     this.assertRunId(runId);
     await mkdir(this.rootDir, { recursive: true, mode: 0o700 });
@@ -182,7 +379,10 @@ export class FileWorkflowStore implements WorkflowStore {
   }
 
   private async readRun(runId: string): Promise<WorkflowRun> {
-    const parsed = JSON.parse(await readFile(this.runPath(runId), 'utf8')) as WorkflowRun;
+    const target = this.runPath(runId);
+    const metadata = await lstat(target);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('Workflow run record is unsafe.');
+    const parsed = JSON.parse(await readFile(target, 'utf8')) as WorkflowRun;
     this.assertRun(parsed);
     return parsed;
   }

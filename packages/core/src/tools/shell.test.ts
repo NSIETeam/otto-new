@@ -5,18 +5,24 @@
  */
 
 import { expect, describe, it, vi, beforeEach } from 'vitest';
-import { ShellTool, isServerOrPersistentCommand } from './shell.js';
+import {
+  ShellTool,
+  backgroundShellOutcome,
+  isServerOrPersistentCommand,
+} from './shell.js';
 import { Config } from '../config/config.js';
 import * as summarizer from '../utils/summarizer.js';
 import { OttoClient } from '../core/client.js';
 import { ToolExecuteConfirmationDetails } from './tools.js';
 import os from 'os';
+import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
 
 describe('ShellTool Bug Reproduction', () => {
   let shellTool: ShellTool;
   let config: Config;
 
   beforeEach(() => {
+    getBackgroundTaskManager().clearAllTasks();
     config = {
       getCoreTools: () => undefined,
       getExcludeTools: () => undefined,
@@ -195,6 +201,7 @@ describe('ShellTool - Background Task Actions', () => {
   let config: Config;
 
   beforeEach(() => {
+    getBackgroundTaskManager().clearAllTasks();
     config = {
       getCoreTools: () => undefined,
       getExcludeTools: () => undefined,
@@ -219,6 +226,15 @@ describe('ShellTool - Background Task Actions', () => {
     expect(shellTool.validateToolParams({ command: '', action: 'stop_background_task', backgroundTaskId: '123' })).toBeNull();
   });
 
+  it('classifies background shell terminal outcomes without reporting nonzero as completed', () => {
+    expect(backgroundShellOutcome(0, null)).toEqual({ status: 'succeeded' });
+    expect(backgroundShellOutcome(2, null)).toEqual({
+      status: 'failed',
+      error: 'Background command exited with code 2',
+    });
+    expect(backgroundShellOutcome(null, 'SIGTERM')).toEqual({ status: 'cancelled' });
+  });
+
   it('bypasses confirmation for background task listings/stop', async () => {
     const signal = new AbortController().signal;
     const confirmList = await shellTool.shouldConfirmExecute({ command: '', action: 'list_background_tasks' }, signal);
@@ -226,5 +242,22 @@ describe('ShellTool - Background Task Actions', () => {
 
     const confirmStop = await shellTool.shouldConfirmExecute({ command: '', action: 'stop_background_task', backgroundTaskId: 'abc' }, signal);
     expect(confirmStop).toBe(false);
+  });
+
+  it('stops a background shell through its registered process teardown', async () => {
+    const manager = getBackgroundTaskManager();
+    const task = manager.createTask('long-running-server', '.', 'shell');
+    const stop = vi.fn();
+    manager.registerStop(task.id, stop);
+
+    const result = await shellTool.execute({
+      command: '',
+      action: 'stop_background_task',
+      backgroundTaskId: task.id,
+    }, new AbortController().signal);
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(manager.getTask(task.id)?.status).toBe('cancelled');
+    expect(result.llmContent).toContain('Cancellation requested');
   });
 });

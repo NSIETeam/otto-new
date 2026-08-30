@@ -42,6 +42,7 @@ import {
   screen,
   session,
   shell,
+  systemPreferences,
   Tray,
   type NativeImage,
 } from 'electron';
@@ -50,10 +51,16 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { HealthInfo, ServerEndpoint } from 'otto-server';
+import type {
+  ChannelPairingPublic,
+  ChannelProvider,
+  HealthInfo,
+  ServerEndpoint,
+} from 'otto-server';
 import {
   CustomerModuleHostBroker,
   CustomerModuleRunner,
+  RecurringTaskRegistry,
   parseCustomerModuleManifest,
   scanCustomerModuleWasm,
   validateCustomerModuleArchiveEntries,
@@ -69,6 +76,17 @@ import {
   rebaseDesktopPetDrag,
   type DesktopPetDragState,
 } from './desktop-pet-drag.js';
+import {
+  createChannelInstallationDeviceKeys,
+  createChannelInstallationProof,
+  type ChannelInstallationDeviceKeys,
+} from './channel-installation-proof.js';
+import { EphemeralChannelPairingKeyStore } from './channel-pairing-key-store.js';
+import {
+  isChannelInstallationId,
+  parseChannelIdentityMutationIpc,
+} from './channel-identity-ipc.js';
+import { cancelDurableWorkflowsForQuit } from './durable-workflow-quit.js';
 
 function ignoreBrokenPipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
@@ -94,6 +112,12 @@ interface FeishuConfigSaveRequest {
   appSecret: string;
   verificationToken?: string | null;
   encryptKey?: string | null;
+}
+
+interface ChannelPairingResult {
+  ok: boolean;
+  pairing: ChannelPairingPublic | null;
+  error: string | null;
 }
 
 /** 根据文件扩展名返回 MIME 类型（用于 readFilePath IPC）。 */
@@ -466,10 +490,17 @@ const CRASH_RELOAD_MAX = 3;
 const DEFAULT_ENTERPRISE_SERVER_URL = defaultEnterpriseServerUrl(
   process.env.OTTO_ENTERPRISE_SERVER_URL,
 );
+const desktopRecurringTasks = new RecurringTaskRegistry({
+  allowPaidBackground: false,
+  onError: (taskName, error) => {
+    console.warn(`[otto-desktop] 后台任务 ${taskName} 失败:`, error);
+  },
+});
 /** server 生命周期管理器（发现/拉起/探活/退出清理）。 */
 const serverManager = new ServerManager({
   enterpriseServerUrl: DEFAULT_ENTERPRISE_SERVER_URL,
   kernelUpdateRoot: resolveKernelUpdateRoot(app.getPath('userData')),
+  recurringTasks: desktopRecurringTasks,
   onHealthChange: (status) => {
     tracer.updateStatus(status);
   },
@@ -490,7 +521,7 @@ const enterpriseNotificationIdentityBoundary =
     () => fileAccessGrants.clear(),
   );
 /** 当前 server 端点（发现的或拉起的）。renderer 经 IPC 取它建 WS。 */
-let endpoint: ServerEndpoint | undefined;
+let endpoint: (ServerEndpoint & { controlToken?: string }) | undefined;
 let endpointEnsurePromise: Promise<void> | undefined;
 let endpointRetryTimer: ReturnType<typeof setTimeout> | undefined;
 let endpointRetryAttempt = 0;
@@ -514,6 +545,46 @@ let enterpriseTrayPopoverWindow: BrowserWindow | undefined;
 let enterpriseTrayContacts: EnterpriseTrayContact[] = [];
 /** 用户主动退出标记；关闭窗口时不退出，只有菜单/托盘退出才真正结束进程。 */
 let isQuitting = false;
+/** Ephemeral private keys for in-progress provider pairings; never exposed to renderer. */
+const channelPairingDeviceKeys = new EphemeralChannelPairingKeyStore<ChannelInstallationDeviceKeys>();
+const desktopRpaAppGrants = new Map<string, 'inspect' | 'interact'>();
+let unregisterDesktopRpaHost: (() => void) | undefined;
+
+async function registerMacOsDesktopRpaHost(): Promise<void> {
+  if (process.platform !== 'darwin') return;
+  const rpa = (await import('otto-rpa')) as unknown as {
+    MacOsAccessibilityPortV1: new (options: {
+      authorizeApp(input: { appId: string; action: 'inspect' | 'interact' }): Promise<boolean>;
+    }) => unknown;
+    registerDesktopRpaPortV1(port: unknown): void;
+  };
+  const port = new rpa.MacOsAccessibilityPortV1({
+    authorizeApp: async ({ appId, action }) => {
+      if (!systemPreferences.isTrustedAccessibilityClient(false)) return false;
+      const current = desktopRpaAppGrants.get(appId);
+      if (current === 'interact' || current === action) return true;
+      const result = mainWindow && !mainWindow.isDestroyed()
+        ? await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: '允许 Otto 控制应用？',
+            message: action === 'interact'
+              ? `允许 Otto 在本次运行期间操作 ${appId} 的可访问控件？`
+              : `允许 Otto 在本次运行期间读取 ${appId} 的可访问控件结构？`,
+            detail: '仅允许语义控件定位；坐标、任意脚本、Shell、密码字段和未脱敏截图均被禁止。',
+            buttons: ['允许本次运行', '拒绝'],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true,
+          })
+        : { response: 1 };
+      if (result.response !== 0) return false;
+      desktopRpaAppGrants.set(appId, action);
+      return true;
+    },
+  });
+  rpa.registerDesktopRpaPortV1(port);
+  unregisterDesktopRpaHost = () => rpa.registerDesktopRpaPortV1(undefined);
+}
 /** 视频编辑器窗口（OpenReel）。 */
 let videoEditorWindow: BrowserWindow | undefined;
 /** 可脱离主窗口、在桌面任意拖动的小宠物窗口。 */
@@ -560,6 +631,16 @@ const IPC = {
   feishuGetConfig: 'otto:feishu-get-config',
   feishuSaveConfig: 'otto:feishu-save-config',
   feishuClearConfig: 'otto:feishu-clear-config',
+  channelPairingBegin: 'otto:channel-pairing-begin',
+  channelPairingStatus: 'otto:channel-pairing-status',
+  channelPairingInstall: 'otto:channel-pairing-install',
+  channelPairingCancel: 'otto:channel-pairing-cancel',
+  channelInstallations: 'otto:channel-installations',
+  channelInstallationAction: 'otto:channel-installation-action',
+  channelIdentities: 'otto:channel-identities',
+  channelIdentityMutation: 'otto:channel-identity-mutation',
+  rpaAccessibilityStatus: 'otto:rpa-accessibility-status',
+  rpaAccessibilityRequest: 'otto:rpa-accessibility-request',
   parkConfig: 'otto:park-config',
   themeGet: 'otto:theme-get',
   themeSet: 'otto:theme-set',
@@ -1037,28 +1118,42 @@ const enterpriseSkillUsageReporter = new EnterpriseSkillUsageReporter({
 const enterpriseRegistrationIntents = new EnterpriseRegistrationIntentStore();
 let enterpriseSessionLoaded = false;
 let enterpriseIntentRendererReady = false;
-let enterpriseIdentityRefreshTimer: ReturnType<typeof setInterval> | undefined;
+let stopEnterpriseIdentityRefreshTask: (() => void) | undefined;
 const ENTERPRISE_IDENTITY_REFRESH_INTERVAL_MS = 2 * 60_000;
-let enterpriseModuleUpdateTimer: ReturnType<typeof setInterval> | undefined;
+let stopEnterpriseModuleUpdateTask: (() => void) | undefined;
 let enterpriseModuleUpdateFingerprint = '';
 let enterpriseModuleUpdatePolling = false;
 const ENTERPRISE_MODULE_UPDATE_POLL_INTERVAL_MS = 2 * 60_000;
-let enterpriseSkillUsageTimer: ReturnType<typeof setInterval> | undefined;
+let stopEnterpriseSkillUsageTask: (() => void) | undefined;
 const ENTERPRISE_SKILL_USAGE_POLL_INTERVAL_MS = 30_000;
 
 function startEnterpriseSkillUsageReporting(): void {
-  if (enterpriseSkillUsageTimer) return;
-  enterpriseSkillUsageTimer = setInterval(() => {
-    if (!isQuitting) void enterpriseSkillUsageReporter.poll();
-  }, ENTERPRISE_SKILL_USAGE_POLL_INTERVAL_MS);
-  enterpriseSkillUsageTimer.unref?.();
-  void enterpriseSkillUsageReporter.poll();
+  if (stopEnterpriseSkillUsageTask) return;
+  stopEnterpriseSkillUsageTask = desktopRecurringTasks.register({
+    name: 'desktop-enterprise-skill-usage-reporting',
+    source: 'packages/desktop/src/main/index.ts#enterprise-skill-usage',
+    definitionVersion: 1,
+    intervalMs: ENTERPRISE_SKILL_USAGE_POLL_INTERVAL_MS,
+    initialDelayMs: 0,
+    missedRunPolicy: 'skip',
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => {
+      try {
+        const stats = fs.statSync(path.join(worklogRootDir(), 'skill_usage.jsonl'));
+        return `${stats.size}:${stats.mtimeMs}`;
+      } catch {
+        return undefined;
+      }
+    },
+    run: async () => {
+      if (!isQuitting) await enterpriseSkillUsageReporter.poll();
+    },
+  });
 }
 
 function stopEnterpriseSkillUsageReporting(): void {
-  if (!enterpriseSkillUsageTimer) return;
-  clearInterval(enterpriseSkillUsageTimer);
-  enterpriseSkillUsageTimer = undefined;
+  stopEnterpriseSkillUsageTask?.();
+  stopEnterpriseSkillUsageTask = undefined;
 }
 
 function acceptEnterpriseRegistrationUrl(input: string): boolean {
@@ -1149,13 +1244,24 @@ function saveEnterpriseSession(): void {
 }
 
 function startEnterpriseIdentityRefresh(): void {
-  if (enterpriseIdentityRefreshTimer) return;
-  enterpriseIdentityRefreshTimer = setInterval(() => {
-    if (isQuitting) return;
-    loadEnterpriseSession();
-    if (!enterpriseClient.snapshot().token) return;
-    void enterpriseAuthOperations
-      .run(async () => {
+  if (stopEnterpriseIdentityRefreshTask) return;
+  stopEnterpriseIdentityRefreshTask = desktopRecurringTasks.register({
+    name: 'desktop-enterprise-identity-refresh',
+    source: 'packages/desktop/src/main/index.ts#enterprise-identity-refresh',
+    definitionVersion: 1,
+    intervalMs: ENTERPRISE_IDENTITY_REFRESH_INTERVAL_MS,
+    initialDelayMs: ENTERPRISE_IDENTITY_REFRESH_INTERVAL_MS,
+    missedRunPolicy: 'skip',
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => {
+      const account = enterpriseClient.authenticatedAccountSnapshot();
+      return !isQuitting && enterpriseClient.snapshot().token && account
+        ? `${account.id}:bucket:${Math.floor(Date.now() / ENTERPRISE_IDENTITY_REFRESH_INTERVAL_MS)}`
+        : undefined;
+    },
+    run: async () => {
+      loadEnterpriseSession();
+      await enterpriseAuthOperations.run(async () => {
         if (!enterpriseClient.snapshot().token) return;
         const session = await enterpriseClient.getSession();
         const outcome = await refreshEnterpriseIdentityLease(
@@ -1169,12 +1275,9 @@ function startEnterpriseIdentityRefresh(): void {
           enterpriseMlsOutboxRetry.wake();
           enterpriseMlsInboundPoll.wake();
         }
-      })
-      .catch((error) => {
-        console.warn('[otto-desktop] 刷新企业身份短租约失败:', error);
       });
-  }, ENTERPRISE_IDENTITY_REFRESH_INTERVAL_MS);
-  enterpriseIdentityRefreshTimer.unref?.();
+    },
+  });
 }
 
 function notifyEnterpriseAccountUpdated(account: EnterpriseAccount): void {
@@ -1185,9 +1288,8 @@ function notifyEnterpriseAccountUpdated(account: EnterpriseAccount): void {
 }
 
 function stopEnterpriseIdentityRefresh(): void {
-  if (!enterpriseIdentityRefreshTimer) return;
-  clearInterval(enterpriseIdentityRefreshTimer);
-  enterpriseIdentityRefreshTimer = undefined;
+  stopEnterpriseIdentityRefreshTask?.();
+  stopEnterpriseIdentityRefreshTask = undefined;
 }
 
 /**
@@ -1295,19 +1397,29 @@ async function checkEnterpriseModuleUpdates(
 }
 
 function startEnterpriseModuleUpdatePolling(): void {
-  if (enterpriseModuleUpdateTimer) return;
-  enterpriseModuleUpdateTimer = setInterval(() => {
-    if (isQuitting) return;
-    void checkEnterpriseModuleUpdates('interval');
-  }, ENTERPRISE_MODULE_UPDATE_POLL_INTERVAL_MS);
-  enterpriseModuleUpdateTimer.unref?.();
+  if (stopEnterpriseModuleUpdateTask) return;
+  stopEnterpriseModuleUpdateTask = desktopRecurringTasks.register({
+    name: 'desktop-enterprise-module-update-check',
+    source: 'packages/desktop/src/main/index.ts#enterprise-module-updates',
+    definitionVersion: 1,
+    intervalMs: ENTERPRISE_MODULE_UPDATE_POLL_INTERVAL_MS,
+    initialDelayMs: ENTERPRISE_MODULE_UPDATE_POLL_INTERVAL_MS,
+    missedRunPolicy: 'skip',
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => {
+      const account = enterpriseClient.authenticatedAccountSnapshot();
+      return !isQuitting && enterpriseClient.snapshot().token && account
+        ? `${account.id}:bucket:${Math.floor(Date.now() / ENTERPRISE_MODULE_UPDATE_POLL_INTERVAL_MS)}`
+        : undefined;
+    },
+    run: () => checkEnterpriseModuleUpdates('interval'),
+  });
   void checkEnterpriseModuleUpdates('startup');
 }
 
 function stopEnterpriseModuleUpdatePolling(): void {
-  if (!enterpriseModuleUpdateTimer) return;
-  clearInterval(enterpriseModuleUpdateTimer);
-  enterpriseModuleUpdateTimer = undefined;
+  stopEnterpriseModuleUpdateTask?.();
+  stopEnterpriseModuleUpdateTask = undefined;
 }
 
 function resetEnterpriseModuleUpdateState(): void {
@@ -1433,6 +1545,55 @@ function requestFeishuConfig(
                 error: string | null;
               },
             );
+          } catch {
+            resolve(null);
+          }
+        });
+        res.on('error', () => resolve(null));
+      },
+    );
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.on('error', () => resolve(null));
+    req.end(payload);
+  });
+}
+
+function requestChannelPairing(
+  method: 'GET' | 'POST' | 'DELETE',
+  requestPath: string,
+  body?: unknown,
+): Promise<{ ok: boolean; data: unknown; error: string | null } | null> {
+  const ep = endpoint;
+  if (!ep?.controlToken) return Promise.resolve(null);
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  return new Promise((resolve) => {
+    const req = http.request(
+      {
+        host: ep.host,
+        port: ep.port,
+        path: requestPath,
+        method,
+        timeout: FEISHU_OP_TIMEOUT_MS,
+        headers: {
+          authorization: `Bearer ${ep.controlToken}`,
+          ...(payload === undefined
+            ? {}
+            : {
+                'content-type': 'application/json',
+                'content-length': Buffer.byteLength(payload),
+              }),
+        },
+      },
+      (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => { text += chunk; });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(text) as { ok: boolean; data: unknown; error: string | null });
           } catch {
             resolve(null);
           }
@@ -2036,13 +2197,33 @@ function createTray(): void {
   };
 
   updateMenu();
-  setInterval(() => {
-    if (tray && !tray.isDestroyed()) updateMenu();
-  }, 2000);
+  desktopRecurringTasks.register({
+    name: 'desktop-tray-menu-refresh',
+    source: 'packages/desktop/src/main/index.ts#tray-menu',
+    definitionVersion: 1,
+    intervalMs: 2_000,
+    initialDelayMs: 2_000,
+    missedRunPolicy: 'skip',
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => tray && !tray.isDestroyed()
+      ? `bucket:${Math.floor(Date.now() / 2_000)}`
+      : undefined,
+    run: () => updateMenu(),
+  });
   void refreshEnterpriseTrayContacts();
-  setInterval(() => {
-    void refreshEnterpriseTrayContacts();
-  }, 8000);
+  desktopRecurringTasks.register({
+    name: 'desktop-enterprise-tray-contacts',
+    source: 'packages/desktop/src/main/index.ts#tray-contacts',
+    definitionVersion: 1,
+    intervalMs: 8_000,
+    initialDelayMs: 8_000,
+    missedRunPolicy: 'skip',
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => !isQuitting && enterpriseClient.snapshot().token
+      ? `bucket:${Math.floor(Date.now() / 8_000)}`
+      : undefined,
+    run: () => refreshEnterpriseTrayContacts(),
+  });
 
   tray.on('click', () => {
     void toggleEnterpriseTrayPopover();
@@ -4394,6 +4575,129 @@ function registerIpc(): void {
     if (!r) return { ok: false, config: null, error: '本地 server 未就绪。' };
     return { ok: r.ok, config: r.data, error: r.error };
   });
+  const channelScopes: Record<ChannelProvider, readonly string[]> = {
+    feishu: ['im:message', 'contact:user.base:readonly'],
+    lark: ['im:message', 'contact:user.base:readonly'],
+    wecom: ['message.send', 'contacts.read.basic'],
+  };
+  ipcMain.handle(IPC.channelPairingBegin, async (_event, provider: unknown): Promise<ChannelPairingResult> => {
+    if (provider !== 'feishu' && provider !== 'lark' && provider !== 'wecom') {
+      return { ok: false, pairing: null, error: '不支持的连接类型。' };
+    }
+    const keys = createChannelInstallationDeviceKeys();
+    const installationPublicKey = keys.publicKey;
+    const response = await requestChannelPairing('POST', '/channels/pairings', {
+      provider,
+      installationPublicKey,
+      requestedScopes: channelScopes[provider],
+    });
+    const pairing = response?.ok ? response.data as ChannelPairingPublic : null;
+    if (pairing) {
+      channelPairingDeviceKeys.set(pairing.pairingId, keys, pairing.expiresAtMs);
+    }
+    return {
+      ok: response?.ok === true,
+      pairing,
+      error: response?.error ?? (response ? null : '本地 server 未就绪。'),
+    };
+  });
+  const pairingAction = async (
+    pairingId: unknown,
+    method: 'GET' | 'POST' | 'DELETE',
+    suffix = '',
+  ): Promise<{ ok: boolean; data: unknown; error: string | null }> => {
+    if (typeof pairingId !== 'string' || !/^pair_[a-f0-9]{24}$/.test(pairingId)) {
+      return { ok: false, data: null, error: '配对编号不合法。' };
+    }
+    const deviceKeys = channelPairingDeviceKeys.get(pairingId);
+    if (suffix === '/install' && !deviceKeys) {
+      return { ok: false, data: null, error: '本机配对密钥已丢失，请重新扫码。' };
+    }
+    const response = await requestChannelPairing(
+      method,
+      `/channels/pairings/${pairingId}${suffix}`,
+      suffix === '/install' && deviceKeys
+        ? createChannelInstallationProof(pairingId, deviceKeys)
+        : undefined,
+    );
+    const status = response?.ok && response.data && typeof response.data === 'object'
+      && 'status' in response.data
+      ? String((response.data as { status: unknown }).status)
+      : undefined;
+    if (
+      method === 'DELETE'
+      || (suffix === '/install' && response?.ok === true)
+      || (status !== undefined && ['connected', 'expired', 'denied', 'failed', 'revoked'].includes(status))
+    ) {
+      channelPairingDeviceKeys.delete(pairingId);
+    }
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  };
+  ipcMain.handle(IPC.channelPairingStatus, (_event, pairingId: unknown) =>
+    pairingAction(pairingId, 'GET'));
+  ipcMain.handle(IPC.channelPairingInstall, (_event, pairingId: unknown) =>
+    pairingAction(pairingId, 'POST', '/install'));
+  ipcMain.handle(IPC.channelPairingCancel, (_event, pairingId: unknown) =>
+    pairingAction(pairingId, 'DELETE'));
+  ipcMain.handle(IPC.channelInstallations, async () => {
+    const response = await requestChannelPairing('GET', '/channels/installations');
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  });
+  ipcMain.handle(
+    IPC.channelInstallationAction,
+    async (_event, installationId: unknown, action: unknown) => {
+      if (
+        typeof installationId !== 'string' ||
+        !/^channel_(feishu|lark|wecom)_[a-f0-9]{24}$/.test(installationId)
+      ) {
+        return { ok: false, data: null, error: '安装编号不合法。' };
+      }
+      if (!['health', 'start', 'stop', 'revoke'].includes(String(action))) {
+        return { ok: false, data: null, error: '安装操作不合法。' };
+      }
+      const response = await requestChannelPairing(
+        action === 'revoke' ? 'DELETE' : action === 'health' ? 'GET' : 'POST',
+        `/channels/installations/${installationId}${action === 'revoke' ? '' : `/${String(action)}`}`,
+      );
+      return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+    },
+  );
+  ipcMain.handle(IPC.channelIdentities, async (_event, installationId: unknown) => {
+    if (!isChannelInstallationId(installationId)) {
+      return { ok: false, data: null, error: '安装编号不合法。' };
+    }
+    const response = await requestChannelPairing(
+      'GET', `/channels/installations/${installationId}/identities`,
+    );
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  });
+  ipcMain.handle(
+    IPC.channelIdentityMutation,
+    async (_event, installationId: unknown, input: unknown) => {
+      const parsed = parseChannelIdentityMutationIpc(installationId, input);
+      if (!parsed.ok) return { ok: false, data: null, error: parsed.error };
+      const response = await requestChannelPairing(
+        'POST',
+        `/channels/installations/${parsed.installationId}/identities`,
+        parsed.body,
+      );
+      return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+    },
+  );
+  ipcMain.handle(IPC.rpaAccessibilityStatus, () => ({
+    platform: process.platform,
+    supported: process.platform === 'darwin',
+    trusted: process.platform === 'darwin'
+      ? systemPreferences.isTrustedAccessibilityClient(false)
+      : false,
+  }));
+  ipcMain.handle(IPC.rpaAccessibilityRequest, () => ({
+    platform: process.platform,
+    supported: process.platform === 'darwin',
+    trusted: process.platform === 'darwin'
+      ? systemPreferences.isTrustedAccessibilityClient(true)
+      : false,
+  }));
   // ── 内置视频编辑器 ──────────────────────────────────────────
   ipcMain.handle(IPC.openVideoEditor, () =>
     Promise.resolve(createVideoEditorWindow()),
@@ -5512,6 +5816,9 @@ if (!gotLock) {
       mainWindowPresentations.get(mainWindow)?.requestShow({ focus: true });
     }
     applyCsp();
+    await registerMacOsDesktopRpaHost().catch((error) => {
+      console.warn('[otto-desktop] macOS Accessibility RPA host unavailable:', error);
+    });
     await ensureEndpoint();
     startEnterpriseIdentityRefresh();
     startEnterpriseModuleUpdatePolling();
@@ -5548,6 +5855,11 @@ if (!gotLock) {
     stopEnterpriseIdentityRefresh();
     stopEnterpriseModuleUpdatePolling();
     stopEnterpriseSkillUsageReporting();
+    desktopRecurringTasks.stopAll();
+    channelPairingDeviceKeys.clear();
+    desktopRpaAppGrants.clear();
+    unregisterDesktopRpaHost?.();
+    unregisterDesktopRpaHost = undefined;
     if (quitCleanupFinished) return;
     event.preventDefault();
     if (quitCleanupStarted) return;
@@ -5563,6 +5875,12 @@ if (!gotLock) {
     // 关窗不杀：server + 飞书守护继续运行。
     void flushEnterpriseAccountDataSync(3_000)
       .catch(logAccountDataSyncFailure)
+      .then(() => cancelDurableWorkflowsForQuit())
+      .then((report) => {
+        if (report.failed.length > 0) {
+          console.warn('[otto-desktop] some durable workflow cancellations could not be persisted:', report.failed);
+        }
+      })
       .then(() => enterpriseMlsOutboxRetry.stop())
       .then(() => enterpriseMlsInboundPoll.stop())
       .then(() => enterpriseMls.close())

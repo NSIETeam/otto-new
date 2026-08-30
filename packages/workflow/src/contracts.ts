@@ -6,6 +6,7 @@ export type WorkflowRunStatus =
   | 'queued'
   | 'running'
   | 'waiting_approval'
+  | 'paused'
   | 'succeeded'
   | 'failed'
   | 'cancelled'
@@ -45,6 +46,9 @@ export interface WorkflowStepRun {
   approvalId?: string;
   approvedAt?: string;
   output?: unknown;
+  /** Bounded durable resume/progress state for a currently running step. */
+  checkpoint?: Record<string, unknown>;
+  checkpointedAt?: string;
   error?: string;
   startedAt?: string;
   completedAt?: string;
@@ -59,6 +63,8 @@ export interface WorkflowRun {
   createdAt: string;
   updatedAt: string;
   steps: WorkflowStepRun[];
+  pauseRequestedAt?: string;
+  cancelRequestedAt?: string;
 }
 
 export interface ClaimedWorkflowStep {
@@ -73,7 +79,7 @@ export interface WorkflowTraceEvent {
   stepId?: string;
   attempt?: number;
   idempotencyKey?: string;
-  kind: 'run_started' | 'step_claimed' | 'step_succeeded' | 'step_failed' | 'approval_recorded' | 'recovery_unknown_outcome' | 'human_takeover';
+  kind: 'run_started' | 'step_claimed' | 'step_succeeded' | 'step_failed' | 'step_cancelled' | 'approval_recorded' | 'recovery_unknown_outcome' | 'human_takeover' | 'run_paused' | 'run_resumed' | 'run_cancelled';
   status: WorkflowRunStatus | WorkflowStepStatus;
   summary: string;
 }

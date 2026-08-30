@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { RecurringTaskRegistry } from 'otto-core';
 
 import type { EnterpriseSharedCache } from '../modules/data_platform/index.js';
 import type { PostgresEnterpriseCoreRepository } from './postgresCoreRepository.js';
@@ -17,6 +18,7 @@ export function createClusteredMlsMaintenance(input: {
   intervalMs?: number;
   owner?: string;
   onError?: (error: unknown) => void;
+  taskRegistry?: RecurringTaskRegistry;
 }) {
   const intervalMs = input.intervalMs ?? 15 * 60 * 1_000;
   if (
@@ -27,7 +29,10 @@ export function createClusteredMlsMaintenance(input: {
     throw new Error('MLS maintenance interval is invalid');
   }
   const owner = input.owner?.trim() || randomUUID();
-  let timer: NodeJS.Timeout | null = null;
+  const taskRegistry = input.taskRegistry ?? new RecurringTaskRegistry({
+    onError: (_taskName, error) => input.onError?.(error),
+  });
+  let stopTask: (() => void) | undefined;
   let running = false;
   let closed = false;
 
@@ -56,17 +61,23 @@ export function createClusteredMlsMaintenance(input: {
   }
 
   function start(): void {
-    if (closed || timer) return;
-    timer = setInterval(() => {
-      void runOnce().catch((error: unknown) => input.onError?.(error));
-    }, intervalMs);
-    timer.unref();
+    if (closed || stopTask) return;
+    stopTask = taskRegistry.register({
+      name: `enterprise.mls-resource-maintenance.${owner}`,
+      source: 'packages/server/src/enterprise/clusteredMlsMaintenance.ts',
+      intervalMs,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => String(Math.floor(Date.now() / intervalMs)),
+      run: async () => {
+        await runOnce();
+      },
+    });
   }
 
   function close(): void {
     closed = true;
-    if (timer) clearInterval(timer);
-    timer = null;
+    stopTask?.();
+    stopTask = undefined;
   }
 
   return { runOnce, start, close };

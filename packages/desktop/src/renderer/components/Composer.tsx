@@ -197,7 +197,6 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: 'feishu-start', description: '启动飞书网关（立即执行）', action: 'local' },
   { id: 'feishu-stop', description: '停止飞书网关（立即执行）', action: 'local' },
   { id: 'feishu-status', description: '查看飞书连接状态', action: 'local' },
-  { id: 'multi-channel', description: '检查微信/企微/钉钉多渠道', action: 'prompt', prompt: '请检查 Otto 的多渠道能力：微信、企业微信、钉钉、飞书适配器和 multi_channel 工具是否可用。' },
   { id: 'ppt', description: 'PPT 创作专家', action: 'agent', agentProfileId: 'ppt' },
   { id: 'doc', description: '文档写作专家', action: 'agent', agentProfileId: 'doc' },
   { id: 'pdf', description: 'PDF 处理专家', action: 'agent', agentProfileId: 'pdf' },
@@ -400,7 +399,7 @@ export function Composer({
   }, [openPopover]);
 
   const stopVoiceMeter = (): void => {
-    if (voiceTimerRef.current !== null) window.clearInterval(voiceTimerRef.current);
+    if (voiceTimerRef.current !== null) window.clearTimeout(voiceTimerRef.current);
     voiceTimerRef.current = null;
     if (voiceMeterFrameRef.current !== null) cancelAnimationFrame(voiceMeterFrameRef.current);
     voiceMeterFrameRef.current = null;
@@ -412,7 +411,11 @@ export function Composer({
 
   const startVoiceMeter = (stream: MediaStream): void => {
     setVoiceSeconds(0);
-    voiceTimerRef.current = window.setInterval(() => setVoiceSeconds((v) => v + 1), 1000);
+    const tickVoiceSeconds = (): void => {
+      setVoiceSeconds((value) => value + 1);
+      voiceTimerRef.current = window.setTimeout(tickVoiceSeconds, 1_000);
+    };
+    voiceTimerRef.current = window.setTimeout(tickVoiceSeconds, 1_000);
     const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return;
     try {

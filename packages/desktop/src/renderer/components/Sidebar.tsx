@@ -35,6 +35,7 @@ import {
   IconMessageCircle,
   IconBriefcaseBusiness,
   IconBuilding2,
+  IconMoreHorizontal,
 } from './icons.js';
 import { LogoutConfirmDialog } from './LogoutConfirmDialog.js';
 import { JoinEnterpriseDialog } from './JoinEnterpriseDialog.js';
@@ -894,17 +895,6 @@ function NavItems({
   );
 }
 
-/** 溢出菜单三点图标（内联，避免动 icons.tsx）。 */
-function IconMoreDots(): React.JSX.Element {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <circle cx="5" cy="12" r="1.7" />
-      <circle cx="12" cy="12" r="1.7" />
-      <circle cx="19" cy="12" r="1.7" />
-    </svg>
-  );
-}
-
 /** 会话项本地交互态：普通 / 菜单打开 / 重命名中 / 删除确认中。 */
 type ItemMode = 'idle' | 'menu' | 'rename' | 'confirm';
 
@@ -1033,7 +1023,7 @@ function SessionItem({
             setMode((m) => (m === 'menu' ? 'idle' : 'menu'));
           }}
         >
-          <IconMoreDots />
+          <IconMoreHorizontal size={16} />
         </button>
       </div>
 

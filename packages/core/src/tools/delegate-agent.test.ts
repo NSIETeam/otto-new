@@ -14,6 +14,7 @@ import type { Config } from '../config/config.js';
 import * as acpClient from '../acp-client/acpAgentClient.js';
 import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
 import type { RunTaskOptions } from '../acp-client/acpAgentClient.js';
+import type { ExternalTaskWorkflowJournalV1 } from '../services/externalTaskWorkflowJournal.js';
 
 vi.mock('../acp-client/acpAgentClient.js', () => ({
   runDelegatedTask: vi.fn(),
@@ -21,16 +22,27 @@ vi.mock('../acp-client/acpAgentClient.js', () => ({
 
 const runDelegatedTask = vi.mocked(acpClient.runDelegatedTask);
 
+const workflowJournal: ExternalTaskWorkflowJournalV1 = {
+  start: vi.fn(async ({ taskId }) => `wf-${taskId}`),
+  startShell: vi.fn(async ({ taskId }) => `wf-shell-${taskId}`),
+  checkpoint: vi.fn(async () => undefined),
+  settle: vi.fn(async () => undefined),
+  recover: vi.fn(async () => null),
+};
+
 function makeTool(targetDir = '/proj') {
   const config = {
     getTargetDir: () => targetDir,
   } as unknown as Config;
-  return new DelegateToAgentTool(config);
+  return new DelegateToAgentTool(config, workflowJournal);
 }
 
 describe('DelegateToAgentTool', () => {
   beforeEach(() => {
     runDelegatedTask.mockReset();
+    vi.mocked(workflowJournal.start).mockClear();
+    vi.mocked(workflowJournal.checkpoint).mockClear();
+    vi.mocked(workflowJournal.settle).mockClear();
     // Clear the singleton between tests so tasks don't accumulate.
     const mgr = getBackgroundTaskManager();
     mgr.clearAllTasks();
@@ -41,6 +53,32 @@ describe('DelegateToAgentTool', () => {
     const res = await tool.execute({ task: '   ' }, new AbortController().signal);
     expect(res.status).toBe('failed');
     expect(runDelegatedTask).not.toHaveBeenCalled();
+  });
+
+  it('requires explicit approval and declares the affected working directory', async () => {
+    const tool = makeTool('/my/project');
+    const confirmation = await tool.shouldConfirmExecute(
+      { task: 'update the implementation', agent: 'codex' },
+      new AbortController().signal,
+    );
+
+    expect(confirmation).toMatchObject({
+      type: 'exec',
+      rootCommand: 'delegate_to_agent',
+      command: 'delegate_to_agent --agent codex --cwd /my/project',
+      warning: expect.stringContaining('读取和修改'),
+    });
+    expect(tool.toolLocations({ task: 'update the implementation' })).toEqual([
+      { path: '/my/project' },
+    ]);
+  });
+
+  it('does not ask for approval when parameters are invalid', async () => {
+    const tool = makeTool('/my/project');
+    await expect(tool.shouldConfirmExecute(
+      { task: ' ' },
+      new AbortController().signal,
+    )).resolves.toBe(false);
   });
 
   it('returns immediately with a Task ID (async mode)', async () => {
@@ -59,6 +97,22 @@ describe('DelegateToAgentTool', () => {
     expect(res.returnDisplay).toContain('Claude Code');
     expect(res.llmContent).toContain('"status":"running"');
     expect(res.llmContent).toContain('"taskId"');
+    expect(workflowJournal.start).toHaveBeenCalledWith(expect.objectContaining({
+      agent: 'claude-code',
+      cwd: '/my/project',
+    }));
+  });
+
+  it('does not bind a background task to the parent turn abort signal', async () => {
+    runDelegatedTask.mockReturnValue(new Promise(() => {}));
+    const parent = new AbortController();
+    const tool = makeTool('/my/project');
+    await tool.execute({ task: 'long work' }, parent.signal);
+    await vi.waitFor(() => expect(runDelegatedTask).toHaveBeenCalledOnce());
+    const backgroundSignal = runDelegatedTask.mock.calls[0][0].signal;
+
+    parent.abort();
+    expect(backgroundSignal.aborted).toBe(false);
   });
 
   it('defaults cwd to the project target dir', async () => {
@@ -127,6 +181,49 @@ describe('DelegateToAgentTool', () => {
     const bgTask = getBackgroundTaskManager().getTask(taskId)!;
     expect(bgTask.answer).toBe('Done: added tests');
     expect(bgTask.kind).toBe('claude-code');
+    expect(bgTask.workflowRunId).toBe(`wf-${taskId}`);
+    expect(workflowJournal.settle).toHaveBeenCalledWith(`wf-${taskId}`, {
+      status: 'succeeded',
+      sessionId: undefined,
+    });
+  });
+
+  it('checkpoints structured ACP progress into the durable workflow', async () => {
+    runDelegatedTask.mockImplementation(async ({ onProgress }) => {
+      const progress = {
+        sessionId: 'native-session',
+        currentTool: 'edit_file',
+        toolCallCount: 2,
+        tokenUsed: 120,
+        lastActivityAt: Date.now(),
+      };
+      onProgress?.(progress);
+      return {
+        status: 'success',
+        label: 'Codex',
+        answer: 'done',
+        transcript: 'done',
+        sessionId: 'native-session',
+        progress,
+      };
+    });
+
+    const tool = makeTool();
+    const result = await tool.execute(
+      { task: 'edit safely', agent: 'codex' },
+      new AbortController().signal,
+    );
+    const taskId = String(result.llmContent).match(/"taskId":"([^"]+)"/)![1];
+    await vi.waitFor(() => expect(getBackgroundTaskManager().getTask(taskId)?.status).toBe('completed'));
+
+    expect(workflowJournal.checkpoint).toHaveBeenCalledWith(
+      `wf-${taskId}`,
+      expect.objectContaining({ sessionId: 'native-session', currentTool: 'edit_file', toolCallCount: 2 }),
+    );
+    expect(workflowJournal.settle).toHaveBeenCalledWith(
+      `wf-${taskId}`,
+      { status: 'succeeded', sessionId: 'native-session' },
+    );
   });
 
   it('fails the background task when runDelegatedTask fails', async () => {
@@ -151,6 +248,20 @@ describe('DelegateToAgentTool', () => {
 
     const bgTask = getBackgroundTaskManager().getTask(taskId)!;
     expect(bgTask.error).toContain('Could not launch Claude Code');
+    expect(workflowJournal.settle).toHaveBeenCalledWith(`wf-${taskId}`, {
+      status: 'failed',
+      error: 'Could not launch Claude Code. Make sure it is installed.',
+      sessionId: undefined,
+    });
+  });
+
+  it('does not launch an agent when the durable workflow cannot start', async () => {
+    vi.mocked(workflowJournal.start).mockRejectedValueOnce(new Error('disk full'));
+    const tool = makeTool();
+    const res = await tool.execute({ task: 'do x' }, new AbortController().signal);
+    expect(res.status).toBe('failed');
+    expect(res.returnDisplay).toContain('disk full');
+    expect(runDelegatedTask).not.toHaveBeenCalled();
   });
 
   it('rejects an unknown agent value', async () => {
@@ -348,6 +459,36 @@ describe('DelegateToAgentTool', () => {
       const task = getBackgroundTaskManager().getTask(taskId);
       expect(task?.status).toBe('cancelled');
     });
+    expect(workflowJournal.settle).toHaveBeenCalledWith(`wf-${taskId}`, {
+      status: 'cancelled',
+      sessionId: undefined,
+    });
+  });
+
+  it('aborts the ACP turn when its registered background task is explicitly cancelled', async () => {
+    runDelegatedTask.mockImplementation(({ signal }) => new Promise((resolve) => {
+      signal.addEventListener('abort', () => resolve({
+        status: 'cancelled',
+        label: 'Codex',
+        answer: '',
+        transcript: '',
+        error: 'Delegated task was cancelled.',
+      }), { once: true });
+    }));
+    const tool = makeTool();
+    const res = await tool.execute(
+      { task: 'long work', agent: 'codex' },
+      new AbortController().signal,
+    );
+    const llmStr = typeof res.llmContent === 'string' ? res.llmContent : JSON.stringify(res.llmContent);
+    const taskId = llmStr.match(/"taskId":"([^"]+)"/)![1];
+
+    getBackgroundTaskManager().cancelTask(taskId);
+    await vi.waitFor(() => expect(workflowJournal.settle).toHaveBeenCalledWith(
+      `wf-${taskId}`,
+      { status: 'cancelled', sessionId: undefined },
+    ));
+    expect(runDelegatedTask.mock.calls[0][0].signal.aborted).toBe(true);
   });
 
   describe('multi-agent conflict detection', () => {

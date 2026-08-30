@@ -14,6 +14,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProductWorkspaceSnapshot } from 'otto-server';
 import type { EnterpriseAccount, EnterpriseDirectMessage } from '../../preload/index.js';
+import * as nonOverlappingPoll from '../lib/nonOverlappingPoll.js';
 import {
   DirectMessagePanel,
   OrganizationTree,
@@ -1019,22 +1020,12 @@ describe('OrganizationTree', () => {
       .mockResolvedValue([oldMessage, newMessage]);
     const onMessageRead = vi.fn();
     const scrollIntoView = vi.fn();
-    const intervals: Array<{ callback: () => void; delay: number }> = [];
-    const originalSetInterval = window.setInterval.bind(window);
-    vi.spyOn(window, 'setInterval').mockImplementation((handler, delay, ...args): ReturnType<typeof window.setInterval> => {
-      const delayMs = Number(delay);
-      if (delayMs !== 2_000) {
-        // Testing Library's waitFor also uses setInterval. Keep those timers live so
-        // assertions are retried even when React effects are delayed under coverage load.
-        return originalSetInterval(handler, delay, ...args) as unknown as ReturnType<typeof window.setInterval>;
-      }
-      intervals.push({
-        callback: handler as () => void,
-        delay: delayMs,
+    let messagePoll: (() => void | Promise<void>) | undefined;
+    vi.spyOn(nonOverlappingPoll, 'startNonOverlappingPoll')
+      .mockImplementation((task, delay) => {
+        if (delay === 2_000) messagePoll = task;
+        return () => undefined;
       });
-      // The component clears this handle on unmount; use a non-colliding synthetic id.
-      return 2_147_483_647 as unknown as ReturnType<typeof window.setInterval>;
-    });
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
       value: scrollIntoView,
@@ -1062,10 +1053,9 @@ describe('OrganizationTree', () => {
     }, { timeout: 3_000 });
 
     scrollIntoView.mockClear();
-    const messagePoll = intervals.find((interval) => interval.delay === 2_000);
     expect(messagePoll).toBeTruthy();
     await act(async () => {
-      messagePoll!.callback();
+      await messagePoll!();
     });
 
     expect(await screen.findByText('轮询到的新消息')).toBeTruthy();
@@ -1077,7 +1067,7 @@ describe('OrganizationTree', () => {
 
     scrollIntoView.mockClear();
     await act(async () => {
-      messagePoll!.callback();
+      await messagePoll!();
     });
     expect(scrollIntoView).not.toHaveBeenCalled();
   });

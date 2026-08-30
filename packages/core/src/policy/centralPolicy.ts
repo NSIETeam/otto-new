@@ -98,9 +98,6 @@ const TOOL_FEATURE_FLAG_MAP: Record<string, string> = {
   // 审计日志
   'audit': 'audit_log',
 
-  // 多渠道消息
-  'multi_channel_send': 'feishu_auto_reply',
-
   // 语音
   'voice_bridge': 'park_service',
 

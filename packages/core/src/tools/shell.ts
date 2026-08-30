@@ -32,6 +32,24 @@ import { t } from '../utils/simpleI18n.js';
 import {
   getDangerousCommandInfo,
 } from '../utils/dangerous-command-detector.js';
+import { startProcessWatchdog } from '../utils/processWatchdog.js';
+import {
+  FileExternalTaskWorkflowJournalV1,
+  type ExternalTaskWorkflowJournalV1,
+  type ExternalTaskWorkflowOutcome,
+} from '../services/externalTaskWorkflowJournal.js';
+
+export function backgroundShellOutcome(
+  exitCode: number | null,
+  signal: NodeJS.Signals | null,
+): ExternalTaskWorkflowOutcome {
+  if (signal) return { status: 'cancelled' };
+  if (exitCode === 0) return { status: 'succeeded' };
+  return {
+    status: 'failed',
+    error: `Background command exited with code ${exitCode ?? 'unknown'}`,
+  };
+}
 
 /**
  * 识别是否为长期运行的服务器/服务类命令行
@@ -380,7 +398,10 @@ export class ShellTool extends BaseTool<ShellToolParams, ToolResult> {
   static Name: string = 'run_shell_command';
   private allowlist: Set<string> = new Set();
 
-  constructor(private readonly config: Config) {
+  constructor(
+    private readonly config: Config,
+    private readonly workflowJournal: ExternalTaskWorkflowJournalV1 = new FileExternalTaskWorkflowJournalV1(),
+  ) {
     super(
       ShellTool.Name,
       'Bash',
@@ -639,9 +660,9 @@ Reserve this tool for system commands and terminal operations that have no dedic
         };
       }
 
-      taskManager.killTask(taskId);
+      taskManager.cancelTask(taskId);
 
-      const msg = `Successfully terminated background task "${taskId}" (Command: \`${task.command}\`).`;
+      const msg = `Cancellation requested for background task "${taskId}" (Command: \`${task.command}\`).`;
       return {
         llmContent: msg,
         returnDisplay: msg,
@@ -891,6 +912,7 @@ Reserve this tool for system commands and terminal operations that have no dedic
     const backgroundSignal = getBackgroundModeSignal();
     let backgroundModeTriggered = false;
     let backgroundTaskId: string | undefined;
+    let backgroundRegistrationError: string | undefined;
 
     // wait for the shell to exit OR background mode to be triggered
     try {
@@ -904,7 +926,10 @@ Reserve this tool for system commands and terminal operations that have no dedic
 
         // Background mode handler - check periodically
         let ticks = 0;
-        const checkInterval = setInterval(() => {
+        const stopBackgroundDetection = startProcessWatchdog({
+          name: 'shell-background-mode-detection', source: 'shell',
+          intervalMs: 100, cost: 'none',
+        }, () => {
           ticks++;
           const isPersistent = isServerOrPersistentCommand(strippedCommand);
           // ⏳ 等待 10 秒（100 个 tick * 100ms），给持久化服务充足的启动时间，以便在发生端口冲突或启动即崩溃（exit 1）时能直接被前台捕获
@@ -917,12 +942,52 @@ Reserve this tool for system commands and terminal operations that have no dedic
                 : '[ShellTool] 🔥 Background mode detected! Moving to background...'
             );
             backgroundModeTriggered = true;
-            clearInterval(checkInterval);
+            stopBackgroundDetection();
 
             // Create a background task to track this process
             const taskManager = getBackgroundTaskManager();
-            const task = taskManager.createTask(params.command, params.directory);
+            const task = taskManager.createTask(params.command, params.directory, 'shell');
             backgroundTaskId = task.id;
+            taskManager.registerStop(task.id, () => { void abortHandler(); });
+            let workflowRunId: string | undefined;
+            let pendingExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+            const finalizeBackgroundExit = async (
+              exitCode: number | null,
+              exitSignal: NodeJS.Signals | null,
+            ): Promise<void> => {
+              if (!workflowRunId) {
+                pendingExit = { code: exitCode, signal: exitSignal };
+                return;
+              }
+              try {
+                await this.settleBackgroundShell(workflowRunId, exitCode, exitSignal);
+              } catch (settleError) {
+                const message = settleError instanceof Error ? settleError.message : String(settleError);
+                taskManager.failTask(task.id, `Durable workflow settlement failed: ${message}`);
+                return;
+              }
+              const outcome = backgroundShellOutcome(exitCode, exitSignal);
+              if (outcome.status === 'succeeded') {
+                taskManager.completeTask(task.id, { exitCode: 0 });
+              } else if (outcome.status === 'cancelled') {
+                taskManager.cancelTask(task.id);
+              } else {
+                taskManager.failTask(task.id, outcome.error);
+              }
+            };
+            const workflowRegistration = this.workflowJournal.startShell({
+              taskId: task.id,
+              cwd: path.resolve(this.config.getTargetDir(), params.directory || ''),
+            }).then(async (runId) => {
+              workflowRunId = runId;
+              taskManager.attachWorkflowRun(task.id, runId);
+              if (pendingExit) await finalizeBackgroundExit(pendingExit.code, pendingExit.signal);
+            }).catch((journalError: unknown) => {
+              void abortHandler();
+              const message = journalError instanceof Error ? journalError.message : String(journalError);
+              backgroundRegistrationError = message;
+              taskManager.failTask(task.id, `Durable workflow start failed: ${message}`);
+            });
 
             if (shell.pid) {
               taskManager.setTaskPid(task.id, shell.pid);
@@ -949,23 +1014,20 @@ Reserve this tool for system commands and terminal operations that have no dedic
             // Set up exit handler for background task
             shell.on('exit', (exitCode: number | null, sig: NodeJS.Signals | null) => {
               console.log('[ShellTool] Background task completed:', task.id, 'exit code:', exitCode);
-              taskManager.completeTask(task.id, {
-                exitCode: exitCode ?? undefined,
-                signal: sig ?? undefined,
-                error: sig ? `Process terminated by external signal: ${sig} (user may have cancelled it)` : undefined,
-              });
+              void finalizeBackgroundExit(exitCode, sig);
             });
 
             // Clear the signal
             backgroundSignal.clearBackgroundMode();
 
-            // Resolve immediately to return control to user
-            resolve();
+            // Do not report a durable background task before its Workflow
+            // record is safely on disk (or a visible registration failure).
+            void workflowRegistration.finally(resolve);
           }
-        }, 100);
+        });
 
         // Clean up interval when process exits normally
-        shell.on('exit', () => clearInterval(checkInterval));
+        shell.on('exit', stopBackgroundDetection);
       });
     } finally {
       clearTimeout(timeoutId);
@@ -974,6 +1036,10 @@ Reserve this tool for system commands and terminal operations that have no dedic
 
     // If background mode was triggered, return early with a special message
     if (backgroundModeTriggered) {
+      if (backgroundRegistrationError) {
+        const message = `Background task was stopped because its durable Workflow could not be created: ${backgroundRegistrationError}`;
+        return { llmContent: message, returnDisplay: message };
+      }
       const isAuto = isServerOrPersistentCommand(strippedCommand);
       const triggerReason = isAuto
         ? `automatically identified as a long-running service/server command and moved to the background`
@@ -1169,121 +1235,15 @@ Reserve this tool for system commands and terminal operations that have no dedic
     };
   }
 
-  /**
-   * 在后台执行 shell 命令，立即返回任务ID
-   * 用于支持 Ctrl+B 快捷键让用户取消等待
-   */
-  executeBackground(
-    params: ShellToolParams,
-    signal: AbortSignal,
-  ): ToolResult {
-    const strippedCommand = stripShellWrapper(params.command);
-    const validationError = this.validateToolParams({
-      ...params,
-      command: strippedCommand,
-    });
-    if (validationError) {
-      return {
-        llmContent: validationError,
-        returnDisplay: validationError,
-      };
-    }
-
-    if (signal.aborted) {
-      return {
-        llmContent: 'Command was cancelled by user before it could start.',
-        returnDisplay: 'Command cancelled by user.',
-      };
-    }
-
-    const taskManager = getBackgroundTaskManager();
-    const task = taskManager.createTask(strippedCommand, params.directory);
-
-    const isWindows = os.platform() === 'win32';
-    const tempFileName = `shell_pgrep_${crypto
-      .randomBytes(6)
-      .toString('hex')}.tmp`;
-    const tempFilePath = path.join(os.tmpdir(), tempFileName);
-
-    const commandToExecute = isWindows
-      ? strippedCommand
-      : (() => {
-          let command = strippedCommand.trim();
-          if (!command.endsWith('&')) command += ';';
-          return `{ ${command} }; __code=$?; pgrep -g 0 >${tempFilePath} 2>&1; exit $__code;`;
-        })();
-
-    const shell = isWindows
-      ? spawn('cmd.exe', ['/c', commandToExecute], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          cwd: path.resolve(this.config.getTargetDir(), params.directory || ''),
-          env: {
-            ...process.env,
-            // New marker for tools that detect they run inside Otto's shell.
-            // Legacy GEMINI_CLI kept so existing user scripts keep working.
-            OTTO_CLI: '1',
-            GEMINI_CLI: '1',
-          },
-          shell: false,
-          windowsVerbatimArguments: true,
-          detached: true, // 后台任务需要 detached
-        })
-      : spawn('bash', ['-c', commandToExecute], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          detached: true,
-          cwd: path.resolve(this.config.getTargetDir(), params.directory || ''),
-          env: {
-            ...process.env,
-            // New marker for tools that detect they run inside Otto's shell.
-            // Legacy GEMINI_CLI kept so existing user scripts keep working.
-            OTTO_CLI: '1',
-            GEMINI_CLI: '1',
-          },
-        });
-
-    if (shell.pid) {
-      taskManager.setTaskPid(task.id, shell.pid);
-    }
-
-    shell.stdout.on('data', (data: Buffer) => {
-      const decodedStr = decodeWindowsCommandOutput(data, strippedCommand);
-      const str = sanitizeShellOutput(decodedStr);
-      taskManager.appendOutput(task.id, str);
-    });
-
-    shell.stderr.on('data', (data: Buffer) => {
-      const decodedStr = decodeWindowsCommandOutput(data, strippedCommand);
-      const str = sanitizeShellOutput(decodedStr);
-      taskManager.appendStderr(task.id, str);
-    });
-
-    shell.on('error', (err: Error) => {
-      taskManager.failTask(task.id, err.message);
-    });
-
-    shell.on('exit', (exitCode: number | null, signal: NodeJS.Signals | null) => {
-      taskManager.completeTask(task.id, {
-        exitCode: exitCode ?? undefined,
-        signal: signal ?? undefined,
-        error: signal ? `Process terminated by external signal: ${signal} (user may have cancelled it)` : undefined,
-      });
-
-      // 清理临时文件
-      if (fs.existsSync(tempFilePath)) {
-        try {
-          fs.unlinkSync(tempFilePath);
-        } catch {
-          // ignore
-        }
-      }
-    });
-
-    // 返回任务ID给 AI 和用户
-    const taskDescription = `${strippedCommand}${params.directory ? ` [in ${params.directory}]` : ''}`;
-    return {
-      llmContent: `Background task started (Task ID: ${task.id}). Command: ${taskDescription}`,
-      returnDisplay: `Running in background (Task ID: ${task.id})`,
-      backgroundTaskId: task.id, // 新增字段，用于 CLI 层感知
-    };
+  private async settleBackgroundShell(
+    workflowRunId: string,
+    exitCode: number | null,
+    signal: NodeJS.Signals | null,
+  ): Promise<void> {
+    await this.workflowJournal.settle(
+      workflowRunId,
+      backgroundShellOutcome(exitCode, signal),
+    );
   }
+
 }

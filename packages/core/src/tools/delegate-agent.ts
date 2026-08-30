@@ -5,7 +5,13 @@
  */
 
 import { Type } from '@google/genai';
-import { BaseTool, Icon, type ToolResult } from './tools.js';
+import {
+  BaseTool,
+  Icon,
+  type ToolCallConfirmationDetails,
+  type ToolLocation,
+  type ToolResult,
+} from './tools.js';
 import { type Config } from '../config/config.js';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import { runDelegatedTask } from '../acp-client/acpAgentClient.js';
@@ -19,6 +25,10 @@ import {
   getBackgroundTaskManager,
   type BackgroundTask,
 } from '../services/backgroundTaskManager.js';
+import {
+  FileExternalTaskWorkflowJournalV1,
+  type ExternalTaskWorkflowJournalV1,
+} from '../services/externalTaskWorkflowJournal.js';
 
 /** Default external agent when the caller doesn't pick one. */
 const DEFAULT_AGENT: ExternalAgentType = 'claude-code';
@@ -85,7 +95,10 @@ export class DelegateToAgentTool extends BaseTool<
 > {
   static readonly Name: string = 'delegate_to_agent';
 
-  constructor(private readonly config: Config) {
+  constructor(
+    private readonly config: Config,
+    private readonly workflowJournal: ExternalTaskWorkflowJournalV1 = new FileExternalTaskWorkflowJournalV1(),
+  ) {
     super(
       DelegateToAgentTool.Name,
       'DelegateToAgent',
@@ -192,6 +205,28 @@ export class DelegateToAgentTool extends BaseTool<
     return `Delegating to ${label}${modeSuffix}: "${preview}${params.task.length > 80 ? '…' : ''}"`;
   }
 
+  toolLocations(params: DelegateToAgentParams): ToolLocation[] {
+    return [{ path: params.cwd ?? this.config.getTargetDir() }];
+  }
+
+  async shouldConfirmExecute(
+    params: DelegateToAgentParams,
+    _abortSignal: AbortSignal,
+  ): Promise<ToolCallConfirmationDetails | false> {
+    if (this.validateToolParams(params)) return false;
+    const agent = params.agent ?? DEFAULT_AGENT;
+    const cwd = params.cwd ?? this.config.getTargetDir();
+    const label = resolveExternalAgentSpec(agent).label;
+    return {
+      type: 'exec',
+      title: `允许 ${label} 在此项目中执行任务？`,
+      command: `delegate_to_agent --agent ${agent} --cwd ${cwd}`,
+      rootCommand: 'delegate_to_agent',
+      warning: '外部代理可能读取和修改该目录中的文件，并运行开发命令。批准后，其会话内权限请求将自动放行。',
+      onConfirm: async () => {},
+    };
+  }
+
   async execute(
     params: DelegateToAgentParams,
     signal: AbortSignal,
@@ -245,10 +280,40 @@ export class DelegateToAgentTool extends BaseTool<
       cwd,
       agent,
     );
+    const backgroundController = new AbortController();
+    taskManager.registerStop(bgTask.id, () => backgroundController.abort());
+
+    let workflowRunId: string;
+    try {
+      workflowRunId = await this.workflowJournal.start({
+        taskId: bgTask.id,
+        agent,
+        cwd,
+        resumedSessionId: params.resumeSessionId,
+      });
+      taskManager.attachWorkflowRun(bgTask.id, workflowRunId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      taskManager.failTask(bgTask.id, `Durable workflow start failed: ${message}`);
+      return {
+        status: 'failed',
+        llmContent: JSON.stringify({ status: 'failed', error: message }),
+        returnDisplay: `无法创建持久化任务：${message}`,
+        summary: 'Durable workflow start failed',
+      };
+    }
 
     // Fire-and-forget: run the ACP session in the background and update
     // the BackgroundTaskManager on completion.
-    this.runAsync(params, agent, cwd, bgTask.id, signal, updateOutput).catch(() => {
+    this.runAsync(
+      params,
+      agent,
+      cwd,
+      bgTask.id,
+      workflowRunId,
+      backgroundController.signal,
+      updateOutput,
+    ).catch(() => {
       // Should never happen — errors are handled inside runAsync.
     });
 
@@ -348,12 +413,10 @@ export class DelegateToAgentTool extends BaseTool<
    * Default timeout for delegated tasks. Claude Code coding tasks can
    * legitimately run for many minutes (large refactors, running test suites,
    * etc.), so we default to 60 minutes. Override with the environment
-   * variable OTTO_CC_TIMEOUT_MINUTES (legacy: OTTO_CC_TIMEOUT_MINUTES).
+   * variable OTTO_CC_TIMEOUT_MINUTES.
    */
   static readonly DEFAULT_TIMEOUT_MS = (() => {
-    const env =
-      process.env.OTTO_CC_TIMEOUT_MINUTES ??
-      process.env.OTTO_CC_TIMEOUT_MINUTES;
+    const env = process.env.OTTO_CC_TIMEOUT_MINUTES;
     if (env) {
       const mins = parseInt(env, 10);
       if (mins > 0) return mins * 60 * 1000;
@@ -370,6 +433,7 @@ export class DelegateToAgentTool extends BaseTool<
     agent: ExternalAgentType,
     cwd: string,
     taskId: string,
+    workflowRunId: string,
     signal: AbortSignal,
     updateOutput?: (output: string) => void,
   ): Promise<void> {
@@ -389,30 +453,49 @@ export class DelegateToAgentTool extends BaseTool<
         cwd,
         signal,
         onUpdate: onStreamUpdate,
-        // Structured progress → persisted task record (drives the /acp-session card).
-        onProgress: (progress) => taskManager.updateProgress(taskId, progress),
+        // Workflow owns durable resume/progress state. BackgroundTaskManager is
+        // retained as a bounded compatibility mirror for existing UI events.
+        onProgress: (progress) => {
+          taskManager.updateProgress(taskId, progress);
+          void this.workflowJournal.checkpoint(workflowRunId, progress).catch(() => undefined);
+        },
         autoApprove: true,
         timeoutMs: DelegateToAgentTool.DEFAULT_TIMEOUT_MS,
         resumeSessionId: params.resumeSessionId,
       });
 
       // Write the final answer + native session id into the task record.
-      const task = taskManager.getTask(taskId);
-      if (task) {
-        task.answer = result.answer || result.transcript;
-        if (result.sessionId) task.sessionId = result.sessionId;
-        if (result.progress) taskManager.updateProgress(taskId, result.progress);
+      taskManager.setResult(taskId, {
+        answer: result.answer || result.transcript,
+        ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+      });
+      if (result.progress) {
+        taskManager.updateProgress(taskId, result.progress);
+        await this.workflowJournal.checkpoint(workflowRunId, result.progress).catch(() => undefined);
       }
 
       if (result.status === 'success') {
+        await this.workflowJournal.settle(workflowRunId, {
+          status: 'succeeded', sessionId: result.sessionId,
+        });
         taskManager.completeTask(taskId, { exitCode: 0 });
       } else if (result.status === 'cancelled') {
+        await this.workflowJournal.settle(workflowRunId, {
+          status: 'cancelled', sessionId: result.sessionId,
+        });
         taskManager.cancelTask(taskId);
       } else {
+        await this.workflowJournal.settle(workflowRunId, {
+          status: 'failed',
+          error: result.error || `${result.label} ${result.status}`,
+          sessionId: result.sessionId,
+        });
         taskManager.failTask(taskId, result.error || `${result.label} ${result.status}`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      await this.workflowJournal.settle(workflowRunId, { status: 'failed', error: msg })
+        .catch(() => undefined);
       taskManager.failTask(taskId, msg);
     }
   }

@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { RecurringTaskRegistry } from 'otto-core';
 
 import {
   createAutomaticKeyRotationTask,
@@ -115,6 +116,28 @@ describe('key rotation coordinator', () => {
     expect(values.get('key-rotation:last-kek-success')).toBe(
       '2026-08-01T00:00:00.000Z',
     );
+  });
+
+  it('registers automatic KMS rotation with an explicit cost estimate', () => {
+    const registry = new RecurringTaskRegistry({ allowPaidBackground: true });
+    const task = createAutomaticKeyRotationTask({
+      coordinator: {} as never,
+      state: {} as never,
+      actorId: 'system:key-rotation',
+      kekIntervalMs: 86_400_000,
+      dekIntervalMs: 604_800_000,
+      isDekMaintenanceWindow: () => false,
+      taskRegistry: registry,
+    });
+
+    const stop = task.start(60_000);
+    expect(registry.list()).toMatchObject([{
+      name: 'server.automatic-key-rotation.system:key-rotation',
+      estimatedCostUsdPerRun: 0.01,
+      paid: true,
+    }]);
+    stop();
+    expect(registry.list()).toEqual([]);
   });
 
   it('cancels a prepared DEK when backup preparation fails', async () => {

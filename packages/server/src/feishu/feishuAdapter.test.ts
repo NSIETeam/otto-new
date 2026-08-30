@@ -23,6 +23,7 @@ import type { FeishuCredentials } from './vendor/credentials.js';
 import { InMemorySessionStore } from '../sessions.js';
 import type { SessionRuntime } from '../sessions.js';
 import type { MessageContent, ServerToClient } from '../protocol.js';
+import { RecurringTaskRegistry } from 'otto-core';
 
 /** 记录所有回推飞书的动作，供断言。 */
 interface PushLog {
@@ -177,6 +178,27 @@ describe('FeishuAdapter 双向链路', () => {
     expect(log.cards[0].finalized).toContain('mock');
   });
 
+  it('registers and disposes the named connection heartbeat', async () => {
+    const registry = new RecurringTaskRegistry();
+    const fake = makeFakeGateway(log);
+    const adapter = new FeishuAdapter({
+      store,
+      broadcast: () => undefined,
+      credentials: CREDS,
+      gatewayFactory: () => fake.gw,
+      taskRegistry: registry,
+    });
+
+    await adapter.start();
+    expect(registry.list()).toMatchObject([{
+      name: 'server.feishu-connection-heartbeat',
+      source: 'packages/server/src/feishu/feishuAdapter.ts',
+      estimatedCostUsdPerRun: 0,
+    }]);
+    await adapter.stop();
+    expect(registry.list()).toEqual([]);
+  });
+
   it('未授权 sender → 不进会话源，只回一句拒绝', async () => {
     const { adapter, fake } = newAdapter({ fire: () => makeFakeGateway(log) });
     await adapter.start();
@@ -216,6 +238,34 @@ describe('FeishuAdapter 双向链路', () => {
     expect(store.listSessions()).toHaveLength(0);
     expect(log.markdowns).toEqual([
       expect.objectContaining({ text: expect.stringContaining('关闭飞书自动回答') }),
+    ]);
+  });
+
+  it('旧兼容接入拒绝斜杠控制命令，不把它们当自然语言交给 runtime', async () => {
+    const fake = makeFakeGateway(log);
+    let runtimeCalls = 0;
+    const adapter = new FeishuAdapter({
+      store,
+      broadcast: (sessionId, frame) => store.publish(sessionId, frame),
+      credentials: CREDS,
+      gatewayFactory: () => fake.gw,
+      ensureRuntime: async () => {
+        runtimeCalls += 1;
+        return undefined;
+      },
+    });
+    await adapter.start();
+
+    await fake.fireMessage(makeMsg({ text: '/restart', messageId: 'om_command' }));
+    await flush();
+
+    expect(runtimeCalls).toBe(0);
+    expect(store.listSessions()).toHaveLength(0);
+    expect(log.markdowns).toEqual([
+      expect.objectContaining({
+        text: expect.stringContaining('扫码托管连接'),
+        replyTo: 'om_command',
+      }),
     ]);
   });
 

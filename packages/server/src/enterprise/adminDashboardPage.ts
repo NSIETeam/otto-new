@@ -152,7 +152,7 @@ async function load(){
   }catch(err){document.getElementById('updateTime').textContent='加载失败：'+err.message;}
 }
 document.getElementById('dashboardTokenForm').addEventListener('submit',event=>{event.preventDefault();const value=document.getElementById('dashboardToken').value.trim();if(!value)return;TOKEN=value;sessionStorage.setItem(KEY,TOKEN);document.getElementById('dashboardToken').value='';load()});
-load();setInterval(()=>{if(TOKEN)load()},10000);
+load();setTimeout(async function refresh(){if(TOKEN)await load();setTimeout(refresh,10000)},10000);
 </script>
 </body></html>`;
 }

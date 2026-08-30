@@ -5,6 +5,7 @@
  */
 
 import os from 'node:os';
+import { recurringTaskRegistry, type RecurringTaskRegistry } from './recurringTaskRegistry.js';
 
 export type MemoryPressureLevel = 'normal' | 'warning' | 'critical';
 
@@ -31,6 +32,7 @@ export interface MemoryPressureMonitorOptions {
   thresholds?: Partial<MemoryPressureThresholds>;
   readMemory?: () => Omit<MemoryPressureSnapshot, 'level' | 'timestamp' | 'reason'>;
   now?: () => number;
+  taskRegistry?: RecurringTaskRegistry;
 }
 
 export type MemoryPressureListener = (snapshot: MemoryPressureSnapshot) => void;
@@ -89,7 +91,8 @@ export class MemoryPressureMonitor {
   private readonly readMemory: () => Omit<MemoryPressureSnapshot, 'level' | 'timestamp' | 'reason'>;
   private readonly now: () => number;
   private listeners: MemoryPressureListener[] = [];
-  private timer: ReturnType<typeof setInterval> | undefined;
+  private readonly taskRegistry: RecurringTaskRegistry;
+  private stopMonitorTask: (() => void) | undefined;
   private latest: MemoryPressureSnapshot;
 
   constructor(options: MemoryPressureMonitorOptions = {}) {
@@ -108,21 +111,27 @@ export class MemoryPressureMonitor {
     };
     this.readMemory = options.readMemory ?? readDefaultMemory;
     this.now = options.now ?? Date.now;
+    this.taskRegistry = options.taskRegistry ?? recurringTaskRegistry;
     this.latest = this.sample();
   }
 
   start(): void {
-    if (this.timer) return;
-    this.timer = setInterval(() => {
-      this.check();
-    }, this.intervalMs);
-    this.timer.unref?.();
+    if (this.stopMonitorTask) return;
+    this.stopMonitorTask = this.taskRegistry.register({
+      name: 'core.memory-pressure-monitor',
+      source: 'packages/core/src/services/memoryPressureMonitor.ts',
+      intervalMs: this.intervalMs,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => String(Math.floor(this.now() / this.intervalMs)),
+      run: () => {
+        this.check();
+      },
+    });
   }
 
   stop(): void {
-    if (!this.timer) return;
-    clearInterval(this.timer);
-    this.timer = undefined;
+    this.stopMonitorTask?.();
+    this.stopMonitorTask = undefined;
   }
 
   subscribe(listener: MemoryPressureListener): () => void {

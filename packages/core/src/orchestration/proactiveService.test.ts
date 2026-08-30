@@ -163,7 +163,8 @@ describe('ProactiveService 调度与日程提醒', () => {
       (rule) => rule.id === 'daily_work_insight',
     );
 
-    expect(insight).toBeUndefined();
+    expect(insight?.action.message ?? '').not.toContain('未完成');
+    expect(insight?.action.message ?? '').not.toContain('待跟进');
   });
 
   it('只在会议进入 10 分钟窗口后提醒，并按本地时区显示时间', async () => {

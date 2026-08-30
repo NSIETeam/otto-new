@@ -26,6 +26,7 @@ describe('DurableWorkflowTool', () => {
   it('makes state changes confirmable but leaves status read-only', async () => {
     expect(await tool.shouldConfirmExecute({ action: 'start', definition }, new AbortController().signal)).not.toBe(false);
     expect(await tool.shouldConfirmExecute({ action: 'status', run_id: 'wf-00000000-0000-0000-0000-000000000000' }, new AbortController().signal)).toBe(false);
+    expect(await tool.shouldConfirmExecute({ action: 'list' }, new AbortController().signal)).toBe(false);
   });
 
   it('loads persistence for a read-only status lookup', async () => {
@@ -45,6 +46,27 @@ describe('DurableWorkflowTool', () => {
       if (!runId) throw new Error('Durable workflow did not return a run id.');
       const completed = await isolated.execute({ action: 'run_next', run_id: runId }, new AbortController().signal);
       expect(String(completed.llmContent)).toContain('"status":"succeeded"');
+    } finally {
+      if (previous === undefined) delete process.env['OTTO_USER_DIR'];
+      else process.env['OTTO_USER_DIR'] = previous;
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  it('exposes pause, resume, cancel and list through the confirmed Core adapter', async () => {
+    const temporary = await mkdtemp(path.join(os.tmpdir(), 'otto-durable-workflow-control-'));
+    const previous = process.env['OTTO_USER_DIR'];
+    process.env['OTTO_USER_DIR'] = temporary;
+    try {
+      const isolated = new DurableWorkflowTool(createMockConfig(), new ToolRegistry(createMockConfig()));
+      const started = await isolated.execute({ action: 'start', definition }, new AbortController().signal);
+      const runId = String(started.llmContent).match(/"id":"(wf-[^"]+)"/)?.[1];
+      if (!runId) throw new Error('Durable workflow did not return a run id.');
+
+      expect(String((await isolated.execute({ action: 'pause', run_id: runId }, new AbortController().signal)).llmContent)).toContain('"status":"paused"');
+      expect(String((await isolated.execute({ action: 'list' }, new AbortController().signal)).llmContent)).toContain(runId);
+      expect(String((await isolated.execute({ action: 'resume', run_id: runId }, new AbortController().signal)).llmContent)).toContain('"status":"queued"');
+      expect(String((await isolated.execute({ action: 'cancel', run_id: runId }, new AbortController().signal)).llmContent)).toContain('"status":"cancelled"');
     } finally {
       if (previous === undefined) delete process.env['OTTO_USER_DIR'];
       else process.env['OTTO_USER_DIR'] = previous;

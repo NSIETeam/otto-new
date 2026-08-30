@@ -379,9 +379,14 @@ async function afterPack(context) {
   }
 
   // The explicitly unsigned transition still gets a complete ad-hoc seal.
-  // Deep-sign first so nested Mach-O files reach their final bytes, then write
-  // the manifest and re-seal only the outer bundle without touching them again.
+  // Deep-sign standard nested code first. The Otto native executable lives in
+  // a nonstandard Resources subtree, so sign it explicitly before recording
+  // its final digest, then re-seal only the outer bundle.
   codeSign(appPath, { identity: null, keychainFile: null, deep: true });
+  codeSign(ottoNativeAsset.binaryPath, {
+    identity: null,
+    keychainFile: null,
+  });
   verifyCodeSignature(ottoNativeAsset.binaryPath);
   logMacNativeSignatureChange(ottoNativeAsset, nativeBeforeSigning);
   finalizePackagedOttoNativeAsset(ottoNativeAsset, {

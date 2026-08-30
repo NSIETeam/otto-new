@@ -1250,6 +1250,48 @@ describe('desktop packaging contract', () => {
     expect(workflow).toContain("OTTO_DESKTOP_MAX_INSTALLER_MB: '140'");
   });
 
+  it('explicitly ad-hoc signs the nonstandard macOS native runtime before sealing its manifest', async () => {
+    const source = await readFile(
+      path.join(packageRoot, 'scripts', 'after-pack.cjs'),
+      'utf8',
+    );
+    const unsignedMarker = source.indexOf(
+      '// The explicitly unsigned transition still gets a complete ad-hoc seal.',
+    );
+    expect(unsignedMarker).toBeGreaterThan(-1);
+    const unsignedBranch = source.slice(unsignedMarker);
+    const deepAppSeal = unsignedBranch.indexOf(
+      'codeSign(appPath, { identity: null, keychainFile: null, deep: true });',
+    );
+    const nativeSign = unsignedBranch.indexOf(
+      'codeSign(ottoNativeAsset.binaryPath',
+    );
+    const nativeVerify = unsignedBranch.indexOf(
+      'verifyCodeSignature(ottoNativeAsset.binaryPath)',
+    );
+    const manifestFinalize = unsignedBranch.indexOf(
+      'finalizePackagedOttoNativeAsset(ottoNativeAsset',
+    );
+    const outerAppSeal = unsignedBranch.indexOf(
+      'codeSign(appPath, { identity: null, keychainFile: null });',
+      deepAppSeal + 1,
+    );
+    const packagedVerify = unsignedBranch.indexOf(
+      'verifyFinalPackagedOttoNativeAsset(context, ottoNativeAsset)',
+    );
+    const appVerify = unsignedBranch.indexOf(
+      'verifyCodeSignature(appPath, true)',
+    );
+
+    expect(deepAppSeal).toBeGreaterThan(-1);
+    expect(deepAppSeal).toBeLessThan(nativeSign);
+    expect(nativeSign).toBeLessThan(nativeVerify);
+    expect(nativeVerify).toBeLessThan(manifestFinalize);
+    expect(manifestFinalize).toBeLessThan(outerAppSeal);
+    expect(outerAppSeal).toBeLessThan(packagedVerify);
+    expect(packagedVerify).toBeLessThan(appVerify);
+  });
+
   it('discovers every packaged LibreOffice bundle before signing Otto', async () => {
     const appPath = await mkdtemp(path.join(os.tmpdir(), 'otto-after-pack-'));
     try {

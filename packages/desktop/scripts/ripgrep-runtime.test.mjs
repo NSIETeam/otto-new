@@ -3,7 +3,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readBoundedResponseBody } from './fetch-mac-ripgrep.mjs';
+import {
+  assertReviewedRipgrepArchive,
+  resolveRipgrepInstallCacheSpec,
+} from './prime-vscode-ripgrep-cache.mjs';
 import {
   assertMachOArchitecture,
   readBundledRipgrepVersion,
@@ -18,6 +25,80 @@ function thinMachO(cpuType) {
 }
 
 describe('ripgrep runtime verification', () => {
+  it('derives the npm postinstall cache only from reviewed package and target mappings', () => {
+    const repoRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../..',
+    );
+    const packageLock = JSON.parse(
+      readFileSync(path.join(repoRoot, 'package-lock.json'), 'utf8'),
+    );
+
+    expect(
+      resolveRipgrepInstallCacheSpec({
+        packageLock,
+        platform: 'darwin',
+        arch: 'arm64',
+        temporaryDirectory: '/reviewed-temp',
+      }),
+    ).toMatchObject({
+      packageVersion: '1.17.0',
+      upstreamVersion: 'v15.0.0',
+      target: 'aarch64-apple-darwin',
+      archiveName: 'ripgrep-v15.0.0-aarch64-apple-darwin.tar.gz',
+      archiveSha256:
+        '16ded8d87db15333e8c06188ea2635dcde7f9869412f843e463a290f9d7493f3',
+      cacheDirectory: path.join(
+        '/reviewed-temp',
+        'vscode-ripgrep-cache-1.17.0',
+      ),
+    });
+    expect(
+      resolveRipgrepInstallCacheSpec({
+        packageLock,
+        platform: 'darwin',
+        arch: 'x64',
+        temporaryDirectory: '/reviewed-temp',
+      }),
+    ).toMatchObject({
+      upstreamVersion: 'v15.0.0',
+      target: 'x86_64-apple-darwin',
+      archiveName: 'ripgrep-v15.0.0-x86_64-apple-darwin.tar.gz',
+      archiveSha256:
+        '9787387f2d01ee3382e5984c39beb457f445585d81f928a5b1a089706ffb6c8f',
+    });
+    expect(() =>
+      resolveRipgrepInstallCacheSpec({
+        packageLock,
+        platform: 'linux',
+        arch: 'x64',
+        temporaryDirectory: '/reviewed-temp',
+      }),
+    ).toThrow('unsupported release host');
+    expect(() =>
+      resolveRipgrepInstallCacheSpec({
+        packageLock: {
+          packages: {
+            'node_modules/@vscode/ripgrep': { version: '99.0.0' },
+          },
+        },
+        platform: 'darwin',
+        arch: 'arm64',
+        temporaryDirectory: '/reviewed-temp',
+      }),
+    ).toThrow('unreviewed @vscode/ripgrep package version');
+  });
+
+  it('rejects truncated and wrong-digest postinstall cache archives', () => {
+    const spec = { archiveSha256: '0'.repeat(64) };
+    expect(() =>
+      assertReviewedRipgrepArchive(Buffer.alloc(1023), spec),
+    ).toThrow('size is outside the release boundary');
+    expect(() =>
+      assertReviewedRipgrepArchive(Buffer.alloc(1024), spec),
+    ).toThrow('SHA256 mismatch');
+  });
+
   it('accepts only the requested thin 64-bit Mach-O architecture', () => {
     const arm64 = thinMachO(0x0100000c);
     const x64 = thinMachO(0x01000007);

@@ -307,10 +307,23 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Prime reviewed ripgrep postinstall cache
+        run: node packages/desktop/scripts/prime-vscode-ripgrep-cache.mjs
+
       - name: Install dependencies
         run: npm ci
         env:
           PYTHON: python3.11
+
+      - name: Verify installed ripgrep postinstall result
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCH="$(node -p 'process.arch')"
+          RIPGREP='node_modules/@vscode/ripgrep/bin/rg'
+          node packages/desktop/scripts/ripgrep-runtime.mjs "$RIPGREP" \
+            --platform darwin --arch "$ARCH" --require-source-digest
+          "$RIPGREP" --version | grep -F 'ripgrep 15.0.0'
 
       - name: Enforce release dependency audit
         run: npm run security:dependencies:release

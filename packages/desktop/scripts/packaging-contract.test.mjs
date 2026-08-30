@@ -813,7 +813,22 @@ describe('desktop packaging contract', () => {
     );
     expect(buildJob).toContain('contents: read');
     expect(buildJob).toContain('artifact-metadata: write');
-    expect(buildJob).not.toContain('GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}');
+    expect(buildJob).not.toContain('GITHUB_TOKEN:');
+    expect(buildJob).toContain(
+      'node packages/desktop/scripts/prime-vscode-ripgrep-cache.mjs',
+    );
+    expect(
+      buildJob.indexOf(
+        'node packages/desktop/scripts/prime-vscode-ripgrep-cache.mjs',
+      ),
+    ).toBeLessThan(buildJob.indexOf('run: npm ci'));
+    expect(buildJob).toContain('Verify installed ripgrep postinstall result');
+    expect(buildJob).toContain(
+      '--platform darwin --arch "$ARCH" --require-source-digest',
+    );
+    expect(buildJob.indexOf('run: npm ci')).toBeLessThan(
+      buildJob.indexOf('Verify installed ripgrep postinstall result'),
+    );
     expect(enterpriseJob).toContain('      - verify-windows-signature');
     expect(enterpriseJob).toContain('      - create-release-drafts');
     expect(enterpriseJob).toContain(

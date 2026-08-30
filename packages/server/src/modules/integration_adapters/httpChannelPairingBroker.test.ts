@@ -65,6 +65,21 @@ describe('HttpChannelPairingBrokerV1', () => {
     await expect(failure.poll(registration.pairingId)).rejects.not.toThrow('provider-token-in-error');
   });
 
+  it('bounds the broker-directed polling delay', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'waiting', pollAfterMs: 250,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'waiting', pollAfterMs: 120_000,
+      }), { status: 200 }));
+    const broker = new HttpChannelPairingBrokerV1({
+      baseUrl: 'https://connect.otto.example', bearerToken: 'secret', fetchImpl,
+    });
+    await expect(broker.poll(registration.pairingId)).resolves.toMatchObject({ pollAfterMs: 1_000 });
+    await expect(broker.poll(registration.pairingId)).resolves.toMatchObject({ pollAfterMs: 30_000 });
+  });
+
   it('rejects insecure remote origins and aborts hung requests', async () => {
     expect(() => new HttpChannelPairingBrokerV1({
       baseUrl: 'http://connect.otto.example', bearerToken: 'secret',

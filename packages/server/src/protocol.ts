@@ -1578,6 +1578,7 @@ export interface ChannelPairingPublic {
   qrPayload: string;
   expiresAtMs: number;
   requestedScopes: readonly string[];
+  pollAfterMs: number;
   tenantName?: string;
   failureReason?: string;
 }

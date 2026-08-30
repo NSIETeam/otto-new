@@ -41,6 +41,8 @@ export interface PairingSession {
   qrPayload: string;
   expiresAtMs: number;
   requestedScopes: readonly string[];
+  /** Server-directed bounded delay before the next status poll. */
+  pollAfterMs: number;
   tenantName?: string;
   failureReason?: string;
 }
@@ -431,6 +433,7 @@ export class ChannelPairingCoordinator {
       qrPayload: nonce ? `${this.publicPairingOrigin}/channel/pair${query}` : '',
       expiresAtMs: pairing.expiresAtMs,
       requestedScopes: [...pairing.requestedScopes],
+      pollAfterMs: 2_000,
       ...(pairing.authorization?.tenantName ? { tenantName: pairing.authorization.tenantName } : {}),
       ...(pairing.failureReason ? { failureReason: pairing.failureReason } : {}),
     };

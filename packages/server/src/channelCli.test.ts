@@ -32,6 +32,7 @@ function json(data: unknown): Response {
 describe('runChannelCli', () => {
   it('logs in through QR polling and proves device possession before installation', async () => {
     const output: string[] = [];
+    const sleep = vi.fn(async () => undefined);
     const pairingId = 'pair_0123456789abcdef01234567';
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(json({
@@ -41,6 +42,7 @@ describe('runChannelCli', () => {
         qrPayload: 'https://connect.otto.example/channel/pair?opaque',
         expiresAtMs: 10_000,
         requestedScopes: ['message.send'],
+        pollAfterMs: 250,
       }))
       .mockResolvedValueOnce(json({
         pairingId,
@@ -49,6 +51,7 @@ describe('runChannelCli', () => {
         qrPayload: '',
         expiresAtMs: 10_000,
         requestedScopes: ['message.send'],
+        pollAfterMs: 2_000,
         tenantName: 'Acme',
       }))
       .mockResolvedValueOnce(json({
@@ -61,11 +64,15 @@ describe('runChannelCli', () => {
       readEndpointRecord: () => endpoint,
       fetchImpl,
       now: () => 1,
-      sleep: async () => undefined,
+      sleep,
+      renderQr: (value) => value.includes('opaque') ? '[terminal qr]' : '',
       stdout: (text) => output.push(text),
     })).toBe(0);
-    expect(output[0]).toContain('请扫码授权 https://connect.otto.example');
-    expect(output[1]).toBe('wecom: 已安装 Acme / Otto');
+    expect(output[0]).toBe('wecom: 请使用企业微信扫描下方二维码并确认授权');
+    expect(output[1]).toBe('[terminal qr]');
+    expect(output.join('\n')).not.toContain('https://connect.otto.example');
+    expect(output[2]).toBe('wecom: 已安装 Acme / Otto');
+    expect(sleep).toHaveBeenCalledWith(1_000);
     const installCall = fetchImpl.mock.calls[2];
     expect(installCall[0]).toContain(`/channels/pairings/${pairingId}/install`);
     const body = JSON.parse(String(installCall[1]?.body)) as {

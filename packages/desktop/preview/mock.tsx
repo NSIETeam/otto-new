@@ -12,12 +12,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createRoot } from 'react-dom/client';
 import { App } from '../src/renderer/App.js';
+import { startRendererThemeSync } from '../src/renderer/themeSync.js';
 
 type Frame = any;
+type PreviewTheme = 'system' | 'light' | 'dark';
 const handlers = new Set<(f: Frame) => void>();
 const emit = (f: Frame): void => {
   for (const h of handlers) h(f);
 };
+const requestedTheme = new URLSearchParams(location.search).get('theme');
+let previewTheme: PreviewTheme = requestedTheme === 'light' || requestedTheme === 'dark'
+  ? requestedTheme
+  : 'system';
 
 // —— 样例时间（浏览器运行，可用 Date）——
 const today = new Date();
@@ -221,8 +227,11 @@ const mockBridge = {
   async feishuSaveConfig(): Promise<any> { return { ok: false, config: null, error: '浏览器演示模式不支持' }; },
   async feishuClearConfig(): Promise<any> { return { ok: false, config: null, error: '浏览器演示模式不支持' }; },
   async parkConfig(): Promise<any> { return null; },
-  async themeGet(): Promise<string> { return 'system'; },
-  async themeSet(value: string): Promise<string> { return value; },
+  async themeGet(): Promise<PreviewTheme> { return previewTheme; },
+  async themeSet(value: PreviewTheme): Promise<PreviewTheme> {
+    previewTheme = value;
+    return value;
+  },
   async customerModuleInstalledList(): Promise<any[]> { return []; },
   async skillLeaderboard(): Promise<any> { return { leaderboard: '浏览器演示模式暂未接入排行榜。', starBoard: '', tabs: [] }; },
   async workLogToday(): Promise<any> { return { summary: '', date: new Date().toISOString().slice(0, 10), totalActions: 0, workResults: 0 }; },
@@ -335,4 +344,7 @@ const mockBridge = {
 if (new URLSearchParams(location.search).has('empty')) MODELS.length = 0;
 
 const root = document.getElementById('root');
-if (root) createRoot(root).render(<App />);
+if (root) {
+  startRendererThemeSync();
+  createRoot(root).render(<App />);
+}

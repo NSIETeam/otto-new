@@ -17,6 +17,7 @@ import { GeneratedIcon, type GeneratedIconName } from '../GeneratedIcon.js';
 import { IconClose } from '../icons.js';
 import { Panel, Card, Dot, Badge, Empty, type DotTone } from './HubUI.js';
 import { readPetWidgetEnabled, writePetWidgetEnabled } from '../../petWidgetPreference.js';
+import { announceRendererTheme } from '../../themeSync.js';
 
 // ── 偏好设置 ──────────────────────────────────────────────────────────────
 
@@ -78,6 +79,7 @@ export function PrefsPanel({
 
   const pickTheme = (v: 'system' | 'light' | 'dark'): void => {
     setTheme(v);
+    announceRendererTheme(v);
     void window.otto?.themeSet?.(v);
   };
 
@@ -148,6 +150,7 @@ export function PrefsPanel({
       let themeReset: Promise<unknown> | undefined;
       if (needsThemeReset) {
         setTheme('system');
+        announceRendererTheme('system');
         themeReset = window.otto?.themeSet?.('system');
       }
       if (s.agentStyle !== 'default') actions.setSetting('agentStyle', 'default');
@@ -165,6 +168,7 @@ export function PrefsPanel({
     } catch {
       // 主题 IPC 失败时恢复原来的视觉状态，并保留可重试入口。
       setTheme(previousTheme);
+      announceRendererTheme(previousTheme);
       setThemeResetSettled(false);
       setResetStatus('error');
     }

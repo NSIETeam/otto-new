@@ -11,6 +11,7 @@ const basePairing = {
   qrPayload: '',
   expiresAtMs: Date.now() + 300_000,
   requestedScopes: ['im:message'],
+  pollAfterMs: 2_000,
   tenantName: '示例企业',
 };
 
@@ -84,7 +85,7 @@ describe('ChannelPairingCard', () => {
     channelPairingBegin.mockResolvedValue({ ok: true, pairing: waiting, error: null });
     const channelPairingStatus = vi.fn().mockResolvedValue({
       ok: true,
-      data: { ...waiting, qrPayload: '' },
+      data: { ...waiting, qrPayload: '', pollAfterMs: 5_000 },
       error: null,
     });
     Object.assign(window.otto, { channelPairingStatus });
@@ -96,6 +97,10 @@ describe('ChannelPairingCard', () => {
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
     expect(channelPairingStatus).toHaveBeenCalledWith(waiting.pairingId);
     expect(screen.getByRole('img', { name: '飞书连接二维码' })).toBeTruthy();
+    await act(async () => vi.advanceTimersByTimeAsync(4_999));
+    expect(channelPairingStatus).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(channelPairingStatus).toHaveBeenCalledTimes(2);
   });
 
   it('continues polling after a transient local status failure', async () => {

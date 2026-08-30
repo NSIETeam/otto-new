@@ -69,14 +69,19 @@ export class HttpChannelPairingBrokerV1 implements ChannelPairingBrokerV1 {
     });
     if (!body || typeof body !== 'object') throw new Error('channel pairing broker returned invalid status');
     const input = body as Record<string, unknown>;
-    if (input.status === 'waiting') return { status: 'waiting' };
-    if (input.status === 'admin_approved') return { status: 'admin_approved' };
+    const pollAfterMs = typeof input.pollAfterMs === 'number' && Number.isFinite(input.pollAfterMs)
+      ? Math.min(30_000, Math.max(1_000, Math.round(input.pollAfterMs)))
+      : undefined;
+    const poll = pollAfterMs === undefined ? {} : { pollAfterMs };
+    if (input.status === 'waiting') return { status: 'waiting', ...poll };
+    if (input.status === 'admin_approved') return { status: 'admin_approved', ...poll };
     if (input.status === 'denied') {
       return {
         status: 'denied',
         ...(typeof input.reason === 'string' && input.reason.trim()
           ? { reason: input.reason.trim().slice(0, 500) }
           : {}),
+        ...poll,
       };
     }
     if (
@@ -101,6 +106,7 @@ export class HttpChannelPairingBrokerV1 implements ChannelPairingBrokerV1 {
     return {
       status: 'authorized',
       plaintextCredential: input.plaintextCredential,
+      ...poll,
       authorization: {
         tenantId: authorization.tenantId,
         tenantName: authorization.tenantName,

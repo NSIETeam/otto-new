@@ -7,6 +7,7 @@
 
 import type { ServerEndpointRecord } from './endpoint.js';
 import { generateKeyPairSync, sign } from 'node:crypto';
+import * as qrcodeTerminal from 'qrcode-terminal';
 import type {
   ChannelHealth,
   ChannelInstallation,
@@ -23,6 +24,24 @@ export interface ChannelCliDependencies {
   stderr?: (text: string) => void;
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
+  renderQr?: (value: string) => string;
+}
+
+const PROVIDER_LABEL: Readonly<Record<ChannelProvider, string>> = {
+  feishu: '飞书',
+  lark: 'Lark',
+  wecom: '企业微信',
+};
+
+function renderTerminalQr(value: string): string {
+  let rendered = '';
+  qrcodeTerminal.generate(value, { small: true }, (qr) => { rendered = qr; });
+  if (!rendered) throw new Error('无法生成终端二维码');
+  return rendered;
+}
+
+function boundedPollDelay(value: number): number {
+  return Number.isFinite(value) ? Math.min(30_000, Math.max(1_000, Math.round(value))) : 2_000;
 }
 
 type ChannelCliAction = 'login' | 'list' | 'status' | 'start' | 'stop' | 'send' | 'logout'
@@ -152,7 +171,8 @@ export async function runChannelCli(
         installationPublicKey,
         requestedScopes: scopes[provider],
       })) as PairingSession;
-      stdout(`${provider}: 请扫码授权 ${pairing.qrPayload}`);
+      stdout(`${provider}: 请使用${PROVIDER_LABEL[provider]}扫描下方二维码并确认授权`);
+      stdout((dependencies.renderQr ?? renderTerminalQr)(pairing.qrPayload));
       let announcedAdminWait = false;
       const now = dependencies.now ?? Date.now;
       const sleep = dependencies.sleep ?? ((milliseconds: number) =>
@@ -183,7 +203,7 @@ export async function runChannelCli(
           stdout(`${provider}: 等待企业管理员在供应商平台批准`);
           announcedAdminWait = true;
         }
-        await sleep(2_000);
+        await sleep(boundedPollDelay(pairing.pollAfterMs));
         pairing = (await request(
           `/channels/pairings/${pairing.pairingId}`,
         )) as PairingSession;

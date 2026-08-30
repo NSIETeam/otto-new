@@ -16,6 +16,10 @@ const PROVIDER_LABEL: Record<ChannelProvider, string> = {
 
 const TERMINAL = new Set(['connected', 'expired', 'denied', 'failed', 'revoked']);
 
+function boundedPollDelay(value: number): number {
+  return Number.isFinite(value) ? Math.min(30_000, Math.max(1_000, Math.round(value))) : 2_000;
+}
+
 function pairingMessage(pairing: ChannelPairingPublic): string {
   switch (pairing.status) {
     case 'waiting_scan': return `请使用${PROVIDER_LABEL[pairing.provider]}扫码并确认授权。`;
@@ -82,11 +86,11 @@ export function ChannelPairingCard({ provider }: { provider: ChannelProvider }):
         }));
       }
       else if (response?.error) setError(response.error);
-    }, 2_000, {
+    }, boundedPollDelay(pairing.pollAfterMs), {
       runImmediately: false,
       onError: (cause) => setError(cause instanceof Error ? cause.message : '连接状态查询失败。'),
     });
-  }, [pairingId, pairingStatus]);
+  }, [pairingId, pairingStatus, pairing?.pollAfterMs]);
 
   const begin = async (): Promise<void> => {
     if (busy) return;

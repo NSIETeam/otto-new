@@ -331,9 +331,11 @@ means no source-level substitute is accepted.
 | --- | --- | --- |
 | Tracked right-rail assets are classified and compact surfaces reject unregistered SVG/raster drift | `visual-asset-inventory.mjs`, inventory contract test, `visual-style-contract.test.mjs` | Automated |
 | Shared theme-aware module, customer-module, navigation and channel-status icons | `ModuleIcon.tsx`, `icons.tsx`, catalog and focused component tests | Automated |
+| Renderer theme source is resolved onto the document root, reacts immediately to settings and OS changes, and rejects stale startup reads | `themeSync.ts`, `themeSync.test.ts`, `visual-style-contract.test.mjs` | Automated; full screenshot matrix pending while macOS is locked |
 | Production feature code has no raw interval; process watchdogs are named, observable, cost-free and stoppable | `nonOverlappingPoll.ts`, `processWatchdog.ts`, focused page/watchdog tests, production source scan | Automated |
 | Shared QR connector and device-bound installation | `channelConnector.ts`, `managedChannelConnector.ts`, focused connector tests | Automated |
 | Pairing QR survives nonce-redacted polling; transient status failures recover without overlapping requests | `ChannelPairingCard.tsx`, focused fake-timer UI tests | Automated |
+| Desktop and `otto feishu|lark|wecom login` render scannable QR codes without printing the nonce-bearing URL; broker-directed polling is bounded to 1-30 seconds | `ChannelPairingCard.tsx`, `channelCli.ts`, `httpChannelPairingBroker.ts`, focused tests | Automated; real provider smoke pending |
 | Abandoned provider credentials and device proof keys are erased at the five-minute deadline without an idle network call | `managedChannelConnector.ts`, `channel-pairing-key-store.ts`, focused expiry tests | Automated |
 | Protected credential custody and idempotent outbound writes | `channelCredentialVault.ts`, `channelOutboundLedger.ts`, focused persistence tests | Automated |
 | Provider 429, 5xx, timeout and interrupted prepared writes become persisted `unknown_outcome` and cannot auto-replay | `channelOutboundLedger.ts`, `managedChannelConnector.ts`, `brokerChannelRuntime.test.ts`, focused recovery tests | Automated |
@@ -352,7 +354,7 @@ means no source-level substitute is accepted.
 | Real managed Feishu/Lark installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | Real managed WeCom installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | macOS Accessibility RPA control and recovery | Signed local build and isolated macOS account | Pending smoke |
-| 24/72 hour zero-paid-call idle proof | Release-candidate simulation artifact | Pending |
+| 24/72 hour zero-paid-call idle proof | `idle-safety-simulation.test.ts`: real registry clock, seven intercepted external origins and eight failure classes | Automated virtual-clock proof; release-candidate wall-clock artifact pending |
 
 ### Cleanup decisions
 
@@ -430,3 +432,21 @@ means no source-level substitute is accepted.
   claimed records `unknown_outcome` and cannot replay. Workflow size, output,
   artifact count and artifact bytes are bounded, and artifact files use an
   atomic temporary-file switch with failed temporary writes removed.
+- Desktop no longer relies solely on Chromium media-query repaint timing when
+  Electron changes `nativeTheme.themeSource`. The renderer records both the
+  requested and resolved theme on the document root, updates immediately from
+  Settings, follows OS changes only in system mode, and ignores a stale startup
+  read after a newer user choice. Explicit light/dark token overrides cover the
+  right rail and detached subpages. The real screenshot matrix remains pending
+  until the local Mac is unlocked; automated contracts are not presented as a
+  substitute for that review.
+- ESLint now ignores all Desktop preview bundle directories (`preview-dist`,
+  `setup-preview-dist`, and `live-dist`). These generated bundles are already
+  Git-ignored and must not be parsed as source or create false release blockers.
+- The shared channel CLI now emits an actual compact terminal QR for Feishu,
+  Lark, and WeCom instead of printing the nonce-bearing pairing URL. Desktop
+  and CLI consume the same server-directed polling delay; the HTTP Broker
+  adapter clamps it to 1-30 seconds so a provider cannot cause a hot loop or
+  suppress status indefinitely. `qrcode-terminal` is now declared by the
+  Server package that imports it, and the stale missing `otto` bin entry in the
+  lockfile was repaired.

@@ -17,6 +17,8 @@ describe('desktop visual style contract', () => {
     ]);
 
     expect(tokens).toContain('color-scheme: light dark;');
+    expect(tokens).toMatch(/:root\[data-otto-theme='light'\]\s*\{[^}]*--otto-sidebar-bg: #f5f5f7;/su);
+    expect(tokens).toMatch(/:root\[data-otto-theme='dark'\]\s*\{[^}]*--otto-sidebar-bg: #242426;/su);
     expect(css).toMatch(/\.otto-right-panel\s*\{[^}]*color-scheme: light dark;/su);
     expect(css).toMatch(/@media \(prefers-color-scheme: dark\)\s*\{\s*\.otto-auth-shell\s*\{/su);
     expect(css).toContain('.otto-auth-panel {\n    background: var(--otto-bg);');
@@ -32,6 +34,22 @@ describe('desktop visual style contract', () => {
     for (const fixedLightSurface of ['#fff5f3', '#ecfdf5', '#fff5f5', '#fff1f2']) {
       expect(css).not.toContain(fixedLightSurface);
     }
+  });
+
+  it('defines every Otto theme variable referenced by production styles', async () => {
+    const styles = await Promise.all(
+      ['tokens.css', 'app.css', 'module-workspace.css'].map((file) =>
+        readFile(path.join(packageRoot, 'src', 'renderer', 'styles', file), 'utf8')),
+    );
+    const source = styles.join('\n');
+    const definitions = new Set(
+      [...source.matchAll(/(--otto-[a-z0-9-]+)\s*:/gu)].map((match) => match[1]),
+    );
+    const references = new Set(
+      [...source.matchAll(/var\((--otto-[a-z0-9-]+)/gu)].map((match) => match[1]),
+    );
+
+    expect([...references].filter((name) => !definitions.has(name))).toEqual([]);
   });
 
   it('keeps module groups on the shared appearance tokens', async () => {
@@ -94,5 +112,12 @@ describe('desktop visual style contract', () => {
       expect(config).toContain("'react$': require.resolve('react', { paths: [__dirname] })");
       expect(config).toContain("'react-dom$': require.resolve('react-dom', { paths: [__dirname] })");
     }
+  });
+
+  it('runs visual previews through the same renderer theme synchronization', async () => {
+    const preview = await readFile(path.join(packageRoot, 'preview', 'mock.tsx'), 'utf8');
+    expect(preview).toContain("import { startRendererThemeSync } from '../src/renderer/themeSync.js';");
+    expect(preview).toContain('startRendererThemeSync();');
+    expect(preview).toContain("new URLSearchParams(location.search).get('theme')");
   });
 });

@@ -23,6 +23,7 @@ const pairing: PairingSession = {
   qrPayload: 'https://pairing.example/channel/pair?opaque=1',
   expiresAtMs: Date.now() + 300_000,
   requestedScopes: ['im:message'],
+  pollAfterMs: 2_000,
 };
 
 function fakeConnector(): ChannelConnectorV1 {

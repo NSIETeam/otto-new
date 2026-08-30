@@ -16,11 +16,13 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import './browserPreviewBridge.js';
 import { App } from './App.js';
+import { startRendererThemeSync } from './themeSync.js';
 
 const container = document.getElementById('root');
 if (!container) {
   throw new Error('找不到 #root 容器');
 }
+startRendererThemeSync();
 createRoot(container).render(
   <React.StrictMode>
     <App />

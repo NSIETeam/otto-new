@@ -64,7 +64,7 @@ function verifyPackagedPayload(context) {
 
 function verifyPackagedRipgrep(context) {
   const platform = context.electronPlatformName;
-  if (!['win32', 'darwin'].includes(platform)) return;
+  if (!['win32', 'darwin'].includes(platform)) return null;
   const arch = electronBuilderArchName(context.arch);
   const executableName = platform === 'win32' ? 'rg.exe' : 'rg';
   const executablePath = path.join(
@@ -86,6 +86,7 @@ function verifyPackagedRipgrep(context) {
     { stdio: 'inherit' },
   );
   console.log(`[after-pack] ripgrep source verified: ${platform}-${arch}`);
+  return executablePath;
 }
 
 function packagedArchivePath(context) {
@@ -140,6 +141,7 @@ function copySqlCipherNativeAsset(context) {
   console.log(
     `[after-pack] SQLCipher native asset copied with exact source identity: ${target}`,
   );
+  return path.join(destination, 'better_sqlite3.node');
 }
 
 function copyOttoNativeAsset(context) {
@@ -323,8 +325,8 @@ function findNestedLibreOfficeBundles(appPath) {
 
 async function afterPack(context) {
   verifyPackagedPayload(context);
-  verifyPackagedRipgrep(context);
-  copySqlCipherNativeAsset(context);
+  const ripgrepExecutablePath = verifyPackagedRipgrep(context);
+  const sqlCipherBindingPath = copySqlCipherNativeAsset(context);
   const ottoNativeAsset = copyOttoNativeAsset(context);
   if (context.electronPlatformName === 'win32') {
     if (typeof context.packager.signIf !== 'function') {
@@ -380,21 +382,25 @@ async function afterPack(context) {
 
   // The explicitly unsigned transition still gets a complete ad-hoc seal.
   // Deep-sign standard nested code first. The Otto native executable lives in
-  // a nonstandard Resources subtree, so sign it explicitly before recording
-  // its final digest, then re-seal only the outer bundle.
-  codeSign(appPath, { identity: null, keychainFile: null, deep: true });
-  codeSign(ottoNativeAsset.binaryPath, {
-    identity: null,
-    keychainFile: null,
-  });
+  // a nonstandard Resources subtree, as do the SQLCipher and ripgrep loose
+  // binaries. Sign all three explicitly, then re-seal only the outer bundle.
+  const adHocSigning = { identity: null, keychainFile: null };
+  codeSign(appPath, { ...adHocSigning, deep: true });
+  codeSign(ottoNativeAsset.binaryPath, adHocSigning);
   verifyCodeSignature(ottoNativeAsset.binaryPath);
+  codeSign(sqlCipherBindingPath, adHocSigning);
+  verifyCodeSignature(sqlCipherBindingPath);
+  codeSign(ripgrepExecutablePath, adHocSigning);
+  verifyCodeSignature(ripgrepExecutablePath);
   logMacNativeSignatureChange(ottoNativeAsset, nativeBeforeSigning);
   finalizePackagedOttoNativeAsset(ottoNativeAsset, {
     kind: 'codesign',
     verified: true,
   });
-  codeSign(appPath, { identity: null, keychainFile: null });
+  codeSign(appPath, adHocSigning);
   verifyFinalPackagedOttoNativeAsset(context, ottoNativeAsset);
+  verifyCodeSignature(sqlCipherBindingPath);
+  verifyCodeSignature(ripgrepExecutablePath);
   verifyCodeSignature(appPath, true);
   console.log(`[after-pack] macOS ad-hoc 签名校验通过：${appPath}`);
 }

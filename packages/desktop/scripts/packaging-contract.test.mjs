@@ -1250,7 +1250,7 @@ describe('desktop packaging contract', () => {
     expect(workflow).toContain("OTTO_DESKTOP_MAX_INSTALLER_MB: '140'");
   });
 
-  it('explicitly ad-hoc signs the nonstandard macOS native runtime before sealing its manifest', async () => {
+  it('explicitly ad-hoc signs every nonstandard macOS loose binary before sealing the app', async () => {
     const source = await readFile(
       path.join(packageRoot, 'scripts', 'after-pack.cjs'),
       'utf8',
@@ -1261,10 +1261,10 @@ describe('desktop packaging contract', () => {
     expect(unsignedMarker).toBeGreaterThan(-1);
     const unsignedBranch = source.slice(unsignedMarker);
     const deepAppSeal = unsignedBranch.indexOf(
-      'codeSign(appPath, { identity: null, keychainFile: null, deep: true });',
+      'codeSign(appPath, { ...adHocSigning, deep: true });',
     );
     const nativeSign = unsignedBranch.indexOf(
-      'codeSign(ottoNativeAsset.binaryPath',
+      'codeSign(ottoNativeAsset.binaryPath, adHocSigning)',
     );
     const nativeVerify = unsignedBranch.indexOf(
       'verifyCodeSignature(ottoNativeAsset.binaryPath)',
@@ -1272,12 +1272,30 @@ describe('desktop packaging contract', () => {
     const manifestFinalize = unsignedBranch.indexOf(
       'finalizePackagedOttoNativeAsset(ottoNativeAsset',
     );
+    const sqlCipherSign = unsignedBranch.indexOf(
+      'codeSign(sqlCipherBindingPath, adHocSigning)',
+    );
+    const sqlCipherVerify = unsignedBranch.indexOf(
+      'verifyCodeSignature(sqlCipherBindingPath)',
+    );
+    const ripgrepSign = unsignedBranch.indexOf(
+      'codeSign(ripgrepExecutablePath, adHocSigning)',
+    );
+    const ripgrepVerify = unsignedBranch.indexOf(
+      'verifyCodeSignature(ripgrepExecutablePath)',
+    );
     const outerAppSeal = unsignedBranch.indexOf(
-      'codeSign(appPath, { identity: null, keychainFile: null });',
+      'codeSign(appPath, adHocSigning);',
       deepAppSeal + 1,
     );
     const packagedVerify = unsignedBranch.indexOf(
       'verifyFinalPackagedOttoNativeAsset(context, ottoNativeAsset)',
+    );
+    const finalSqlCipherVerify = unsignedBranch.lastIndexOf(
+      'verifyCodeSignature(sqlCipherBindingPath)',
+    );
+    const finalRipgrepVerify = unsignedBranch.lastIndexOf(
+      'verifyCodeSignature(ripgrepExecutablePath)',
     );
     const appVerify = unsignedBranch.indexOf(
       'verifyCodeSignature(appPath, true)',
@@ -1286,10 +1304,16 @@ describe('desktop packaging contract', () => {
     expect(deepAppSeal).toBeGreaterThan(-1);
     expect(deepAppSeal).toBeLessThan(nativeSign);
     expect(nativeSign).toBeLessThan(nativeVerify);
-    expect(nativeVerify).toBeLessThan(manifestFinalize);
+    expect(nativeVerify).toBeLessThan(sqlCipherSign);
+    expect(sqlCipherSign).toBeLessThan(sqlCipherVerify);
+    expect(sqlCipherVerify).toBeLessThan(ripgrepSign);
+    expect(ripgrepSign).toBeLessThan(ripgrepVerify);
+    expect(ripgrepVerify).toBeLessThan(manifestFinalize);
     expect(manifestFinalize).toBeLessThan(outerAppSeal);
     expect(outerAppSeal).toBeLessThan(packagedVerify);
-    expect(packagedVerify).toBeLessThan(appVerify);
+    expect(packagedVerify).toBeLessThan(finalSqlCipherVerify);
+    expect(finalSqlCipherVerify).toBeLessThan(finalRipgrepVerify);
+    expect(finalRipgrepVerify).toBeLessThan(appVerify);
   });
 
   it('discovers every packaged LibreOffice bundle before signing Otto', async () => {

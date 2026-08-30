@@ -62,10 +62,12 @@ Otto 的发布链路分成三段：先检查异常，再构建双仓 GitHub Rele
 文件：`.github/workflows/macos-preview.yml`
 
 这是不进入正式更新渠道的手动测试构建。它只接受远端 `internal` 的
-精确最新提交，仍执行仓库质量门禁、SQLCipher 来源验证、Developer ID
-签名、公证和 Gatekeeper 校验。下载文件固定为
-`Otto-macOS-Preview-arm64.dmg` 与 `Otto-macOS-Preview-x64.dmg`，文件名不带
-产品版本；`provenance.json` 仍保存内部版本、来源提交和工作流运行编号。
+精确最新提交，并执行仓库质量门禁与 SQLCipher 来源验证。Apple custody
+齐全时继续执行 Developer ID 签名、公证和 Gatekeeper 校验，文件名为
+`Otto-macOS-Preview-arm64.dmg` 与 `Otto-macOS-Preview-x64.dmg`；缺少 custody
+时只生成明确标记的 `Otto-macOS-Preview-Unsigned-<arch>.dmg`，使用 ad-hoc
+应用签名和 DMG 完整性校验，不能冒充正式分发包。文件名均不带产品版本；
+`provenance.json` 保存内部版本、来源提交、工作流运行编号和签名状态。
 任一 DMG 超过 120 MiB 时工作流直接失败，不上传超限测试包。
 
 产物仅作为保留 14 天的 Actions artifact，不创建 tag、GitHub Release、

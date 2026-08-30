@@ -393,6 +393,10 @@ means no source-level substitute is accepted.
   authoritative theme-aware layout block. The shared icon registry rejects
   fixed SVG paint, and the asset inventory now discovers production Hub
   subpages automatically instead of relying on a short manual file list.
+- Removed `LocalAgentPanel`'s private light-only inline theme and a nonexistent
+  `otto-hub__btn-primary` class. Enterprise pairing now uses the shared Hub
+  control classes, appearance tokens, focus ring and narrow-layout behavior;
+  only functional black-on-white QR matrices retain fixed paint in Hub pages.
 - Replaced renderer feature `setInterval` calls with either non-overlapping
   async polling or deadline-based one-shot timers. Core protocol watchdogs and
   Server generated admin pages now use named process watchdogs or non-overlap

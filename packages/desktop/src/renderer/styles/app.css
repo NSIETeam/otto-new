@@ -5565,6 +5565,56 @@ h6.otto-prose__h {
   margin-top: -4px;
 }
 
+.otto-local-agent__pairing,
+.otto-local-agent__success {
+  margin-top: 20px;
+}
+.otto-local-agent__card-body {
+  padding: 8px 0;
+}
+.otto-local-agent__label {
+  margin-bottom: 10px;
+}
+.otto-local-agent__hint {
+  margin-bottom: 14px;
+}
+.otto-local-agent__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.otto-local-agent__token {
+  min-height: 44px;
+  flex: 1;
+  padding: 0 16px;
+  border: 1px solid var(--otto-border);
+  border-radius: 12px;
+  background: var(--otto-bg);
+  color: var(--otto-text);
+  font: 800 20px var(--otto-font-mono);
+  letter-spacing: .15em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.otto-local-agent__token:focus-visible {
+  border-color: var(--otto-accent);
+  outline: none;
+  box-shadow: var(--otto-shadow-focus);
+}
+.otto-local-agent__submit {
+  min-height: 44px;
+  padding: 0 22px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+@media (max-width: 560px) {
+  .otto-local-agent__controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .otto-hub__chiprow {
   display: flex;
   flex-wrap: wrap;

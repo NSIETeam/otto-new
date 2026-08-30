@@ -125,6 +125,18 @@ describe('desktop visual style contract', () => {
     expect(tokens).toMatch(/\.otto-right-panel\s*\{[^}]*border-left: 1px solid var\(--otto-border-strong\);/su);
   });
 
+  it('keeps Hub subpages free of fixed inline colour themes', async () => {
+    const localAgentPanel = await readFile(
+      path.join(packageRoot, 'src', 'renderer', 'components', 'hub', 'LocalAgentPanel.tsx'),
+      'utf8',
+    );
+
+    expect(localAgentPanel).not.toMatch(/#[0-9a-f]{3,8}/iu);
+    expect(localAgentPanel).not.toContain('style={{');
+    expect(localAgentPanel).toContain('otto-local-agent__token');
+    expect(localAgentPanel).toContain('otto-hub__btn--primary');
+  });
+
   it('keeps both browser previews on the desktop React instance for visual audits', async () => {
     const configs = await Promise.all(
       ['webpack.preview.cjs', 'webpack.live.cjs'].map((file) =>

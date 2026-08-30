@@ -164,6 +164,35 @@ describe('desktop packaging contract', () => {
     );
   });
 
+  it('keeps the desktop package lean without removing runtime entrypoints', async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+    );
+    expect(packageJson.build.mac.electronLanguages).toEqual(
+      expect.arrayContaining(['en', 'zh_CN', 'zh_TW']),
+    );
+    expect(packageJson.build.files).toEqual(expect.arrayContaining([
+      '!**/node_modules/better-sqlite3/deps/**',
+      '!**/node_modules/better-sqlite3/build/**',
+      '!**/node_modules/pdf-parse/lib/pdf.js/v1.10.88/**',
+      '!**/node_modules/pdf-parse/lib/pdf.js/v1.9.426/**',
+      '!**/node_modules/pdf-parse/lib/pdf.js/v2.0.550/**',
+      '!**/node_modules/pdf-parse/**/pdf.worker.js',
+      '!**/node_modules/playwright/lib/**',
+      '!**/node_modules/react-dom/**',
+      '!**/node_modules/xlsx/dist/**',
+    ]));
+    expect(packageJson.build.files).not.toContain(
+      '!**/node_modules/better-sqlite3/lib/**',
+    );
+    expect(packageJson.build.files).not.toContain(
+      '!**/node_modules/pdf-parse/lib/pdf.js/v1.10.100/build/pdf.js',
+    );
+    expect(packageJson.build.files).not.toContain(
+      '!**/node_modules/playwright-core/lib/server/**',
+    );
+  });
+
   it('uses the current dependency collector and verifies the packaged Windows runtime', async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(packageRoot, 'package.json'), 'utf8'),

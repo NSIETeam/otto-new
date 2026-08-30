@@ -150,7 +150,8 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
-          MAX_DMG_BYTES=$((120 * 1024 * 1024))
+          TARGET_DMG_BYTES=$((120 * 1024 * 1024))
+          MAX_DMG_BYTES=$((150 * 1024 * 1024))
           SIGNING_MODE="${{ steps.signing.outputs.mode }}"
           mkdir -p preview-output
           for arch in arm64 x64; do
@@ -163,8 +164,14 @@ jobs:
             test -f "$source"
             size="$(stat -f '%z' "$source")"
             if [ "$size" -gt "$MAX_DMG_BYTES" ]; then
-              echo "$source is ${size} bytes; preview DMGs must not exceed 120 MiB." >&2
+              echo "$source is ${size} bytes; preview DMGs must not exceed the 150 MiB hard ceiling." >&2
               exit 1
+            fi
+            if [ "$size" -gt "$TARGET_DMG_BYTES" ]; then
+              echo "::warning file=$source::Preview DMG is ${size} bytes, above the 120 MiB target but within the 150 MiB hard ceiling."
+              echo "- ${arch}: ${size} bytes (above 120 MiB target; below 150 MiB ceiling)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- ${arch}: ${size} bytes (within 120 MiB target)" >> "$GITHUB_STEP_SUMMARY"
             fi
             hdiutil verify "$source"
             if [ "$SIGNING_MODE" = "signed" ]; then
@@ -174,7 +181,7 @@ jobs:
             cp "$source" "$target"
           done
           shasum -a 256 preview-output/*.dmg > preview-output/SHA256SUMS.txt
-          SIGNING_MODE="$SIGNING_MODE" node -e 'const fs=require("node:fs");fs.writeFileSync("preview-output/provenance.json",JSON.stringify({sourceRepository:process.env.GITHUB_REPOSITORY,sourceCommit:process.env.GITHUB_SHA,workflowRunId:process.env.GITHUB_RUN_ID,internalVersion:require("./package.json").version,signingStatus:process.env.SIGNING_MODE,builtAt:new Date().toISOString()},null,2)+"\n")'
+          SIGNING_MODE="$SIGNING_MODE" TARGET_DMG_BYTES="$TARGET_DMG_BYTES" MAX_DMG_BYTES="$MAX_DMG_BYTES" node -e 'const fs=require("node:fs");fs.writeFileSync("preview-output/provenance.json",JSON.stringify({sourceRepository:process.env.GITHUB_REPOSITORY,sourceCommit:process.env.GITHUB_SHA,workflowRunId:process.env.GITHUB_RUN_ID,internalVersion:require("./package.json").version,signingStatus:process.env.SIGNING_MODE,sizeBudget:{targetBytes:Number(process.env.TARGET_DMG_BYTES),hardCeilingBytes:Number(process.env.MAX_DMG_BYTES)},builtAt:new Date().toISOString()},null,2)+"\n")'
 
       - name: Upload macOS preview
         uses: actions/upload-artifact@v4

@@ -93,7 +93,7 @@ flowchart LR
   Audit --> Build[Build Desktop before electron-builder]
   Build --> Matrix[arm64 and x64 packages]
   Matrix --> Prune[Prune alternate telemetry builds]
-  Prune --> Gate[120 MiB per-DMG gate]
+  Prune --> Gate[120 MiB target / 150 MiB hard ceiling]
   Gate --> Verify[hdiutil + SHA-256 + source provenance]
   Verify --> Artifact[Versionless Preview artifact; no release or tag]
 ```
@@ -108,7 +108,7 @@ flowchart LR
 | Long-running task state and schedules | `packages/workflow` | workflow tests and recurring registry call sites |
 | Computer control and inspection | `packages/rpa` | RPA policy and adapter tests |
 | Customer module packaging and execution | Desktop + Server | manifest, registry, Host ABI and market tests |
-| Preview packaging and the 120 MiB budget | `.github/workflows/macos-preview.yml` | packaging contract tests + artifact provenance |
+| Preview packaging and the 120/150 MiB budget | `.github/workflows/macos-preview.yml` | packaging contract tests + artifact provenance |
 
 ## Update triggers
 

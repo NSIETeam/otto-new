@@ -21,7 +21,7 @@ describe('generated Otto code map', () => {
       'RPA',
       'Customer module path',
       'Versionless macOS Preview path',
-      '120 MiB per-DMG gate',
+      '120 MiB target / 150 MiB hard ceiling',
     ]) {
       expect(map).toContain(marker);
     }

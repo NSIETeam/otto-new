@@ -1,6 +1,6 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -107,5 +107,60 @@ describe('FileWorkflowStore', () => {
     const unknown = await store.getRun(run.id);
     const takenOver = await store.takeOverUnknownRun({ runId: run.id, note: 'confirmed by operator', expectedRevision: unknown!.revision });
     expect(takenOver).toMatchObject({ status: 'cancelled', steps: [expect.objectContaining({ status: 'cancelled' })] });
+  });
+
+  it('bounds run files by pruning the oldest terminal run before creating another', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-workflow-'));
+    roots.push(root);
+    const store = new FileWorkflowStore(root, { maxRuns: 2 });
+    const oneStep: WorkflowDefinition = {
+      id: 'bounded', version: 1,
+      steps: [{ id: 'read', kind: 'tool', input: {}, sideEffect: 'none' }],
+    };
+    const finished = await store.createRun(oneStep);
+    const claimed = await store.claimNextStep(finished.id, finished.revision);
+    await store.completeStep({ runId: finished.id, stepId: 'read', expectedRevision: claimed!.run.revision });
+    const protectedRun = await store.createRun(oneStep);
+    const newest = await store.createRun(oneStep);
+
+    expect(await store.getRun(finished.id)).toBeNull();
+    expect((await store.listRuns()).map((run) => run.id).sort()).toEqual([protectedRun.id, newest.id].sort());
+  });
+
+  it('fails closed when capacity contains only active or unresolved runs', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-workflow-'));
+    roots.push(root);
+    const store = new FileWorkflowStore(root, { maxRuns: 2 });
+    await store.createRun(definition);
+    await store.createRun(definition);
+
+    await expect(store.createRun(definition)).rejects.toThrow('no terminal run to prune');
+    expect(await store.listRuns()).toHaveLength(2);
+  });
+
+  it('serializes concurrent creation so callers cannot race past the run cap', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-workflow-'));
+    roots.push(root);
+    const store = new FileWorkflowStore(root, { maxRuns: 2 });
+    const outcomes = await Promise.allSettled([
+      store.createRun(definition), store.createRun(definition), store.createRun(definition),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(2);
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+    expect(await store.listRuns()).toHaveLength(2);
+  });
+
+  it('rejects a symlink run record instead of reading outside the store', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-workflow-'));
+    roots.push(root);
+    const outside = path.join(root, 'outside.json');
+    await writeFile(outside, '{"secret":true}\n');
+    const runId = 'wf-00000000-0000-0000-0000-000000000001';
+    await symlink(outside, path.join(root, `${runId}.json`));
+    const store = new FileWorkflowStore(root);
+
+    await expect(store.getRun(runId)).rejects.toThrow('unsafe');
+    expect(await readFile(outside, 'utf8')).toBe('{"secret":true}\n');
   });
 });

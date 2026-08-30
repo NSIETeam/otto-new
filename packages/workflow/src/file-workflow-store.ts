@@ -1,7 +1,7 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   WorkflowConflictError,
@@ -35,11 +35,38 @@ function createStepRun(runId: string, step: WorkflowDefinition['steps'][number])
  * two local workers from claiming or completing the same step.
  */
 export class FileWorkflowStore implements WorkflowStore {
-  constructor(private readonly rootDir: string) {}
+  private readonly maxRuns: number;
+  private readonly terminalRetentionMs: number;
+  private createTail: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly rootDir: string,
+    options: { maxRuns?: number; terminalRetentionMs?: number } = {},
+  ) {
+    this.maxRuns = options.maxRuns ?? 10_000;
+    this.terminalRetentionMs = options.terminalRetentionMs ?? 30 * 24 * 60 * 60_000;
+    if (!Number.isSafeInteger(this.maxRuns) || this.maxRuns < 1 || this.maxRuns > 100_000) {
+      throw new Error('workflow run file limit is invalid');
+    }
+    if (!Number.isSafeInteger(this.terminalRetentionMs) || this.terminalRetentionMs < 60_000) {
+      throw new Error('workflow terminal retention is invalid');
+    }
+  }
 
   async createRun(definition: WorkflowDefinition): Promise<WorkflowRun> {
     this.assertDefinition(definition);
+    let result!: WorkflowRun;
+    const pending = this.createTail.then(async () => {
+      result = await this.createRunExclusive(definition);
+    });
+    this.createTail = pending.catch(() => undefined);
+    await pending;
+    return result;
+  }
+
+  private async createRunExclusive(definition: WorkflowDefinition): Promise<WorkflowRun> {
     await mkdir(this.rootDir, { recursive: true, mode: 0o700 });
+    await this.maintainRunCapacity();
     const id = `wf-${randomUUID()}`;
     const timestamp = now();
     const run: WorkflowRun = {
@@ -54,6 +81,36 @@ export class FileWorkflowStore implements WorkflowStore {
     };
     await this.writeRun(run);
     return cloneRun(run);
+  }
+
+  private async maintainRunCapacity(): Promise<void> {
+    const names = (await readdir(this.rootDir))
+      .filter((entry) => /^wf-[0-9a-f-]{36}\.json$/u.test(entry));
+    // Stay on the cheap directory-count path during ordinary operation. Full
+    // run parsing is reserved for actual capacity pressure.
+    if (names.length < this.maxRuns) return;
+    const runs = await Promise.all(names.map((name) => this.readRun(name.slice(0, -5))));
+    const terminal = runs
+      .filter((run) => ['succeeded', 'failed', 'cancelled'].includes(run.status))
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt) || a.id.localeCompare(b.id));
+    const cutoff = Date.now() - this.terminalRetentionMs;
+    const removed = new Set<string>();
+    for (const run of terminal) {
+      if (Date.parse(run.updatedAt) >= cutoff) continue;
+      await unlink(path.join(this.rootDir, `${run.id}.json`));
+      removed.add(run.id);
+    }
+    let count = runs.length - removed.size;
+    for (const run of terminal) {
+      if (count < this.maxRuns) break;
+      if (removed.has(run.id)) continue;
+      await unlink(path.join(this.rootDir, `${run.id}.json`));
+      removed.add(run.id);
+      count -= 1;
+    }
+    if (count >= this.maxRuns) {
+      throw new Error('workflow run file limit reached with no terminal run to prune');
+    }
   }
 
   async getRun(runId: string): Promise<WorkflowRun | null> {
@@ -280,7 +337,10 @@ export class FileWorkflowStore implements WorkflowStore {
   }
 
   private async readRun(runId: string): Promise<WorkflowRun> {
-    const parsed = JSON.parse(await readFile(this.runPath(runId), 'utf8')) as WorkflowRun;
+    const target = this.runPath(runId);
+    const metadata = await lstat(target);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('Workflow run record is unsafe.');
+    const parsed = JSON.parse(await readFile(target, 'utf8')) as WorkflowRun;
     this.assertRun(parsed);
     return parsed;
   }

@@ -32,6 +32,7 @@ const run: ControllableWorkflowRun = {
     status: 'waiting_approval',
     approvalId: 'approval-1',
     input: {
+      approvalExpiresAtMs: Number.MAX_SAFE_INTEGER,
       origin: {
         provider: context.provider,
         installationId: context.installationId,

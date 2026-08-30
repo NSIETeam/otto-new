@@ -345,6 +345,7 @@ means no source-level substitute is accepted.
 | Chat command authorization, deduplication and visible reply before ACK | `channelTaskControl.ts`, `brokerChannelTaskBridge.ts`, focused tests | Automated |
 | Natural-language request becomes durable approval-gated work | `workflowTaskControlPort.ts`, `durableWorkflowChannelBackend.test.ts` | Automated |
 | Remote workflow visibility, mutation and approval are bound to the persisted provider, installation, tenant, canonical user and locally trusted device origin; local, cross-identity and wrong-device workflows fail closed | `brokerChannelRuntime.ts`, `workflowTaskControlPort.ts`, focused tests | Automated |
+| Chat-created external-workflow approvals persist a ten-minute deadline and cannot execute after expiry | `workflowTaskControlPort.ts`, `durableWorkflowChannelBackend.test.ts` | Automated |
 | Non-overlapping workflow worker skips unchanged persisted revisions | `recurringTaskRegistry.ts`, `server.residentTasks.test.ts` | Automated |
 | ACP delegate session handle is persisted before work; every background turn links to a durable external Workflow step; restart becomes `interrupted`/`unknown_outcome`, never silent replay | `externalTaskWorkflowJournal.ts`, `acpAgentClient.ts`, `backgroundTaskManager.ts`, delegate status and restart tests | Automated; BackgroundTaskManager remains a compatibility UI mirror |
 | Starting a local external coding agent requires explicit approval and declares its affected working directory | `delegate-agent.ts`, focused confirmation tests | Automated |

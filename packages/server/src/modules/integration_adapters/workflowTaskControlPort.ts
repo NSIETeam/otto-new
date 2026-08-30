@@ -12,6 +12,8 @@ import {
   type WorkflowRuntime,
 } from 'otto-workflow';
 
+const CHANNEL_APPROVAL_TTL_MS = 10 * 60_000;
+
 export interface ControllableWorkflowRun {
   id: string;
   definitionId: string;
@@ -82,7 +84,10 @@ export class ResidentWorkflowControlBackendV1 implements WorkflowControlBackend 
 
 /** Creates a persisted, approval-gated agent run for natural-language chat work. */
 export class DurableChannelTaskProposalBackendV1 implements ChannelTaskProposalBackend {
-  constructor(private readonly runtime: WorkflowRuntime) {}
+  constructor(
+    private readonly runtime: WorkflowRuntime,
+    private readonly now: () => number = Date.now,
+  ) {}
 
   async create(input: {
     request: string;
@@ -99,6 +104,7 @@ export class DurableChannelTaskProposalBackendV1 implements ChannelTaskProposalB
         requiresApproval: true,
         input: {
           request: input.request,
+          approvalExpiresAtMs: this.now() + CHANNEL_APPROVAL_TTL_MS,
           idempotencyKey: input.idempotencyKey,
           origin: {
             provider: input.context.provider,
@@ -119,7 +125,7 @@ export class DurableChannelTaskProposalBackendV1 implements ChannelTaskProposalB
     if (!approvalId) throw new Error('durable channel proposal did not enter approval state');
     return {
       proposalId: run.id,
-      preview: `任务已持久化，尚未执行。确认范围和费用后发送 /approve ${approvalId}`,
+      preview: `任务已持久化，尚未执行。请在 10 分钟内确认范围和费用后发送 /approve ${approvalId}`,
       requiresApproval: true,
     };
   }
@@ -153,6 +159,7 @@ export class WorkflowTaskControlPort implements ChannelTaskControlPort {
   constructor(
     private readonly backend: WorkflowControlBackend,
     private readonly proposals: ChannelTaskProposalBackend,
+    private readonly now: () => number = Date.now,
   ) {}
 
   async list(context: ChannelTaskMessageContext): Promise<ChannelTaskSummary[]> {
@@ -194,6 +201,10 @@ export class WorkflowTaskControlPort implements ChannelTaskControlPort {
       .flatMap((run) => run.steps.map((step) => ({ run, step })))
       .find(({ step }) => step.status === 'waiting_approval' && step.approvalId === approvalId);
     if (!match) throw new Error('workflow approval was not found');
+    const expiresAtMs = match.step.input.approvalExpiresAtMs;
+    if (typeof expiresAtMs !== 'number' || !Number.isFinite(expiresAtMs) || this.now() > expiresAtMs) {
+      throw new Error('workflow approval has expired');
+    }
     return this.mutate(
       () => this.backend.approve(match.run.id, match.step.stepId, approvalId),
       match.run.id,

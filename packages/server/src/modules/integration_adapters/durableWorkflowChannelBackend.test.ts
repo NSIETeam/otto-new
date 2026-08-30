@@ -37,10 +37,11 @@ describe('durable channel workflow adapters', () => {
     const execute = vi.fn(async () => ({ completed: true }));
     const runtime = new WorkflowRuntime(store, { execute });
     const supervisor = new ResidentWorkflowSupervisor(store, runtime, { maxConcurrentRuns: 1 });
-    const proposals = new DurableChannelTaskProposalBackendV1(runtime);
+    const proposals = new DurableChannelTaskProposalBackendV1(runtime, () => 10_000);
     const control = new WorkflowTaskControlPort(
       new ResidentWorkflowControlBackendV1(supervisor),
       proposals,
+      () => 10_000,
     );
     const proposal = await control.propose(
       '巡检销售后台并汇报异常',
@@ -49,6 +50,7 @@ describe('durable channel workflow adapters', () => {
     );
     expect(proposal).toMatchObject({ requiresApproval: true });
     expect(proposal.preview).toContain('/approve approval-');
+    expect(proposal.preview).toContain('10 分钟');
     expect(execute).not.toHaveBeenCalled();
     const waiting = await supervisor.get(proposal.proposalId);
     expect(waiting).toMatchObject({
@@ -57,6 +59,7 @@ describe('durable channel workflow adapters', () => {
         sideEffect: 'external',
         input: expect.objectContaining({
           request: '巡检销售后台并汇报异常',
+          approvalExpiresAtMs: 610_000,
           origin: expect.objectContaining({ tenantId: 'tenant-1', userId: 'otto-user-1', deviceId: 'device-1' }),
         }),
       })],
@@ -70,5 +73,28 @@ describe('durable channel workflow adapters', () => {
 
     const restored = new FileWorkflowStore(root);
     expect(await restored.getRun(proposal.proposalId)).toMatchObject({ status: 'succeeded' });
+  });
+
+  it('keeps an expired durable approval from executing', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-channel-workflow-'));
+    roots.push(root);
+    const store = new FileWorkflowStore(root);
+    const execute = vi.fn(async () => ({ completed: true }));
+    const runtime = new WorkflowRuntime(store, { execute });
+    let now = 10_000;
+    const control = new WorkflowTaskControlPort(
+      new ResidentWorkflowControlBackendV1(new ResidentWorkflowSupervisor(store, runtime)),
+      new DurableChannelTaskProposalBackendV1(runtime, () => now),
+      () => now,
+    );
+    const proposal = await control.propose('执行高风险巡检', 'channel:lark:expiry', context);
+    const waiting = await store.getRun(proposal.proposalId);
+    const approvalId = waiting!.steps[0].approvalId!;
+
+    now = 610_001;
+    await expect(control.approve(approvalId, 'approval-message-key', context))
+      .rejects.toThrow('workflow approval has expired');
+    expect(execute).not.toHaveBeenCalled();
+    expect(await store.getRun(proposal.proposalId)).toMatchObject({ status: 'waiting_approval' });
   });
 });

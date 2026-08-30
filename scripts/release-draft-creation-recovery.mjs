@@ -96,9 +96,13 @@ export async function buildExpectedDraftIdentity({
   prerelease,
   assetProfile,
 }) {
+  const packageIdentityIsValid =
+    assetProfile === 'production'
+      ? /^[0-9a-f]{12}-[0-9a-f]{12}$/.test(packageIdentity ?? '')
+      : assetProfile === 'unsigned-transition' && packageIdentity === null;
   if (
     !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(version) ||
-    !/^[0-9a-f]{12}-[0-9a-f]{12}$/.test(packageIdentity) ||
+    !packageIdentityIsValid ||
     typeof prerelease !== 'boolean' ||
     !['production', 'unsigned-transition'].includes(assetProfile)
   ) {
@@ -268,6 +272,18 @@ function validateCreationIntent(intent, expected) {
     'pre-public latest pointers',
   );
   const version = intent.tag?.slice(1);
+  const production = intent.expected?.assetProfile === 'production';
+  const packageIdentityIsValid = production
+    ? /^[0-9a-f]{12}-[0-9a-f]{12}$/.test(intent.expected.packageIdentity ?? '')
+    : intent.expected?.assetProfile === 'unsigned-transition' &&
+      intent.expected.packageIdentity === null;
+  const legacyBindingIsValid = production
+    ? /^[0-9a-f]{40}$/.test(intent.legacyMainCommit ?? '') &&
+      intent.expected.targets.legacy === 'main' &&
+      intent.expected.tagCommits.legacy === intent.legacyMainCommit
+    : intent.legacyMainCommit === null &&
+      intent.expected.targets.legacy === null &&
+      intent.expected.tagCommits.legacy === null;
   const valid =
     intent.format === 'otto-release-creation-intent-v1' &&
     intent.run.id === expected.runId &&
@@ -277,7 +293,7 @@ function validateCreationIntent(intent, expected) {
     intent.legacyRepository === expected.legacyRepository &&
     intent.canonicalCommit === expected.canonicalCommit &&
     /^[0-9a-f]{40}$/.test(intent.canonicalCommit ?? '') &&
-    /^[0-9a-f]{40}$/.test(intent.legacyMainCommit ?? '') &&
+    legacyBindingIsValid &&
     typeof intent.createLegacy === 'boolean' &&
     typeof intent.preexisting.canonical.tag === 'boolean' &&
     intent.preexisting.canonical.release === false &&
@@ -285,6 +301,8 @@ function validateCreationIntent(intent, expected) {
     intent.preexisting.legacy.release === false &&
     intent.expected.version === version &&
     intent.expected.packageIdentity === expected.packageIdentity &&
+    intent.expected.assetProfile === expected.assetProfile &&
+    packageIdentityIsValid &&
     /^v[0-9]+\.[0-9]+\.[0-9]+$/.test(intent.tag ?? '') &&
     /^[0-9a-f]{64}$/.test(intent.expected.bodySha256 ?? '') &&
     intent.expected.releaseName === `Otto ${intent.tag}` &&
@@ -294,9 +312,7 @@ function validateCreationIntent(intent, expected) {
     ) &&
     intent.createLegacy === (intent.expected.assetProfile === 'production') &&
     intent.expected.targets.canonical === intent.canonicalCommit &&
-    intent.expected.targets.legacy === 'main' &&
     intent.expected.tagCommits.canonical === intent.canonicalCommit &&
-    intent.expected.tagCommits.legacy === intent.legacyMainCommit &&
     intent.prePublicLatest.format === 'otto-pre-public-latest-v1' &&
     intent.prePublicLatest.tag === intent.tag &&
     intent.prePublicLatest.canonicalRepository === intent.canonicalRepository &&
@@ -351,7 +367,22 @@ function assertPointer(actual, expected, label) {
   }
 }
 
-async function observePreCreation(adapter, endpoints, tag) {
+async function observePreCreation(adapter, endpoints, tag, createLegacy) {
+  const legacy = createLegacy
+    ? {
+        repository: await adapter.getRepositoryIdentity(endpoints.legacy),
+        mainCommit: await adapter.getBranchCommit(endpoints.legacy, 'main'),
+        tagCommit: await adapter.getTagCommit(endpoints.legacy, tag),
+        release: await adapter.getRelease(endpoints.legacy, tag),
+        latest: await adapter.getLatest(endpoints.legacy),
+      }
+    : {
+        repository: endpoints.legacy.repository,
+        mainCommit: null,
+        tagCommit: null,
+        release: null,
+        latest: null,
+      };
   return {
     canonical: {
       repository: await adapter.getRepositoryIdentity(endpoints.canonical),
@@ -359,13 +390,7 @@ async function observePreCreation(adapter, endpoints, tag) {
       release: await adapter.getRelease(endpoints.canonical, tag),
       latest: await adapter.getLatest(endpoints.canonical),
     },
-    legacy: {
-      repository: await adapter.getRepositoryIdentity(endpoints.legacy),
-      mainCommit: await adapter.getBranchCommit(endpoints.legacy, 'main'),
-      tagCommit: await adapter.getTagCommit(endpoints.legacy, tag),
-      release: await adapter.getRelease(endpoints.legacy, tag),
-      latest: await adapter.getLatest(endpoints.legacy),
-    },
+    legacy,
   };
 }
 
@@ -412,8 +437,18 @@ export async function captureReleaseCreationIntent({
   ) {
     throw new Error('release creation capture arguments are invalid');
   }
-  const first = await observePreCreation(adapter, endpoints, expected.tag);
-  const second = await observePreCreation(adapter, endpoints, expected.tag);
+  const first = await observePreCreation(
+    adapter,
+    endpoints,
+    expected.tag,
+    createLegacy,
+  );
+  const second = await observePreCreation(
+    adapter,
+    endpoints,
+    expected.tag,
+    createLegacy,
+  );
   if (stableJson(first) !== stableJson(second)) {
     throw new Error('remote release creation state changed during capture');
   }
@@ -437,10 +472,13 @@ export async function captureReleaseCreationIntent({
       bodySha256: expected.bodySha256,
       prerelease: expected.prerelease,
       assetProfile: expected.assetProfile,
-      targets: { canonical: expected.canonicalCommit, legacy: 'main' },
+      targets: {
+        canonical: expected.canonicalCommit,
+        legacy: createLegacy ? 'main' : null,
+      },
       tagCommits: {
         canonical: expected.canonicalCommit,
-        legacy: first.legacy.mainCommit,
+        legacy: createLegacy ? first.legacy.mainCommit : null,
       },
       assets: expected.assets,
     },
@@ -464,6 +502,7 @@ export async function captureReleaseCreationIntent({
     legacyRepository: endpoints.legacy.repository,
     canonicalCommit: expected.canonicalCommit,
     packageIdentity: expected.packageIdentity,
+    assetProfile: expected.assetProfile,
   });
 }
 
@@ -474,7 +513,12 @@ export async function verifyReleaseCreationIntent({
 }) {
   for (let observation = 0; observation < 2; observation += 1) {
     assertPreCreationState(
-      await observePreCreation(adapter, endpoints, intent.tag),
+      await observePreCreation(
+        adapter,
+        endpoints,
+        intent.tag,
+        intent.createLegacy,
+      ),
       intent,
     );
   }
@@ -524,7 +568,9 @@ async function observeCleanupState(adapter, endpoints, intent) {
   });
   return {
     canonical: await observe(endpoints.canonical),
-    legacy: await observe(endpoints.legacy),
+    legacy: intent.createLegacy
+      ? await observe(endpoints.legacy)
+      : { tagCommit: null, release: null, latest: null },
   };
 }
 
@@ -890,12 +936,18 @@ function parsePairs(argv) {
 }
 
 function parseCommon(options) {
+  const assetProfile = options.get('--asset-profile');
+  const rawPackageIdentity = options.get('--package-identity');
   const common = {
     tag: options.get('--tag'),
     canonicalRepository: options.get('--canonical-repo'),
     legacyRepository: options.get('--legacy-repo'),
     canonicalCommit: options.get('--canonical-commit'),
-    packageIdentity: options.get('--package-identity'),
+    packageIdentity:
+      assetProfile === 'unsigned-transition' && rawPackageIdentity === ''
+        ? null
+        : rawPackageIdentity,
+    assetProfile,
     runId: options.get('--run-id'),
   };
   if (
@@ -905,7 +957,11 @@ function parseCommon(options) {
     ) ||
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(common.legacyRepository ?? '') ||
     !/^[0-9a-f]{40}$/.test(common.canonicalCommit ?? '') ||
-    !/^[0-9a-f]{12}-[0-9a-f]{12}$/.test(common.packageIdentity ?? '') ||
+    !['production', 'unsigned-transition'].includes(common.assetProfile) ||
+    (common.assetProfile === 'production' &&
+      !/^[0-9a-f]{12}-[0-9a-f]{12}$/.test(common.packageIdentity ?? '')) ||
+    (common.assetProfile === 'unsigned-transition' &&
+      common.packageIdentity !== null) ||
     !/^\d+$/.test(common.runId ?? '')
   ) {
     throw new Error('draft recovery binding arguments are invalid');
@@ -932,6 +988,7 @@ async function readLockedIntent(options) {
     legacyRepository: options.legacyRepository,
     canonicalCommit: options.canonicalCommit,
     packageIdentity: options.packageIdentity,
+    assetProfile: options.assetProfile,
   });
 }
 
@@ -957,7 +1014,7 @@ async function main() {
     const artifactDirectory = pairs.get('--artifact-dir');
     const intentFile = pairs.get('--intent-file');
     const prePublicLatestFile = pairs.get('--pre-public-latest-file');
-    const assetProfile = pairs.get('--asset-profile');
+    const assetProfile = common.assetProfile;
     const prerelease = pairs.get('--expected-prerelease');
     const canonicalTagPreexisting = pairs.get('--canonical-tag-preexisting');
     if (
@@ -1021,7 +1078,7 @@ async function main() {
     !['verify-before-create', 'cleanup'].includes(command) ||
     !intentFile ||
     !/^[0-9a-f]{64}$/.test(intentSha256 ?? '') ||
-    pairs.size !== 8
+    pairs.size !== 9
   ) {
     throw new Error('draft recovery command arguments are invalid');
   }

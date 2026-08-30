@@ -197,6 +197,21 @@ describe('desktop packaging contract', () => {
     expect(packageJson.build.files).not.toContain('!**/node_modules/**/src/**');
   });
 
+  it('keeps one CommonJS OpenTelemetry runtime instead of packaging alternate builds', async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+    );
+    expect(packageJson.build.files).toEqual(
+      expect.arrayContaining([
+        '!**/node_modules/@opentelemetry/**/build/esm/**',
+        '!**/node_modules/@opentelemetry/**/build/esnext/**',
+      ]),
+    );
+    expect(packageJson.build.files).not.toContain(
+      '!**/node_modules/@opentelemetry/**/build/src/**',
+    );
+  });
+
   it('excludes known native build trees and duplicate browser payloads without removing runtime binaries', async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
@@ -454,7 +469,7 @@ describe('desktop packaging contract', () => {
     expect(script).toContain("'codesign',");
   });
 
-  it('publishes verified releases before committing the old-user update mirror', async () => {
+  it('publishes canonical, then mirror, then legacy while retaining enterprise compensation', async () => {
     const [workflow, deliveryScript] = await Promise.all([
       readFile(
         path.join(repoRoot, '.github', 'workflows', 'release.yml'),
@@ -479,7 +494,7 @@ describe('desktop packaging contract', () => {
       workflow.match(
         /node packages\/desktop\/scripts\/verify-update-manifest\.mjs/g,
       )?.length,
-    ).toBe(2);
+    ).toBeGreaterThanOrEqual(4);
     expect(workflow).not.toContain("['macArm64', 'macX64', 'winX64']");
     expect(workflow).not.toContain("const crypto = require('node:crypto');");
     expect(workflow).toContain('CHECKSUMS="$DESKTOP_RELEASE/SHA256SUMS"');
@@ -561,12 +576,19 @@ describe('desktop packaging contract', () => {
     const buildJobStart = workflow.indexOf('  build:');
     const enterpriseJobStart = workflow.indexOf('  deploy-enterprise:');
     const mirrorJobStart = workflow.indexOf('  deploy-update-mirror:');
-    const publishJobStart = workflow.indexOf('  publish-release:');
+    const canonicalJobStart = workflow.indexOf('  publish-canonical:');
+    const legacyJobStart = workflow.indexOf('  publish-legacy:');
+    const finalizeEnterpriseJobStart = workflow.indexOf(
+      '  finalize-enterprise-release-transaction:',
+    );
     const rollbackMirrorJobStart = workflow.indexOf(
       '  rollback-update-mirror:',
     );
     const rollbackReleaseJobStart = workflow.indexOf(
       '  rollback-release-publication:',
+    );
+    const rollbackEnterpriseJobStart = workflow.indexOf(
+      '  rollback-enterprise-release-transaction:',
     );
     const validateSourceJob = workflow.slice(
       validateSourceJobStart,
@@ -574,13 +596,29 @@ describe('desktop packaging contract', () => {
     );
     const buildJob = workflow.slice(buildJobStart, windowsVerificationJobStart);
     const enterpriseJob = workflow.slice(enterpriseJobStart, mirrorJobStart);
-    const mirrorJob = workflow.slice(mirrorJobStart, publishJobStart);
-    const publishJob = workflow.slice(publishJobStart, rollbackMirrorJobStart);
+    const mirrorJob = workflow.slice(mirrorJobStart, canonicalJobStart);
+    const canonicalJob = workflow.slice(canonicalJobStart, legacyJobStart);
+    const legacyJob = workflow.slice(
+      legacyJobStart,
+      finalizeEnterpriseJobStart,
+    );
+    const publishJob = workflow.slice(
+      canonicalJobStart,
+      finalizeEnterpriseJobStart,
+    );
+    const finalizeEnterpriseJob = workflow.slice(
+      finalizeEnterpriseJobStart,
+      rollbackMirrorJobStart,
+    );
     const rollbackMirrorJob = workflow.slice(
       rollbackMirrorJobStart,
       rollbackReleaseJobStart,
     );
-    const rollbackReleaseJob = workflow.slice(rollbackReleaseJobStart);
+    const rollbackReleaseJob = workflow.slice(
+      rollbackReleaseJobStart,
+      rollbackEnterpriseJobStart,
+    );
+    const rollbackEnterpriseJob = workflow.slice(rollbackEnterpriseJobStart);
     expect(validateSourceJob).toContain('permissions:\n      contents: read');
     expect(validateSourceJob).toContain('INPUT_VERSION: ${{ inputs.version }}');
     expect(validateSourceJob).toContain(
@@ -604,6 +642,7 @@ describe('desktop packaging contract', () => {
       'package_identity: ${{ needs.build.outputs.package_identity }}',
     );
     expect(enterpriseJob).toContain('use_workflow_artifact: true');
+    expect(enterpriseJob).toContain('defer_finalize: true');
     expect(enterpriseJob).not.toContain('secrets: inherit');
     expect(enterpriseJob).not.toContain('    secrets:');
     expect(buildJob).toContain('    environment: production-approval');
@@ -614,7 +653,7 @@ describe('desktop packaging contract', () => {
     expect(buildJob).not.toContain('sha256sum -c "$ENTERPRISE_SHA"');
     expect(mirrorJob).toContain('    environment: production-automation');
     expect(mirrorJob).toContain('      - deploy-enterprise');
-    expect(mirrorJob).toContain('      - publish-release');
+    expect(mirrorJob).toContain('      - publish-canonical');
     expect(mirrorJob).toContain('timeout-minutes: 90');
     expect(mirrorJob).toContain(
       'publish-mirror "$MIRROR_TRANSACTION_ID" \\\n            "${{ needs.build.outputs.version }}" \\\n            "${{ needs.build.outputs.package_identity }}" \\\n            "${{ needs.build.outputs.source_commit }}"',
@@ -624,10 +663,17 @@ describe('desktop packaging contract', () => {
     ).toBeLessThan(
       mirrorJob.indexOf('publish-mirror "$MIRROR_TRANSACTION_ID"'),
     );
-    expect(publishJob).toContain('      - create-release-drafts');
-    expect(publishJob).toContain('      - deploy-enterprise');
-    expect(publishJob).not.toContain('      - deploy-update-mirror');
-    expect(publishJob).toContain('timeout-minutes: 30');
+    expect(canonicalJob).toContain('      - create-release-drafts');
+    expect(canonicalJob).toContain('      - deploy-enterprise');
+    expect(canonicalJob).not.toContain('      - deploy-update-mirror');
+    expect(canonicalJob).toContain('timeout-minutes: 30');
+    expect(legacyJob).toContain('      - publish-canonical');
+    expect(legacyJob).toContain('      - deploy-update-mirror');
+    expect(legacyJob).toContain('timeout-minutes: 45');
+    expect(finalizeEnterpriseJob).toContain('finalize-deployment');
+    expect(finalizeEnterpriseJob).toContain('DEPLOY_SSH_KEY:');
+    expect(finalizeEnterpriseJob).not.toContain('ROLLBACK_DEPLOY_SSH_KEY:');
+    expect(finalizeEnterpriseJob).toContain('for attempt in 1 2 3 4 5 6; do');
     const prepareCreationJob = workflow.slice(
       prepareCreationJobStart,
       createDraftsJobStart,
@@ -721,7 +767,7 @@ describe('desktop packaging contract', () => {
       ),
     );
     expect(publishJob).toContain(
-      'name: Reverify, publish, and reverify both release endpoints',
+      'name: Reverify, publish, and reverify canonical release endpoint',
     );
     expect(publishJob).toContain(
       'name: Download immutable release creation intent',
@@ -819,7 +865,7 @@ describe('desktop packaging contract', () => {
     );
     expect(rollbackReleaseJob).toContain('      - deploy-update-mirror');
     expect(rollbackReleaseJob).toContain(
-      "needs.publish-release.result == 'success'",
+      "needs.publish-canonical.result == 'success'",
     );
     expect(rollbackReleaseJob).toContain(
       "needs.deploy-update-mirror.result == 'failure'",
@@ -832,6 +878,15 @@ describe('desktop packaging contract', () => {
     );
     expect(rollbackReleaseJob).not.toContain('return_to_draft');
     expect(rollbackReleaseJob).not.toContain('--draft=true');
+    expect(rollbackEnterpriseJob).toContain(
+      "needs.rollback-release-publication.result == 'success'",
+    );
+    expect(rollbackEnterpriseJob).toContain(
+      "needs.rollback-update-mirror.result == 'success'",
+    );
+    expect(rollbackEnterpriseJob).toContain('rollback-enterprise');
+    expect(rollbackEnterpriseJob).toContain('ROLLBACK_DEPLOY_SSH_KEY:');
+    expect(rollbackEnterpriseJob).not.toMatch(/^\s+DEPLOY_SSH_KEY:/m);
     expect(
       workflow.match(/if \[ "\$GITHUB_RUN_ATTEMPT" != '1' \]; then/g)?.length,
     ).toBe(4);

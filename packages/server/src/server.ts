@@ -63,10 +63,7 @@ import {
   type LocalAgentPingResponse,
   type ChannelPairingBeginRequest,
 } from './protocol.js';
-import {
-  TRUSTED_ORIGINS,
-  PNA_HEADERS,
-} from './protocol.js';
+import { TRUSTED_ORIGINS, PNA_HEADERS } from './protocol.js';
 import {
   ENTERPRISE_IDENTITY_RECOVERING_MESSAGE,
   ProductWorkspaceStore,
@@ -169,6 +166,7 @@ import {
   getProactiveService,
   type ProactiveLocalNotifier,
   AutoSkillRealtimeWatcher,
+  atomicWriteTextFile,
   setRealtimeWatcher,
   getHabitAnalyzer,
   RecurringTaskRegistry,
@@ -219,9 +217,9 @@ function normalizeGeneratedSessionTitle(raw: string): string | undefined {
     .replace(/\s+/gu, ' ');
   if (!title) return undefined;
   const length = Array.from(title).length;
-  return length >= 4
-    && length <= 24
-    && /^[\p{Script=Han}\p{L}\p{N} ._+#-]+$/u.test(title)
+  return length >= 4 &&
+    length <= 24 &&
+    /^[\p{Script=Han}\p{L}\p{N} ._+#-]+$/u.test(title)
     ? title
     : undefined;
 }
@@ -229,7 +227,10 @@ function normalizeGeneratedSessionTitle(raw: string): string | undefined {
 function fallbackSessionTitle(firstUserMessage: string): string {
   const withoutPolitePrefix = firstUserMessage
     .trim()
-    .replace(/^(?:(?:请问|想问|我想问|请|麻烦|可以|能否)你?)?(?:帮我|帮忙)?(?:一下)?/u, '');
+    .replace(
+      /^(?:(?:请问|想问|我想问|请|麻烦|可以|能否)你?)?(?:帮我|帮忙)?(?:一下)?/u,
+      '',
+    );
   const han = withoutPolitePrefix.match(/\p{Script=Han}/gu)?.join('') ?? '';
   const hasLatinOrNumber = /[\p{L}\p{N}]/u.test(
     withoutPolitePrefix.replace(/\p{Script=Han}/gu, ''),
@@ -342,7 +343,9 @@ const defaultRuntimeFactory: RuntimeFactory = async (
     );
   }
   if (workspaceContext && !profile?.toolFree) {
-    userRules = userRules ? `${userRules}\n\n${workspaceContext}` : workspaceContext;
+    userRules = userRules
+      ? `${userRules}\n\n${workspaceContext}`
+      : workspaceContext;
   }
   const managedModelConfig = model?.startsWith('otto:')
     ? managedModelAccess
@@ -554,7 +557,9 @@ export class OttoServer {
   private readonly recurringTaskRegistry: RecurringTaskRegistry;
   private stopMemoryMaintenance?: () => void;
   private stopAutoCompression?: () => void;
-  private readonly channelConnectors: Partial<Record<ChannelProvider, ChannelConnectorV1>>;
+  private readonly channelConnectors: Partial<
+    Record<ChannelProvider, ChannelConnectorV1>
+  >;
   private readonly managedChannelPlatform?: ManagedChannelPlatformV1;
   private readonly residentWorkflowSupervisor?: ResidentWorkflowSupervisor;
   private stopResidentWorkflowWorker?: () => void;
@@ -568,12 +573,15 @@ export class OttoServer {
       opts.port ?? Number(process.env.OTTO_SERVER_PORT ?? DEFAULT_PORT);
     this.enableFeishu =
       opts.enableFeishu ?? process.env.OTTO_FEISHU_ENABLED === '1';
-    this.defaultWorkspacePath = opts.defaultWorkspacePath
-      ?? process.env.OTTO_DEFAULT_WORKSPACE_PATH
-      ?? resolveDefaultCwd();
-    this.store = opts.store ?? new InMemorySessionStore({
-      defaultWorkspacePath: this.defaultWorkspacePath,
-    });
+    this.defaultWorkspacePath =
+      opts.defaultWorkspacePath ??
+      process.env.OTTO_DEFAULT_WORKSPACE_PATH ??
+      resolveDefaultCwd();
+    this.store =
+      opts.store ??
+      new InMemorySessionStore({
+        defaultWorkspacePath: this.defaultWorkspacePath,
+      });
     this.sessionEvictUnsub = this.store.onEvict((sessionId) => {
       this.cleanupSessionTitleState(sessionId);
     });
@@ -589,7 +597,8 @@ export class OttoServer {
       opts.sessionTitleTimeoutMs ?? DEFAULT_SESSION_TITLE_TIMEOUT_MS;
     this.recurringTaskRegistry = new RecurringTaskRegistry({
       allowPaidBackground: true,
-      stateStore: opts.recurringTaskStateStore ?? new JsonRecurringTaskStateStore(),
+      stateStore:
+        opts.recurringTaskStateStore ?? new JsonRecurringTaskStateStore(),
       onError: (taskName, error) => {
         console.warn(`[ResidentTask] ${taskName} failed:`, error);
       },
@@ -600,8 +609,11 @@ export class OttoServer {
       ...opts.managedChannelPlatform?.connectors,
       ...opts.channelConnectors,
     };
-    this.channelIdentityRegistry = opts.channelIdentityRegistry
-      ?? new JsonChannelIdentityRegistryV1({ audit: createJsonChannelIdentityAuditSink() });
+    this.channelIdentityRegistry =
+      opts.channelIdentityRegistry ??
+      new JsonChannelIdentityRegistryV1({
+        audit: createJsonChannelIdentityAuditSink(),
+      });
     getHabitAnalyzer().setTaskRegistry(this.recurringTaskRegistry);
     this.globalAuthorizationMode =
       loadUserSettingsSubset().authorizationMode ?? 'manual';
@@ -614,9 +626,8 @@ export class OttoServer {
 
   /** 启动 HTTP + WS，并按需注册飞书网关。 */
   async start(): Promise<void> {
-    const { enforceUsbLicenseFromEnvironment } = await import(
-      './modules/order_license/usbLicenseActivation.js'
-    );
+    const { enforceUsbLicenseFromEnvironment } =
+      await import('./modules/order_license/usbLicenseActivation.js');
     await enforceUsbLicenseFromEnvironment();
     this.http = createServer((req, res) => this.handleHttp(req, res));
     this.wss = new WebSocketServer({
@@ -633,9 +644,10 @@ export class OttoServer {
     // 仍只经原订阅链渲染，因此不重复 append。
     this.externalInboundUnsub?.();
     this.externalInboundUnsub = this.store.subscribeAll((frame) => {
-      const sessionId = frame.type === 'message_start'
-        ? frame.payload.message.sessionId
-        : undefined;
+      const sessionId =
+        frame.type === 'message_start'
+          ? frame.payload.message.sessionId
+          : undefined;
       const session = sessionId ? this.store.getSession(sessionId) : undefined;
       // 全局通知也必须遵守会话租户边界。否则身份切换后，旧/
       // 其他企业会话的标题与摘要会绕过订阅授权广播给当前用户。
@@ -692,7 +704,7 @@ export class OttoServer {
       const realtimeWatcher = new AutoSkillRealtimeWatcher({ threshold: 3 });
       realtimeWatcher.setCallback((summary) => {
         this.broadcastAll({
-          type: "realtime_pattern",
+          type: 'realtime_pattern',
           payload: {
             pattern: summary.pattern,
             count: summary.count,
@@ -712,12 +724,11 @@ export class OttoServer {
       habitAnalyzer.setConfig(scannerConfig);
       habitAnalyzer.setCallback((insights) => {
         this.broadcastAll({
-          type: "habit_insight",
+          type: 'habit_insight',
           payload: { insights },
         });
       });
       habitAnalyzer.start();
-
 
       this.setAutoSkillScannerEnabled(backgroundModelTasksEnabled);
     } catch (error) {
@@ -765,22 +776,43 @@ export class OttoServer {
       proactive.setLocalNotifier({
         notify: async (message, priority, ruleId) => {
           const ruleName =
-            { morning_briefing: '晨间简报', tomorrow_early_schedule: '明早日程提醒', daily_work_summary: '每日汇总' }[ruleId] ?? ruleId;
+            {
+              morning_briefing: '晨间简报',
+              tomorrow_early_schedule: '明早日程提醒',
+              daily_work_summary: '每日汇总',
+            }[ruleId] ?? ruleId;
           this.broadcastAll({
             type: 'proactive_alert',
-            payload: { ruleId, ruleName, message, priority, timestamp: new Date().toISOString() },
+            payload: {
+              ruleId,
+              ruleName,
+              message,
+              priority,
+              timestamp: new Date().toISOString(),
+            },
           });
         },
       } as ProactiveLocalNotifier);
-      proactive.startScheduler(() => ({
-        userId: 'local',
-        userName: 'Otto User',
-        currentDay: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date().getDay()],
-        currentTime: `${new Date().getHours()}:${new Date().getMinutes()}`,
-        recentActions: [],
-        pendingTasks: 0,
-        hasUpcomingMeeting: false,
-      }), this.recurringTaskRegistry);
+      proactive.startScheduler(
+        () => ({
+          userId: 'local',
+          userName: 'Otto User',
+          currentDay: [
+            'Sunday',
+            'Monday',
+            'Tuesday',
+            'Wednesday',
+            'Thursday',
+            'Friday',
+            'Saturday',
+          ][new Date().getDay()],
+          currentTime: `${new Date().getHours()}:${new Date().getMinutes()}`,
+          recentActions: [],
+          pendingTasks: 0,
+          hasUpcomingMeeting: false,
+        }),
+        this.recurringTaskRegistry,
+      );
       console.log('[Server] ProactiveService started (local mode)');
     } catch (err) {
       console.warn('[Server] ProactiveService init failed (non-fatal):', err);
@@ -798,7 +830,9 @@ export class OttoServer {
     this.stopChannelWorkflowMilestones?.();
     this.stopChannelWorkflowMilestones = undefined;
     getHabitAnalyzer().stop();
-    this.recurringTaskRegistry.stopAll();
+    // Stop scheduling first, then let already-started external work checkpoint
+    // its outcome before connectors and transports are torn down.
+    await this.recurringTaskRegistry.shutdown({ timeoutMs: 30_000 });
     this.sessionEvictUnsub?.();
     this.sessionEvictUnsub = undefined;
     this.pendingSessionTitles.clear();
@@ -817,10 +851,15 @@ export class OttoServer {
     }
     this.workflowUnsub?.();
     this.workflowUnsub = undefined;
-    try { getProactiveService().stopScheduler(); } catch { /* ignore */ }
+    try {
+      getProactiveService().stopScheduler();
+    } catch {
+      /* ignore */
+    }
     this.scheduleUnsub?.();
     this.scheduleUnsub = undefined;
-    for (const timer of this.ephemeralSessionTimers.values()) clearTimeout(timer);
+    for (const timer of this.ephemeralSessionTimers.values())
+      clearTimeout(timer);
     this.ephemeralSessionTimers.clear();
     // 落盘存储：停机前把挂起的去抖写盘立即落地（被动保存不丢最后一轮）。
     const flush = (this.store as { flush?: () => void }).flush;
@@ -894,7 +933,9 @@ export class OttoServer {
     lastCompletedInputVersion?: string;
     nextRunAtMs?: number;
   }> {
-    return this.recurringTaskRegistry.list().map(({ stop: _stop, ...task }) => ({ ...task }));
+    return this.recurringTaskRegistry
+      .list()
+      .map(({ stop: _stop, ...task }) => ({ ...task }));
   }
 
   /** 供 Electron main / CLI 端点文件写入；renderer 和 WS 客户端不应获得。 */
@@ -1055,10 +1096,7 @@ export class OttoServer {
         workspace.managerWorkspace?.organization.departments.find(
           (item) => item.id === workspace.context.departmentId,
         );
-      if (
-        currentDepartment &&
-        profile.department !== currentDepartment.name
-      ) {
+      if (currentDepartment && profile.department !== currentDepartment.name) {
         return '当前成员只能使用本部门 Agent。';
       }
     }
@@ -1100,10 +1138,7 @@ export class OttoServer {
       return ENTERPRISE_IDENTITY_RECOVERING_MESSAGE;
     }
     if (identity.status === 'active') {
-      if (
-        !session.enterpriseAccountId ||
-        !session.enterpriseOrganizationId
-      ) {
+      if (!session.enterpriseAccountId || !session.enterpriseOrganizationId) {
         return '该会话缺少中心企业身份绑定，已拒绝访问。';
       }
       if (
@@ -1114,10 +1149,7 @@ export class OttoServer {
       }
       return undefined;
     }
-    if (
-      session.enterpriseAccountId ||
-      session.enterpriseOrganizationId
-    ) {
+    if (session.enterpriseAccountId || session.enterpriseOrganizationId) {
       return '该企业会话需要重新登录原中心企业账号。';
     }
     return undefined;
@@ -1127,8 +1159,9 @@ export class OttoServer {
     return this.store
       .listSessions()
       .filter(
-        (session) => !this.store.isEphemeralSession(session.sessionId)
-          && !this.sessionAuthorizationError(session),
+        (session) =>
+          !this.store.isEphemeralSession(session.sessionId) &&
+          !this.sessionAuthorizationError(session),
       );
   }
 
@@ -1162,8 +1195,8 @@ export class OttoServer {
       .listSessions()
       .find(
         (session) =>
-          session.feishuChatId === chatId
-          && !this.sessionAuthorizationError(session),
+          session.feishuChatId === chatId &&
+          !this.sessionAuthorizationError(session),
       );
     if (existing) return existing;
     return this.createSessionForCurrentIdentity({
@@ -1224,16 +1257,19 @@ export class OttoServer {
       serverVersion: SERVER_VERSION,
       protocolVersion: PROTOCOL_VERSION,
       uptimeMs: () => Date.now() - this.startedAt,
-      cwd: (sessionId) => this.store.getSession(sessionId)?.workspacePath
-        ?? this.defaultWorkspacePath,
+      cwd: (sessionId) =>
+        this.store.getSession(sessionId)?.workspacePath ??
+        this.defaultWorkspacePath,
       getConfig: (sid) =>
         this.store.getRuntime(sid)?.getConfig?.() as CoreConfig | undefined,
       currentModel: () => this.currentModel(),
       modelInfos: () => this.modelInfos(),
       mcpServerInfos: () => this.mcpServerInfos(),
-      extensionSummaries: (sessionId) => discoverExtensionSummaries(
-        this.store.getSession(sessionId)?.workspacePath ?? this.defaultWorkspacePath,
-      ),
+      extensionSummaries: (sessionId) =>
+        discoverExtensionSummaries(
+          this.store.getSession(sessionId)?.workspacePath ??
+            this.defaultWorkspacePath,
+        ),
     };
   }
 
@@ -1432,9 +1468,7 @@ export class OttoServer {
       );
     }
     // 模型切换成功日志
-    console.log(
-      `[model-switch] session=${sessionId} model=${model}`,
-    );
+    console.log(`[model-switch] session=${sessionId} model=${model}`);
     // 回发带 current 的 models_list，让 renderer 模型药丸/菜单勾号反映真实生效模型。
     this.send(conn.socket, {
       type: 'models_list',
@@ -1454,14 +1488,18 @@ export class OttoServer {
       return Promise.resolve();
     }
     if (
-      (session.status !== 'idle' && session.status !== 'error')
-      || this.runtimeInit.has(sessionId)
-      || this.messageDispatches.has(sessionId)
-      || this.workspaceUpdates.has(sessionId)
+      (session.status !== 'idle' && session.status !== 'error') ||
+      this.runtimeInit.has(sessionId) ||
+      this.messageDispatches.has(sessionId) ||
+      this.workspaceUpdates.has(sessionId)
     ) {
       this.send(
         conn.socket,
-        errorFrame(sessionId, 'session_busy', '当前任务执行中，完成或停止后再切换工作目录'),
+        errorFrame(
+          sessionId,
+          'session_busy',
+          '当前任务执行中，完成或停止后再切换工作目录',
+        ),
       );
       return Promise.resolve();
     }
@@ -1486,17 +1524,24 @@ export class OttoServer {
       if (!stat.isDirectory()) throw new Error('所选路径不是目录');
       const session = this.store.getSession(sessionId);
       if (!session) {
-        this.send(conn.socket, errorFrame(sessionId, 'no_session', '会话不存在'));
+        this.send(
+          conn.socket,
+          errorFrame(sessionId, 'no_session', '会话不存在'),
+        );
         return;
       }
       if (
-        (session.status !== 'idle' && session.status !== 'error')
-        || this.runtimeInit.has(sessionId)
-        || this.messageDispatches.has(sessionId)
+        (session.status !== 'idle' && session.status !== 'error') ||
+        this.runtimeInit.has(sessionId) ||
+        this.messageDispatches.has(sessionId)
       ) {
         this.send(
           conn.socket,
-          errorFrame(sessionId, 'session_busy', '当前任务执行中，完成或停止后再切换工作目录'),
+          errorFrame(
+            sessionId,
+            'session_busy',
+            '当前任务执行中，完成或停止后再切换工作目录',
+          ),
         );
         return;
       }
@@ -1976,8 +2021,11 @@ export class OttoServer {
   // ──────────────────────────────────────────────────────────────────────
 
   private workspaceForSession(sessionId?: string): string {
-    return (sessionId ? this.store.getSession(sessionId)?.workspacePath : undefined)
-      ?? this.defaultWorkspacePath;
+    return (
+      (sessionId
+        ? this.store.getSession(sessionId)?.workspacePath
+        : undefined) ?? this.defaultWorkspacePath
+    );
   }
 
   /** 拉取层级记忆文件（项目 OTTO.md + 全局 ~/.otto-user/memory/OTTO.md）内容。 */
@@ -2033,7 +2081,8 @@ export class OttoServer {
       );
       await MemoryTool.performAddMemoryEntry(fact, memoryFilePath, {
         readFile: fs.readFile,
-        writeFile: fs.writeFile,
+        writeFile: async (filePath, content) =>
+          atomicWriteTextFile(filePath, content),
         mkdir: fs.mkdir,
       });
       await this.handleGetMemory(conn, {
@@ -2063,7 +2112,10 @@ export class OttoServer {
     );
   }
 
-  private async sendSkillsList(conn: ClientConn, workspacePath: string): Promise<void> {
+  private async sendSkillsList(
+    conn: ClientConn,
+    workspacePath: string,
+  ): Promise<void> {
     try {
       const adapter = new SkillsCompatAdapter(workspacePath);
       const skills = await adapter.listSkills();
@@ -2195,7 +2247,9 @@ export class OttoServer {
     }
   }
 
-  private startResidentMaintenanceTasks(backgroundModelTasksEnabled: boolean): void {
+  private startResidentMaintenanceTasks(
+    backgroundModelTasksEnabled: boolean,
+  ): void {
     if (this.residentWorkflowSupervisor && !this.stopResidentWorkflowWorker) {
       this.stopResidentWorkflowWorker = this.recurringTaskRegistry.register({
         name: 'server-durable-workflow-worker',
@@ -2206,7 +2260,8 @@ export class OttoServer {
         estimatedCostUsdPerRun: 0,
         missedRunPolicy: 'run-once',
         getInputVersion: () => this.residentWorkflowSupervisor!.inputVersion(),
-        run: () => this.residentWorkflowSupervisor!.tick().then(() => undefined),
+        run: () =>
+          this.residentWorkflowSupervisor!.tick().then(() => undefined),
       });
     }
     if (this.managedChannelPlatform && !this.stopChannelWorkflowMilestones) {
@@ -2218,7 +2273,8 @@ export class OttoServer {
         initialDelayMs: 0,
         estimatedCostUsdPerRun: 0,
         missedRunPolicy: 'run-once',
-        getInputVersion: () => this.managedChannelPlatform!.milestoneInputVersion(),
+        getInputVersion: () =>
+          this.managedChannelPlatform!.milestoneInputVersion(),
         run: () => this.managedChannelPlatform!.flushMilestones(),
       });
     }
@@ -2232,7 +2288,8 @@ export class OttoServer {
         missedRunPolicy: 'skip',
         // Maintenance includes time-based expiry, so each cadence bucket is a
         // real deterministic input even when user content did not change.
-        getInputVersion: () => `bucket:${Math.floor(Date.now() / MAINTENANCE_INTERVAL_MS)}`,
+        getInputVersion: () =>
+          `bucket:${Math.floor(Date.now() / MAINTENANCE_INTERVAL_MS)}`,
         run: async () => {
           await getAutoMemoryEngine().runMaintenanceCycle();
         },
@@ -2256,11 +2313,13 @@ export class OttoServer {
       estimatedCostUsdPerRun: 0.01,
       missedRunPolicy: 'skip',
       getInputVersion: () => {
-        const candidates = this.store.listSessions()
-          .filter((session) => (
-            session.status === 'idle'
-            && session.messageCount >= AUTO_COMPRESS_MIN_MESSAGES
-          ))
+        const candidates = this.store
+          .listSessions()
+          .filter(
+            (session) =>
+              session.status === 'idle' &&
+              session.messageCount >= AUTO_COMPRESS_MIN_MESSAGES,
+          )
           .map((session) => `${session.sessionId}:${session.messageCount}`)
           .sort();
         return candidates.length > 0 ? candidates.join('|') : undefined;
@@ -2567,7 +2626,9 @@ export class OttoServer {
       if (!isLoopbackRequest(req)) {
         return sendJson(res, 403, err('loopback_only'));
       }
-      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+      if (
+        !matchesBearerToken(req.headers.authorization, this.localControlToken)
+      ) {
         return sendJson(res, 401, err('unauthorized'));
       }
       void readJsonBody(req)
@@ -2601,7 +2662,9 @@ export class OttoServer {
       if (!isLoopbackRequest(req)) {
         return sendJson(res, 403, err('loopback_only'));
       }
-      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+      if (
+        !matchesBearerToken(req.headers.authorization, this.localControlToken)
+      ) {
         return sendJson(res, 401, err('unauthorized'));
       }
       void readJsonBody(req)
@@ -2623,7 +2686,11 @@ export class OttoServer {
           sendJson(res, 202, ok({ deliveredTo: this.conns.size }));
         })
         .catch((error) => {
-          sendJson(res, 400, err(error instanceof Error ? error.message : String(error)));
+          sendJson(
+            res,
+            400,
+            err(error instanceof Error ? error.message : String(error)),
+          );
         });
       return;
     }
@@ -2632,7 +2699,11 @@ export class OttoServer {
       return;
     }
     if (path === '/main.js') {
-      void this.serveRendererAsset(res, 'main.js', 'application/javascript; charset=utf-8');
+      void this.serveRendererAsset(
+        res,
+        'main.js',
+        'application/javascript; charset=utf-8',
+      );
       return;
     }
     // 跨域探测接口：企业服务器网页检测本地 otto（只读，最小化响应）
@@ -2649,7 +2720,9 @@ export class OttoServer {
       return sendJsonWithCors(res, 200, ok(pingResponse), req.headers.origin);
     }
     if (path === HTTP_ROUTES.channelPairings && req.method === 'POST') {
-      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+      if (
+        !matchesBearerToken(req.headers.authorization, this.localControlToken)
+      ) {
         return sendJson(res, 401, err('unauthorized'));
       }
       void readJsonBody(req)
@@ -2657,7 +2730,11 @@ export class OttoServer {
         .then(async (input) => {
           const connector = this.channelConnectors[input.provider];
           if (!connector) {
-            sendJson(res, 503, err(`channel_connector_unavailable:${input.provider}`));
+            sendJson(
+              res,
+              503,
+              err(`channel_connector_unavailable:${input.provider}`),
+            );
             return;
           }
           const pairing = await connector.beginPairing(input);
@@ -2665,7 +2742,11 @@ export class OttoServer {
           sendJson(res, 201, ok(pairing));
         })
         .catch((error) => {
-          sendJson(res, 400, err(error instanceof Error ? error.message : String(error)));
+          sendJson(
+            res,
+            400,
+            err(error instanceof Error ? error.message : String(error)),
+          );
         });
       return;
     }
@@ -2673,14 +2754,17 @@ export class OttoServer {
       /^\/channels\/pairings\/(pair_[a-f0-9]{24})(?:\/(install))?$/,
     );
     if (channelPairingMatch) {
-      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+      if (
+        !matchesBearerToken(req.headers.authorization, this.localControlToken)
+      ) {
         return sendJson(res, 401, err('unauthorized'));
       }
       const pairingId = channelPairingMatch[1];
       const action = channelPairingMatch[2];
       const provider = this.channelPairingProviders.get(pairingId);
       const connector = provider ? this.channelConnectors[provider] : undefined;
-      if (!connector) return sendJson(res, 404, err('channel_pairing_not_found'));
+      if (!connector)
+        return sendJson(res, 404, err('channel_pairing_not_found'));
       let operation: Promise<unknown>;
       if (req.method === 'GET' && !action) {
         operation = connector.getPairingStatus(pairingId);
@@ -2695,30 +2779,42 @@ export class OttoServer {
       }
       void operation
         .then((result) => {
-          const status = result && typeof result === 'object' && 'status' in result
-            ? String((result as { status: unknown }).status)
-            : undefined;
+          const status =
+            result && typeof result === 'object' && 'status' in result
+              ? String((result as { status: unknown }).status)
+              : undefined;
           if (
-            req.method === 'DELETE'
-            || action === 'install'
-            || (status !== undefined
-              && ['connected', 'expired', 'denied', 'failed', 'revoked'].includes(status))
+            req.method === 'DELETE' ||
+            action === 'install' ||
+            (status !== undefined &&
+              ['connected', 'expired', 'denied', 'failed', 'revoked'].includes(
+                status,
+              ))
           ) {
             this.channelPairingProviders.delete(pairingId);
           }
           sendJson(res, 200, ok(result));
         })
         .catch((error) => {
-          sendJson(res, 409, err(error instanceof Error ? error.message : String(error)));
+          sendJson(
+            res,
+            409,
+            err(error instanceof Error ? error.message : String(error)),
+          );
         });
       return;
     }
     if (path === HTTP_ROUTES.channelInstallations && req.method === 'GET') {
-      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+      if (
+        !matchesBearerToken(req.headers.authorization, this.localControlToken)
+      ) {
         return sendJson(res, 401, err('unauthorized'));
       }
       const installations = Object.values(this.channelConnectors)
-        .filter((connector): connector is ChannelConnectorV1 => connector !== undefined)
+        .filter(
+          (connector): connector is ChannelConnectorV1 =>
+            connector !== undefined,
+        )
         .flatMap((connector) => connector.listInstallations());
       return sendJson(res, 200, ok(installations));
     }
@@ -2726,48 +2822,59 @@ export class OttoServer {
       /^\/channels\/installations\/(channel_(feishu|lark|wecom)_[a-f0-9]{24})(?:\/(start|stop|health|send|identities))?$/,
     );
     if (channelInstallationMatch) {
-      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+      if (
+        !matchesBearerToken(req.headers.authorization, this.localControlToken)
+      ) {
         return sendJson(res, 401, err('unauthorized'));
       }
       const installationId = channelInstallationMatch[1];
       const provider = channelInstallationMatch[2] as ChannelProvider;
       const action = channelInstallationMatch[3];
       const connector = this.channelConnectors[provider];
-      if (!connector) return sendJson(res, 404, err('channel_installation_not_found'));
+      if (!connector)
+        return sendJson(res, 404, err('channel_installation_not_found'));
       const installation = connector
         .listInstallations()
         .find((candidate) => candidate.installationId === installationId);
-      if (!installation) return sendJson(res, 404, err('channel_installation_not_found'));
+      if (!installation)
+        return sendJson(res, 404, err('channel_installation_not_found'));
       let operation: Promise<unknown>;
       if (req.method === 'GET' && action === 'identities') {
-        operation = Promise.resolve(this.channelIdentityRegistry.list(installationId));
+        operation = Promise.resolve(
+          this.channelIdentityRegistry.list(installationId),
+        );
       } else if (req.method === 'POST' && action === 'identities') {
         const actor = this.productWorkspace.snapshot().context;
-        if (actor.edition === 'enterprise' && !actor.capabilities.includes('organization:manage')) {
+        if (
+          actor.edition === 'enterprise' &&
+          !actor.capabilities.includes('organization:manage')
+        ) {
           return sendJson(res, 403, err('channel_identity_admin_required'));
         }
         operation = readJsonBody(req)
           .then((body) => parseChannelIdentityMutation(body))
-          .then((input) => input.action === 'bind'
-            ? this.channelIdentityRegistry.bind({
-              provider,
-              installationId,
-              tenantId: installation.tenantId,
-              providerUserId: input.providerUserId,
-              canonicalUserId: input.canonicalUserId,
-              approvalId: input.approvalId,
-              approvedBy: actor.userId,
-              expectedRevision: input.expectedRevision,
-            })
-            : this.channelIdentityRegistry.revoke({
-              provider,
-              installationId,
-              tenantId: installation.tenantId,
-              providerUserId: input.providerUserId,
-              approvalId: input.approvalId,
-              approvedBy: actor.userId,
-              expectedRevision: input.expectedRevision,
-            }));
+          .then((input) =>
+            input.action === 'bind'
+              ? this.channelIdentityRegistry.bind({
+                  provider,
+                  installationId,
+                  tenantId: installation.tenantId,
+                  providerUserId: input.providerUserId,
+                  canonicalUserId: input.canonicalUserId,
+                  approvalId: input.approvalId,
+                  approvedBy: actor.userId,
+                  expectedRevision: input.expectedRevision,
+                })
+              : this.channelIdentityRegistry.revoke({
+                  provider,
+                  installationId,
+                  tenantId: installation.tenantId,
+                  providerUserId: input.providerUserId,
+                  approvalId: input.approvalId,
+                  approvedBy: actor.userId,
+                  expectedRevision: input.expectedRevision,
+                }),
+          );
       } else if (req.method === 'GET' && !action) {
         operation = Promise.resolve(installation);
       } else if (req.method === 'GET' && action === 'health') {
@@ -2781,14 +2888,20 @@ export class OttoServer {
           .then((body) => parseChannelSendInput(body))
           .then((input) => connector.send(installationId, input));
       } else if (req.method === 'DELETE' && !action) {
-        operation = connector.revoke(installationId).then(() => ({ revoked: true }));
+        operation = connector
+          .revoke(installationId)
+          .then(() => ({ revoked: true }));
       } else {
         return sendJson(res, 405, err('method_not_allowed'));
       }
       void operation
         .then((result) => sendJson(res, 200, ok(result)))
         .catch((error) => {
-          sendJson(res, 409, err(error instanceof Error ? error.message : String(error)));
+          sendJson(
+            res,
+            409,
+            err(error instanceof Error ? error.message : String(error)),
+          );
         });
       return;
     }
@@ -2892,7 +3005,9 @@ export class OttoServer {
       sendJson(
         res,
         500,
-        err(`browser_app_unavailable: ${e instanceof Error ? e.message : String(e)}`),
+        err(
+          `browser_app_unavailable: ${e instanceof Error ? e.message : String(e)}`,
+        ),
       );
     }
   }
@@ -3173,27 +3288,18 @@ export class OttoServer {
           errorFrame(scopedSessionId, 'no_session', '会话不存在'),
         );
       }
-      const identityDenied =
-        this.sessionIdentityAuthorizationError(session);
+      const identityDenied = this.sessionIdentityAuthorizationError(session);
       if (identityDenied) {
         return this.send(
           conn.socket,
-          errorFrame(
-            scopedSessionId,
-            'forbidden_session',
-            identityDenied,
-          ),
+          errorFrame(scopedSessionId, 'forbidden_session', identityDenied),
         );
       }
       const denied = this.sessionAuthorizationError(session);
       if (denied) {
         return this.send(
           conn.socket,
-          errorFrame(
-            scopedSessionId,
-            'forbidden_agent_profile',
-            denied,
-          ),
+          errorFrame(scopedSessionId, 'forbidden_agent_profile', denied),
         );
       }
     }
@@ -3264,16 +3370,20 @@ export class OttoServer {
         if (profile) {
           this.store.appendMessage(summary.sessionId, {
             role: 'assistant',
-            content: [{
-              type: 'text',
-              value: profile.welcomeMessage
-                ?? `Hello，我是 ${profile.name}，我可以帮你完成相关工作。`,
-            }],
+            content: [
+              {
+                type: 'text',
+                value:
+                  profile.welcomeMessage ??
+                  `Hello，我是 ${profile.name}，我可以帮你完成相关工作。`,
+              },
+            ],
             source: 'local',
             isStreaming: false,
           });
         }
-        const createdSummary = this.store.getSession(summary.sessionId) ?? summary;
+        const createdSummary =
+          this.store.getSession(summary.sessionId) ?? summary;
         if (!profile?.ephemeral) {
           this.broadcastAll({
             type: 'session_upsert',
@@ -3850,7 +3960,8 @@ export class OttoServer {
     conn: ClientConn,
     msg: Extract<ClientToServer, { type: 'send_user_message' }>,
   ): Promise<void> {
-    const { sessionId, source, clientMessageId, authorizedContext } = msg.payload;
+    const { sessionId, source, clientMessageId, authorizedContext } =
+      msg.payload;
     let { content } = msg.payload;
     const session = this.store.getSession(sessionId);
     if (!session) {
@@ -3880,7 +3991,10 @@ export class OttoServer {
         const newSummary = this.createSessionForCurrentIdentity({
           productEdition: this.productWorkspace.snapshot().context.edition,
         });
-        this.broadcastAll({ type: 'session_upsert', payload: { session: newSummary } });
+        this.broadcastAll({
+          type: 'session_upsert',
+          payload: { session: newSummary },
+        });
         const titleInput = this.claimSessionTitleInput(
           newSummary.sessionId,
           content,
@@ -3905,7 +4019,11 @@ export class OttoServer {
         );
       }
 
-      const cached = await this.cacheMessageFilesOrReport(conn, sessionId, content);
+      const cached = await this.cacheMessageFilesOrReport(
+        conn,
+        sessionId,
+        content,
+      );
       if (!cached) return;
       content = cached;
 
@@ -3926,7 +4044,11 @@ export class OttoServer {
     }
 
     const titleInput = this.claimSessionTitleInput(sessionId, content);
-    const cached = await this.cacheMessageFilesOrReport(conn, sessionId, content);
+    const cached = await this.cacheMessageFilesOrReport(
+      conn,
+      sessionId,
+      content,
+    );
     if (!cached) {
       this.releaseSessionTitleClaim(sessionId, titleInput);
       return;
@@ -4055,7 +4177,10 @@ export class OttoServer {
     }
 
     // 内部测试阶段所有身份都必须先绑定自己的 API。真实运行不允许回退 mock
-    if (!this.shouldMock() && this.modelInfos().every((model) => !model.enabled)) {
+    if (
+      !this.shouldMock() &&
+      this.modelInfos().every((model) => !model.enabled)
+    ) {
       this.finishProvisionalSessionTitle(sessionId, provisionalTitle);
       this.store.publish(sessionId, {
         type: 'error',
@@ -4164,7 +4289,8 @@ export class OttoServer {
       timeout.unref?.();
     });
     const titlePromise = Promise.resolve().then(() =>
-      runtime.generateTitle!(firstUserMessage));
+      runtime.generateTitle!(firstUserMessage),
+    );
     void Promise.race([titlePromise, timeoutPromise])
       .then((rawTitle) => {
         this.refineProvisionalSessionTitle(
@@ -4189,10 +4315,10 @@ export class OttoServer {
   ): ProvisionalSessionTitle | undefined {
     const latest = this.store.getSession(sessionId);
     if (
-      !latest
-      || latest.title !== DEFAULT_SESSION_TITLE
-      || this.manuallyRenamedSessions.has(sessionId)
-      || this.sessionAuthorizationError(latest)
+      !latest ||
+      latest.title !== DEFAULT_SESSION_TITLE ||
+      this.manuallyRenamedSessions.has(sessionId) ||
+      this.sessionAuthorizationError(latest)
     ) {
       return undefined;
     }
@@ -4217,12 +4343,12 @@ export class OttoServer {
   ): void {
     const latest = this.store.getSession(sessionId);
     if (
-      !latest
-      || latest.title !== provisionalTitle.title
-      || this.provisionalSessionTitles.get(sessionId) !== provisionalTitle
-      || this.manuallyRenamedSessions.has(sessionId)
-      || this.sessionAuthorizationError(latest)
-      || generatedTitle === provisionalTitle.title
+      !latest ||
+      latest.title !== provisionalTitle.title ||
+      this.provisionalSessionTitles.get(sessionId) !== provisionalTitle ||
+      this.manuallyRenamedSessions.has(sessionId) ||
+      this.sessionAuthorizationError(latest) ||
+      generatedTitle === provisionalTitle.title
     ) {
       return;
     }
@@ -4240,8 +4366,8 @@ export class OttoServer {
     provisionalTitle: ProvisionalSessionTitle | undefined,
   ): void {
     if (
-      provisionalTitle
-      && this.provisionalSessionTitles.get(sessionId) === provisionalTitle
+      provisionalTitle &&
+      this.provisionalSessionTitles.get(sessionId) === provisionalTitle
     ) {
       this.provisionalSessionTitles.delete(sessionId);
     }
@@ -4253,11 +4379,13 @@ export class OttoServer {
   ): string | undefined {
     const session = this.store.getSession(sessionId);
     if (
-      !session
-      || session.title !== DEFAULT_SESSION_TITLE
-      || this.claimedSessionTitles.has(sessionId)
-      || this.manuallyRenamedSessions.has(sessionId)
-      || this.store.getHistory(sessionId).some((message) => message.role === 'user')
+      !session ||
+      session.title !== DEFAULT_SESSION_TITLE ||
+      this.claimedSessionTitles.has(sessionId) ||
+      this.manuallyRenamedSessions.has(sessionId) ||
+      this.store
+        .getHistory(sessionId)
+        .some((message) => message.role === 'user')
     ) {
       return undefined;
     }
@@ -4359,12 +4487,14 @@ export class OttoServer {
     const summary = this.store.getSession(sessionId);
     const model = summary?.model;
     const profile = resolveAgentProfile(summary?.agentProfileId);
-    const enterpriseWorkspace = summary?.productEdition === 'enterprise'
-      ? this.productWorkspace.snapshot()
-      : undefined;
-    const workspaceContext = enterpriseWorkspace && !profile?.toolFree
-      ? buildEnterpriseWorkspaceContext(enterpriseWorkspace)
-      : '';
+    const enterpriseWorkspace =
+      summary?.productEdition === 'enterprise'
+        ? this.productWorkspace.snapshot()
+        : undefined;
+    const workspaceContext =
+      enterpriseWorkspace && !profile?.toolFree
+        ? buildEnterpriseWorkspaceContext(enterpriseWorkspace)
+        : '';
     const documentIdentity = enterpriseWorkspace
       ? resolveEnterpriseDocumentIdentity(enterpriseWorkspace)
       : undefined;
@@ -4382,7 +4512,7 @@ export class OttoServer {
           () => {
             const identity = this.productWorkspace.enterpriseIdentityState();
             return identity.status === 'active'
-              ? identity.account.managedModelGateway ?? null
+              ? (identity.account.managedModelGateway ?? null)
               : null;
           },
         );
@@ -4392,7 +4522,8 @@ export class OttoServer {
           : '会话已不存在';
         if (
           identityGeneration !== this.enterpriseIdentityGeneration ||
-          (latestSummary?.workspacePath ?? this.defaultWorkspacePath) !== workspacePath ||
+          (latestSummary?.workspacePath ?? this.defaultWorkspacePath) !==
+            workspacePath ||
           denied
         ) {
           runtime.cancel();
@@ -4404,8 +4535,7 @@ export class OttoServer {
                 sessionId,
                 code: 'forbidden_session',
                 message:
-                  denied ??
-                  '中心企业身份已变化，已丢弃旧身份下创建的运行时。',
+                  denied ?? '中心企业身份已变化，已丢弃旧身份下创建的运行时。',
               },
             });
           }
@@ -4697,7 +4827,10 @@ export class OttoServer {
 
   private getOrCreateQueue(sessionId: string): QueuedMessage[] {
     let q = this.messageQueues.get(sessionId);
-    if (!q) { q = []; this.messageQueues.set(sessionId, q); }
+    if (!q) {
+      q = [];
+      this.messageQueues.set(sessionId, q);
+    }
     return q;
   }
 
@@ -4710,11 +4843,7 @@ export class OttoServer {
     this.beginMessageDispatch(sessionId);
     // fire-and-forget: 下一轮不阻塞当前返回
     setImmediate(() => {
-      void this.handleQueuedMessage(
-        sessionId,
-        conn,
-        next,
-      );
+      void this.handleQueuedMessage(sessionId, conn, next);
     });
   }
 
@@ -4738,7 +4867,6 @@ export class OttoServer {
       this.endMessageDispatch(sessionId);
     }
   }
-
 }
 
 // ── helpers ──
@@ -4993,14 +5121,19 @@ function readJsonBody(
   });
 }
 
-function parseIncrementalUpdatePushBody(body: unknown):
+function parseIncrementalUpdatePushBody(
+  body: unknown,
+):
   | { ok: true; value: { manifestUrl: string; reason?: string } }
   | { ok: false; error: string } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return { ok: false, error: '请求体必须是对象' };
   }
   const input = body as { manifestUrl?: unknown; reason?: unknown };
-  if (typeof input.manifestUrl !== 'string' || input.manifestUrl.trim().length === 0) {
+  if (
+    typeof input.manifestUrl !== 'string' ||
+    input.manifestUrl.trim().length === 0
+  ) {
     return { ok: false, error: 'manifestUrl 不能为空' };
   }
   let manifestUrl: string;
@@ -5014,10 +5147,15 @@ function parseIncrementalUpdatePushBody(body: unknown):
     return { ok: false, error: 'manifestUrl 不是合法 URL' };
   }
   if (input.reason !== undefined) {
-    if (typeof input.reason !== 'string') return { ok: false, error: 'reason 必须是字符串' };
+    if (typeof input.reason !== 'string')
+      return { ok: false, error: 'reason 必须是字符串' };
     const reason = input.reason.trim();
-    if (reason.length > 160) return { ok: false, error: 'reason 不能超过 160 字符' };
-    return { ok: true, value: reason ? { manifestUrl, reason } : { manifestUrl } };
+    if (reason.length > 160)
+      return { ok: false, error: 'reason 不能超过 160 字符' };
+    return {
+      ok: true,
+      value: reason ? { manifestUrl, reason } : { manifestUrl },
+    };
   }
   return { ok: true, value: { manifestUrl } };
 }
@@ -5068,10 +5206,7 @@ function parseEnterpriseIdentitySyncBody(
     return { ok: false, error: '请求体缺少 account' };
   }
   if (wrapped.account === null) return { ok: true, account: null };
-  if (
-    typeof wrapped.account !== 'object' ||
-    Array.isArray(wrapped.account)
-  ) {
+  if (typeof wrapped.account !== 'object' || Array.isArray(wrapped.account)) {
     return { ok: false, error: 'account 必须是对象或 null' };
   }
   const input = wrapped.account as Record<string, unknown>;
@@ -5079,21 +5214,20 @@ function parseEnterpriseIdentitySyncBody(
     Array.from(value, (character) => {
       const code = character.charCodeAt(0);
       return code <= 31 || code === 127 ? ' ' : character;
-    }).join('').trim();
+    })
+      .join('')
+      .trim();
   const requiredText = (
     key: 'id' | 'organizationId' | 'name',
   ): string | undefined => {
     const value = input[key];
-    return typeof value === 'string' && value.trim()
-      ? value.trim()
-      : undefined;
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
   };
   const id = requiredText('id');
   const organizationId = requiredText('organizationId');
   const name = requiredText('name');
   const leaseExpiresAt =
-    typeof input.leaseExpiresAt === 'string' &&
-    input.leaseExpiresAt.trim()
+    typeof input.leaseExpiresAt === 'string' && input.leaseExpiresAt.trim()
       ? input.leaseExpiresAt.trim()
       : undefined;
   if (!id || !organizationId || !name || !leaseExpiresAt) {
@@ -5114,11 +5248,7 @@ function parseEnterpriseIdentitySyncBody(
   ] as const;
   for (const key of nullableTextKeys) {
     const value = input[key];
-    if (
-      value !== undefined &&
-      value !== null &&
-      typeof value !== 'string'
-    ) {
+    if (value !== undefined && value !== null && typeof value !== 'string') {
       return { ok: false, error: `account.${key} 必须是字符串或 null` };
     }
   }
@@ -5281,7 +5411,9 @@ function parseEnterpriseIdentitySyncBody(
       ...(typeof input.role === 'string' || input.role === null
         ? { role: input.role }
         : {}),
-      ...(Array.isArray(input.tags) ? { tags: [...input.tags] as string[] } : {}),
+      ...(Array.isArray(input.tags)
+        ? { tags: [...input.tags] as string[] }
+        : {}),
       ...(typeof input.department === 'string' || input.department === null
         ? { department: input.department }
         : {}),
@@ -5327,7 +5459,9 @@ function parseFeishuConfigSaveRequest(
   };
 }
 
-function parseChannelPairingBeginRequest(body: unknown): ChannelPairingBeginRequest {
+function parseChannelPairingBeginRequest(
+  body: unknown,
+): ChannelPairingBeginRequest {
   if (typeof body !== 'object' || body === null) {
     throw new Error('channel pairing body must be a JSON object');
   }
@@ -5394,8 +5528,10 @@ function parseChannelSendInput(body: unknown): {
   const text = typeof input.text === 'string' ? input.text.trim() : '';
   const idempotencyKey =
     typeof input.idempotencyKey === 'string' ? input.idempotencyKey.trim() : '';
-  if (!target || target.length > 500) throw new Error('channel message target is invalid');
-  if (!text || text.length > 20_000) throw new Error('channel message text is invalid');
+  if (!target || target.length > 500)
+    throw new Error('channel message target is invalid');
+  if (!text || text.length > 20_000)
+    throw new Error('channel message text is invalid');
   if (!/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)) {
     throw new Error('channel message idempotency key is invalid');
   }
@@ -5408,7 +5544,10 @@ type ChannelIdentityMutationCommon = {
   expectedRevision: number;
 };
 type ChannelIdentityMutation =
-  | (ChannelIdentityMutationCommon & { action: 'bind'; canonicalUserId: string })
+  | (ChannelIdentityMutationCommon & {
+      action: 'bind';
+      canonicalUserId: string;
+    })
   | (ChannelIdentityMutationCommon & { action: 'revoke' });
 
 function parseChannelIdentityMutation(body: unknown): ChannelIdentityMutation {
@@ -5425,7 +5564,10 @@ function parseChannelIdentityMutation(body: unknown): ChannelIdentityMutation {
     return value;
   };
   const expectedRevision = input.expectedRevision;
-  if (!Number.isSafeInteger(expectedRevision) || (expectedRevision as number) < 0) {
+  if (
+    !Number.isSafeInteger(expectedRevision) ||
+    (expectedRevision as number) < 0
+  ) {
     throw new Error('expectedRevision is invalid');
   }
   const common = {

@@ -3,6 +3,12 @@ name: SQLCipher native assets
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      require_attestation:
+        description: Fail the reusable workflow unless both verified matrices are attested.
+        required: false
+        type: boolean
+        default: true
   pull_request:
     paths:
       - '.github/workflows/sqlcipher-native.yml'
@@ -32,9 +38,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-  attestations: write
-  artifact-metadata: write
 
 env:
   SQLCIPHER_SOURCE_REVISION: e2a6040f2ae5cfff2b3e08eb3320007d93cdf3fc
@@ -44,9 +47,57 @@ env:
   GLIBC_MAX_VERSION: '2.35'
 
 jobs:
+  validate-source:
+    name: Classify native build source without privileges
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      trusted_for_attestation: ${{ steps.trust.outputs.trusted_for_attestation }}
+    steps:
+      - name: Checkout source for immutable trust classification
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Classify exact latest internal source
+        id: trust
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SOURCE_REF: ${{ github.ref }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          REQUIRE_ATTESTATION: ${{ inputs.require_attestation == true && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin internal
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          INTERNAL_COMMIT="$(git rev-parse origin/internal)"
+          test "$SOURCE_COMMIT" = "$GITHUB_SHA"
+
+          TRUSTED_FOR_ATTESTATION=false
+          if [ "$SOURCE_REPOSITORY" = "NSIETeam/otto-new" ] \
+            && [ "$SOURCE_COMMIT" = "$INTERNAL_COMMIT" ] \
+            && [ "$EVENT_NAME" != "pull_request" ] \
+            && { [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "push" ]; } \
+            && { [ "$SOURCE_REF" = "refs/heads/internal" ] || [ "$REQUIRE_ATTESTATION" = "true" ]; }; then
+            TRUSTED_FOR_ATTESTATION=true
+          fi
+
+          echo "trusted_for_attestation=$TRUSTED_FOR_ATTESTATION" >> "$GITHUB_OUTPUT"
+          if [ "$REQUIRE_ATTESTATION" = "true" ] \
+            && [ "$TRUSTED_FOR_ATTESTATION" != "true" ]; then
+            echo "Reusable SQLCipher builds may attest only the exact latest internal source." >&2
+            exit 1
+          fi
+
   build:
     name: Build ${{ matrix.target }}
+    needs: validate-source
     timeout-minutes: 90
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -299,9 +350,13 @@ jobs:
           retention-days: 14
 
   verify-matrix:
-    needs: build
+    needs:
+      - validate-source
+      - build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -331,14 +386,6 @@ jobs:
             --expected-source-revision "$SQLCIPHER_SOURCE_REVISION" \
             --expected-runtime-version "$ELECTRON_VERSION" \
             --require-matrix-manifest
-      - name: Attest verified native bindings
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
-        with:
-          subject-path: native/sqlcipher/*/better_sqlite3.node
-      - name: Attest the matrix manifest that binds metadata and SBOMs
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
-        with:
-          subject-path: native/sqlcipher/matrix-manifest.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sqlcipher-native-matrix
@@ -347,9 +394,13 @@ jobs:
           retention-days: 14
 
   verify-node-matrix:
-    needs: build
+    needs:
+      - validate-source
+      - build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -383,6 +434,60 @@ jobs:
             --expected-source-revision "$SQLCIPHER_SOURCE_REVISION" \
             --expected-runtime-version "$NODE_VERSION" \
             --require-matrix-manifest
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sqlcipher-node-native-matrix
+          path: native/sqlcipher-node
+          if-no-files-found: error
+          retention-days: 14
+
+  attest-matrix:
+    name: Attest verified Electron SQLCipher matrix
+    needs:
+      - validate-source
+      - verify-matrix
+    if: ${{ needs.validate-source.outputs.trusted_for_attestation == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download the already verified Electron matrix
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: sqlcipher-native-matrix
+          path: native/sqlcipher
+      - name: Attest verified native bindings
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: native/sqlcipher/*/better_sqlite3.node
+      - name: Attest the matrix manifest that binds metadata and SBOMs
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: native/sqlcipher/matrix-manifest.json
+
+  attest-node-matrix:
+    name: Attest verified enterprise Node.js SQLCipher matrix
+    needs:
+      - validate-source
+      - verify-node-matrix
+    if: ${{ needs.validate-source.outputs.trusted_for_attestation == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download the already verified Node.js matrix
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: sqlcipher-node-native-matrix
+          path: native/sqlcipher-node
       - name: Attest verified enterprise Node.js bindings
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
@@ -391,9 +496,28 @@ jobs:
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: native/sqlcipher-node/matrix-manifest.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: sqlcipher-node-native-matrix
-          path: native/sqlcipher-node
-          if-no-files-found: error
-          retention-days: 14
+
+  require-reusable-attestations:
+    name: Require both attestations for reusable release consumers
+    needs:
+      - validate-source
+      - verify-matrix
+      - verify-node-matrix
+      - attest-matrix
+      - attest-node-matrix
+    if: ${{ always() && inputs.require_attestation == true }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Fail closed unless both trusted attestations succeeded
+        shell: bash
+        env:
+          TRUSTED_SOURCE: ${{ needs.validate-source.outputs.trusted_for_attestation }}
+          ELECTRON_ATTESTATION_RESULT: ${{ needs.attest-matrix.result }}
+          NODE_ATTESTATION_RESULT: ${{ needs.attest-node-matrix.result }}
+        run: |
+          set -euo pipefail
+          test "$TRUSTED_SOURCE" = "true"
+          test "$ELECTRON_ATTESTATION_RESULT" = "success"
+          test "$NODE_ATTESTATION_RESULT" = "success"

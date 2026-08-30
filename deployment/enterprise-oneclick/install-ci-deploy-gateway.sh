@@ -13,7 +13,7 @@ export PATH
 export LC_ALL=C
 export HOME=/root USER=root LOGNAME=root SHELL=/bin/bash
 
-INSTALLER_GATEWAY_PROTOCOL='otto-enterprise-ci-deploy-v4'
+INSTALLER_GATEWAY_PROTOCOL='otto-enterprise-ci-deploy-v5'
 
 fail() {
   printf '[Otto CI Gateway Install] %s\n' "$*" >&2
@@ -307,6 +307,7 @@ STATE_ROOT='/var/lib/otto-ci-deploy'
 UPLOADS_ROOT="${STATE_ROOT}/uploads"
 STAGES_ROOT="${STATE_ROOT}/staging"
 LOCKS_ROOT="${STATE_ROOT}/locks"
+DEPLOYMENTS_ROOT="${STATE_ROOT}/deployments"
 UPLOAD_ROOT="${UPLOADS_ROOT}/enterprise"
 MIRROR_UPLOAD_ROOT="${UPLOADS_ROOT}/mirror"
 STAGING_ROOT="${STAGES_ROOT}/enterprise"
@@ -316,6 +317,7 @@ PRODUCTION_LOCK="${LOCKS_ROOT}/production.lock"
 DIRECTORY_TARGETS=(
   /usr/local/sbin "$LIBEXEC_DIR" /etc/otto-enterprise /etc/sudoers.d
   "$STATE_ROOT" "$UPLOADS_ROOT" "$STAGES_ROOT" "$LOCKS_ROOT"
+  "$DEPLOYMENTS_ROOT"
   "$UPLOAD_ROOT" "$MIRROR_UPLOAD_ROOT"
   "$STAGING_ROOT" "$MIRROR_STAGING_ROOT"
 )
@@ -405,7 +407,8 @@ install -d -o root -g root -m 0755 \
 install -d -o root -g root -m 0711 \
   "$STATE_ROOT" "$UPLOADS_ROOT" "$UPLOAD_ROOT" "$MIRROR_UPLOAD_ROOT"
 install -d -o root -g root -m 0700 \
-  "$STAGES_ROOT" "$LOCKS_ROOT" "$STAGING_ROOT" "$MIRROR_STAGING_ROOT"
+  "$STAGES_ROOT" "$LOCKS_ROOT" "$DEPLOYMENTS_ROOT" \
+  "$STAGING_ROOT" "$MIRROR_STAGING_ROOT"
 
 for target in "${DIRECTORY_TARGETS[@]}"; do
   require_root_controlled_target "$target" directory

@@ -365,11 +365,16 @@ sudo -u 你的CI回滚专用SSH账号 \
 ```
 
 预检必须输出且只输出一行
-`protocol=otto-enterprise-ci-deploy-v4 gateway=<sha256> publish=<sha256> rollback=<sha256> key=<key-id> config=/etc/otto-enterprise/enterprise.env deploy_user=<部署账号> rollback_user=<回滚账号>`，
+`protocol=otto-enterprise-ci-deploy-v5 gateway=<sha256> publish=<sha256> rollback=<sha256> key=<key-id> config=/etc/otto-enterprise/enterprise.env deploy_user=<部署账号> rollback_user=<回滚账号>`，
 其中三个 SHA-256 与本次锁定源码完全一致，key id 与本次企业包签名公钥一致，config
 必须逐字等于生产固定配置路径。任一字段
 不一致都不得触发稳定版发布。每次网关、helper 或信任公钥变化后，服务器管理员都必须
 从锁定源码重新执行上述安装流程；普通发布工作流没有修改 root 信任边界的权限。
+
+CI 网关只接受已经存在且通过身份验证的 one-click `current` 升级，不执行自动首装。全新
+服务器必须由管理员先按本说明人工审计并运行 `install.sh`；只有旧版本身份、数据库、配置、
+systemd 单元和部署工具都已锁入 root-only 事务快照后，工作流才允许切换并在公网验收失败时
+调用独立回滚账号恢复旧版本。成功验收后 `finalize-deployment` 才会清除该快照。
 
 ## 一、在旧服务器导出
 

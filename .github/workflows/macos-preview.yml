@@ -5,8 +5,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-  attestations: write
 
 concurrency:
   group: macos-preview-${{ github.ref }}
@@ -18,19 +16,15 @@ env:
   SQLCIPHER_SOURCE_REVISION: e2a6040f2ae5cfff2b3e08eb3320007d93cdf3fc
 
 jobs:
-  sqlcipher-native:
-    name: Build verified SQLCipher native matrix
-    uses: ./.github/workflows/sqlcipher-native.yml
-
-  preview:
-    name: Audit and package macOS preview
-    runs-on: macos-latest
-    timeout-minutes: 90
-    needs: sqlcipher-native
-
+  validate-source:
+    name: Validate immutable preview source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+      - name: Checkout source without privileged credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
 
@@ -38,20 +32,51 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "NSIETeam/otto-new"
           git fetch --no-tags origin internal
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_SHA" = "$(git rev-parse origin/internal)" || {
             echo "Preview builds must run from the latest internal commit." >&2
             exit 1
           }
 
+  sqlcipher-native:
+    name: Build verified SQLCipher native matrix
+    needs: validate-source
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/sqlcipher-native.yml
+    with:
+      require_attestation: true
+
+  preview:
+    name: Audit and package macOS preview
+    runs-on: macos-latest
+    timeout-minutes: 90
+    needs:
+      - validate-source
+      - sqlcipher-native
+    permissions:
+      contents: read
+      attestations: read
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
 
@@ -62,7 +87,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download verified SQLCipher native matrix
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sqlcipher-native-matrix
           path: native/sqlcipher
@@ -176,7 +201,7 @@ jobs:
           SIGNING_MODE="$SIGNING_MODE" node -e 'const fs=require("node:fs");fs.writeFileSync("preview-output/provenance.json",JSON.stringify({sourceRepository:process.env.GITHUB_REPOSITORY,sourceCommit:process.env.GITHUB_SHA,workflowRunId:process.env.GITHUB_RUN_ID,internalVersion:require("./package.json").version,signingStatus:process.env.SIGNING_MODE,builtAt:new Date().toISOString()},null,2)+"\n")'
 
       - name: Upload macOS preview
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: Otto-macOS-Preview
           path: preview-output/*

@@ -47,6 +47,10 @@ const releaseDraftCreationRecovery = readRepoFile(
   'scripts',
   'release-draft-creation-recovery.mjs',
 );
+const anonymousReleaseVerifier = readRepoFile(
+  'scripts',
+  'verify-anonymous-github-release-assets.mjs',
+);
 
 const gatewayInvocation =
   '/usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy';
@@ -137,7 +141,7 @@ describe('release workflow production privilege boundary', () => {
     ).toHaveLength(1);
     expect(
       releaseWorkflow.match(/^\s{4}environment: production-automation$/gm),
-    ).toHaveLength(8);
+    ).toHaveLength(11);
     expect(deployWorkflow).toContain('    environment: production-automation');
   });
 
@@ -334,7 +338,7 @@ describe('release workflow production privilege boundary', () => {
 
   it('requires the exact installed gateway, helpers and signing trust anchor', () => {
     for (const workflow of [deployWorkflow, releaseWorkflow]) {
-      expect(workflow).toContain('protocol=otto-enterprise-ci-deploy-v4');
+      expect(workflow).toContain('protocol=otto-enterprise-ci-deploy-v5');
       expect(workflow).toContain('config=/etc/otto-enterprise/enterprise.env');
       expect(workflow).toContain(
         'sha256sum deployment/enterprise-oneclick/ci-deploy-gateway.sh',
@@ -413,14 +417,21 @@ describe('release workflow production privilege boundary', () => {
       '  deploy-enterprise:',
     );
     const mirrorStart = releaseWorkflow.indexOf('  deploy-update-mirror:');
-    const publishStart = releaseWorkflow.indexOf('  publish-release:');
+    const canonicalStart = releaseWorkflow.indexOf('  publish-canonical:');
+    const legacyStart = releaseWorkflow.indexOf('  publish-legacy:');
+    const finalizeEnterpriseStart = releaseWorkflow.indexOf(
+      '  finalize-enterprise-release-transaction:',
+    );
     const rollbackMirrorStart = releaseWorkflow.indexOf(
       '  rollback-update-mirror:',
     );
     const rollbackReleaseStart = releaseWorkflow.indexOf(
       '  rollback-release-publication:',
     );
-    const mirrorJob = releaseWorkflow.slice(mirrorStart, publishStart);
+    const rollbackEnterpriseStart = releaseWorkflow.indexOf(
+      '  rollback-enterprise-release-transaction:',
+    );
+    const mirrorJob = releaseWorkflow.slice(mirrorStart, canonicalStart);
     const principalValidationJob = releaseWorkflow.slice(
       principalValidationStart,
       deployEnterpriseStart,
@@ -437,7 +448,19 @@ describe('release workflow production privilege boundary', () => {
       deployEnterpriseStart,
       mirrorStart,
     );
-    const publishJob = releaseWorkflow.slice(publishStart, rollbackMirrorStart);
+    const canonicalJob = releaseWorkflow.slice(canonicalStart, legacyStart);
+    const legacyJob = releaseWorkflow.slice(
+      legacyStart,
+      finalizeEnterpriseStart,
+    );
+    const finalizeEnterpriseJob = releaseWorkflow.slice(
+      finalizeEnterpriseStart,
+      rollbackMirrorStart,
+    );
+    const publishJob = releaseWorkflow.slice(
+      canonicalStart,
+      finalizeEnterpriseStart,
+    );
     expect(publishJob).toContain('always()');
     expect(publishJob).toContain('&& !cancelled()');
     expect(publishJob).toContain('- validate-deployment-principals');
@@ -454,7 +477,13 @@ describe('release workflow production privilege boundary', () => {
       rollbackMirrorStart,
       rollbackReleaseStart,
     );
-    const rollbackReleaseJob = releaseWorkflow.slice(rollbackReleaseStart);
+    const rollbackReleaseJob = releaseWorkflow.slice(
+      rollbackReleaseStart,
+      rollbackEnterpriseStart,
+    );
+    const rollbackEnterpriseJob = releaseWorkflow.slice(
+      rollbackEnterpriseStart,
+    );
     const gatewayPublishStart = gatewayScript.indexOf(
       'if [ "$COMMAND" = \'publish-mirror\' ]; then',
     );
@@ -530,33 +559,50 @@ describe('release workflow production privilege boundary', () => {
     );
     expect(deployEnterpriseJob).toContain('- validate-deployment-principals');
     expect(mirrorStart).toBeGreaterThan(-1);
-    expect(publishStart).toBeGreaterThan(mirrorStart);
-    expect(rollbackMirrorStart).toBeGreaterThan(publishStart);
+    expect(canonicalStart).toBeGreaterThan(mirrorStart);
+    expect(legacyStart).toBeGreaterThan(canonicalStart);
+    expect(finalizeEnterpriseStart).toBeGreaterThan(legacyStart);
+    expect(rollbackMirrorStart).toBeGreaterThan(finalizeEnterpriseStart);
     expect(rollbackReleaseStart).toBeGreaterThan(rollbackMirrorStart);
     expect(mirrorJob).toContain(
       'publish-mirror "$MIRROR_TRANSACTION_ID" \\\n            "${{ needs.build.outputs.version }}" \\\n            "${{ needs.build.outputs.package_identity }}" \\\n            "${{ needs.build.outputs.source_commit }}"',
     );
     expect(mirrorJob).toContain(
-      'ROLLBACK_DEPLOY_SSH_KEY: ${{ secrets.ROLLBACK_DEPLOY_SSH_KEY }}',
+      'DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}',
     );
-    expect(mirrorJob).toContain(
-      'ssh-keygen -y -P \'\' -f "$KEY_AUDIT_DIR/deploy"',
-    );
-    expect(mirrorJob).toContain(
-      '[ "$DEPLOY_KEY_FINGERPRINT" != "$ROLLBACK_KEY_FINGERPRINT" ]',
-    );
+    expect(mirrorJob).not.toContain('ROLLBACK_DEPLOY_SSH_KEY:');
     const deployServerJob = deployWorkflow.slice(
       deployWorkflow.indexOf('  deploy:'),
+      deployWorkflow.indexOf('  finalize-enterprise-deployment:'),
     );
     expect(deployServerJob).toContain(
-      'ROLLBACK_DEPLOY_SSH_KEY: ${{ secrets.ROLLBACK_DEPLOY_SSH_KEY }}',
+      'DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}',
     );
+    expect(deployServerJob).not.toContain('ROLLBACK_DEPLOY_SSH_KEY:');
     expect(deployServerJob).toContain(
       'ssh-keygen -y -P \'\' -f "$KEY_AUDIT_DIR/deploy"',
     );
-    expect(deployServerJob).toContain(
-      '[ "$DEPLOY_KEY_FINGERPRINT" != "$ROLLBACK_KEY_FINGERPRINT" ]',
+    expect(deployServerJob).not.toContain('ROLLBACK_KEY_FINGERPRINT');
+    expect(canonicalJob).toContain('- deploy-enterprise');
+    expect(canonicalJob).not.toContain('- deploy-update-mirror');
+    expect(mirrorJob).toContain('- publish-canonical');
+    expect(legacyJob).toContain('- publish-canonical');
+    expect(legacyJob).toContain('- deploy-update-mirror');
+    expect(deployEnterpriseJob).toContain('defer_finalize: true');
+    expect(finalizeEnterpriseJob).toContain('- publish-legacy');
+    expect(finalizeEnterpriseJob).toContain('finalize-deployment');
+    expect(finalizeEnterpriseJob).toContain('DEPLOY_SSH_KEY:');
+    expect(finalizeEnterpriseJob).not.toContain('ROLLBACK_DEPLOY_SSH_KEY:');
+    expect(finalizeEnterpriseJob).toContain('for attempt in 1 2 3 4 5 6; do');
+    expect(rollbackEnterpriseJob).toContain(
+      "needs.rollback-release-publication.result == 'success'",
     );
+    expect(rollbackEnterpriseJob).toContain(
+      "needs.rollback-update-mirror.result == 'success'",
+    );
+    expect(rollbackEnterpriseJob).toContain('rollback-enterprise');
+    expect(rollbackEnterpriseJob).toContain('ROLLBACK_DEPLOY_SSH_KEY:');
+    expect(rollbackEnterpriseJob).not.toMatch(/^\s+DEPLOY_SSH_KEY:/m);
     expect(gatewayPublish).toContain(
       '[ "$#" -eq 5 ] || fail \'usage: publish-mirror TRANSACTION VERSION PACKAGE_ID SOURCE_COMMIT\'',
     );
@@ -775,17 +821,68 @@ describe('release workflow production privilege boundary', () => {
       'partial release identity is ambiguous',
     );
     expect(releaseDraftCreationRecovery).not.toContain('draft: false');
-    expect(publishJob).toContain(
+    expect(canonicalJob).toContain(
       'PRE_PUBLIC_LATEST_SHA256: ${{ needs.create-release-drafts.outputs.pre_public_latest_sha256 }}',
     );
-    expect(publishJob).toContain('verify-pre-public-latest');
-    expect(publishJob.indexOf('verify-pre-public-latest')).toBeLessThan(
-      publishJob.indexOf('GH_TOKEN="$CANONICAL_TOKEN" gh release edit "$TAG"'),
+    expect(canonicalJob).toContain('verify-pre-public-latest');
+    expect(canonicalJob.indexOf('verify-pre-public-latest')).toBeLessThan(
+      canonicalJob.indexOf(
+        'GH_TOKEN="$CANONICAL_TOKEN" gh release edit "$TAG"',
+      ),
     );
     expect(
       publishJob.indexOf('GH_TOKEN="$CANONICAL_TOKEN" gh release edit "$TAG"'),
     ).toBeLessThan(
       publishJob.indexOf('GH_TOKEN="$LEGACY_TOKEN" gh release edit "$TAG"'),
+    );
+  });
+
+  it('proves canonical and legacy update paths remain anonymously downloadable', () => {
+    const canonicalStart = releaseWorkflow.indexOf('  publish-canonical:');
+    const legacyStart = releaseWorkflow.indexOf('  publish-legacy:');
+    const finalizeStart = releaseWorkflow.indexOf(
+      '  finalize-enterprise-release-transaction:',
+    );
+    const canonicalJob = releaseWorkflow.slice(canonicalStart, legacyStart);
+    const legacyJob = releaseWorkflow.slice(legacyStart, finalizeStart);
+    const canonicalMutation = canonicalJob.indexOf(
+      'GH_TOKEN="$CANONICAL_TOKEN" gh release edit "$TAG"',
+    );
+    const canonicalAnonymousGate = canonicalJob.indexOf(
+      '"$RELEASES_REPO" "$RELEASES_REPO" "$TAG" release-assets',
+    );
+    const legacyMutation = legacyJob.indexOf(
+      'GH_TOKEN="$LEGACY_TOKEN" gh release edit "$TAG"',
+    );
+    const legacyAnonymousGate = legacyJob.indexOf(
+      '"$LEGACY_RELEASES_REPO" "$RELEASES_REPO" "$TAG" release-assets',
+    );
+
+    expect(releaseWorkflow).toContain(
+      'verify-anonymous-github-release-assets.mjs \\\n            --repo-public "$RELEASES_REPO"',
+    );
+    expect(canonicalMutation).toBeGreaterThan(-1);
+    expect(canonicalAnonymousGate).toBeGreaterThan(canonicalMutation);
+    expect(legacyMutation).toBeGreaterThan(-1);
+    expect(legacyAnonymousGate).toBeGreaterThan(legacyMutation);
+    expect(legacyJob).toContain(
+      '"$RELEASES_REPO" "$RELEASES_REPO" "$TAG" release-assets',
+    );
+    expect(anonymousReleaseVerifier).toContain("redirect: 'manual'");
+    expect(anonymousReleaseVerifier).toContain("credentials: 'omit'");
+    expect(anonymousReleaseVerifier).not.toContain('Authorization');
+    expect(anonymousReleaseVerifier).not.toContain('Cookie');
+    expect(anonymousReleaseVerifier).toContain(
+      "metadata.visibility !== 'public'",
+    );
+    expect(anonymousReleaseVerifier).toContain(
+      "hostname === 'release-assets.githubusercontent.com'",
+    );
+    expect(anonymousReleaseVerifier).toContain(
+      'actualSize !== expectedSize || actualSha256 !== expectedSha256',
+    );
+    expect(anonymousReleaseVerifier).toContain(
+      'if (new Set(assetNames).size !== 6)',
     );
   });
 
@@ -837,7 +934,10 @@ describe('release workflow production privilege boundary', () => {
       /deploy-update-mirror:[\s\S]*?timeout-minutes: 90/,
     );
     expect(releaseWorkflow).toMatch(
-      /publish-release:[\s\S]*?timeout-minutes: 30/,
+      /publish-canonical:[\s\S]*?timeout-minutes: 30/,
+    );
+    expect(releaseWorkflow).toMatch(
+      /publish-legacy:[\s\S]*?timeout-minutes: 45/,
     );
     expect(releaseWorkflow).toMatch(
       /rollback-update-mirror:[\s\S]*?timeout-minutes: 45/,

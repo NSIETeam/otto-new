@@ -23,7 +23,8 @@ function fixture() {
 }
 
 afterEach(() => {
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0))
+    fs.rmSync(root, { recursive: true, force: true });
 });
 
 describe('JsonChannelOutboundLedgerV1', () => {
@@ -36,17 +37,27 @@ describe('JsonChannelOutboundLedgerV1', () => {
       requestHash: hash,
     };
     expect((await ledger.prepare(input)).attempts).toBe(1);
-    expect((await ledger.fail(input.idempotencyKey, hash, 'timeout')).state).toBe('failed');
+    expect(
+      (await ledger.fail(input.idempotencyKey, hash, 'timeout')).state,
+    ).toBe('failed');
     expect((await ledger.prepare(input)).attempts).toBe(2);
-    const committed = await ledger.commit(input.idempotencyKey, hash, 'om_message_1');
+    const committed = await ledger.commit(
+      input.idempotencyKey,
+      hash,
+      'om_message_1',
+    );
     expect(committed).toMatchObject({
       state: 'committed',
       attempts: 2,
-      receipt: { idempotencyKey: input.idempotencyKey, providerMessageId: 'om_message_1' },
+      receipt: {
+        idempotencyKey: input.idempotencyKey,
+        providerMessageId: 'om_message_1',
+      },
     });
     expect((await ledger.prepare(input)).attempts).toBe(2);
-    expect((await ledger.commit(input.idempotencyKey, hash, 'om_message_1')).receipt)
-      .toEqual(committed.receipt);
+    expect(
+      (await ledger.commit(input.idempotencyKey, hash, 'om_message_1')).receipt,
+    ).toEqual(committed.receipt);
   });
 
   it('turns an interrupted prepared write into unknown_outcome and never prepares it again', async () => {
@@ -59,7 +70,9 @@ describe('JsonChannelOutboundLedgerV1', () => {
     };
     expect((await ledger.prepare(input)).state).toBe('prepared');
     expect(await ledger.prepare(input)).toMatchObject({
-      state: 'unknown_outcome', attempts: 1, failureCode: 'interrupted_after_prepare',
+      state: 'unknown_outcome',
+      attempts: 1,
+      failureCode: 'interrupted_after_prepare',
     });
     expect((await ledger.prepare(input)).state).toBe('unknown_outcome');
   });
@@ -73,10 +86,13 @@ describe('JsonChannelOutboundLedgerV1', () => {
       requestHash: hash,
     };
     await ledger.prepare(input);
-    expect((await ledger.unknown(input.idempotencyKey, hash, 'provider_timeout')).state)
-      .toBe('unknown_outcome');
-    expect(fs.readFileSync(path.join(root, 'outbound.json'), 'utf8'))
-      .toContain('unknown_outcome');
+    expect(
+      (await ledger.unknown(input.idempotencyKey, hash, 'provider_timeout'))
+        .state,
+    ).toBe('unknown_outcome');
+    expect(fs.readFileSync(path.join(root, 'outbound.json'), 'utf8')).toContain(
+      'unknown_outcome',
+    );
   });
 
   it('rejects key reuse for a different request or installation', async () => {
@@ -88,10 +104,15 @@ describe('JsonChannelOutboundLedgerV1', () => {
       requestHash: hash,
     };
     await ledger.prepare(input);
-    await expect(ledger.prepare({ ...input, requestHash: 'b'.repeat(64) }))
-      .rejects.toThrow('idempotency conflict');
-    await expect(ledger.prepare({ ...input, installationId: 'channel_lark_abcdef0123456789abcdef01' }))
-      .rejects.toThrow('idempotency conflict');
+    await expect(
+      ledger.prepare({ ...input, requestHash: 'b'.repeat(64) }),
+    ).rejects.toThrow('idempotency conflict');
+    await expect(
+      ledger.prepare({
+        ...input,
+        installationId: 'channel_lark_abcdef0123456789abcdef01',
+      }),
+    ).rejects.toThrow('idempotency conflict');
   });
 
   it('stores hashes and states without message content', async () => {
@@ -105,6 +126,10 @@ describe('JsonChannelOutboundLedgerV1', () => {
     const raw = fs.readFileSync(path.join(root, 'outbound.json'), 'utf8');
     expect(raw).toContain(hash);
     expect(raw).not.toContain('message body');
-    expect(fs.statSync(path.join(root, 'outbound.json')).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(path.join(root, 'outbound.json')).mode & 0o777).toBe(
+        0o600,
+      );
+    }
   });
 });

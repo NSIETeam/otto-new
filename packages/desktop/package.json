@@ -114,6 +114,8 @@
       "!**/node_modules/@vscode/ripgrep/**",
       "!**/node_modules/@larksuiteoapi/node-sdk/es/**",
       "!**/node_modules/@larksuiteoapi/node-sdk/types/**",
+      "!**/node_modules/@opentelemetry/**/build/esm/**",
+      "!**/node_modules/@opentelemetry/**/build/esnext/**",
       "!**/node_modules/js-tiktoken/dist/**/*.cjs",
       "!**/node_modules/@otto/native/target/**",
       "!**/node_modules/@otto/native/src/**",

@@ -29,6 +29,12 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { homedir } from 'os';
+import {
+  atomicWriteTextFile,
+  deduplicateGlobalMemoryContent,
+  GLOBAL_MEMORY_SECTION_HEADER,
+} from './globalMemoryMaintenance.js';
+import { withMemoryFileWriteLock } from './memoryFileLock.js';
 
 // ============================================================
 // 类型定义
@@ -63,7 +69,8 @@ export interface MemoryEntry {
 export type MemoryScope = 'global' | 'project' | 'session';
 
 /** 合并策略 */
-export type MergeStrategy = 'auto_similarity' | 'auto_same_topic' | 'auto_same_session' | 'manual';
+export type MergeStrategy =
+  'auto_similarity' | 'auto_same_topic' | 'auto_same_session' | 'manual';
 
 /** 分割策略 */
 export type AutoSplitStrategy = 'by_topic' | 'by_time_range' | 'by_token_count';
@@ -160,13 +167,12 @@ const DEFAULT_CONFIG: AutoMemoryEngineConfig = {
 // 简单 token 估算（中文约 1.5 chars/token，英文约 4 chars/token）
 const DEFAULT_TOKEN_ESTIMATOR: TokenEstimator = {
   estimate: (text: string): number => {
-    const cjk = (text.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) || []).length;
+    const cjk = (text.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) || [])
+      .length;
     const ascii = text.length - cjk;
     return Math.ceil(cjk * 1.5 + ascii / 4);
   },
 };
-
-const MEMORY_SECTION_HEADER = '## Otto Added Memories';
 
 // ============================================================
 // 自动记忆合并/分割引擎
@@ -196,7 +202,9 @@ export class AutoMemoryEngine {
     this.entries = await this.scanAllSources();
     await this.persistIndex();
     this.initialized = true;
-    console.log(`[AutoMemory] Loaded ${this.entries.length} memory entries from source files`);
+    console.log(
+      `[AutoMemory] Loaded ${this.entries.length} memory entries from source files`,
+    );
   }
 
   // ── 源文件扫描 ────────────────────────────────────────
@@ -211,7 +219,9 @@ export class AutoMemoryEngine {
     try {
       const globalEntries = await this.parseGlobalMd();
       entries.push(...globalEntries);
-      console.log(`[AutoMemory] Parsed ${globalEntries.length} entries from global.md`);
+      console.log(
+        `[AutoMemory] Parsed ${globalEntries.length} entries from global.md`,
+      );
     } catch (e) {
       console.warn('[AutoMemory] Failed to parse global.md:', e);
     }
@@ -220,7 +230,9 @@ export class AutoMemoryEngine {
     try {
       const knowledgeEntries = await this.parseKnowledgeJsonl();
       entries.push(...knowledgeEntries);
-      console.log(`[AutoMemory] Parsed ${knowledgeEntries.length} entries from entries.jsonl`);
+      console.log(
+        `[AutoMemory] Parsed ${knowledgeEntries.length} entries from entries.jsonl`,
+      );
     } catch (e) {
       console.warn('[AutoMemory] Failed to parse entries.jsonl:', e);
     }
@@ -251,11 +263,13 @@ export class AutoMemoryEngine {
     }
 
     const entries: MemoryEntry[] = [];
-    const headerIdx = raw.indexOf(MEMORY_SECTION_HEADER);
+    const headerIdx = raw.indexOf(GLOBAL_MEMORY_SECTION_HEADER);
     if (headerIdx < 0) return entries;
 
     // 取出 header 之后、下一个 ## section 之前的所有内容
-    const afterHeader = raw.substring(headerIdx + MEMORY_SECTION_HEADER.length);
+    const afterHeader = raw.substring(
+      headerIdx + GLOBAL_MEMORY_SECTION_HEADER.length,
+    );
     const nextSection = afterHeader.indexOf('\n## ');
     const sectionBody =
       nextSection >= 0 ? afterHeader.substring(0, nextSection) : afterHeader;
@@ -269,7 +283,7 @@ export class AutoMemoryEngine {
       if (!fact) continue;
 
       // 去重：已有相同文本的条目则跳过
-      const dup = entries.find(e => e.text === fact);
+      const dup = entries.find((e) => e.text === fact);
       if (dup) continue;
 
       const topics = this.inferTopicsFromText(fact);
@@ -338,7 +352,7 @@ export class AutoMemoryEngine {
     for (const entry of entries) {
       // 检查是否与已有条目高度相似
       const similar = result.find(
-        r => this.computeSimilarity(r.text, entry.text) >= 0.85,
+        (r) => this.computeSimilarity(r.text, entry.text) >= 0.85,
       );
       if (similar) {
         // 保留时间较新的
@@ -363,52 +377,33 @@ export class AutoMemoryEngine {
     after: number;
     removed: number;
   }> {
-    let raw: string;
-    try {
-      raw = await fs.readFile(this.config.globalMdPath, 'utf-8');
-    } catch {
-      return { before: 0, after: 0, removed: 0 };
-    }
-
-    const headerIdx = raw.indexOf(MEMORY_SECTION_HEADER);
-    if (headerIdx < 0) return { before: 0, after: 0, removed: 0 };
-
-    const before = raw.substring(0, headerIdx + MEMORY_SECTION_HEADER.length);
-    const afterHeader = raw.substring(headerIdx + MEMORY_SECTION_HEADER.length);
-    const nextSection = afterHeader.indexOf('\n## ');
-    const after = nextSection >= 0 ? afterHeader.substring(nextSection) : '';
-
-    // 提取所有 fact 行
-    const sectionBody =
-      nextSection >= 0 ? afterHeader.substring(0, nextSection) : afterHeader;
-    const lines = sectionBody.split('\n');
-    const facts: string[] = [];
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith('-')) continue;
-      const fact = trimmed.replace(/^-\s*/, '').trim();
-      if (!fact) continue;
-      if (!facts.includes(fact)) {
-        facts.push(fact);
+    return withMemoryFileWriteLock(this.config.globalMdPath, async () => {
+      let raw: string;
+      try {
+        raw = await fs.readFile(this.config.globalMdPath, 'utf-8');
+      } catch {
+        return { before: 0, after: 0, removed: 0 };
       }
-    }
 
-    const beforeCount = sectionBody.split('\n').filter(l => l.trim().startsWith('-')).length;
-    const afterCount = facts.length;
+      const result = deduplicateGlobalMemoryContent(raw);
+      if (result.removed === 0) {
+        return {
+          before: result.before,
+          after: result.after,
+          removed: result.removed,
+        };
+      }
 
-    if (beforeCount === afterCount) {
-      return { before: beforeCount, after: afterCount, removed: 0 };
-    }
-
-    // 重写文件
-    const factLines = facts.map(f => `- ${f}\n`).join('');
-    const newContent = `${before}\n${factLines}${after}`;
-    await fs.writeFile(this.config.globalMdPath, newContent, 'utf-8');
-
-    console.log(
-      `[AutoMemory] Deduplicated global.md: ${beforeCount} → ${afterCount} facts (${beforeCount - afterCount} removed)`,
-    );
-    return { before: beforeCount, after: afterCount, removed: beforeCount - afterCount };
+      await atomicWriteTextFile(this.config.globalMdPath, result.content);
+      console.log(
+        `[AutoMemory] Deduplicated global.md: ${result.before} → ${result.after} facts (${result.removed} removed)`,
+      );
+      return {
+        before: result.before,
+        after: result.after,
+        removed: result.removed,
+      };
+    });
   }
 
   // ── 持久化 ─────────────────────────────────────────────
@@ -484,16 +479,16 @@ export class AutoMemoryEngine {
   }): MemoryEntry[] {
     let result = [...this.entries];
     if (filter?.scope) {
-      result = result.filter(e => e.scope === filter.scope);
+      result = result.filter((e) => e.scope === filter.scope);
     }
     if (filter?.topic) {
-      result = result.filter(e =>
-        e.topics.some(t => t.includes(filter!.topic!)),
+      result = result.filter((e) =>
+        e.topics.some((t) => t.includes(filter!.topic!)),
       );
     }
     if (filter?.keywords && filter.keywords.length > 0) {
-      result = result.filter(e =>
-        filter!.keywords!.some(kw => e.text.includes(kw)),
+      result = result.filter((e) =>
+        filter!.keywords!.some((kw) => e.text.includes(kw)),
       );
     }
     result.sort(
@@ -553,7 +548,7 @@ export class AutoMemoryEngine {
   async applyMerge(suggestion: MergeSuggestion): Promise<MemoryEntry | null> {
     if (suggestion.entryIds.length < 2) return null;
 
-    const sourceEntries = this.entries.filter(e =>
+    const sourceEntries = this.entries.filter((e) =>
       suggestion.entryIds.includes(e.id),
     );
     if (sourceEntries.length < 2) return null;
@@ -562,7 +557,7 @@ export class AutoMemoryEngine {
       id: `mem_merged_${Date.now()}`,
       text: suggestion.mergedText,
       timestamp: new Date().toISOString(),
-      topics: [...new Set(sourceEntries.flatMap(e => e.topics))],
+      topics: [...new Set(sourceEntries.flatMap((e) => e.topics))],
       scope: sourceEntries[0].scope,
       sourceType: 'merged',
       sourceSessionId: sourceEntries[0].sourceSessionId,
@@ -622,7 +617,7 @@ export class AutoMemoryEngine {
 
   async applySplit(suggestion: SplitSuggestion): Promise<MemoryEntry[]> {
     const sourceEntry = this.entries.find(
-      e => e.id === suggestion.sourceEntryId,
+      (e) => e.id === suggestion.sourceEntryId,
     );
     if (!sourceEntry) return [];
 
@@ -645,7 +640,7 @@ export class AutoMemoryEngine {
     }
 
     sourceEntry.compressed = true;
-    sourceEntry.compressedFrom = children.map(c => c.id);
+    sourceEntry.compressedFrom = children.map((c) => c.id);
 
     this.entries.push(...children);
     await this.persistIndex();
@@ -655,7 +650,7 @@ export class AutoMemoryEngine {
       type: 'split',
       timestamp: new Date().toISOString(),
       sourceId: suggestion.sourceEntryId,
-      childIds: children.map(c => c.id),
+      childIds: children.map((c) => c.id),
       reason: suggestion.reason,
     });
     await fs.appendFile(logPath, logEntry + '\n', 'utf-8');
@@ -670,7 +665,8 @@ export class AutoMemoryEngine {
 
   async compressOldMemories(): Promise<MemoryCompressionResult[]> {
     const results: MemoryCompressionResult[] = [];
-    const cutoff = Date.now() - this.config.compressAfterDays * 24 * 60 * 60 * 1000;
+    const cutoff =
+      Date.now() - this.config.compressAfterDays * 24 * 60 * 60 * 1000;
 
     const groups = new Map<string, MemoryEntry[]>();
     for (const entry of this.entries) {
@@ -687,9 +683,9 @@ export class AutoMemoryEngine {
     for (const [, group] of groups) {
       if (group.length < 3) continue;
 
-      const keywords = this.extractKeywords(group.map(e => e.text));
-      const summary = this.generateSummary(group.map(e => e.text));
-      const originalIds = group.map(e => e.id);
+      const keywords = this.extractKeywords(group.map((e) => e.text));
+      const summary = this.generateSummary(group.map((e) => e.text));
+      const originalIds = group.map((e) => e.id);
 
       const compressed: MemoryCompressionResult = {
         originalEntryIds: originalIds,
@@ -706,7 +702,7 @@ export class AutoMemoryEngine {
         id: `mem_compressed_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         text: `[COMPRESSED] ${summary}`,
         timestamp: new Date().toISOString(),
-        topics: [...new Set(group.flatMap(e => e.topics))],
+        topics: [...new Set(group.flatMap((e) => e.topics))],
         scope: group[0].scope,
         sourceType: 'merged',
         accessCount: group.reduce((s, e) => s + e.accessCount, 0),
@@ -730,7 +726,7 @@ export class AutoMemoryEngine {
   async cleanExpiredMemories(): Promise<number> {
     const cutoff = Date.now() - this.config.maxAgeDays * 24 * 60 * 60 * 1000;
     const before = this.entries.length;
-    this.entries = this.entries.filter(e => {
+    this.entries = this.entries.filter((e) => {
       if (!e.compressed) return true;
       return new Date(e.timestamp).getTime() >= cutoff;
     });
@@ -764,7 +760,7 @@ export class AutoMemoryEngine {
     // 1. 重新扫描源文件，合并增量
     const freshEntries = await this.scanAllSources();
     let newEntries = 0;
-    const existingTexts = new Set(this.entries.map(e => e.text));
+    const existingTexts = new Set(this.entries.map((e) => e.text));
     for (const entry of freshEntries) {
       if (!existingTexts.has(entry.text)) {
         this.entries.push(entry);
@@ -809,7 +805,14 @@ export class AutoMemoryEngine {
     const cleanups = await this.cleanExpiredMemories();
     await this.persistIndex();
 
-    return { merges, splits, compressions, cleanups, globalMdDeduped, newEntries };
+    return {
+      merges,
+      splits,
+      compressions,
+      cleanups,
+      globalMdDeduped,
+      newEntries,
+    };
   }
 
   // ── 统计 ─────────────────────────────────────────────
@@ -829,7 +832,7 @@ export class AutoMemoryEngine {
       (sum, e) => sum + this.tokenEstimator.estimate(e.text),
       0,
     );
-    const compressedCount = this.entries.filter(e => e.compressed).length;
+    const compressedCount = this.entries.filter((e) => e.compressed).length;
 
     return {
       totalEntries: this.entries.length,
@@ -837,7 +840,8 @@ export class AutoMemoryEngine {
       oldestEntry: oldest,
       newestEntry: newest,
       totalEstimatedTokens: totalTokens,
-      compressionRatio: this.entries.length > 0 ? compressedCount / this.entries.length : 0,
+      compressionRatio:
+        this.entries.length > 0 ? compressedCount / this.entries.length : 0,
     };
   }
 
@@ -849,10 +853,11 @@ export class AutoMemoryEngine {
     const tokensB = this.tokenize(b);
     if (tokensA.size === 0 || tokensB.size === 0) return 0;
 
-    const intersection = new Set([...tokensA].filter(t => tokensB.has(t)));
+    const intersection = new Set([...tokensA].filter((t) => tokensB.has(t)));
     const union = new Set([...tokensA, ...tokensB]);
     const jaccard = intersection.size / union.size;
-    const lenRatio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
+    const lenRatio =
+      Math.min(a.length, b.length) / Math.max(a.length, b.length);
 
     return jaccard * 0.7 + lenRatio * 0.3;
   }
@@ -878,12 +883,14 @@ export class AutoMemoryEngine {
   }
 
   private wasRecentlyMerged(idA: string, idB: string): boolean {
-    const entryA = this.entries.find(e => e.id === idA);
-    const entryB = this.entries.find(e => e.id === idB);
+    const entryA = this.entries.find((e) => e.id === idA);
+    const entryB = this.entries.find((e) => e.id === idB);
     if (!entryA || !entryB) return false;
-    return entryA.compressedFrom?.includes(idB) ||
+    return (
+      entryA.compressedFrom?.includes(idB) ||
       entryB.compressedFrom?.includes(idA) ||
-      false;
+      false
+    );
   }
 
   private splitByTopics(
@@ -891,7 +898,7 @@ export class AutoMemoryEngine {
     topics: string[],
   ): Array<{ text: string; topic: string }> {
     if (topics.length === 0) return [{ text, topic: 'general' }];
-    const lines = text.split('\n').filter(l => l.trim());
+    const lines = text.split('\n').filter((l) => l.trim());
     if (lines.length <= 1) return [{ text, topic: topics[0] }];
 
     const perTopic = Math.ceil(lines.length / topics.length);
@@ -968,7 +975,7 @@ export class AutoMemoryEngine {
   }
 
   getUncompressedEntries(scope?: MemoryScope): MemoryEntry[] {
-    return this.entries.filter(e => {
+    return this.entries.filter((e) => {
       if (scope && e.scope !== scope) return false;
       return !e.compressed;
     });

@@ -313,4 +313,114 @@ describe('SQLCipher native asset gate', () => {
       'gh attestation verify native/sqlcipher-node/matrix-manifest.json',
     );
   });
+
+  it('keeps untrusted SQLCipher builds outside the OIDC boundary', () => {
+    const workflow = fs.readFileSync(
+      path.join(process.cwd(), '.github', 'workflows', 'sqlcipher-native.yml'),
+      'utf8',
+    );
+    const job = (name, nextName) => {
+      const start = workflow.indexOf(`  ${name}:`);
+      const end = nextName
+        ? workflow.indexOf(`  ${nextName}:`, start)
+        : workflow.length;
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+      return workflow.slice(start, end);
+    };
+    const topLevelPermissions = workflow.slice(
+      workflow.indexOf('permissions:'),
+      workflow.indexOf('env:'),
+    );
+    const validateSource = job('validate-source', 'build');
+    const build = job('build', 'verify-matrix');
+    const verifyMatrix = job('verify-matrix', 'verify-node-matrix');
+    const verifyNodeMatrix = job('verify-node-matrix', 'attest-matrix');
+
+    expect(topLevelPermissions).toContain('contents: read');
+    expect(topLevelPermissions).not.toContain('id-token: write');
+    expect(topLevelPermissions).not.toContain('attestations: write');
+    expect(topLevelPermissions).not.toContain('artifact-metadata: write');
+    expect(workflow.indexOf('  validate-source:')).toBeLessThan(
+      workflow.indexOf('  build:'),
+    );
+    expect(validateSource).toContain('permissions:\n      contents: read');
+    expect(validateSource).toContain('git fetch --no-tags origin internal');
+    expect(validateSource).toContain('trusted_for_attestation');
+    expect(validateSource).toContain('refs/heads/internal');
+    expect(validateSource).toContain('pull_request');
+    expect(build).toContain('needs: validate-source');
+    for (const unprivilegedJob of [
+      validateSource,
+      build,
+      verifyMatrix,
+      verifyNodeMatrix,
+    ]) {
+      expect(unprivilegedJob).not.toContain('id-token: write');
+      expect(unprivilegedJob).not.toContain('attestations: write');
+      expect(unprivilegedJob).not.toContain('artifact-metadata: write');
+    }
+  });
+
+  it('attests both verified matrices only in isolated trusted-source jobs', () => {
+    const workflow = fs.readFileSync(
+      path.join(process.cwd(), '.github', 'workflows', 'sqlcipher-native.yml'),
+      'utf8',
+    );
+    const job = (name, nextName) => {
+      const start = workflow.indexOf(`  ${name}:`);
+      const end = nextName
+        ? workflow.indexOf(`  ${nextName}:`, start)
+        : workflow.length;
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+      return workflow.slice(start, end);
+    };
+    const attestMatrix = job('attest-matrix', 'attest-node-matrix');
+    const attestNodeMatrix = job(
+      'attest-node-matrix',
+      'require-reusable-attestations',
+    );
+    const reusableGate = job('require-reusable-attestations');
+    const privilegedJobs = workflow
+      .split(/^ {2}(?=[a-z0-9-]+:)/m)
+      .filter((section) => section.includes('id-token: write'));
+
+    expect(workflow).toMatch(
+      /workflow_call:[\s\S]*?require_attestation:[\s\S]*?type: boolean[\s\S]*?default: true/,
+    );
+    expect(privilegedJobs).toHaveLength(2);
+    for (const attestJob of [attestMatrix, attestNodeMatrix]) {
+      expect(attestJob).toContain('contents: read');
+      expect(attestJob).toContain('id-token: write');
+      expect(attestJob).toContain('attestations: write');
+      expect(attestJob).toContain('artifact-metadata: write');
+      expect(attestJob).toContain(
+        "needs.validate-source.outputs.trusted_for_attestation == 'true'",
+      );
+      expect(attestJob).not.toContain('actions/checkout@');
+      expect(attestJob).not.toContain('scripts/');
+    }
+    expect(attestMatrix).toContain('name: sqlcipher-native-matrix');
+    expect(attestNodeMatrix).toContain('name: sqlcipher-node-native-matrix');
+    expect(reusableGate).toContain('inputs.require_attestation == true');
+    expect(reusableGate).toContain('needs.attest-matrix.result');
+    expect(reusableGate).toContain('needs.attest-node-matrix.result');
+  });
+
+  it('pins every external action in the SQLCipher workflow', () => {
+    const workflow = fs.readFileSync(
+      path.join(process.cwd(), '.github', 'workflows', 'sqlcipher-native.yml'),
+      'utf8',
+    );
+    const actions = workflow
+      .split(/\r?\n/)
+      .map((line) => line.match(/^\s*uses:\s+([^\s#]+)/)?.[1])
+      .filter(Boolean)
+      .filter((reference) => !reference.startsWith('./'));
+    expect(actions.length).toBeGreaterThan(0);
+    for (const action of actions) {
+      expect(action).toMatch(/^[^@\s]+@[0-9a-f]{40}$/);
+    }
+  });
 });

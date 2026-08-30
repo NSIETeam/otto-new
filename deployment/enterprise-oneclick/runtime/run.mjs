@@ -94,7 +94,18 @@ process.env.OTTO_LICENSE_ENFORCE = 'true';
 process.env.OTTO_LICENSE_PUBLIC_KEYS = JSON.stringify(licensePublicKeys);
 
 const { closeEnterpriseDatabase } = await import('./src/enterprise/db.js');
-const { startEnterpriseServer } = await import('./src/enterprise/server.js');
+const { ENTERPRISE_TASK_DRAIN_TIMEOUT_MS, startEnterpriseServer } =
+  await import('./src/enterprise/server.js');
+
+if (
+  !Number.isSafeInteger(ENTERPRISE_TASK_DRAIN_TIMEOUT_MS) ||
+  ENTERPRISE_TASK_DRAIN_TIMEOUT_MS <= 0
+) {
+  throw new Error('enterprise task drain timeout contract is invalid');
+}
+const SHUTDOWN_HTTP_GRACE_MS = 15_000;
+const FORCE_SHUTDOWN_TIMEOUT_MS =
+  ENTERPRISE_TASK_DRAIN_TIMEOUT_MS + SHUTDOWN_HTTP_GRACE_MS;
 
 const server = startEnterpriseServer({
   host,
@@ -133,21 +144,13 @@ if (readinessFile) {
       process.stderr.write(
         `[Otto Enterprise] cannot publish canary readiness: ${error.message}\n`,
       );
-      server.close((closeError) => {
-        closeEnterpriseDatabase();
-        if (closeError) {
-          process.stderr.write(
-            `[Otto Enterprise] cannot stop failed canary: ${closeError.message}\n`,
-          );
-        }
-        process.exit(1);
-      });
+      shutdown('readiness publication failure', 1);
     }
   });
 }
 
 let stopping = false;
-function shutdown(signal) {
+function shutdown(signal, successExitCode = 0) {
   if (stopping) return;
   stopping = true;
   process.stdout.write(
@@ -156,20 +159,24 @@ function shutdown(signal) {
   const forceTimer = setTimeout(() => {
     process.stderr.write('[Otto Enterprise] graceful shutdown timed out\n');
     server.closeAllConnections?.();
-    closeEnterpriseDatabase();
+    // The server may still have an accepted external write in progress. A hard
+    // process stop is safer than closing SQLite underneath that write.
     process.exit(1);
-  }, 15_000);
-  forceTimer.unref();
+  }, FORCE_SHUTDOWN_TIMEOUT_MS);
   server.close((error) => {
-    clearTimeout(forceTimer);
-    closeEnterpriseDatabase();
     if (error) {
       process.stderr.write(
         `[Otto Enterprise] shutdown failed: ${error.message}\n`,
       );
-      process.exit(1);
+      process.exitCode = 1;
+      // Keep the outer watchdog referenced. A drain timeout means work may
+      // still be running, so neither the database nor the process is torn down
+      // before the full drain + HTTP budget expires.
+      return;
     }
-    process.exit(0);
+    clearTimeout(forceTimer);
+    closeEnterpriseDatabase();
+    process.exit(successExitCode);
   });
 }
 

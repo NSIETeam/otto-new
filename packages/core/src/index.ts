@@ -132,8 +132,17 @@ export * from './services/fileDiscoveryService.js';
 export * from './services/fileSystemService.js';
 export * from './services/gitService.js';
 export * from './services/sessionManager.js';
-export { TaskWatchdog, getTaskWatchdog, resetTaskWatchdog } from './services/taskWatchdog.js';
-export type { WatchdogConfig, WatchdogState, WatchdogStatus, WatchdogCallbacks } from './services/taskWatchdog.js';
+export {
+  TaskWatchdog,
+  getTaskWatchdog,
+  resetTaskWatchdog,
+} from './services/taskWatchdog.js';
+export type {
+  WatchdogConfig,
+  WatchdogState,
+  WatchdogStatus,
+  WatchdogCallbacks,
+} from './services/taskWatchdog.js';
 export * from './services/mcpResponseGuard.js';
 export * from './services/fileOperationQueue.js';
 export * from './services/backgroundTaskManager.js';
@@ -145,7 +154,10 @@ export * from './services/bundledRuntime.js';
 export * from './services/sessionCheckpoint.js';
 export * from './services/taskWatchdog.js';
 export * from './services/memoryPressureMonitor.js';
-export { formatClaudeCodeTaskResult, isAcpDelegateTask } from './tools/delegate-agent.js';
+export {
+  formatClaudeCodeTaskResult,
+  isAcpDelegateTask,
+} from './tools/delegate-agent.js';
 export {
   CacheSafeParamsStore,
   type CacheSafeParams,
@@ -210,6 +222,7 @@ export * from './tools/write-file.js';
 export * from './tools/web-fetch.js';
 export * from './tools/memoryTool.js';
 export * from './memory/memoryProvider.js';
+export { atomicWriteTextFile } from './memory/globalMemoryMaintenance.js';
 export * from './memory/mem0Adapter.js';
 export * from './memory/codebaseMemoryTypes.js';
 export * from './memory/codebaseMemoryProvider.js';
@@ -238,10 +251,7 @@ export * from './tools/todo-store.js';
 export * from './tools/ppt/index.js';
 
 // Session 处理
-export {
-  OttoSessionManager,
-  getSessionManager,
-} from './sessions/index.js';
+export { OttoSessionManager, getSessionManager } from './sessions/index.js';
 export type {
   SessionMeta,
   SessionStatus,
@@ -274,10 +284,7 @@ export type {
   MemoryStats,
   AutoMemoryEngineConfig,
 } from './memory/autoMerge.js';
-export {
-  AutoMemoryEngine,
-  getAutoMemoryEngine,
-} from './memory/autoMerge.js';
+export { AutoMemoryEngine, getAutoMemoryEngine } from './memory/autoMerge.js';
 
 // Otto Enterprise 能力工具
 export * from './tools/desktop-automation.js';
@@ -294,15 +301,28 @@ export * from './tools/enterprise-collaboration.js';
 export * from './a2a/federationAtoaProtocol.js';
 
 // 多渠道通知服务
-export { NotificationService, getNotificationService } from './services/notificationService.js';
-export type { NotificationRecord, NotificationPriority, NotificationChannel, EscalationPolicy, FeishuNotifySender, SmsNotifySender } from './services/notificationService.js';
+export {
+  NotificationService,
+  getNotificationService,
+} from './services/notificationService.js';
+export type {
+  NotificationRecord,
+  NotificationPriority,
+  NotificationChannel,
+  EscalationPolicy,
+  FeishuNotifySender,
+  SmsNotifySender,
+} from './services/notificationService.js';
 export {
   AliyunSmsAuthenticationSender,
   AliyunSmsSender,
   createAliyunLoginSmsFromEnv,
   createAliyunSmsFromEnv,
 } from './services/aliyunSmsSender.js';
-export type { AliyunSmsConfig, SmsSendResult } from './services/aliyunSmsSender.js';
+export type {
+  AliyunSmsConfig,
+  SmsSendResult,
+} from './services/aliyunSmsSender.js';
 
 // 个人知识库（本地，无企业授权可用）
 export * from './tools/knowledge-base.js';
@@ -334,7 +354,12 @@ export { OAuthUtils } from './mcp/oauth-utils.js';
 
 // Export telemetry functions
 export * from './telemetry/index.js';
-export { sessionId, getSessionId, setSessionId, resetSessionId } from './utils/session.js';
+export {
+  sessionId,
+  getSessionId,
+  setSessionId,
+  resetSessionId,
+} from './utils/session.js';
 export * from './utils/browser.js';
 
 // Export skills system (consolidated from cli package)

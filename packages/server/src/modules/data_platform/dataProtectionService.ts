@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { cp, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import type { RecurringTaskRegistry } from 'otto-core';
 
 import {
   createEncryptedBackupArchive,
@@ -81,7 +82,7 @@ export interface DataProtectionService {
     reason?: 'scheduled' | 'manual' | 'startup',
   ): Promise<DataProtectionStatus>;
   sweepOrphanAttachments(): number;
-  start(): () => void;
+  start(taskRegistry?: RecurringTaskRegistry): () => void;
 }
 
 export function parseDataProtectionEncryptionKey(value: string): Buffer {
@@ -830,7 +831,7 @@ export function createDataProtectionService(
     return { ...status };
   }
 
-  function start(): () => void {
+  function start(taskRegistry?: RecurringTaskRegistry): () => void {
     stopped = false;
     ensureRuntimeDirectories();
     if (fs.existsSync(runtimeLockPath)) {
@@ -873,6 +874,23 @@ export function createDataProtectionService(
       30_000,
       intervalMs - Math.max(0, Date.now() - latest),
     );
+    let stopTask: (() => void) | undefined;
+    if (taskRegistry) {
+      stopTask = taskRegistry.register({
+        name: 'enterprise.data-protection-backup',
+        source:
+          'packages/server/src/modules/data_platform/dataProtectionService.ts',
+        intervalMs,
+        initialDelayMs: firstDelay,
+        missedRunPolicy: 'run-once',
+        estimatedCostUsdPerRun: 0,
+        getInputVersion: () => String(Math.floor(Date.now() / intervalMs)),
+        run: () =>
+          runBackup(status.lastSuccessAt ? 'scheduled' : 'startup').then(
+            () => undefined,
+          ),
+      });
+    }
     const schedule = (delay: number) => {
       timer = setTimeout(async () => {
         if (stopped) return;
@@ -881,9 +899,10 @@ export function createDataProtectionService(
       }, delay);
       timer.unref?.();
     };
-    schedule(firstDelay);
+    if (!taskRegistry) schedule(firstDelay);
     return () => {
       stopped = true;
+      stopTask?.();
       if (timer) clearTimeout(timer);
       timer = null;
       try {

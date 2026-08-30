@@ -5,7 +5,8 @@
 兼容性验收流程，不能复用这里的单机健康检查作为放行依据。
 
 Otto 的发布链路分成三段：先检查异常，再锁定双仓发布前的 `latest` 指针并构建
-GitHub Release 草稿，最后依次部署企业服务器、公开双仓 Release 和同步桌面更新镜像。
+GitHub Release 草稿，最后预提交企业服务器事务，并依次公开正式仓、更新桌面镜像、
+公开兼容仓，全部核验后才最终提交企业服务器事务。
 
 发布前必须先完成 `docs/release-preflight.md`；本文件只说明 Actions 如何执行，不替代发布门禁。
 
@@ -17,7 +18,7 @@ GitHub Release 草稿，最后依次部署企业服务器、公开双仓 Release
 - 企业一键部署包必须带外置可信公钥可验证的 Ed25519 `.sig`，只有 SHA-256 不允许发布。
 - 独立的 `prepare-release-creation-intent` 作业会在任何 tag/Release 写入前连续读取并锁定双仓状态，把 run id、tag、两仓、完整源码 commit、兼容仓 `main` commit、两仓 tag 是否预先存在、Release 不存在、名称/正文/预发布标志、完整 14 资产向量和发布前 `latest` 写入创建意图。`creation-intent.json` 与 `pre-public-latest.json` 的 SHA-256 在第一次写入前作为不可变 workflow artifact 上传；`create-release-drafts` 必须下载、验摘要并连续两次复核远端状态后才可创建草稿。
 - 若 `create-release-drafts` 失败或取消，`cleanup-partial-release-drafts` 会在同一 DAG 中以 `always()` 运行。只有 Release 仍是身份、正文、target、预发布标志完全一致的 draft，已有资产是锁定向量的严格子集（含名称锁定且 size=0、digest 为空的 `starter` 上传），tag commit 未漂移且两仓 `latest` 仍等于发布前值时，才删除本 run 的部分草稿和本 run 新建的 tag。正式 tag push 触发前已经存在的正式仓源码 tag 永远保留；任何公开 Release 或歧义状态都停止并交由人工事故处理。清理算法可幂等续跑。
-- 正式发布顺序是：构建并验签草稿 -> 部署企业服务 -> 公开 `NSIETeam/otto-new` 并复核 -> 最后公开旧客户端兼容仓并复核 -> 事务性更新国内镜像。兼容仓是 Release 公开阶段的最后一次公共变更，不能先于正式仓暴露。若镜像更新失败，必须先成功回滚镜像，再用发布前快照从目标版本移除 `latest` 并精确恢复两仓此前的 `latest` 指针。
+- 正式发布顺序是：构建并验签草稿 -> 预提交企业服务事务（延迟最终确认） -> 公开 `NSIETeam/otto-new` 并复核 -> 事务性更新国内镜像并复核 -> 最后公开旧客户端兼容仓并复核 -> 最终确认企业服务事务。兼容仓是 Release 公开阶段的最后一次公共变更，不能先于正式仓或镜像暴露。任一后续步骤失败时，必须先完成镜像与 Release 指针补偿，成功后才允许回滚企业服务事务。
 - 任何已公开并可能被客户端观察到的 Release 都绝不改回 draft，也不删除或覆盖资产。补偿后目标 Release 保持原公开/预发布可见性，只是不再是 `latest`；该版本号视为永久烧毁，事故闭环后必须使用新的 patch 版本重新发布。
 - 从创建草稿前到流程完全结束，必须冻结 `internal`、两仓 immutable releases 设置、tag、Release 资产和镜像的人工修改。工作流会在建草稿和企业部署前重新读取 `internal`；企业部署开始后，以已锁定提交作为事务提交点，不能因新提交制造半发布状态。
 - 两个 Release 仓必须关闭 immutable releases。工作流先通过 `/actions/permissions` 证明令牌具备 `Administration: read`，再要求 `/immutable-releases` 明确返回未启用；无法证明时一律停止。
@@ -65,7 +66,7 @@ GitHub Release 草稿，最后依次部署企业服务器、公开双仓 Release
 - 根 `package.json` 与 `packages/desktop/package.json` 必须等于目标版本。
 - 桌面安装包必须存在，并随 `latest.json` 一起发布用于校验和更新。
 - `NSIETeam/otto-new` 是正式 Release；`Felix201209/otto-releases` 同步同一份资产，作为 V1.9.13 及更早客户端的兼容入口。
-- Release 默认先创建为 draft；创建前锁定并上传 SHA-256 绑定的完整创建意图和双仓发布前 `latest` 快照。企业部署和安装包验签通过后，工作流先公开并复核正式仓，再把兼容仓作为最后一个 Release 端点公开，随后事务性更新旧客户端镜像。镜像失败时先回滚镜像，再校验同一快照摘要并精确恢复此前 `latest`；已经公开的目标 Release 与资产保持可下载，不会退回 draft。
+- Release 默认先创建为 draft；创建前锁定并上传 SHA-256 绑定的完整创建意图和双仓发布前 `latest` 快照。企业服务预提交和安装包验签通过后，工作流先公开并复核正式仓，再事务性更新并复核旧客户端镜像，最后公开兼容仓；三处公开端点全部收敛后才最终确认企业服务事务。失败时先补偿镜像和 Release 指针，再回滚企业服务；已经公开的目标 Release 与资产保持可下载，不会退回 draft。
 - root 网关 `preflight` 必须返回且仅返回与本次源码和固定安装配置完全一致的 `protocol`、`gateway`、`publish`、`rollback`、`key`、`config`、`deploy_user`、`rollback_user`；旧网关、helper、信任锚、配置路径或账号身份漂移都会在上传前失败。
 
 ## macOS Preview Build
@@ -168,7 +169,7 @@ git push origin "v${VERSION}"
 若运行因平台故障被强制中断：
 
 1. 记录 `TAG`、`GITHUB_RUN_ID`、`GITHUB_RUN_ATTEMPT`，镜像事务号固定为 `${TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`。
-2. 先通过固定网关执行 `preflight`。若企业部署 SSH 回包丢失，用 `verify-deployment <version> <package_identity> <source_commit>` 核对当前服务器是否已经是该签名构建；三个值必须来自锁定 workflow artifact 的签名 manifest/metadata。不得凭 Actions 的失败状态直接回滚可能已经接收新写入的数据库。
+2. 先通过固定网关执行 `preflight`。若企业部署 SSH 回包丢失，用 `reconcile-deployment <original_transaction_id> <version> <package_identity> <source_commit>` 对原工作流的精确事务进行幂等分类；如只需复验已经取得 receipt 的事务，使用 `verify-deployment <original_transaction_id> <version> <package_identity> <source_commit>`。事务号固定来自原 run，不得按版本模糊搜索；其余三个值必须来自锁定 workflow artifact 的签名 manifest/metadata。不得凭 Actions 的失败状态直接回滚可能已经接收新写入的数据库。
 3. 确认原 workflow run 已终止、服务器上没有仍在运行的上传或网关进程，并完成上一步的部署状态核对后，才可清理该原事务遗留的上传目录：依次执行 `cleanup-upload enterprise <original_transaction_id>` 与 `cleanup-upload mirror <original_transaction_id>`。只能使用原事务号；不得为了绕过 “pending cleanup” 改用新事务号，也不得在原运行仍可能恢复时提前清理。
 4. 使用独立的 `ROLLBACK_DEPLOY_USER`/`ROLLBACK_DEPLOY_SSH_KEY` 对该事务执行 `rollback-mirror <transaction_id>`，保存它最后一行返回的 `restored_manifest_sha256=<digest|absent>`；部署账号不得执行此命令。已进入公开认领阶段的事务还必须持有发布器为该事务生成、限时且一次性的 root-only 回滚能力票据；它会在事务未公开时安全返回，在镜像已被后续事务接管或票据不匹配时拒绝回滚。
 5. 读取 root-only 的 `/opt/otto-website/transactions/<transaction_id>/UPDATE-MIRROR-SHA256SUMS`、同目录签名 envelope 和 `published-latest.json`，以前者逐项记录全部六个版本化资产（包括三个 blockmap）的名称和 SHA-256，并与 `/opt/otto-website/downloads/` 中已出现的同名普通文件核对。发布器会在第一个版本化资产公开前先持久化这三份审计材料和 `claiming`；从该标记出现起版本即永久烧毁，服务端也会拒绝其他 run-id 再用同一版本。中断时已出现的已验证资产会永久保留：它们可能已被客户端缓存，不能安全删除；恢复后的公开 `latest.json` 不得再引用它们，后续发布也不得复用该版本或覆盖同名文件。文件缺失、hash 不同、路径越界或无法证明是否曾公开时，立即升级为人工事故处理。

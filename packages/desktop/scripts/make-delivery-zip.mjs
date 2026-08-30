@@ -23,6 +23,7 @@
  *   Otto-<version>-x64.dmg.blockmap   — Mac x86_64 增量更新块图
  *   Otto-Setup-<version>-win-x64.exe.blockmap — Windows x64 增量更新块图
  *   latest.json                       — 更新清单（sha256 + URL）
+ *   latest.mirror.json                — 镜像专用更新清单（仅作为工作流内部资产）
  */
 
 import {
@@ -40,7 +41,10 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WINDOWS_RIPGREP_INTEGRITY } from './ripgrep-integrity.mjs';
-import { resolveUpdateAssetBaseUrl } from './update-mirror-config.mjs';
+import {
+  DEFAULT_UPDATE_ASSET_BASE_URL,
+  resolveUpdateAssetBaseUrl,
+} from './update-mirror-config.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESKTOP_DIR = path.resolve(__dirname, '..');
@@ -64,6 +68,10 @@ const SOURCE_REPO = 'NSIETeam/otto-new';
 const SOURCE_UPSTREAM = 'origin/internal';
 const RELEASES_REPO = process.env.OTTO_RELEASES_REPO || 'NSIETeam/otto-new';
 const UPDATE_ASSET_BASE_URL = resolveUpdateAssetBaseUrl();
+const MIRROR_UPDATE_ASSET_BASE_URL = resolveUpdateAssetBaseUrl(
+  process.env.OTTO_UPDATE_MIRROR_ASSET_BASE_URL ||
+    DEFAULT_UPDATE_ASSET_BASE_URL,
+);
 const RELEASE_TAG = `v${VERSION}`;
 const BUILD_ASSET_NAMES = [
   `Otto-${VERSION}-arm64.dmg`,
@@ -540,7 +548,7 @@ function checkArtifacts(expected = RELEASE_ASSET_NAMES) {
 // ── Step 3: 生成更新清单 ──────────────────────────────────────────────────
 
 async function makeLatestJson(sourceCommit) {
-  log('LATEST', '生成更新清单 latest.json...');
+  log('LATEST', '生成 GitHub 与镜像双更新清单...');
 
   const notesFile = process.argv.find(
     (a) =>
@@ -562,41 +570,51 @@ async function makeLatestJson(sourceCommit) {
   const macArm64 = path.join(RELEASE_DIR, `Otto-${VERSION}-arm64.dmg`);
   const macX64 = path.join(RELEASE_DIR, `Otto-${VERSION}-x64.dmg`);
   const winX64 = path.join(RELEASE_DIR, `Otto-Setup-${VERSION}-win-x64.exe`);
-  const releaseBaseUrl = UPDATE_ASSET_BASE_URL;
   // 使用发布候选提交时间，确保同一 commit 的失败重试能生成字节完全一致的清单。
   const publishedAt = git(['show', '-s', '--format=%cI', sourceCommit]);
-
-  const manifest = {
+  const assetFacts = {
+    'mac-arm64': {
+      name: `Otto-${VERSION}-arm64.dmg`,
+      size: statSync(macArm64).size,
+      sha256: await sha256(macArm64),
+    },
+    'mac-x64': {
+      name: `Otto-${VERSION}-x64.dmg`,
+      size: statSync(macX64).size,
+      sha256: await sha256(macX64),
+    },
+    'win-x64': {
+      name: `Otto-Setup-${VERSION}-win-x64.exe`,
+      size: statSync(winX64).size,
+      sha256: await sha256(winX64),
+    },
+  };
+  const manifestFor = (baseUrl) => ({
     version: VERSION,
     sourceCommit,
     notes,
     publishedAt,
-    assets: {
-      'mac-arm64': {
-        name: `Otto-${VERSION}-arm64.dmg`,
-        url: `${releaseBaseUrl}/Otto-${VERSION}-arm64.dmg`,
-        size: statSync(macArm64).size,
-        sha256: await sha256(macArm64),
-      },
-      'mac-x64': {
-        name: `Otto-${VERSION}-x64.dmg`,
-        url: `${releaseBaseUrl}/Otto-${VERSION}-x64.dmg`,
-        size: statSync(macX64).size,
-        sha256: await sha256(macX64),
-      },
-      'win-x64': {
-        name: `Otto-Setup-${VERSION}-win-x64.exe`,
-        url: `${releaseBaseUrl}/Otto-Setup-${VERSION}-win-x64.exe`,
-        size: statSync(winX64).size,
-        sha256: await sha256(winX64),
-      },
-    },
-  };
-
-  const outPath = path.join(RELEASE_DIR, 'latest.json');
-  writeFileSync(outPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  log('LATEST', `更新清单已生成: ${outPath}`);
-  for (const [platform, asset] of Object.entries(manifest.assets)) {
+    assets: Object.fromEntries(
+      Object.entries(assetFacts).map(([platform, asset]) => [
+        platform,
+        {
+          name: asset.name,
+          url: `${baseUrl}/${asset.name}`,
+          size: asset.size,
+          sha256: asset.sha256,
+        },
+      ]),
+    ),
+  });
+  const githubManifest = manifestFor(UPDATE_ASSET_BASE_URL);
+  const mirrorManifest = manifestFor(MIRROR_UPDATE_ASSET_BASE_URL);
+  const githubPath = path.join(RELEASE_DIR, 'latest.json');
+  const mirrorPath = path.join(RELEASE_DIR, 'latest.mirror.json');
+  writeFileSync(githubPath, `${JSON.stringify(githubManifest, null, 2)}\n`);
+  writeFileSync(mirrorPath, `${JSON.stringify(mirrorManifest, null, 2)}\n`);
+  log('LATEST', `GitHub 更新清单已生成: ${githubPath}`);
+  log('LATEST', `镜像更新清单已生成: ${mirrorPath}`);
+  for (const [platform, asset] of Object.entries(githubManifest.assets)) {
     log(
       'LATEST',
       `  ${platform}: ${asset.sha256.substring(0, 16)}...  ${(asset.size / 1048576).toFixed(1)} MB`,
@@ -679,7 +697,13 @@ async function readAndVerifyBuildProvenance(localAssets, sourceCommit) {
   return provenance;
 }
 
-function validateManifest(manifest, localAssets, source, sourceCommit) {
+function validateManifest(
+  manifest,
+  localAssets,
+  source,
+  sourceCommit,
+  expectedBaseUrl = UPDATE_ASSET_BASE_URL,
+) {
   if (
     !manifest ||
     typeof manifest !== 'object' ||
@@ -714,7 +738,7 @@ function validateManifest(manifest, localAssets, source, sourceCommit) {
   for (const [platform, name] of Object.entries(expectedPlatforms)) {
     const expected = localAssetByName(localAssets, name);
     const actual = manifestAssets[platform];
-    const expectedUrl = `${UPDATE_ASSET_BASE_URL}/${name}`;
+    const expectedUrl = `${expectedBaseUrl}/${name}`;
     if (
       !actual ||
       actual.name !== name ||
@@ -738,6 +762,24 @@ function readAndValidateLocalManifest(localAssets, sourceCommit) {
     throw new Error(`本地 latest.json 无法解析: ${error.message}`);
   }
   validateManifest(manifest, localAssets, '本地', sourceCommit);
+  return manifest;
+}
+
+function readAndValidateMirrorManifest(localAssets, sourceCommit) {
+  const manifestPath = path.join(RELEASE_DIR, 'latest.mirror.json');
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  } catch (error) {
+    throw new Error(`本地 latest.mirror.json 无法解析: ${error.message}`);
+  }
+  validateManifest(
+    manifest,
+    localAssets,
+    '本地镜像',
+    sourceCommit,
+    MIRROR_UPDATE_ASSET_BASE_URL,
+  );
   return manifest;
 }
 
@@ -1106,7 +1148,11 @@ async function main() {
   await makeLatestJson(sourceState.sourceCommit);
   const localAssets = await inspectLocalAssets();
   readAndValidateLocalManifest(localAssets, sourceState.sourceCommit);
-  log('CHECK', `本地固定 7 个资产与 latest.json v${VERSION} 全部核验通过`);
+  readAndValidateMirrorManifest(localAssets, sourceState.sourceCommit);
+  log(
+    'CHECK',
+    `本地固定 7 个 Release 资产及双更新清单 v${VERSION} 全部核验通过`,
+  );
 
   if (SHOULD_PUBLISH) {
     assertSourceStateUnchanged(sourceState.sourceCommit, {

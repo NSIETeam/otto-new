@@ -24,15 +24,27 @@ describe('JsonRecurringTaskStateStore', () => {
     const filePath = temporaryFile();
     const store = new JsonRecurringTaskStateStore({ filePath });
     store.put({
-      name: 'daily-index', source: 'test', definitionVersion: 2,
-      lastCompletedInputVersion: 'v4', nextRunAtMs: 20, updatedAtMs: 10,
+      name: 'daily-index',
+      source: 'test',
+      definitionVersion: 2,
+      lastCompletedInputVersion: 'v4',
+      nextRunAtMs: 20,
+      updatedAtMs: 10,
     });
 
-    expect(new JsonRecurringTaskStateStore({ filePath }).get('daily-index')).toEqual({
-      name: 'daily-index', source: 'test', definitionVersion: 2,
-      lastCompletedInputVersion: 'v4', nextRunAtMs: 20, updatedAtMs: 10,
+    expect(
+      new JsonRecurringTaskStateStore({ filePath }).get('daily-index'),
+    ).toEqual({
+      name: 'daily-index',
+      source: 'test',
+      definitionVersion: 2,
+      lastCompletedInputVersion: 'v4',
+      nextRunAtMs: 20,
+      updatedAtMs: 10,
     });
-    expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+    }
     expect(fs.readdirSync(path.dirname(filePath))).toEqual(['tasks.json']);
   });
 
@@ -53,33 +65,102 @@ describe('JsonRecurringTaskStateStore', () => {
     expect(fs.existsSync(filePath)).toBe(false);
   });
 
+  it('fails closed without renaming corrupt enterprise state', () => {
+    const filePath = temporaryFile();
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, '{broken', 'utf8');
+    const corrupt: string[] = [];
+
+    expect(
+      () =>
+        new JsonRecurringTaskStateStore({
+          filePath,
+          corruptPolicy: 'fail-closed',
+          onCorrupt: (reportedPath) => corrupt.push(reportedPath),
+        }),
+    ).toThrow(/unreadable or corrupt/u);
+    expect(corrupt).toEqual([filePath]);
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('{broken');
+    expect(fs.readdirSync(path.dirname(filePath))).toEqual(['tasks.json']);
+  });
+
+  it('fails a checkpoint when the parent-directory durability barrier fails', () => {
+    const filePath = temporaryFile();
+    const directories: string[] = [];
+    const store = new JsonRecurringTaskStateStore({
+      filePath,
+      syncDirectory: (directory) => {
+        directories.push(directory);
+        throw new Error('directory fsync failed');
+      },
+    });
+
+    expect(() =>
+      store.put({
+        name: 'external-write',
+        source: 'test',
+        definitionVersion: 1,
+        lastCompletedInputVersion: 'v1',
+        nextRunAtMs: 20,
+        updatedAtMs: 10,
+      }),
+    ).toThrow('directory fsync failed');
+    expect(directories).toEqual([path.dirname(filePath)]);
+  });
+
   it('rejects invalid state before touching the existing file', () => {
     const filePath = temporaryFile();
     const store = new JsonRecurringTaskStateStore({ filePath });
     store.put({
-      name: 'valid', source: 'test', definitionVersion: 1,
-      nextRunAtMs: 20, updatedAtMs: 10,
+      name: 'valid',
+      source: 'test',
+      definitionVersion: 1,
+      nextRunAtMs: 20,
+      updatedAtMs: 10,
     });
     const before = fs.readFileSync(filePath, 'utf8');
 
-    expect(() => store.put({
-      name: '', source: 'test', definitionVersion: 1,
-      nextRunAtMs: 20, updatedAtMs: 10,
-    })).toThrow('invalid recurring task state');
+    expect(() =>
+      store.put({
+        name: '',
+        source: 'test',
+        definitionVersion: 1,
+        nextRunAtMs: 20,
+        updatedAtMs: 10,
+      }),
+    ).toThrow('invalid recurring task state');
     expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
   });
 
   it('keeps the newest duplicate when reading a recovered state file', () => {
     const filePath = temporaryFile();
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify({
-      version: 1,
-      tasks: [
-        { name: 'same', source: 'test', definitionVersion: 1, nextRunAtMs: 2, updatedAtMs: 2 },
-        { name: 'same', source: 'test', definitionVersion: 1, nextRunAtMs: 3, updatedAtMs: 3 },
-      ],
-    }), 'utf8');
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        tasks: [
+          {
+            name: 'same',
+            source: 'test',
+            definitionVersion: 1,
+            nextRunAtMs: 2,
+            updatedAtMs: 2,
+          },
+          {
+            name: 'same',
+            source: 'test',
+            definitionVersion: 1,
+            nextRunAtMs: 3,
+            updatedAtMs: 3,
+          },
+        ],
+      }),
+      'utf8',
+    );
 
-    expect(new JsonRecurringTaskStateStore({ filePath }).get('same')?.nextRunAtMs).toBe(3);
+    expect(
+      new JsonRecurringTaskStateStore({ filePath }).get('same')?.nextRunAtMs,
+    ).toBe(3);
   });
 });

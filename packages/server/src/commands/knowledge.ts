@@ -18,6 +18,7 @@ import * as path from 'node:path';
 import { homedir } from 'node:os';
 import {
   AcpCommands,
+  atomicWriteTextFile,
   DEFAULT_CONTEXT_FILENAME,
   KnowledgeBaseTool,
   MemoryTool,
@@ -89,14 +90,19 @@ export const kbCommand: ServerSlashCommand = {
       action: (_ctx, args) => {
         const parsed = parseKbArgs(args);
         if (!parsed._) {
-          return fail('用法：`/kb add [--category 分类] [--tags a,b] <要保存的内容>`');
+          return fail(
+            '用法：`/kb add [--category 分类] [--tags a,b] <要保存的内容>`',
+          );
         }
         return runKb({
           action: 'add',
           content: parsed._,
           category: parsed['category'],
           tags: parsed['tags']
-            ? parsed['tags'].split(',').map((t) => t.trim()).filter(Boolean)
+            ? parsed['tags']
+                .split(',')
+                .map((t) => t.trim())
+                .filter(Boolean)
             : undefined,
         });
       },
@@ -147,7 +153,12 @@ export const kbCommand: ServerSlashCommand = {
 function memoryFilePaths(cwd: string): { project: string; global: string } {
   return {
     project: path.join(cwd, 'OTTO.md'),
-    global: path.join(homedir(), OTTO_CONFIG_DIR, 'memory', DEFAULT_CONTEXT_FILENAME),
+    global: path.join(
+      homedir(),
+      OTTO_CONFIG_DIR,
+      'memory',
+      DEFAULT_CONTEXT_FILENAME,
+    ),
   };
 }
 
@@ -194,7 +205,8 @@ export const memoryCommand: ServerSlashCommand = {
         const target = memoryFilePaths(ctx.host.cwd(ctx.sessionId)).project;
         await MemoryTool.performAddMemoryEntry(fact, target, {
           readFile: fs.readFile,
-          writeFile: fs.writeFile,
+          writeFile: async (filePath, content) =>
+            atomicWriteTextFile(filePath, content),
           mkdir: fs.mkdir,
         });
         return md(`已写入 \`${target}\`：\n\n> ${fact}`);
@@ -234,7 +246,9 @@ export const memoryCommand: ServerSlashCommand = {
             .access(filePath)
             .then(() => true)
             .catch(() => false);
-          lines.push(`- ${label}：\`${filePath}\`${exists ? '' : '（不存在）'}`);
+          lines.push(
+            `- ${label}：\`${filePath}\`${exists ? '' : '（不存在）'}`,
+          );
         }
         return md(lines.join('\n'));
       },

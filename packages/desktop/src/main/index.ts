@@ -69,6 +69,7 @@ import {
 import { WorkspaceDirectoryStore } from './workspace-directory-store.js';
 import { MainWindowPresentationController } from './main-window-presentation.js';
 import { askWindowCloseChoice } from './window-close-policy.js';
+import { trayMenuInputVersion } from './tray-menu-state.js';
 import {
   advanceDesktopPetDrag,
   clampDesktopPetToWorkArea,
@@ -249,10 +250,10 @@ function normalizeEnterpriseMessageAttachments(
     maxTotalBytes?: number;
   } = {},
 ): EnterpriseDirectMessageAttachmentUpload[] {
-  const maxFileBytes = limits.maxFileBytes ??
-    ENTERPRISE_MESSAGE_ATTACHMENT_MAX_FILE_BYTES;
-  const maxTotalBytes = limits.maxTotalBytes ??
-    ENTERPRISE_MESSAGE_ATTACHMENT_MAX_TOTAL_BYTES;
+  const maxFileBytes =
+    limits.maxFileBytes ?? ENTERPRISE_MESSAGE_ATTACHMENT_MAX_FILE_BYTES;
+  const maxTotalBytes =
+    limits.maxTotalBytes ?? ENTERPRISE_MESSAGE_ATTACHMENT_MAX_TOTAL_BYTES;
   if (value == null) return [];
   if (
     !Array.isArray(value) ||
@@ -290,10 +291,7 @@ function normalizeEnterpriseMessageAttachments(
       );
     }
     if (sourcePath) {
-      const granted = fileAccessGrants.resolve(
-        sourcePath,
-        maxFileBytes,
-      );
+      const granted = fileAccessGrants.resolve(sourcePath, maxFileBytes);
       if (granted.size !== size) {
         throw new Error('附件在选择后发生变化，请重新选择');
       }
@@ -315,9 +313,9 @@ function normalizeEnterpriseMessageAttachments(
   });
 }
 
-function normalizeEnterpriseAtoaSources(value: unknown): Array<
-  'current_chat' | 'enterprise_knowledge' | 'work_logs' | 'schedules'
-> {
+function normalizeEnterpriseAtoaSources(
+  value: unknown,
+): Array<'current_chat' | 'enterprise_knowledge' | 'work_logs' | 'schedules'> {
   if (!Array.isArray(value) || value.length > 4) {
     throw new Error('A2A 授权范围无效');
   }
@@ -546,7 +544,8 @@ let enterpriseTrayContacts: EnterpriseTrayContact[] = [];
 /** 用户主动退出标记；关闭窗口时不退出，只有菜单/托盘退出才真正结束进程。 */
 let isQuitting = false;
 /** Ephemeral private keys for in-progress provider pairings; never exposed to renderer. */
-const channelPairingDeviceKeys = new EphemeralChannelPairingKeyStore<ChannelInstallationDeviceKeys>();
+const channelPairingDeviceKeys =
+  new EphemeralChannelPairingKeyStore<ChannelInstallationDeviceKeys>();
 const desktopRpaAppGrants = new Map<string, 'inspect' | 'interact'>();
 let unregisterDesktopRpaHost: (() => void) | undefined;
 
@@ -554,7 +553,10 @@ async function registerMacOsDesktopRpaHost(): Promise<void> {
   if (process.platform !== 'darwin') return;
   const rpa = (await import('otto-rpa')) as unknown as {
     MacOsAccessibilityPortV1: new (options: {
-      authorizeApp(input: { appId: string; action: 'inspect' | 'interact' }): Promise<boolean>;
+      authorizeApp(input: {
+        appId: string;
+        action: 'inspect' | 'interact';
+      }): Promise<boolean>;
     }) => unknown;
     registerDesktopRpaPortV1(port: unknown): void;
   };
@@ -563,20 +565,23 @@ async function registerMacOsDesktopRpaHost(): Promise<void> {
       if (!systemPreferences.isTrustedAccessibilityClient(false)) return false;
       const current = desktopRpaAppGrants.get(appId);
       if (current === 'interact' || current === action) return true;
-      const result = mainWindow && !mainWindow.isDestroyed()
-        ? await dialog.showMessageBox(mainWindow, {
-            type: 'warning',
-            title: '允许 Otto 控制应用？',
-            message: action === 'interact'
-              ? `允许 Otto 在本次运行期间操作 ${appId} 的可访问控件？`
-              : `允许 Otto 在本次运行期间读取 ${appId} 的可访问控件结构？`,
-            detail: '仅允许语义控件定位；坐标、任意脚本、Shell、密码字段和未脱敏截图均被禁止。',
-            buttons: ['允许本次运行', '拒绝'],
-            defaultId: 1,
-            cancelId: 1,
-            noLink: true,
-          })
-        : { response: 1 };
+      const result =
+        mainWindow && !mainWindow.isDestroyed()
+          ? await dialog.showMessageBox(mainWindow, {
+              type: 'warning',
+              title: '允许 Otto 控制应用？',
+              message:
+                action === 'interact'
+                  ? `允许 Otto 在本次运行期间操作 ${appId} 的可访问控件？`
+                  : `允许 Otto 在本次运行期间读取 ${appId} 的可访问控件结构？`,
+              detail:
+                '仅允许语义控件定位；坐标、任意脚本、Shell、密码字段和未脱敏截图均被禁止。',
+              buttons: ['允许本次运行', '拒绝'],
+              defaultId: 1,
+              cancelId: 1,
+              noLink: true,
+            })
+          : { response: 1 };
       if (result.response !== 0) return false;
       desktopRpaAppGrants.set(appId, action);
       return true;
@@ -675,7 +680,8 @@ const IPC = {
   customerModuleInstalledList: 'otto:customer-module-installed-list',
   customerModuleInstall: 'otto:customer-module-install',
   customerModuleSetEnabled: 'otto:customer-module-set-enabled',
-  customerModuleSetBackgroundEnabled: 'otto:customer-module-set-background-enabled',
+  customerModuleSetBackgroundEnabled:
+    'otto:customer-module-set-background-enabled',
   customerModuleUninstall: 'otto:customer-module-uninstall',
   customerModuleClearData: 'otto:customer-module-clear-data',
   customerModuleExportData: 'otto:customer-module-export-data',
@@ -753,12 +759,15 @@ const IPC = {
   enterpriseMessageSend: 'otto:enterprise-message-send',
   enterpriseMessageSecurityReset: 'otto:enterprise-message-security-reset',
   enterpriseFederationContactCode: 'otto:enterprise-federation-contact-code',
-  enterpriseFederationContactImport: 'otto:enterprise-federation-contact-import',
+  enterpriseFederationContactImport:
+    'otto:enterprise-federation-contact-import',
   enterpriseFederationContacts: 'otto:enterprise-federation-contacts',
-  enterpriseFederationContactRemove: 'otto:enterprise-federation-contact-remove',
+  enterpriseFederationContactRemove:
+    'otto:enterprise-federation-contact-remove',
   enterpriseFederationMessagesList: 'otto:enterprise-federation-messages-list',
   enterpriseFederationMessageSend: 'otto:enterprise-federation-message-send',
-  enterpriseFederationAttachmentSave: 'otto:enterprise-federation-attachment-save',
+  enterpriseFederationAttachmentSave:
+    'otto:enterprise-federation-attachment-save',
   enterpriseFederationAtoaTasks: 'otto:enterprise-federation-atoa-tasks',
   enterpriseFederationAtoaApprove: 'otto:enterprise-federation-atoa-approve',
   enterpriseFederationAtoaDeny: 'otto:enterprise-federation-atoa-deny',
@@ -766,7 +775,8 @@ const IPC = {
   enterpriseFederationAtoaRespond: 'otto:enterprise-federation-atoa-respond',
   enterpriseFederationContactVerification:
     'otto:enterprise-federation-contact-verification',
-  enterpriseFederationContactVerify: 'otto:enterprise-federation-contact-verify',
+  enterpriseFederationContactVerify:
+    'otto:enterprise-federation-contact-verify',
   enterpriseMessageAttachmentRead: 'otto:enterprise-message-attachment-read',
   enterpriseE2eeDevicesList: 'otto:enterprise-e2ee-devices-list',
   enterpriseE2eeKeyTransparency: 'otto:enterprise-e2ee-key-transparency',
@@ -1139,7 +1149,9 @@ function startEnterpriseSkillUsageReporting(): void {
     estimatedCostUsdPerRun: 0,
     getInputVersion: () => {
       try {
-        const stats = fs.statSync(path.join(worklogRootDir(), 'skill_usage.jsonl'));
+        const stats = fs.statSync(
+          path.join(worklogRootDir(), 'skill_usage.jsonl'),
+        );
         return `${stats.size}:${stats.mtimeMs}`;
       } catch {
         return undefined;
@@ -1590,10 +1602,18 @@ function requestChannelPairing(
       (res) => {
         let text = '';
         res.setEncoding('utf8');
-        res.on('data', (chunk: string) => { text += chunk; });
+        res.on('data', (chunk: string) => {
+          text += chunk;
+        });
         res.on('end', () => {
           try {
-            resolve(JSON.parse(text) as { ok: boolean; data: unknown; error: string | null });
+            resolve(
+              JSON.parse(text) as {
+                ok: boolean;
+                data: unknown;
+                error: string | null;
+              },
+            );
           } catch {
             resolve(null);
           }
@@ -1746,12 +1766,14 @@ function trayTooltip(unreadCount: number): string {
   if (unreadCount <= 0) return 'Otto';
   const lines: string[] = [`Otto · ${unreadCount} 条未读消息`];
   if (enterpriseTrayContacts.length > 0) {
-    const contacts = enterpriseTrayContacts.slice(0, 4).map((item) => (
-      `${item.name} ${item.count} 条：${item.preview}`
-    ));
+    const contacts = enterpriseTrayContacts
+      .slice(0, 4)
+      .map((item) => `${item.name} ${item.count} 条：${item.preview}`);
     lines.push(...contacts);
     if (enterpriseTrayContacts.length > contacts.length) {
-      lines.push(`还有 ${enterpriseTrayContacts.length - contacts.length} 位联系人`);
+      lines.push(
+        `还有 ${enterpriseTrayContacts.length - contacts.length} 位联系人`,
+      );
     }
   }
   // 提示用户 hover 或点击可以查看详情
@@ -1768,7 +1790,9 @@ async function refreshEnterpriseTrayContacts(): Promise<void> {
   }
   try {
     enterpriseTrayContacts = summarizeEnterpriseTrayContacts(
-      await listEnterpriseUnreadMessageNotifications({ includeFederation: true }),
+      await listEnterpriseUnreadMessageNotifications({
+        includeFederation: true,
+      }),
     );
   } catch {
     updateUnreadIndicators(notificationService.getUnreadSessions());
@@ -1780,9 +1804,7 @@ async function refreshEnterpriseTrayContacts(): Promise<void> {
 
 async function listEnterpriseUnreadMessageNotifications(
   options: { includeFederation?: boolean } = {},
-): Promise<
-  Array<EnterpriseUnreadMessageNotification & { count?: number }>
-> {
+): Promise<Array<EnterpriseUnreadMessageNotification & { count?: number }>> {
   const localMessages = !enterpriseClient.supportsMlsPrivateMessages()
     ? await enterpriseClient.listUnreadDirectMessageNotifications()
     : await Promise.all([
@@ -1797,7 +1819,8 @@ async function listEnterpriseUnreadMessageNotifications(
           source: 'enterprise' as const,
           title: '端到端加密私聊',
           senderAccountId: message.senderAccountId,
-          senderName: names.get(message.senderAccountId) ?? message.senderAccountId,
+          senderName:
+            names.get(message.senderAccountId) ?? message.senderAccountId,
           preview: message.content.slice(0, 160),
           createdAt: message.createdAt,
         }));
@@ -1823,8 +1846,8 @@ async function listEnterpriseUnreadMessageNotifications(
 
 function totalTrayUnreadCount(unread: readonly string[]): number {
   const enterpriseSessionIds = new Set(
-    enterpriseTrayContacts.map(
-      (contact) => contact.accountId.startsWith('federation:')
+    enterpriseTrayContacts.map((contact) =>
+      contact.accountId.startsWith('federation:')
         ? `enterprise:federation:${contact.accountId.slice('federation:'.length)}`
         : `enterprise:message:${contact.accountId}`,
     ),
@@ -1959,7 +1982,8 @@ function handleEnterpriseTrayNavigation(targetUrl: string): void {
     if (!accountId || accountId.length > 256) return;
     if (accountId.startsWith('federation:')) {
       const contactId = accountId.slice('federation:'.length);
-      if (contactId) openNotificationSession(`enterprise:federation:${contactId}`);
+      if (contactId)
+        openNotificationSession(`enterprise:federation:${contactId}`);
       return;
     }
     openNotificationSession(`enterprise:message:${accountId}`);
@@ -2205,9 +2229,14 @@ function createTray(): void {
     initialDelayMs: 2_000,
     missedRunPolicy: 'skip',
     estimatedCostUsdPerRun: 0,
-    getInputVersion: () => tray && !tray.isDestroyed()
-      ? `bucket:${Math.floor(Date.now() / 2_000)}`
-      : undefined,
+    getInputVersion: () =>
+      tray && !tray.isDestroyed()
+        ? trayMenuInputVersion({
+            status: tracer.getSummary(),
+            restarting: trayRestarting,
+            contacts: enterpriseTrayContacts,
+          })
+        : undefined,
     run: () => updateMenu(),
   });
   void refreshEnterpriseTrayContacts();
@@ -2219,9 +2248,10 @@ function createTray(): void {
     initialDelayMs: 8_000,
     missedRunPolicy: 'skip',
     estimatedCostUsdPerRun: 0,
-    getInputVersion: () => !isQuitting && enterpriseClient.snapshot().token
-      ? `bucket:${Math.floor(Date.now() / 8_000)}`
-      : undefined,
+    getInputVersion: () =>
+      !isQuitting && enterpriseClient.snapshot().token
+        ? `bucket:${Math.floor(Date.now() / 8_000)}`
+        : undefined,
     run: () => refreshEnterpriseTrayContacts(),
   });
 
@@ -2297,18 +2327,21 @@ function createWindow(): BrowserWindow {
     closePromptPending = true;
     void askWindowCloseChoice({
       showMessageBox: (options) => dialog.showMessageBox(options),
-    }).then((choice) => {
-      if (choice === 'continue-background') {
-        win.hide();
-      } else if (choice === 'stop-and-quit') {
-        isQuitting = true;
-        app.quit();
-      }
-    }).catch((error) => {
-      console.error('[otto-desktop] close choice dialog failed:', error);
-    }).finally(() => {
-      closePromptPending = false;
-    });
+    })
+      .then((choice) => {
+        if (choice === 'continue-background') {
+          win.hide();
+        } else if (choice === 'stop-and-quit') {
+          isQuitting = true;
+          app.quit();
+        }
+      })
+      .catch((error) => {
+        console.error('[otto-desktop] close choice dialog failed:', error);
+      })
+      .finally(() => {
+        closePromptPending = false;
+      });
   });
 
   hardenWebContents(win);
@@ -2367,12 +2400,14 @@ function clampDesktopPetPosition(
   x: number;
   y: number;
 } {
-  const width = Number.isFinite(windowSize.width) && windowSize.width > 0
-    ? Math.round(windowSize.width)
-    : DESKTOP_PET_WINDOW_WIDTH;
-  const height = Number.isFinite(windowSize.height) && windowSize.height > 0
-    ? Math.round(windowSize.height)
-    : DESKTOP_PET_WINDOW_HEIGHT;
+  const width =
+    Number.isFinite(windowSize.width) && windowSize.width > 0
+      ? Math.round(windowSize.width)
+      : DESKTOP_PET_WINDOW_WIDTH;
+  const height =
+    Number.isFinite(windowSize.height) && windowSize.height > 0
+      ? Math.round(windowSize.height)
+      : DESKTOP_PET_WINDOW_HEIGHT;
   const displayAnchor = anchor ?? {
     x: candidate.x + width / 2,
     y: candidate.y + height / 2,
@@ -2384,10 +2419,20 @@ function clampDesktopPetPosition(
 function resolveDesktopPetPosition(): { x: number; y: number } {
   const saved = readDesktopPetPosition();
   const primaryWorkArea = screen.getPrimaryDisplay().workArea;
-  return clampDesktopPetPosition(saved ?? {
-    x: primaryWorkArea.x + primaryWorkArea.width - DESKTOP_PET_WINDOW_WIDTH - 24,
-    y: primaryWorkArea.y + primaryWorkArea.height - DESKTOP_PET_WINDOW_HEIGHT - 24,
-  });
+  return clampDesktopPetPosition(
+    saved ?? {
+      x:
+        primaryWorkArea.x +
+        primaryWorkArea.width -
+        DESKTOP_PET_WINDOW_WIDTH -
+        24,
+      y:
+        primaryWorkArea.y +
+        primaryWorkArea.height -
+        DESKTOP_PET_WINDOW_HEIGHT -
+        24,
+    },
+  );
 }
 
 function saveDesktopPetPosition(win: BrowserWindow): void {
@@ -2437,12 +2482,15 @@ function updateDesktopPetDragPosition(): void {
   if (next.x === currentX && next.y === currentY) return;
   desktopPetDragMoved = true;
   const fixedSize = desktopPetOuterSize ?? liveBounds;
-  desktopPetWindow.setBounds({
-    x: next.x,
-    y: next.y,
-    width: fixedSize.width,
-    height: fixedSize.height,
-  }, false);
+  desktopPetWindow.setBounds(
+    {
+      x: next.x,
+      y: next.y,
+      width: fixedSize.width,
+      height: fixedSize.height,
+    },
+    false,
+  );
 }
 
 function finishDesktopPetDrag(): boolean {
@@ -2545,10 +2593,13 @@ function ensureDesktopPetWindow(): BrowserWindow {
     pushDesktopPetState();
     if (!desktopPetEnabled) return;
     const [currentX, currentY] = win.getPosition();
-    const visiblePosition = clampDesktopPetPosition({
-      x: currentX,
-      y: currentY,
-    }, desktopPetOuterSize);
+    const visiblePosition = clampDesktopPetPosition(
+      {
+        x: currentX,
+        y: currentY,
+      },
+      desktopPetOuterSize,
+    );
     if (visiblePosition.x !== currentX || visiblePosition.y !== currentY) {
       win.setPosition(visiblePosition.x, visiblePosition.y, false);
     }
@@ -2606,8 +2657,8 @@ function setDesktopPetEnabled(enabled: boolean): boolean {
 function isDesktopPetSender(sender: Electron.WebContents): boolean {
   return Boolean(
     desktopPetWindow &&
-      !desktopPetWindow.isDestroyed() &&
-      desktopPetWindow.webContents === sender,
+    !desktopPetWindow.isDestroyed() &&
+    desktopPetWindow.webContents === sender,
   );
 }
 
@@ -3433,16 +3484,22 @@ function registerIpc(): void {
     ) {
       throw new Error('知识修订字段不完整');
     }
-    const adjudication = revision.adjudication && typeof revision.adjudication === 'object'
-      ? revision.adjudication as Record<string, unknown>
-      : null;
-    if (adjudication && (
-      !Array.isArray(adjudication.acceptedEvidenceIds)
-      || !adjudication.acceptedEvidenceIds.every((id) => typeof id === 'string' && /^\d+$/u.test(id))
-      || !Array.isArray(adjudication.rejectedEvidenceIds)
-      || !adjudication.rejectedEvidenceIds.every((id) => typeof id === 'string' && /^\d+$/u.test(id))
-      || typeof adjudication.rationale !== 'string'
-    )) {
+    const adjudication =
+      revision.adjudication && typeof revision.adjudication === 'object'
+        ? (revision.adjudication as Record<string, unknown>)
+        : null;
+    if (
+      adjudication &&
+      (!Array.isArray(adjudication.acceptedEvidenceIds) ||
+        !adjudication.acceptedEvidenceIds.every(
+          (id) => typeof id === 'string' && /^\d+$/u.test(id),
+        ) ||
+        !Array.isArray(adjudication.rejectedEvidenceIds) ||
+        !adjudication.rejectedEvidenceIds.every(
+          (id) => typeof id === 'string' && /^\d+$/u.test(id),
+        ) ||
+        typeof adjudication.rationale !== 'string')
+    ) {
       throw new Error('知识裁决字段不正确');
     }
     return enterpriseClient.reviseKnowledge(body.id, {
@@ -3460,36 +3517,43 @@ function registerIpc(): void {
       resolveConflict: revision.resolveConflict === true,
       adjudication: adjudication
         ? {
-          acceptedEvidenceIds: adjudication.acceptedEvidenceIds as string[],
-          rejectedEvidenceIds: adjudication.rejectedEvidenceIds as string[],
-          rationale: adjudication.rationale as string,
-        }
+            acceptedEvidenceIds: adjudication.acceptedEvidenceIds as string[],
+            rejectedEvidenceIds: adjudication.rejectedEvidenceIds as string[],
+            rationale: adjudication.rationale as string,
+          }
         : undefined,
     });
   });
-  ipcMain.handle(IPC.enterpriseKnowledgeRevalidate, async (_e, input: unknown) => {
-    loadEnterpriseSession();
-    const body = input && typeof input === 'object'
-      ? input as Record<string, unknown>
-      : {};
-    if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
-      throw new Error('知识复核参数不正确');
-    }
-    const revalidation = body.input && typeof body.input === 'object'
-      ? body.input as Record<string, unknown>
-      : {};
-    if (typeof revalidation.rationale !== 'string'
-      || revalidation.rationale.trim().length < 12
-      || !Number.isSafeInteger(revalidation.validForDays)
-      || Number(revalidation.validForDays) < 30
-      || Number(revalidation.validForDays) > 365) {
-      throw new Error('知识复核字段不完整');
-    }
-    return enterpriseClient.revalidateKnowledge(body.id, {
-      rationale: revalidation.rationale.trim(),
-      validForDays: Number(revalidation.validForDays),
-    });
-  });
+  ipcMain.handle(
+    IPC.enterpriseKnowledgeRevalidate,
+    async (_e, input: unknown) => {
+      loadEnterpriseSession();
+      const body =
+        input && typeof input === 'object'
+          ? (input as Record<string, unknown>)
+          : {};
+      if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
+        throw new Error('知识复核参数不正确');
+      }
+      const revalidation =
+        body.input && typeof body.input === 'object'
+          ? (body.input as Record<string, unknown>)
+          : {};
+      if (
+        typeof revalidation.rationale !== 'string' ||
+        revalidation.rationale.trim().length < 12 ||
+        !Number.isSafeInteger(revalidation.validForDays) ||
+        Number(revalidation.validForDays) < 30 ||
+        Number(revalidation.validForDays) > 365
+      ) {
+        throw new Error('知识复核字段不完整');
+      }
+      return enterpriseClient.revalidateKnowledge(body.id, {
+        rationale: revalidation.rationale.trim(),
+        validForDays: Number(revalidation.validForDays),
+      });
+    },
+  );
   ipcMain.handle(
     IPC.enterpriseKnowledgeRevisions,
     async (_e, input: unknown) => {
@@ -3508,9 +3572,10 @@ function registerIpc(): void {
     IPC.enterpriseKnowledgeEvidence,
     async (_e, input: unknown) => {
       loadEnterpriseSession();
-      const body = input && typeof input === 'object'
-        ? input as Record<string, unknown>
-        : {};
+      const body =
+        input && typeof input === 'object'
+          ? (input as Record<string, unknown>)
+          : {};
       if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
         throw new Error('知识证据参数不正确');
       }
@@ -3763,15 +3828,22 @@ function registerIpc(): void {
         throw new Error('联邦联系人无效');
       }
       const markRead = !(
-        options && typeof options === 'object' &&
-        'markRead' in options && options.markRead === false
+        options &&
+        typeof options === 'object' &&
+        'markRead' in options &&
+        options.markRead === false
       );
       return enterpriseClient.listFederationMessages(contactId, { markRead });
     },
   );
   ipcMain.handle(
     IPC.enterpriseFederationMessageSend,
-    async (_event, contactId: unknown, content: unknown, attachments: unknown) => {
+    async (
+      _event,
+      contactId: unknown,
+      content: unknown,
+      attachments: unknown,
+    ) => {
       loadEnterpriseSession();
       if (
         typeof contactId !== 'string' ||
@@ -3808,10 +3880,14 @@ function registerIpc(): void {
     ) => {
       loadEnterpriseSession();
       if (
-        typeof contactId !== 'string' || !contactId ||
-        typeof messageId !== 'string' || !messageId ||
-        typeof attachmentId !== 'string' || !attachmentId ||
-        typeof suggestedFileName !== 'string' || !suggestedFileName
+        typeof contactId !== 'string' ||
+        !contactId ||
+        typeof messageId !== 'string' ||
+        !messageId ||
+        typeof attachmentId !== 'string' ||
+        !attachmentId ||
+        typeof suggestedFileName !== 'string' ||
+        !suggestedFileName
       ) {
         throw new Error('联邦附件信息无效');
       }
@@ -3845,15 +3921,19 @@ function registerIpc(): void {
       }
       const candidate = input as Record<string, unknown>;
       if (
-        typeof candidate.contactId !== 'string' || !candidate.contactId ||
-        typeof candidate.messageId !== 'string' || !candidate.messageId
+        typeof candidate.contactId !== 'string' ||
+        !candidate.contactId ||
+        typeof candidate.messageId !== 'string' ||
+        !candidate.messageId
       ) {
         throw new Error('A2A 授权请求无效');
       }
       return enterpriseClient.approveFederationAtoaProposal({
         contactId: candidate.contactId,
         messageId: candidate.messageId,
-        grantedSources: normalizeEnterpriseAtoaSources(candidate.grantedSources),
+        grantedSources: normalizeEnterpriseAtoaSources(
+          candidate.grantedSources,
+        ),
       });
     },
   );
@@ -3866,8 +3946,10 @@ function registerIpc(): void {
       }
       const candidate = input as Record<string, unknown>;
       if (
-        typeof candidate.contactId !== 'string' || !candidate.contactId ||
-        typeof candidate.messageId !== 'string' || !candidate.messageId
+        typeof candidate.contactId !== 'string' ||
+        !candidate.contactId ||
+        typeof candidate.messageId !== 'string' ||
+        !candidate.messageId
       ) {
         throw new Error('A2A 拒绝请求无效');
       }
@@ -3886,7 +3968,8 @@ function registerIpc(): void {
       }
       const candidate = input as Record<string, unknown>;
       if (
-        typeof candidate.contactId !== 'string' || !candidate.contactId ||
+        typeof candidate.contactId !== 'string' ||
+        !candidate.contactId ||
         typeof candidate.decisionMessageId !== 'string' ||
         !candidate.decisionMessageId
       ) {
@@ -3907,10 +3990,12 @@ function registerIpc(): void {
       }
       const candidate = input as Record<string, unknown>;
       if (
-        typeof candidate.contactId !== 'string' || !candidate.contactId ||
+        typeof candidate.contactId !== 'string' ||
+        !candidate.contactId ||
         typeof candidate.requestMessageId !== 'string' ||
         !candidate.requestMessageId ||
-        typeof candidate.answer !== 'string' || !candidate.answer.trim()
+        typeof candidate.answer !== 'string' ||
+        !candidate.answer.trim()
       ) {
         throw new Error('A2A 回复请求无效');
       }
@@ -3918,7 +4003,9 @@ function registerIpc(): void {
         contactId: candidate.contactId,
         requestMessageId: candidate.requestMessageId,
         answer: candidate.answer.trim().slice(0, 2400),
-        grantedSources: normalizeEnterpriseAtoaSources(candidate.grantedSources),
+        grantedSources: normalizeEnterpriseAtoaSources(
+          candidate.grantedSources,
+        ),
       });
     },
   );
@@ -4580,38 +4667,62 @@ function registerIpc(): void {
     lark: ['im:message', 'contact:user.base:readonly'],
     wecom: ['message.send', 'contacts.read.basic'],
   };
-  ipcMain.handle(IPC.channelPairingBegin, async (_event, provider: unknown): Promise<ChannelPairingResult> => {
-    if (provider !== 'feishu' && provider !== 'lark' && provider !== 'wecom') {
-      return { ok: false, pairing: null, error: '不支持的连接类型。' };
-    }
-    const keys = createChannelInstallationDeviceKeys();
-    const installationPublicKey = keys.publicKey;
-    const response = await requestChannelPairing('POST', '/channels/pairings', {
-      provider,
-      installationPublicKey,
-      requestedScopes: channelScopes[provider],
-    });
-    const pairing = response?.ok ? response.data as ChannelPairingPublic : null;
-    if (pairing) {
-      channelPairingDeviceKeys.set(pairing.pairingId, keys, pairing.expiresAtMs);
-    }
-    return {
-      ok: response?.ok === true,
-      pairing,
-      error: response?.error ?? (response ? null : '本地 server 未就绪。'),
-    };
-  });
+  ipcMain.handle(
+    IPC.channelPairingBegin,
+    async (_event, provider: unknown): Promise<ChannelPairingResult> => {
+      if (
+        provider !== 'feishu' &&
+        provider !== 'lark' &&
+        provider !== 'wecom'
+      ) {
+        return { ok: false, pairing: null, error: '不支持的连接类型。' };
+      }
+      const keys = createChannelInstallationDeviceKeys();
+      const installationPublicKey = keys.publicKey;
+      const response = await requestChannelPairing(
+        'POST',
+        '/channels/pairings',
+        {
+          provider,
+          installationPublicKey,
+          requestedScopes: channelScopes[provider],
+        },
+      );
+      const pairing = response?.ok
+        ? (response.data as ChannelPairingPublic)
+        : null;
+      if (pairing) {
+        channelPairingDeviceKeys.set(
+          pairing.pairingId,
+          keys,
+          pairing.expiresAtMs,
+        );
+      }
+      return {
+        ok: response?.ok === true,
+        pairing,
+        error: response?.error ?? (response ? null : '本地 server 未就绪。'),
+      };
+    },
+  );
   const pairingAction = async (
     pairingId: unknown,
     method: 'GET' | 'POST' | 'DELETE',
     suffix = '',
   ): Promise<{ ok: boolean; data: unknown; error: string | null }> => {
-    if (typeof pairingId !== 'string' || !/^pair_[a-f0-9]{24}$/.test(pairingId)) {
+    if (
+      typeof pairingId !== 'string' ||
+      !/^pair_[a-f0-9]{24}$/.test(pairingId)
+    ) {
       return { ok: false, data: null, error: '配对编号不合法。' };
     }
     const deviceKeys = channelPairingDeviceKeys.get(pairingId);
     if (suffix === '/install' && !deviceKeys) {
-      return { ok: false, data: null, error: '本机配对密钥已丢失，请重新扫码。' };
+      return {
+        ok: false,
+        data: null,
+        error: '本机配对密钥已丢失，请重新扫码。',
+      };
     }
     const response = await requestChannelPairing(
       method,
@@ -4620,27 +4731,39 @@ function registerIpc(): void {
         ? createChannelInstallationProof(pairingId, deviceKeys)
         : undefined,
     );
-    const status = response?.ok && response.data && typeof response.data === 'object'
-      && 'status' in response.data
-      ? String((response.data as { status: unknown }).status)
-      : undefined;
+    const status =
+      response?.ok &&
+      response.data &&
+      typeof response.data === 'object' &&
+      'status' in response.data
+        ? String((response.data as { status: unknown }).status)
+        : undefined;
     if (
-      method === 'DELETE'
-      || (suffix === '/install' && response?.ok === true)
-      || (status !== undefined && ['connected', 'expired', 'denied', 'failed', 'revoked'].includes(status))
+      method === 'DELETE' ||
+      (suffix === '/install' && response?.ok === true) ||
+      (status !== undefined &&
+        ['connected', 'expired', 'denied', 'failed', 'revoked'].includes(
+          status,
+        ))
     ) {
       channelPairingDeviceKeys.delete(pairingId);
     }
     return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
   };
   ipcMain.handle(IPC.channelPairingStatus, (_event, pairingId: unknown) =>
-    pairingAction(pairingId, 'GET'));
+    pairingAction(pairingId, 'GET'),
+  );
   ipcMain.handle(IPC.channelPairingInstall, (_event, pairingId: unknown) =>
-    pairingAction(pairingId, 'POST', '/install'));
+    pairingAction(pairingId, 'POST', '/install'),
+  );
   ipcMain.handle(IPC.channelPairingCancel, (_event, pairingId: unknown) =>
-    pairingAction(pairingId, 'DELETE'));
+    pairingAction(pairingId, 'DELETE'),
+  );
   ipcMain.handle(IPC.channelInstallations, async () => {
-    const response = await requestChannelPairing('GET', '/channels/installations');
+    const response = await requestChannelPairing(
+      'GET',
+      '/channels/installations',
+    );
     return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
   });
   ipcMain.handle(
@@ -4659,18 +4782,26 @@ function registerIpc(): void {
         action === 'revoke' ? 'DELETE' : action === 'health' ? 'GET' : 'POST',
         `/channels/installations/${installationId}${action === 'revoke' ? '' : `/${String(action)}`}`,
       );
-      return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+      return (
+        response ?? { ok: false, data: null, error: '本地 server 未就绪。' }
+      );
     },
   );
-  ipcMain.handle(IPC.channelIdentities, async (_event, installationId: unknown) => {
-    if (!isChannelInstallationId(installationId)) {
-      return { ok: false, data: null, error: '安装编号不合法。' };
-    }
-    const response = await requestChannelPairing(
-      'GET', `/channels/installations/${installationId}/identities`,
-    );
-    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
-  });
+  ipcMain.handle(
+    IPC.channelIdentities,
+    async (_event, installationId: unknown) => {
+      if (!isChannelInstallationId(installationId)) {
+        return { ok: false, data: null, error: '安装编号不合法。' };
+      }
+      const response = await requestChannelPairing(
+        'GET',
+        `/channels/installations/${installationId}/identities`,
+      );
+      return (
+        response ?? { ok: false, data: null, error: '本地 server 未就绪。' }
+      );
+    },
+  );
   ipcMain.handle(
     IPC.channelIdentityMutation,
     async (_event, installationId: unknown, input: unknown) => {
@@ -4681,22 +4812,26 @@ function registerIpc(): void {
         `/channels/installations/${parsed.installationId}/identities`,
         parsed.body,
       );
-      return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+      return (
+        response ?? { ok: false, data: null, error: '本地 server 未就绪。' }
+      );
     },
   );
   ipcMain.handle(IPC.rpaAccessibilityStatus, () => ({
     platform: process.platform,
     supported: process.platform === 'darwin',
-    trusted: process.platform === 'darwin'
-      ? systemPreferences.isTrustedAccessibilityClient(false)
-      : false,
+    trusted:
+      process.platform === 'darwin'
+        ? systemPreferences.isTrustedAccessibilityClient(false)
+        : false,
   }));
   ipcMain.handle(IPC.rpaAccessibilityRequest, () => ({
     platform: process.platform,
     supported: process.platform === 'darwin',
-    trusted: process.platform === 'darwin'
-      ? systemPreferences.isTrustedAccessibilityClient(true)
-      : false,
+    trusted:
+      process.platform === 'darwin'
+        ? systemPreferences.isTrustedAccessibilityClient(true)
+        : false,
   }));
   // ── 内置视频编辑器 ──────────────────────────────────────────
   ipcMain.handle(IPC.openVideoEditor, () =>
@@ -4741,9 +4876,9 @@ function registerIpc(): void {
     }
     const completedCurrentTask = Boolean(
       desktopPetState.running &&
-        !candidate.running &&
-        desktopPetState.sessionId &&
-        desktopPetState.sessionId === candidate.sessionId,
+      !candidate.running &&
+      desktopPetState.sessionId &&
+      desktopPetState.sessionId === candidate.sessionId,
     );
     desktopPetState = {
       running: candidate.running,
@@ -4769,7 +4904,8 @@ function registerIpc(): void {
       !desktopPetWindow ||
       desktopPetWindow.isDestroyed() ||
       desktopPetDragState
-    ) return;
+    )
+      return;
     if (interactive === true) {
       desktopPetWindow.setIgnoreMouseEvents(false);
     } else {
@@ -4817,10 +4953,8 @@ function registerIpc(): void {
     menu.popup({ window: desktopPetWindow });
   });
 
-  ipcMain.handle(
-    IPC.skillLeaderboard,
-    async () =>
-      enterpriseSkillLibrary.leaderboard(await authenticatedSkillScope()),
+  ipcMain.handle(IPC.skillLeaderboard, async () =>
+    enterpriseSkillLibrary.leaderboard(await authenticatedSkillScope()),
   );
 
   // 工作日志：读取本地日历的今天，展示业务成果 + 支撑操作。
@@ -4856,10 +4990,8 @@ function registerIpc(): void {
     return result;
   });
 
-  ipcMain.handle(
-    IPC.skillShareList,
-    async () =>
-      enterpriseSkillLibrary.listDepartment(await authenticatedSkillScope()),
+  ipcMain.handle(IPC.skillShareList, async () =>
+    enterpriseSkillLibrary.listDepartment(await authenticatedSkillScope()),
   );
   ipcMain.handle(IPC.skillMarketplace, () =>
     enterpriseSkillLibrary.listMarketplace(),
@@ -4961,16 +5093,23 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.customerModuleSubmit, async (_event, input: unknown) => {
     loadEnterpriseSession();
-    if (!input || typeof input !== 'object') throw new Error('客户模块投稿参数不正确');
+    if (!input || typeof input !== 'object')
+      throw new Error('客户模块投稿参数不正确');
     const body = input as Record<string, unknown>;
-    if (!body.manifest || typeof body.manifest !== 'object' || !body.files || typeof body.files !== 'object') {
+    if (
+      !body.manifest ||
+      typeof body.manifest !== 'object' ||
+      !body.files ||
+      typeof body.files !== 'object'
+    ) {
       throw new Error('客户模块清单和文件不能为空');
     }
     const files = body.files as Record<string, unknown>;
     let encodedSize = 0;
     const normalizedFiles: Record<string, string> = {};
     for (const [path, encoded] of Object.entries(files)) {
-      if (typeof encoded !== 'string') throw new Error(`客户模块文件格式不正确：${path}`);
+      if (typeof encoded !== 'string')
+        throw new Error(`客户模块文件格式不正确：${path}`);
       encodedSize += encoded.length;
       if (encodedSize > 24_000_000) throw new Error('客户模块包超过上传限制');
       normalizedFiles[path] = encoded;
@@ -4982,27 +5121,64 @@ function registerIpc(): void {
   });
 
   ipcMain.handle(IPC.customerModuleTest, async (_event, input: unknown) => {
-    if (!input || typeof input !== 'object') throw new Error('客户模块测试参数不正确');
+    if (!input || typeof input !== 'object')
+      throw new Error('客户模块测试参数不正确');
     const body = input as Record<string, unknown>;
-    const manifest = parseCustomerModuleManifest(body.manifest, { requireSignature: false });
-    if (!body.files || typeof body.files !== 'object' || Array.isArray(body.files)) throw new Error('客户模块测试文件不能为空');
-    const files = new Map(Object.entries(body.files as Record<string, unknown>).map(([name, encoded]) => {
-      if (typeof encoded !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)) throw new Error(`客户模块文件不是有效 base64：${name}`);
-      return [name, Uint8Array.from(Buffer.from(encoded, 'base64'))];
-    }));
-    validateCustomerModuleArchiveEntries(manifest, [...files].map(([filePath, bytes]) => ({ path: filePath, kind: 'file' as const, size: bytes.byteLength })), { requireSignature: false });
+    const manifest = parseCustomerModuleManifest(body.manifest, {
+      requireSignature: false,
+    });
+    if (
+      !body.files ||
+      typeof body.files !== 'object' ||
+      Array.isArray(body.files)
+    )
+      throw new Error('客户模块测试文件不能为空');
+    const files = new Map(
+      Object.entries(body.files as Record<string, unknown>).map(
+        ([name, encoded]) => {
+          if (
+            typeof encoded !== 'string' ||
+            !/^[A-Za-z0-9+/]*={0,2}$/u.test(encoded)
+          )
+            throw new Error(`客户模块文件不是有效 base64：${name}`);
+          return [name, Uint8Array.from(Buffer.from(encoded, 'base64'))];
+        },
+      ),
+    );
+    validateCustomerModuleArchiveEntries(
+      manifest,
+      [...files].map(([filePath, bytes]) => ({
+        path: filePath,
+        kind: 'file' as const,
+        size: bytes.byteLength,
+      })),
+      { requireSignature: false },
+    );
     await verifyCustomerModuleFileHashes(manifest.files, files);
-    await scanCustomerModuleWasm(files.get(manifest.entrypoint) ?? new Uint8Array());
+    await scanCustomerModuleWasm(
+      files.get(manifest.entrypoint) ?? new Uint8Array(),
+    );
     const hostAudit: Array<Record<string, unknown>> = [];
     const host = new CustomerModuleHostBroker({
-      invoke: async () => { throw new Error('本地沙箱测试禁止真实外部调用'); },
-      onAudit: (event) => hostAudit.push(event as unknown as Record<string, unknown>),
+      invoke: async () => {
+        throw new Error('本地沙箱测试禁止真实外部调用');
+      },
+      onAudit: (event) =>
+        hostAudit.push(event as unknown as Record<string, unknown>),
     });
     const audit: Array<Record<string, unknown>> = [];
-    const result = await new CustomerModuleRunner({ host, onAudit: (event) => audit.push(event as unknown as Record<string, unknown>) }).run({
-      moduleId: manifest.id, version: manifest.version,
-      wasm: files.get(manifest.entrypoint) ?? new Uint8Array(), input: {},
-      approvedCapabilities: manifest.permissions.map((permission) => permission.kind),
+    const result = await new CustomerModuleRunner({
+      host,
+      onAudit: (event) =>
+        audit.push(event as unknown as Record<string, unknown>),
+    }).run({
+      moduleId: manifest.id,
+      version: manifest.version,
+      wasm: files.get(manifest.entrypoint) ?? new Uint8Array(),
+      input: {},
+      approvedCapabilities: manifest.permissions.map(
+        (permission) => permission.kind,
+      ),
       limits: { timeoutMs: 2_000, maxOutputBytes: 256 * 1024 },
     });
     return { result, audit, hostAudit };
@@ -5013,19 +5189,43 @@ function registerIpc(): void {
     const root = path.join(app.getPath('userData'), 'customer-modules');
     try {
       await recoverCustomerModuleInstallReceipts(root, enterpriseClient);
-      const records = await refreshCustomerModuleMarketStatus(root, enterpriseClient);
-      return records.map(({ artifactPath: _artifactPath, receiptId: _receiptId, receiptStatus: _receiptStatus, manifest, ...record }) => ({ ...record, inputSchema: manifest.inputSchema }));
+      const records = await refreshCustomerModuleMarketStatus(
+        root,
+        enterpriseClient,
+      );
+      return records.map(
+        ({
+          artifactPath: _artifactPath,
+          receiptId: _receiptId,
+          receiptStatus: _receiptStatus,
+          manifest,
+          ...record
+        }) => ({ ...record, inputSchema: manifest.inputSchema }),
+      );
     } catch {
       const records = await listInstalledCustomerModules(root);
-      return records.map(({ artifactPath: _artifactPath, receiptId: _receiptId, receiptStatus: _receiptStatus, manifest, ...record }) => ({ ...record, inputSchema: manifest.inputSchema }));
+      return records.map(
+        ({
+          artifactPath: _artifactPath,
+          receiptId: _receiptId,
+          receiptStatus: _receiptStatus,
+          manifest,
+          ...record
+        }) => ({ ...record, inputSchema: manifest.inputSchema }),
+      );
     }
   });
 
   ipcMain.handle(IPC.customerModuleInstall, async (_event, input: unknown) => {
     loadEnterpriseSession();
-    if (!input || typeof input !== 'object') throw new Error('客户模块安装参数不正确');
+    if (!input || typeof input !== 'object')
+      throw new Error('客户模块安装参数不正确');
     const body = input as Record<string, unknown>;
-    if (typeof body.moduleId !== 'string' || typeof body.version !== 'string' || !Array.isArray(body.approvedPermissions)) {
+    if (
+      typeof body.moduleId !== 'string' ||
+      typeof body.version !== 'string' ||
+      !Array.isArray(body.approvedPermissions)
+    ) {
       throw new Error('客户模块安装参数不正确');
     }
     const installed = await installCustomerModule({
@@ -5036,62 +5236,139 @@ function registerIpc(): void {
       ottoVersion: app.getVersion(),
       approvedPermissions: body.approvedPermissions as never,
     });
-    const { artifactPath: _artifactPath, receiptId: _receiptId, receiptStatus: _receiptStatus, manifest, ...record } = installed;
+    const {
+      artifactPath: _artifactPath,
+      receiptId: _receiptId,
+      receiptStatus: _receiptStatus,
+      manifest,
+      ...record
+    } = installed;
     return { ...record, inputSchema: manifest.inputSchema };
   });
 
-  ipcMain.handle(IPC.customerModuleSetEnabled, async (_event, input: unknown) => {
-    if (!input || typeof input !== 'object') throw new Error('客户模块启停参数不正确');
-    const body = input as Record<string, unknown>;
-    if (typeof body.moduleId !== 'string' || typeof body.enabled !== 'boolean') throw new Error('客户模块启停参数不正确');
-    const root = path.join(app.getPath('userData'), 'customer-modules');
-    const record = await setCustomerModuleEnabled(root, body.moduleId, body.enabled);
-    const { artifactPath: _artifactPath, receiptId: _receiptId, receiptStatus: _receiptStatus, manifest, ...safe } = record;
-    return { ...safe, inputSchema: manifest.inputSchema };
-  });
+  ipcMain.handle(
+    IPC.customerModuleSetEnabled,
+    async (_event, input: unknown) => {
+      if (!input || typeof input !== 'object')
+        throw new Error('客户模块启停参数不正确');
+      const body = input as Record<string, unknown>;
+      if (
+        typeof body.moduleId !== 'string' ||
+        typeof body.enabled !== 'boolean'
+      )
+        throw new Error('客户模块启停参数不正确');
+      const root = path.join(app.getPath('userData'), 'customer-modules');
+      const record = await setCustomerModuleEnabled(
+        root,
+        body.moduleId,
+        body.enabled,
+      );
+      const {
+        artifactPath: _artifactPath,
+        receiptId: _receiptId,
+        receiptStatus: _receiptStatus,
+        manifest,
+        ...safe
+      } = record;
+      return { ...safe, inputSchema: manifest.inputSchema };
+    },
+  );
 
-  ipcMain.handle(IPC.customerModuleSetBackgroundEnabled, async (_event, input: unknown) => {
-    if (!input || typeof input !== 'object') throw new Error('客户模块后台授权参数不正确');
-    const body = input as Record<string, unknown>;
-    if (typeof body.moduleId !== 'string' || typeof body.enabled !== 'boolean') throw new Error('客户模块后台授权参数不正确');
-    const root = path.join(app.getPath('userData'), 'customer-modules');
-    const record = await setCustomerModuleBackgroundEnabled(root, body.moduleId, body.enabled);
-    const { artifactPath: _artifactPath, receiptId: _receiptId, receiptStatus: _receiptStatus, manifest, ...safe } = record;
-    return { ...safe, inputSchema: manifest.inputSchema };
-  });
+  ipcMain.handle(
+    IPC.customerModuleSetBackgroundEnabled,
+    async (_event, input: unknown) => {
+      if (!input || typeof input !== 'object')
+        throw new Error('客户模块后台授权参数不正确');
+      const body = input as Record<string, unknown>;
+      if (
+        typeof body.moduleId !== 'string' ||
+        typeof body.enabled !== 'boolean'
+      )
+        throw new Error('客户模块后台授权参数不正确');
+      const root = path.join(app.getPath('userData'), 'customer-modules');
+      const record = await setCustomerModuleBackgroundEnabled(
+        root,
+        body.moduleId,
+        body.enabled,
+      );
+      const {
+        artifactPath: _artifactPath,
+        receiptId: _receiptId,
+        receiptStatus: _receiptStatus,
+        manifest,
+        ...safe
+      } = record;
+      return { ...safe, inputSchema: manifest.inputSchema };
+    },
+  );
 
-  ipcMain.handle(IPC.customerModuleUninstall, async (_event, moduleId: unknown) => {
-    if (typeof moduleId !== 'string') throw new Error('客户模块卸载参数不正确');
-    await uninstallCustomerModule(path.join(app.getPath('userData'), 'customer-modules'), moduleId);
-  });
+  ipcMain.handle(
+    IPC.customerModuleUninstall,
+    async (_event, moduleId: unknown) => {
+      if (typeof moduleId !== 'string')
+        throw new Error('客户模块卸载参数不正确');
+      await uninstallCustomerModule(
+        path.join(app.getPath('userData'), 'customer-modules'),
+        moduleId,
+      );
+    },
+  );
 
-  ipcMain.handle(IPC.customerModuleClearData, async (_event, moduleId: unknown) => {
-    if (typeof moduleId !== 'string') throw new Error('客户模块数据清理参数不正确');
-    await clearCustomerModuleData(path.join(app.getPath('userData'), 'customer-modules'), moduleId);
-  });
+  ipcMain.handle(
+    IPC.customerModuleClearData,
+    async (_event, moduleId: unknown) => {
+      if (typeof moduleId !== 'string')
+        throw new Error('客户模块数据清理参数不正确');
+      await clearCustomerModuleData(
+        path.join(app.getPath('userData'), 'customer-modules'),
+        moduleId,
+      );
+    },
+  );
 
-  ipcMain.handle(IPC.customerModuleExportData, async (_event, moduleId: unknown) => {
-    if (typeof moduleId !== 'string') throw new Error('客户模块数据导出参数不正确');
-    const root = path.join(app.getPath('userData'), 'customer-modules');
-    const exported = await exportCustomerModuleData(root, moduleId);
-    const selected = await dialog.showSaveDialog({ defaultPath: `${moduleId}-data.json` });
-    if (selected.canceled || !selected.filePath) return null;
-    await fs.promises.writeFile(selected.filePath, `${JSON.stringify(exported, null, 2)}\n`, { mode: 0o600 });
-    return selected.filePath;
-  });
+  ipcMain.handle(
+    IPC.customerModuleExportData,
+    async (_event, moduleId: unknown) => {
+      if (typeof moduleId !== 'string')
+        throw new Error('客户模块数据导出参数不正确');
+      const root = path.join(app.getPath('userData'), 'customer-modules');
+      const exported = await exportCustomerModuleData(root, moduleId);
+      const selected = await dialog.showSaveDialog({
+        defaultPath: `${moduleId}-data.json`,
+      });
+      if (selected.canceled || !selected.filePath) return null;
+      await fs.promises.writeFile(
+        selected.filePath,
+        `${JSON.stringify(exported, null, 2)}\n`,
+        { mode: 0o600 },
+      );
+      return selected.filePath;
+    },
+  );
 
   ipcMain.handle(IPC.customerModuleRun, async (_event, input: unknown) => {
     loadEnterpriseSession();
-    if (!input || typeof input !== 'object') throw new Error('客户模块运行参数不正确');
+    if (!input || typeof input !== 'object')
+      throw new Error('客户模块运行参数不正确');
     const body = input as Record<string, unknown>;
-    if (typeof body.runId !== 'string' || typeof body.moduleId !== 'string' || typeof body.version !== 'string' || !body.formInput || typeof body.formInput !== 'object' || Array.isArray(body.formInput)) {
+    if (
+      typeof body.runId !== 'string' ||
+      typeof body.moduleId !== 'string' ||
+      typeof body.version !== 'string' ||
+      !body.formInput ||
+      typeof body.formInput !== 'object' ||
+      Array.isArray(body.formInput)
+    ) {
       throw new Error('客户模块运行参数不正确');
     }
-    if (customerModuleRunControllers.has(body.runId)) throw new Error('客户模块运行 ID 已被占用');
+    if (customerModuleRunControllers.has(body.runId))
+      throw new Error('客户模块运行 ID 已被占用');
     const controller = new AbortController();
     customerModuleRunControllers.set(body.runId, controller);
     const root = path.join(app.getPath('userData'), 'customer-modules');
-    const record = (await listInstalledCustomerModules(root)).find((item) => item.id === body.moduleId && item.version === body.version);
+    const record = (await listInstalledCustomerModules(root)).find(
+      (item) => item.id === body.moduleId && item.version === body.version,
+    );
     if (!record) throw new Error('客户模块未安装');
     const hostAudit: Array<Record<string, unknown>> = [];
     const host = createDesktopCustomerModuleHost({
@@ -5099,12 +5376,16 @@ function registerIpc(): void {
       storageRoot: path.join(root, 'data'),
       modelInvoke: customerModuleModelInvoke,
       selectReadFile: async () => {
-        const selected = await dialog.showOpenDialog({ properties: ['openFile'] });
-        return selected.canceled ? null : selected.filePaths[0] ?? null;
+        const selected = await dialog.showOpenDialog({
+          properties: ['openFile'],
+        });
+        return selected.canceled ? null : (selected.filePaths[0] ?? null);
       },
       selectWriteFile: async (suggestedName) => {
-        const selected = await dialog.showSaveDialog({ defaultPath: suggestedName });
-        return selected.canceled ? null : selected.filePath ?? null;
+        const selected = await dialog.showSaveDialog({
+          defaultPath: suggestedName,
+        });
+        return selected.canceled ? null : (selected.filePath ?? null);
       },
       onAudit: (event) => {
         hostAudit.push(event as unknown as Record<string, unknown>);
@@ -5134,10 +5415,14 @@ function registerIpc(): void {
     return true;
   });
 
-  ipcMain.handle(IPC.generateCustomAgent, async (_event, requirement: unknown) => {
-    if (typeof requirement !== 'string') throw new Error('专家需求格式不正确');
-    return generateCustomAgent(requirement);
-  });
+  ipcMain.handle(
+    IPC.generateCustomAgent,
+    async (_event, requirement: unknown) => {
+      if (typeof requirement !== 'string')
+        throw new Error('专家需求格式不正确');
+      return generateCustomAgent(requirement);
+    },
+  );
 
   ipcMain.handle(IPC.enterpriseSkillReview, async (_event, input: unknown) => {
     loadEnterpriseSession();
@@ -5617,18 +5902,27 @@ function registerIpc(): void {
     return workspaceDirectories.grant(result.filePaths[0]);
   });
 
-  ipcMain.handle(IPC.recruitmentTranscribe, async (_event, filePath: unknown) => {
-    if (typeof filePath !== 'string' || !filePath.trim()) {
-      throw new Error('面试录音路径无效');
-    }
-    const granted = fileAccessGrants.resolve(filePath, 2 * 1024 * 1024 * 1024);
-    return transcribeRecruitmentInterview(granted.filePath);
-  });
+  ipcMain.handle(
+    IPC.recruitmentTranscribe,
+    async (_event, filePath: unknown) => {
+      if (typeof filePath !== 'string' || !filePath.trim()) {
+        throw new Error('面试录音路径无效');
+      }
+      const granted = fileAccessGrants.resolve(
+        filePath,
+        2 * 1024 * 1024 * 1024,
+      );
+      return transcribeRecruitmentInterview(granted.filePath);
+    },
+  );
 
-  ipcMain.handle(IPC.authorizeWorkspaceDirectory, (_event, directory: unknown) => {
-    if (typeof directory !== 'string') throw new Error('工作目录格式无效');
-    return workspaceDirectories.authorize(directory);
-  });
+  ipcMain.handle(
+    IPC.authorizeWorkspaceDirectory,
+    (_event, directory: unknown) => {
+      if (typeof directory !== 'string') throw new Error('工作目录格式无效');
+      return workspaceDirectories.authorize(directory);
+    },
+  );
 
   // 拖拽/隐藏 input 的 File 路径由可信 preload 通过 webUtils 提取后送到这里。
   // renderer 只能传 File 对象给 contextBridge，没有任意字符串 grant API。
@@ -5817,7 +6111,10 @@ if (!gotLock) {
     }
     applyCsp();
     await registerMacOsDesktopRpaHost().catch((error) => {
-      console.warn('[otto-desktop] macOS Accessibility RPA host unavailable:', error);
+      console.warn(
+        '[otto-desktop] macOS Accessibility RPA host unavailable:',
+        error,
+      );
     });
     await ensureEndpoint();
     startEnterpriseIdentityRefresh();
@@ -5855,7 +6152,11 @@ if (!gotLock) {
     stopEnterpriseIdentityRefresh();
     stopEnterpriseModuleUpdatePolling();
     stopEnterpriseSkillUsageReporting();
-    desktopRecurringTasks.stopAll();
+    // This call synchronously prevents new runs and returns a drain promise for
+    // any health/identity/reporting task that had already started.
+    const recurringTaskDrain = desktopRecurringTasks.shutdown({
+      timeoutMs: 30_000,
+    });
     channelPairingDeviceKeys.clear();
     desktopRpaAppGrants.clear();
     unregisterDesktopRpaHost?.();
@@ -5873,12 +6174,24 @@ if (!gotLock) {
     notificationService.clearAll();
     // detached server 仅用户主动退出托盘时才杀。
     // 关窗不杀：server + 飞书守护继续运行。
-    void flushEnterpriseAccountDataSync(3_000)
+    void recurringTaskDrain
+      .catch((error) => {
+        // User explicitly requested process exit. Surface the unsafe timeout,
+        // then continue the bounded cleanup path instead of hanging forever.
+        console.error(
+          '[otto-desktop] resident task drain failed during shutdown:',
+          error,
+        );
+      })
+      .then(() => flushEnterpriseAccountDataSync(3_000))
       .catch(logAccountDataSyncFailure)
       .then(() => cancelDurableWorkflowsForQuit())
       .then((report) => {
         if (report.failed.length > 0) {
-          console.warn('[otto-desktop] some durable workflow cancellations could not be persisted:', report.failed);
+          console.warn(
+            '[otto-desktop] some durable workflow cancellations could not be persisted:',
+            report.failed,
+          );
         }
       })
       .then(() => enterpriseMlsOutboxRetry.stop())

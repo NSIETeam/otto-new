@@ -5,8 +5,21 @@
  */
 
 import { defineConfig } from 'vitest/config';
+import { fileURLToPath } from 'node:url';
+
+const workflowSource = fileURLToPath(
+  new URL('../workflow/src/index.ts', import.meta.url),
+);
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      // The workspace package's runtime entry is generated under dist/. Core
+      // tests must exercise the source from the same checkout instead of a
+      // possibly stale local build left by an earlier branch or merge.
+      'otto-workflow': workflowSource,
+    },
+  },
   test: {
     reporters: ['default', 'junit'],
     silent: true,

@@ -16,6 +16,8 @@
  *   OTTO_ENTERPRISE_ADMIN_TOKEN=xxx node dist/enterprise/bin.js   # 局域网 + 鉴权
  */
 
+import { shutdownEnterpriseRuntime } from './gracefulShutdown.js';
+
 function configuredForPostgres(): boolean {
   const backend =
     process.env.OTTO_ENTERPRISE_DATABASE_BACKEND?.trim().toLowerCase() ||
@@ -24,10 +26,8 @@ function configuredForPostgres(): boolean {
 }
 
 async function startPostgres(args: Set<string>): Promise<void> {
-  const {
-    bootstrapClusteredEnterpriseAdmin,
-    startClusteredEnterpriseServer,
-  } = await import('./clusteredServer.js');
+  const { bootstrapClusteredEnterpriseAdmin, startClusteredEnterpriseServer } =
+    await import('./clusteredServer.js');
   if (args.has('--seed')) {
     throw new Error(
       'demo seed is intentionally unavailable in PostgreSQL clustered mode',
@@ -53,7 +53,15 @@ async function startPostgres(args: Set<string>): Promise<void> {
   await startClusteredEnterpriseServer();
 }
 
-async function startLocal(args: Set<string>): Promise<void> {
+interface StartedLocalServer {
+  server: import('node:http').Server;
+  closeDatabase: () => void;
+  forceShutdownTimeoutMs: number;
+}
+
+async function startLocal(
+  args: Set<string>,
+): Promise<StartedLocalServer | null> {
   const [db, serverModule] = await Promise.all([
     import('./db.js'),
     import('./server.js'),
@@ -81,7 +89,7 @@ async function startLocal(args: Set<string>): Promise<void> {
       isAdmin: true,
     });
     console.log(`[bootstrap] 本地管理员账号已创建：${username}`);
-    return;
+    return null;
   }
 
   if (args.has('--seed')) {
@@ -129,13 +137,53 @@ async function startLocal(args: Set<string>): Promise<void> {
       );
     }
   }
-  serverModule.startEnterpriseServer();
+  return {
+    server: serverModule.startEnterpriseServer(),
+    closeDatabase: db.closeEnterpriseDatabase,
+    forceShutdownTimeoutMs:
+      serverModule.ENTERPRISE_TASK_DRAIN_TIMEOUT_MS + 15_000,
+  };
+}
+
+function installShutdownSignals(runtime: StartedLocalServer): void {
+  let shutdownPromise: Promise<void> | undefined;
+  const shutdown = (signal: NodeJS.Signals): Promise<void> => {
+    if (shutdownPromise) return shutdownPromise;
+    console.log(
+      `[Otto Enterprise] ${signal} received; draining resident work before exit...`,
+    );
+    shutdownPromise = shutdownEnterpriseRuntime(runtime, {
+      onError: (error) => {
+        process.exitCode = 1;
+        console.error(
+          `[Otto Enterprise] graceful shutdown failed: ${error.message}`,
+        );
+      },
+    }).then(
+      () => {
+        console.log('[Otto Enterprise] graceful shutdown complete');
+      },
+      (error: unknown) => {
+        process.exitCode = 1;
+        throw error;
+      },
+    );
+    // The signal callback cannot be awaited by Node; keep the rejection
+    // handled while exitCode communicates failure to the service manager.
+    void shutdownPromise.catch(() => undefined);
+    return shutdownPromise;
+  };
+  process.once('SIGINT', () => void shutdown('SIGINT'));
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
 }
 
 async function main(): Promise<void> {
   const args = new Set(process.argv.slice(2));
   if (configuredForPostgres()) await startPostgres(args);
-  else await startLocal(args);
+  else {
+    const runtime = await startLocal(args);
+    if (runtime) installShutdownSignals(runtime);
+  }
 }
 
 main().catch((error: unknown) => {

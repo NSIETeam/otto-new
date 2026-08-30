@@ -35,13 +35,15 @@ if [ ! -x /usr/bin/python3 ]; then
 fi
 
 install -d -o root -g root -m 0755 \
-  /usr/local/sbin /usr/local/libexec/otto-enterprise-ci /etc/otto-enterprise
+  /usr/local/sbin /usr/local/libexec/otto-enterprise-ci \
+  /etc/otto-enterprise /var/lib/otto-enterprise
 install -d -o root -g root -m 0711 \
   "$STATE_ROOT" "$STATE_ROOT/uploads" \
   "$STATE_ROOT/uploads/enterprise" "$STATE_ROOT/uploads/mirror"
 install -d -o root -g root -m 0700 \
   "$STATE_ROOT/staging" "$STATE_ROOT/staging/enterprise" \
-  "$STATE_ROOT/staging/mirror" "$STATE_ROOT/locks" "$TEST_ROOT"
+  "$STATE_ROOT/staging/mirror" "$STATE_ROOT/locks" \
+  "$STATE_ROOT/deployments" "$TEST_ROOT"
 install -o root -g root -m 0755 \
   "$REPOSITORY_ROOT/deployment/enterprise-oneclick/ci-deploy-gateway.sh" \
   "$GATEWAY"
@@ -254,7 +256,7 @@ fi
 expected_key_id="$(openssl pkey -pubin \
   -in /etc/otto-enterprise/enterprise-package-signing-public.pem \
   -outform DER | sha256sum | awk '{print substr($1,1,16)}')"
-expected_preflight="protocol=otto-enterprise-ci-deploy-v4 gateway=$(sha256sum "$GATEWAY" | awk '{print $1}') publish=$(sha256sum "$PUBLISHER" | awk '{print $1}') rollback=$(sha256sum "$ROLLBACK" | awk '{print $1}') key=${expected_key_id} config=/etc/otto-enterprise/integration.env deploy_user=nobody rollback_user=daemon"
+expected_preflight="protocol=otto-enterprise-ci-deploy-v5 gateway=$(sha256sum "$GATEWAY" | awk '{print $1}') publish=$(sha256sum "$PUBLISHER" | awk '{print $1}') rollback=$(sha256sum "$ROLLBACK" | awk '{print $1}') key=${expected_key_id} config=/etc/otto-enterprise/integration.env deploy_user=nobody rollback_user=daemon"
 actual_preflight="$(SUDO_USER=nobody "$GATEWAY" preflight)"
 [ "$actual_preflight" = "$expected_preflight" ] || {
   printf 'gateway preflight identity mismatch\nexpected: %s\nactual:   %s\n' \
@@ -312,7 +314,7 @@ if wait "$old_gateway_pid"; then
 fi
 grep -F 'running gateway inode does not match the locked fixed gateway' \
   "$TEST_ROOT/old-gateway.out" >/dev/null
-expected_preflight="protocol=otto-enterprise-ci-deploy-v4 gateway=$(sha256sum "$GATEWAY" | awk '{print $1}') publish=$(sha256sum "$PUBLISHER" | awk '{print $1}') rollback=$(sha256sum "$ROLLBACK" | awk '{print $1}') key=${expected_key_id} config=/etc/otto-enterprise/integration.env deploy_user=nobody rollback_user=daemon"
+expected_preflight="protocol=otto-enterprise-ci-deploy-v5 gateway=$(sha256sum "$GATEWAY" | awk '{print $1}') publish=$(sha256sum "$PUBLISHER" | awk '{print $1}') rollback=$(sha256sum "$ROLLBACK" | awk '{print $1}') key=${expected_key_id} config=/etc/otto-enterprise/integration.env deploy_user=nobody rollback_user=daemon"
 [ "$(SUDO_USER=daemon "$GATEWAY" preflight)" = "$expected_preflight" ]
 if SUDO_USER=nobody "$GATEWAY" rollback-mirror v1.9.14-100-1; then
   printf 'deploy principal was allowed to invoke mirror rollback\n' >&2
@@ -873,6 +875,22 @@ envelope = {
 output_path.write_text(json.dumps(envelope, indent=2) + '\n', encoding='utf-8')
 PY
 
+# The v5 CI gateway is upgrade-only, including dry-run. Model the direct
+# one-click install layout before asking it to inspect the 1.9.14 package.
+install -d -o root -g root -m 0755 \
+  /opt/otto-enterprise/releases/1.9.13-dddddddddddd \
+  /opt/otto-enterprise/deploy
+printf '%s\n' \
+  '{"format":"otto-enterprise-release-v1","version":"1.9.13","releaseChannel":"stable","buildCommit":"dddddddddddddddddddddddddddddddddddddddd","buildIdentityKind":"release-content-sha1","sourceCommit":"ffffffffffffffffffffffffffffffffffffffff","sourceTreeDirty":false,"sourceDiffSha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","sourceInputSha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","runtime":{"node":"22.23.1","supportedArchitectures":["linux-x64","linux-arm64"]}}' \
+  > /opt/otto-enterprise/releases/1.9.13-dddddddddddd/manifest.json
+chown root:root /opt/otto-enterprise/releases/1.9.13-dddddddddddd/manifest.json
+chmod 0644 /opt/otto-enterprise/releases/1.9.13-dddddddddddd/manifest.json
+ln -s /opt/otto-enterprise/releases/1.9.13-dddddddddddd \
+  /opt/otto-enterprise/current
+printf '%s\n' '#!/bin/bash' 'set -Eeuo pipefail' 'exit 0' \
+  > /opt/otto-enterprise/deploy/verify.sh
+chmod 0755 /opt/otto-enterprise/deploy/verify.sh
+
 SUDO_USER=nobody "$GATEWAY" prepare-upload enterprise v1.9.14-301-1
 UPLOAD_DIR="$STATE_ROOT/uploads/enterprise/v1.9.14-301-1"
 gateway_upload_file enterprise v1.9.14-301-1 \
@@ -892,26 +910,142 @@ SUDO_USER=nobody "$GATEWAY" deploy \
 }
 
 install -d -o root -g root -m 0755 \
-  /opt/otto-enterprise/releases/1.9.14-aaaaaaaaaaaa/release \
+  /opt/otto-enterprise/releases/1.9.14-aaaaaaaaaaaa \
   /opt/otto-enterprise/deploy
 install -o root -g root -m 0644 \
   "$PACKAGE_WORK/release/manifest.json" \
-  /opt/otto-enterprise/releases/1.9.14-aaaaaaaaaaaa/release/manifest.json
-ln -s /opt/otto-enterprise/releases/1.9.14-aaaaaaaaaaaa \
-  /opt/otto-enterprise/current
+  /opt/otto-enterprise/releases/1.9.14-aaaaaaaaaaaa/manifest.json
+ln -sfn /opt/otto-enterprise/releases/1.9.14-aaaaaaaaaaaa \
+  /opt/otto-enterprise/current.next
+mv -Tf /opt/otto-enterprise/current.next /opt/otto-enterprise/current
 printf '%s\n' \
   '#!/bin/bash' \
   'set -Eeuo pipefail' \
   '[ "$OTTO_CONFIG_PATH" = "/etc/otto-enterprise/integration.env" ]' \
   > /opt/otto-enterprise/deploy/verify.sh
 chmod 0755 /opt/otto-enterprise/deploy/verify.sh
+VERIFY_TRANSACTION='v1.9.14-300-1'
+VERIFY_TRANSACTION_DIR="$STATE_ROOT/deployments/$VERIFY_TRANSACTION"
+install -d -o root -g root -m 0700 \
+  "$VERIFY_TRANSACTION_DIR" \
+  "$VERIFY_TRANSACTION_DIR/upgrade" \
+  "$VERIFY_TRANSACTION_DIR/upgrade/deploy.before"
+{
+  printf '%s\n' \
+    'format=otto-enterprise-deployment-state-v1' \
+    "transaction=$VERIFY_TRANSACTION" \
+    'action=upgrade' \
+    'target_version=1.9.14' \
+    "target_package=$PACKAGE_ID" \
+    "target_source=$SOURCE_COMMIT" \
+    'previous_version=1.9.13' \
+    'previous_package=dddddddddddd-eeeeeeeeeeee' \
+    'previous_source=ffffffffffffffffffffffffffffffffffffffff' \
+    'previous_current=/opt/otto-enterprise/releases/1.9.13-dddddddddddd'
+} > "$VERIFY_TRANSACTION_DIR/state"
+chown root:root "$VERIFY_TRANSACTION_DIR/state"
+chmod 0600 "$VERIFY_TRANSACTION_DIR/state"
+for snapshot in \
+  data.db.before \
+  enterprise.env.before \
+  resident-recurring-tasks.absent \
+  database-key-preserved; do
+  install -o root -g root -m 0600 /dev/null \
+    "$VERIFY_TRANSACTION_DIR/upgrade/$snapshot"
+done
+install -o root -g root -m 0644 /dev/null \
+  "$VERIFY_TRANSACTION_DIR/upgrade/otto-enterprise.service.before"
+VERIFY_WITNESS="otto-enterprise-rollback-witness-v1 transaction=$VERIFY_TRANSACTION target_version=1.9.14 target_package=$PACKAGE_ID target_source=$SOURCE_COMMIT previous_version=1.9.13 previous_package=dddddddddddd-eeeeeeeeeeee previous_source=ffffffffffffffffffffffffffffffffffffffff"
+printf '%s\n' "$VERIFY_WITNESS" > "$VERIFY_TRANSACTION_DIR/rollback-witness.expected"
+chown root:root "$VERIFY_TRANSACTION_DIR/rollback-witness.expected"
+chmod 0600 "$VERIFY_TRANSACTION_DIR/rollback-witness.expected"
 SUDO_USER=nobody "$GATEWAY" verify-deployment \
-  1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT"
+  "$VERIFY_TRANSACTION" 1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT"
 if SUDO_USER=nobody "$GATEWAY" verify-deployment \
-  1.9.14 cccccccccccc-bbbbbbbbbbbb "$SOURCE_COMMIT"; then
+  "$VERIFY_TRANSACTION" 1.9.14 cccccccccccc-bbbbbbbbbbbb "$SOURCE_COMMIT"; then
   printf 'gateway reconciliation accepted the wrong build identity\n' >&2
   exit 1
 fi
+# A new run with the same package identity must not silently adopt this older
+# unfinished transaction. Recovery requires the old exact transaction id.
+NEW_SAME_PACKAGE_TRANSACTION='v1.9.14-302-1'
+SUDO_USER=nobody "$GATEWAY" prepare-upload enterprise \
+  "$NEW_SAME_PACKAGE_TRANSACTION"
+gateway_upload_file enterprise "$NEW_SAME_PACKAGE_TRANSACTION" \
+  "archive-$PACKAGE_ID" "$TEST_ROOT/$ARCHIVE_NAME"
+gateway_upload_file enterprise "$NEW_SAME_PACKAGE_TRANSACTION" \
+  "checksum-$PACKAGE_ID" "$TEST_ROOT/$ARCHIVE_NAME.sha256"
+gateway_upload_file enterprise "$NEW_SAME_PACKAGE_TRANSACTION" \
+  "signature-$PACKAGE_ID" "$TEST_ROOT/$ARCHIVE_NAME.sig"
+if SUDO_USER=nobody "$GATEWAY" deploy \
+  "$NEW_SAME_PACKAGE_TRANSACTION" "$ARCHIVE_NAME" \
+  1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT" false; then
+  printf 'gateway adopted an older unfinished same-package transaction\n' >&2
+  exit 1
+fi
+if [ -e "$STATE_ROOT/uploads/enterprise/$NEW_SAME_PACKAGE_TRANSACTION" ]; then
+  SUDO_USER=nobody "$GATEWAY" cleanup-upload enterprise \
+    "$NEW_SAME_PACKAGE_TRANSACTION"
+fi
+RECOVERED_DEPLOYMENT="$(SUDO_USER=nobody "$GATEWAY" reconcile-deployment \
+  "$VERIFY_TRANSACTION" 1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT")"
+case "$RECOVERED_DEPLOYMENT" in
+  "recovered_deployed transaction=$VERIFY_TRANSACTION version=1.9.14 package=$PACKAGE_ID source=$SOURCE_COMMIT "*) ;;
+  *)
+    printf 'gateway did not durably recover the exact deployed receipt: %s\n' \
+      "$RECOVERED_DEPLOYMENT" >&2
+    exit 1
+    ;;
+esac
+SUDO_USER=nobody "$GATEWAY" finalize-deployment \
+  "$VERIFY_TRANSACTION" 1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT" >/dev/null
+[ -f "$VERIFY_TRANSACTION_DIR/finalized" ]
+
+# Simulate an upgrade that failed before cutover after its transaction state
+# became durable. Reconciliation must verify the still-running previous release,
+# write an exact terminal rollback receipt, and leave no unfinished blocker.
+FAILED_TRANSACTION='v1.9.15-303-1'
+FAILED_TRANSACTION_DIR="$STATE_ROOT/deployments/$FAILED_TRANSACTION"
+FAILED_PACKAGE='111111111111-222222222222'
+FAILED_SOURCE='3333333333333333333333333333333333333333'
+install -d -o root -g root -m 0700 \
+  "$FAILED_TRANSACTION_DIR" "$FAILED_TRANSACTION_DIR/upgrade"
+{
+  printf '%s\n' \
+    'format=otto-enterprise-deployment-state-v1' \
+    "transaction=$FAILED_TRANSACTION" \
+    'action=upgrade' \
+    'target_version=1.9.15' \
+    "target_package=$FAILED_PACKAGE" \
+    "target_source=$FAILED_SOURCE" \
+    'previous_version=1.9.14' \
+    "previous_package=$PACKAGE_ID" \
+    "previous_source=$SOURCE_COMMIT" \
+    'previous_current=/opt/otto-enterprise/releases/1.9.14-aaaaaaaaaaaa'
+} > "$FAILED_TRANSACTION_DIR/state"
+chown root:root "$FAILED_TRANSACTION_DIR/state"
+chmod 0600 "$FAILED_TRANSACTION_DIR/state"
+FAILED_WITNESS="otto-enterprise-rollback-witness-v1 transaction=$FAILED_TRANSACTION target_version=1.9.15 target_package=$FAILED_PACKAGE target_source=$FAILED_SOURCE previous_version=1.9.14 previous_package=$PACKAGE_ID previous_source=$SOURCE_COMMIT"
+printf '%s\n' "$FAILED_WITNESS" \
+  > "$FAILED_TRANSACTION_DIR/rollback-witness.expected"
+printf '%s\n' "$FAILED_WITNESS" \
+  > "$FAILED_TRANSACTION_DIR/upgrade/rollback-verified"
+chown root:root \
+  "$FAILED_TRANSACTION_DIR/rollback-witness.expected" \
+  "$FAILED_TRANSACTION_DIR/upgrade/rollback-verified"
+chmod 0600 \
+  "$FAILED_TRANSACTION_DIR/rollback-witness.expected" \
+  "$FAILED_TRANSACTION_DIR/upgrade/rollback-verified"
+RECOVERED_ROLLBACK="$(SUDO_USER=nobody "$GATEWAY" reconcile-deployment \
+  "$FAILED_TRANSACTION" 1.9.15 "$FAILED_PACKAGE" "$FAILED_SOURCE")"
+EXPECTED_RECOVERED_ROLLBACK="recovered_rolled_back transaction=$FAILED_TRANSACTION restored_version=1.9.14 restored_package=$PACKAGE_ID restored_source=$SOURCE_COMMIT replaced_version=1.9.15 replaced_package=$FAILED_PACKAGE replaced_source=$FAILED_SOURCE"
+[ "$RECOVERED_ROLLBACK" = "$EXPECTED_RECOVERED_ROLLBACK" ] || {
+  printf 'gateway did not durably classify the pre-cutover failure\nexpected: %s\nactual:   %s\n' \
+    "$EXPECTED_RECOVERED_ROLLBACK" "$RECOVERED_ROLLBACK" >&2
+  exit 1
+}
+[ "$(<"$FAILED_TRANSACTION_DIR/rolled-back")" = \
+  "${EXPECTED_RECOVERED_ROLLBACK#recovered_}" ]
 
 SUDO_USER=nobody "$GATEWAY" prepare-upload enterprise v1.9.14-302-1
 TAMPERED_UPLOAD="$STATE_ROOT/uploads/enterprise/v1.9.14-302-1"

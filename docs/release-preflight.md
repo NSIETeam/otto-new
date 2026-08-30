@@ -204,8 +204,8 @@ Release 不存在、名称、正文摘要、预发布标志、完整 14 资产�
 仍为发布前值时，才可删除本 run 的草稿和本 run 新建的 tag。正式 tag push 前已存在的
 正式仓源码 tag 必须保留；公开 Release、未知资产或任何歧义均禁止自动删除。
 
-公开阶段必须先公开并完整复核 `NSIETeam/otto-new`，最后才公开并复核旧客户端兼容仓
-`Felix201209/otto-releases`。若后续镜像事务失败，先完成镜像回滚，再从目标 Release
+公开阶段必须先公开并完整复核 `NSIETeam/otto-new`，随后上传、复核并原子切换更新镜像，最后才公开并复核旧客户端兼容仓
+`Felix201209/otto-releases`。两个 GitHub Release 中的 `latest.json` 必须使用 GitHub asset URL；两个仓库必须保持 public，且工作流要在不发送 Authorization/Cookie 的情况下下载并核验正式仓 `latest.json`、三个安装包与三个 blockmap 的大小和 SHA-256。镜像使用独立生成并经证明的 `latest.mirror.json`（上传到镜像时重命名为 `latest.json`），该内部文件不得成为 GitHub Release 资产。若镜像或兼容仓事务失败，先完成镜像回滚，再从目标 Release
 移除 `latest` 并按快照中的 Release id + tag 精确恢复两个仓此前的 `latest`。已经公开且
 可能被客户端观察到的 Release 绝不改回 draft，资产不得删除、覆盖或让既有下载 URL
 失效；从首次公开起该版本号永久烧毁，恢复闭环后只能使用新的 patch 版本。
@@ -218,11 +218,11 @@ Release 不存在、名称、正文摘要、预发布标志、完整 14 资产�
 
 ## 8. 企业服务器升级
 
-正式发布只能使用主 Release workflow 调用 `.github/workflows/deploy-server.yml`。GitHub runner、Secrets、生产审批或服务器信任边界不可用时必须停止发布；不得临时改成直接执行包内脚本。独立手动部署也必须经过 `production-approval`，只用于已审计恢复或 dry-run。
+正式发布只能使用主 Release workflow 调用 `.github/workflows/deploy-server.yml`。该 CI 网关只允许升级已经存在且可验证的 one-click `current`；全新服务器首装必须在发布窗口前由管理员人工审计并运行 `install.sh`，不得把自动首装伪装成可补偿事务。GitHub runner、Secrets、生产审批或服务器信任边界不可用时必须停止发布；不得临时改成直接执行包内脚本。独立手动部署也必须经过 `production-approval`，只用于已审计恢复或 dry-run。
 
 发布窗口前由服务器管理员从本次锁定源码重新安装 root 网关和两个镜像 helper。工作流的 `preflight` 必须精确匹配：
 
-- `protocol=otto-enterprise-ci-deploy-v4`
+- `protocol=otto-enterprise-ci-deploy-v5`
 - `config=/etc/otto-enterprise/enterprise.env`，必须逐字等于服务器 root 固定的生产配置路径
 - `deploy_user` 与 `rollback_user` 均与本次固定安装配置一致，且是两个不同的非 root 账号
 - 已安装网关、publish helper、rollback helper 与锁定源码的 SHA-256
@@ -230,7 +230,8 @@ Release 不存在、名称、正文摘要、预发布标志、完整 14 资产�
 
 主工作流随后自动执行签名验证、root staging、隔离迁移 canary、数据库备份、systemd 切换和精确部署身份复核。验收必须满足：
 
-- root 网关 `verify-deployment <version> <package_identity> <source_commit>` 通过；三个值都必须从锁定 workflow artifact 的签名 manifest/metadata 取得，不得手工猜测。
+- root 网关 `verify-deployment <transaction_id> <version> <package_identity> <source_commit>` 返回与事务、版本、包身份和源码提交精确绑定的部署回执；四个值都必须从本次锁定 workflow 和签名 manifest/metadata 取得，不得手工猜测。
+- 公网验收成功后必须调用 `finalize-deployment` 删除该事务的 root-only 回滚快照；公网验收失败或已提交事务的后续 job 未完整成功时，必须由只持有独立回滚私钥的 job 调用 `rollback-enterprise`，核对精确回滚回执并重新验收此前锁定版本。
 - 公网 `/enterprise/health` 只返回兼容信息：`status: ok`、`service: otto-enterprise`、精确 `version` 与 `appVersion`、当前 `apiVersion` 和所需 `capabilities`；其中 `version` 和 `appVersion` 都必须等于本次发布版本。
 - 公网 health 不得包含 `buildCommit`、`schemaVersion`、`db`、部署、许可证、运行时或短信私有状态。
 - 私有 `/enterprise/deployment/status` 仅在服务器本地通过管理员令牌检查，并要求

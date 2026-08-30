@@ -7,5 +7,5 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "dist", "node_modules"]
+  "exclude": ["src/**/*.test.ts", "src/test-support/**", "dist", "node_modules"]
 }

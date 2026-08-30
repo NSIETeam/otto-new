@@ -42,6 +42,10 @@ import {
 } from '../modules/integration_adapters/index.js';
 import { FeatureFlagManager, ProjectSettingsManager } from 'otto-core';
 import {
+  JsonRecurringTaskStateStore,
+  recurringTaskStateFilePath,
+} from '../recurringTaskStateStore.js';
+import {
   dispatchEnterpriseRoute,
   type AdminPrincipal,
 } from './enterpriseRouteDispatcher.js';
@@ -126,7 +130,9 @@ export interface EnterpriseServerOptions {
   /** 回执签名私钥（PEM）；不传则不签名（只含 digest）。 */
   controlSigningPrivateKey?: string;
   /** 执行 Control 下发指令的业务钩子（对接 SERVER-16 企业开通）。未传则 CONTROL-12 不启用执行。 */
-  controlCommandExecute?: (command: ControlCommandEnvelopeLike) => ControlCommandRunResultShim;
+  controlCommandExecute?: (
+    command: ControlCommandEnvelopeLike,
+  ) => ControlCommandRunResultShim;
   /** 密码登录限流参数；生产使用安全默认值，测试可注入时钟和较小阈值。 */
   loginRateLimit?: PasswordLoginRateLimitOptions;
   /** Test seam; production derives bootstrap credentials from server-side environment only. */
@@ -161,6 +167,42 @@ export interface VerificationSmsSender {
 }
 
 const ENTERPRISE_API_VERSION = 4;
+/** Resident external writes get this long to finish and checkpoint on stop. */
+export const ENTERPRISE_TASK_DRAIN_TIMEOUT_MS = 30_000;
+
+export function enterpriseRecurringTaskStatePath(
+  dataDirectory = process.env.OTTO_ENTERPRISE_DIR?.trim() ||
+    path.join(os.homedir(), '.otto-enterprise'),
+): string {
+  return recurringTaskStateFilePath(dataDirectory);
+}
+
+export function createEnterpriseRecurringTaskRegistry(): RecurringTaskRegistry {
+  const statePath = enterpriseRecurringTaskStatePath();
+  const stateStore = new JsonRecurringTaskStateStore({
+    filePath: statePath,
+    corruptPolicy: 'fail-closed',
+    onCorrupt: (_filePath, error) => {
+      console.error(
+        `[Otto Enterprise] resident task state is unreadable: ${statePath}`,
+        error,
+      );
+    },
+  });
+  // Fail before listen() if the systemd data directory cannot durably accept
+  // checkpoints. Starting without this proof could replay an accepted effect
+  // after the next restart.
+  stateStore.verifyWritable();
+  return new RecurringTaskRegistry({
+    allowPaidBackground: true,
+    stateStore,
+    onError: (taskName, error) =>
+      console.error(
+        `[Otto Enterprise] resident task ${taskName} failed`,
+        error,
+      ),
+  });
+}
 
 export const ENTERPRISE_CAPABILITIES = [
   'password_auth',
@@ -431,9 +473,9 @@ function makeHandler(
       }
       const commercialOrganizationId =
         memberAccount?.organizationId ?? adminPrincipal?.organizationId ?? null;
-      const commercialActorId = memberAccount?.id ?? (
-        adminPrincipal?.kind === 'account' ? adminPrincipal.account.id : null
-      );
+      const commercialActorId =
+        memberAccount?.id ??
+        (adminPrincipal?.kind === 'account' ? adminPrincipal.account.id : null);
       const auditCommercialDecision = (
         event: string,
         detail: Record<string, unknown>,
@@ -478,22 +520,23 @@ function makeHandler(
         method,
         crossOrganizationView: Boolean(
           requestedOrganizationId &&
-            requestedOrganizationId !== commercialOrganizationId,
+          requestedOrganizationId !== commercialOrganizationId,
         ),
       });
       const organizationFeature =
-        baselineOrganizationFeatureForEnterpriseRoute(path) ?? commercialFeature;
-      const organizationFeatureEnabled = organizationFeature &&
-        commercialOrganizationId
-        ? baselineOrganizationFeatureForEnterpriseRoute(path)
-          ? db.getConfiguredOrganizationFeatures(commercialOrganizationId)[
-              organizationFeature
-            ] === true
-          : db.isOrganizationFeatureEnabled(
-              commercialOrganizationId,
-              organizationFeature,
-            )
-        : true;
+        baselineOrganizationFeatureForEnterpriseRoute(path) ??
+        commercialFeature;
+      const organizationFeatureEnabled =
+        organizationFeature && commercialOrganizationId
+          ? baselineOrganizationFeatureForEnterpriseRoute(path)
+            ? db.getConfiguredOrganizationFeatures(commercialOrganizationId)[
+                organizationFeature
+              ] === true
+            : db.isOrganizationFeatureEnabled(
+                commercialOrganizationId,
+                organizationFeature,
+              )
+          : true;
       if (
         commercialFeature &&
         !db.isPrivateDeploymentProvisioningCompleteForOrganization(
@@ -560,8 +603,8 @@ function makeHandler(
         }
         const rawIdempotencyKey = req.headers['x-otto-idempotency-key'];
         const idempotencyKey = Array.isArray(rawIdempotencyKey)
-          ? rawIdempotencyKey[0] ?? ''
-          : rawIdempotencyKey ?? '';
+          ? (rawIdempotencyKey[0] ?? '')
+          : (rawIdempotencyKey ?? '');
         const referenceId = `op_${createHash('sha256')
           .update(`${method}\0${path}\0${idempotencyKey}`, 'utf8')
           .digest('hex')}`;
@@ -581,26 +624,35 @@ function makeHandler(
               referenceId,
               holdId: admission.holdId,
             });
-            res.setHeader('X-Otto-Billing-Admission', admission.holdId ?? 'required');
+            res.setHeader(
+              'X-Otto-Billing-Admission',
+              admission.holdId ?? 'required',
+            );
             res.once('finish', () => {
-              const outcome = res.statusCode >= 200 && res.statusCode < 400
-                ? 'capture'
-                : 'release';
-              auditCommercialDecision('commercial_billing_finalization_queued', {
-                module: billingOperation.module,
-                referenceId,
-                outcome,
-              });
-              void db.finalizeBillingOperation(
-                admission,
-                outcome,
-                billingFetch,
-              ).catch((error: unknown) => {
-                console.error('[Otto Enterprise] billing finalization failed', {
-                  code: outcome,
-                  message: error instanceof Error ? error.message : String(error),
+              const outcome =
+                res.statusCode >= 200 && res.statusCode < 400
+                  ? 'capture'
+                  : 'release';
+              auditCommercialDecision(
+                'commercial_billing_finalization_queued',
+                {
+                  module: billingOperation.module,
+                  referenceId,
+                  outcome,
+                },
+              );
+              void db
+                .finalizeBillingOperation(admission, outcome, billingFetch)
+                .catch((error: unknown) => {
+                  console.error(
+                    '[Otto Enterprise] billing finalization failed',
+                    {
+                      code: outcome,
+                      message:
+                        error instanceof Error ? error.message : String(error),
+                    },
+                  );
                 });
-              });
             });
           }
         } catch (error) {
@@ -807,7 +859,9 @@ export function createEnterpriseServer(opts: EnterpriseServerOptions = {}): {
       );
     }
     for (let index = 0; index < 100; index += 1) {
-      const receipt = controlBoundary.services.queryReceipt(submitted.commandId);
+      const receipt = controlBoundary.services.queryReceipt(
+        submitted.commandId,
+      );
       if (receipt) {
         if (receipt.status !== 'succeeded') {
           throw new Error('bootstrap_provisioning_failed');
@@ -916,16 +970,41 @@ function validatedStartOptions(
   };
 }
 
+function enterpriseCanaryMode(host: string): boolean {
+  const configured = process.env.OTTO_ENTERPRISE_CANARY_MODE?.trim();
+  if (!configured) return false;
+  if (configured !== '1') {
+    throw new Error('OTTO_ENTERPRISE_CANARY_MODE must be exactly 1 when set');
+  }
+  const readinessPath = process.env.OTTO_ENTERPRISE_READY_FILE?.trim() || '';
+  if (!isLoopback(host) || !readinessPath || !path.isAbsolute(readinessPath)) {
+    throw new Error(
+      'enterprise canary mode requires loopback host and an absolute readiness file',
+    );
+  }
+  const dataDirectory = path.resolve(
+    process.env.OTTO_ENTERPRISE_DIR?.trim() ||
+      path.join(os.homedir(), '.otto-enterprise'),
+  );
+  const resolvedReadinessPath = path.resolve(readinessPath);
+  if (path.dirname(resolvedReadinessPath) !== dataDirectory) {
+    throw new Error(
+      'enterprise canary readiness file must be a direct child of OTTO_ENTERPRISE_DIR',
+    );
+  }
+  return true;
+}
+
 /** 组装并 listen；返回 http.Server。访问地址不包含凭证，自动令牌只落 0600 文件。 */
 export function startEnterpriseServer(
   opts: EnterpriseServerOptions = {},
 ): Server {
   const validatedOptions = validatedStartOptions(opts);
-  const taskRegistry = validatedOptions.taskRegistry ?? new RecurringTaskRegistry({
-    allowPaidBackground: true,
-    onError: (taskName, error) =>
-      console.error(`[Otto Enterprise] resident task ${taskName} failed`, error),
-  });
+  const resolvedHost =
+    validatedOptions.host || process.env.OTTO_ENTERPRISE_HOST || '127.0.0.1';
+  const canaryMode = enterpriseCanaryMode(resolvedHost);
+  const taskRegistry =
+    validatedOptions.taskRegistry ?? createEnterpriseRecurringTaskRegistry();
   db.getDatabaseReadiness();
   db.ensureDirectMessageContentEncrypted();
   db.ensureDeploymentLicenseSecretsEncrypted();
@@ -977,24 +1056,31 @@ export function startEnterpriseServer(
     );
     console.log('[Otto Enterprise] Ctrl+C 停止');
   });
-  const stopPrivateDeploymentRuntime = startPrivateDeploymentRuntime(db, {
-    onError: (error) =>
-      console.error(
-        '[Otto Enterprise] private deployment runtime failed',
-        error,
-      ),
-  });
-  const stopPrivateDeploymentBootstrapRuntime =
-    startPrivateDeploymentBootstrapRuntime(privateDeploymentBootstrap, {
-      onError: (error) =>
-        console.error(
-          '[Otto Enterprise] private deployment bootstrap failed',
-          error,
-        ),
-    });
+  const stopPrivateDeploymentRuntime = canaryMode
+    ? () => undefined
+    : startPrivateDeploymentRuntime(db, {
+        onError: (error) =>
+          console.error(
+            '[Otto Enterprise] private deployment runtime failed',
+            error,
+          ),
+        taskRegistry,
+      });
+  const stopPrivateDeploymentBootstrapRuntime = canaryMode
+    ? () => undefined
+    : startPrivateDeploymentBootstrapRuntime(privateDeploymentBootstrap, {
+        onError: (error) =>
+          console.error(
+            '[Otto Enterprise] private deployment bootstrap failed',
+            error,
+          ),
+        taskRegistry,
+      });
   let stopFederationRuntime: () => void;
   try {
-    stopFederationRuntime = db.startFederationRuntime();
+    stopFederationRuntime = canaryMode
+      ? () => undefined
+      : db.startFederationRuntime(taskRegistry);
   } catch (error) {
     stopPrivateDeploymentRuntime();
     stopPrivateDeploymentBootstrapRuntime();
@@ -1003,7 +1089,9 @@ export function startEnterpriseServer(
   }
   let stopDataProtectionRuntime: () => void;
   try {
-    stopDataProtectionRuntime = db.startDataProtectionRuntime();
+    stopDataProtectionRuntime = canaryMode
+      ? () => undefined
+      : db.startDataProtectionRuntime(taskRegistry);
   } catch (error) {
     stopPrivateDeploymentRuntime();
     stopPrivateDeploymentBootstrapRuntime();
@@ -1024,27 +1112,37 @@ export function startEnterpriseServer(
     }
   };
   const mlsCleanupIntervalMs = 15 * 60 * 1_000;
-  const stopMlsCleanup = taskRegistry.register({
-    name: 'enterprise.local-mls-resource-maintenance',
-    source: 'packages/server/src/enterprise/server.ts#mls-cleanup',
-    intervalMs: mlsCleanupIntervalMs,
-    estimatedCostUsdPerRun: 0,
-    getInputVersion: () => String(Math.floor(Date.now() / mlsCleanupIntervalMs)),
-    run: runMlsCleanup,
-  }) ?? (() => undefined);
-  const initialMlsCleanup = setImmediate(runMlsCleanup);
-  initialMlsCleanup.unref();
+  const stopMlsCleanup = canaryMode
+    ? () => undefined
+    : (taskRegistry.register({
+        name: 'enterprise.local-mls-resource-maintenance',
+        source: 'packages/server/src/enterprise/server.ts#mls-cleanup',
+        intervalMs: mlsCleanupIntervalMs,
+        estimatedCostUsdPerRun: 0,
+        getInputVersion: () =>
+          String(Math.floor(Date.now() / mlsCleanupIntervalMs)),
+        run: runMlsCleanup,
+      }) ?? (() => undefined));
+  const initialMlsCleanup = canaryMode
+    ? undefined
+    : setImmediate(runMlsCleanup);
+  initialMlsCleanup?.unref();
+  const clearInitialMlsCleanup = () => {
+    if (initialMlsCleanup) clearImmediate(initialMlsCleanup);
+  };
   let stopTicketNotificationRuntime: () => void;
   try {
-    stopTicketNotificationRuntime = startTicketNotificationRuntime({
-      smsSender: repairSmsSender,
-      feishuSender: repairFeishuSender,
-      taskRegistry,
-      onError: (error) =>
-        console.error('[Otto Enterprise] 工单通知升级任务失败', error),
-    });
+    stopTicketNotificationRuntime = canaryMode
+      ? () => undefined
+      : startTicketNotificationRuntime({
+          smsSender: repairSmsSender,
+          feishuSender: repairFeishuSender,
+          taskRegistry,
+          onError: (error) =>
+            console.error('[Otto Enterprise] 工单通知升级任务失败', error),
+        });
   } catch (error) {
-    clearImmediate(initialMlsCleanup);
+    clearInitialMlsCleanup();
     stopMlsCleanup();
     stopPrivateDeploymentRuntime();
     stopPrivateDeploymentBootstrapRuntime();
@@ -1053,14 +1151,105 @@ export function startEnterpriseServer(
     server.close();
     throw error;
   }
-  server.once('close', () => {
-    clearImmediate(initialMlsCleanup);
+  const nativeClose = server.close.bind(server);
+  let gracefulClosePromise: Promise<void> | undefined;
+  let closeInitiated = false;
+  let runtimesCleaned = false;
+  const cleanupRuntimes = () => {
+    if (runtimesCleaned) return;
+    runtimesCleaned = true;
     stopMlsCleanup();
     stopPrivateDeploymentRuntime();
     stopPrivateDeploymentBootstrapRuntime();
     stopFederationRuntime();
     stopDataProtectionRuntime();
     stopTicketNotificationRuntime();
+  };
+  const closeHttp = (): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      const closeListeningServer = () => {
+        nativeClose((error?: Error) => (error ? reject(error) : resolve()));
+      };
+      if (server.listening) {
+        closeListeningServer();
+        return;
+      }
+      // startEnterpriseServer returns immediately after listen() is requested.
+      // A caller may request shutdown before the listening callback fires.
+      const onListening = () => {
+        server.off('error', onError);
+        closeListeningServer();
+      };
+      const onError = (error: Error) => {
+        server.off('listening', onListening);
+        reject(error);
+      };
+      server.once('listening', onListening);
+      server.once('error', onError);
+    });
+  const gracefulClose = (): Promise<void> => {
+    if (gracefulClosePromise) return gracefulClosePromise;
+    closeInitiated = true;
+    clearInitialMlsCleanup();
+    // Stop accepting requests and stop scheduling resident work at the same
+    // time. Keep the database and runtime resources alive until every task has
+    // checkpointed its outcome.
+    const httpClosed = closeHttp();
+    const drained = taskRegistry.shutdown({
+      timeoutMs: ENTERPRISE_TASK_DRAIN_TIMEOUT_MS,
+    });
+    gracefulClosePromise = Promise.allSettled([httpClosed, drained]).then(
+      (results) => {
+        const failures = results
+          .filter(
+            (result): result is PromiseRejectedResult =>
+              result.status === 'rejected',
+          )
+          .map((result) => result.reason);
+        if (failures.length > 0) {
+          throw new AggregateError(
+            failures,
+            'enterprise server graceful shutdown failed',
+          );
+        }
+        // Data protection removes its ownership lock only after every in-flight
+        // backup/write has drained. On a timeout, leave resources intact and
+        // report failure so a service manager can perform an explicit hard stop;
+        // tearing down the database here could corrupt work that is still live.
+        cleanupRuntimes();
+      },
+    );
+    return gracefulClosePromise;
+  };
+  server.once('close', () => {
+    if (closeInitiated) return;
+    // Defensive path for an unexpected transport close that did not enter the
+    // wrapped close method. There is no caller to await, but resident work is
+    // still stopped, drained, and cleaned rather than orphaned.
+    clearInitialMlsCleanup();
+    gracefulClosePromise = taskRegistry
+      .shutdown({
+        timeoutMs: ENTERPRISE_TASK_DRAIN_TIMEOUT_MS,
+      })
+      .then(cleanupRuntimes);
+    void gracefulClosePromise.catch((error) => {
+      console.error(
+        '[Otto Enterprise] resident drain after unexpected close failed',
+        error,
+      );
+    });
   });
+  server.close = ((callback?: (error?: Error) => void) => {
+    void gracefulClose().then(
+      () => callback?.(),
+      (error: unknown) => {
+        const normalized =
+          error instanceof Error ? error : new Error(String(error));
+        console.error('[Otto Enterprise] graceful shutdown failed', normalized);
+        callback?.(normalized);
+      },
+    );
+    return server;
+  }) as typeof server.close;
   return server;
 }

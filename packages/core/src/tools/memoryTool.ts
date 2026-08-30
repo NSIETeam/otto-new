@@ -11,6 +11,11 @@ import * as path from 'path';
 import { homedir } from 'os';
 import { glob } from 'glob';
 import { Config } from '../config/config.js';
+import {
+  atomicWriteTextFile,
+  GLOBAL_MEMORY_SECTION_HEADER,
+} from '../memory/globalMemoryMaintenance.js';
+import { withMemoryFileWriteLock } from '../memory/memoryFileLock.js';
 
 const memoryToolSchemaData: FunctionDeclaration = {
   name: 'save_memory',
@@ -50,7 +55,7 @@ Do NOT use this tool:
 
 export const OTTO_CONFIG_DIR = '.otto-user';
 export const DEFAULT_CONTEXT_FILENAME = 'OTTO.md';
-export const MEMORY_SECTION_HEADER = '## Otto Added Memories';
+export const MEMORY_SECTION_HEADER = GLOBAL_MEMORY_SECTION_HEADER;
 
 /**
  * 单个记忆文件的写入上限(字节)。超过则不再追加新事实并 warn,
@@ -65,9 +70,7 @@ export const MAX_MEMORY_FILE_SIZE = 256 * 1024; // 256KB
  * 造成跨工具串味(读到 ~/clawd 、~/.codex 下别人的记忆)。这里收紧为单一来源。
  * 需要兼容 AGENTS.md 的项目可通过 settings 的 contextFileName 显式配置。
  */
-export const DEFAULT_CONTEXT_FILENAMES = [
-  'OTTO.md',
-];
+export const DEFAULT_CONTEXT_FILENAMES = ['OTTO.md'];
 
 // This variable will hold the currently configured filename for context files.
 // It defaults to DEFAULT_CONTEXT_FILENAME but can be overridden by setOttoMdFilename.
@@ -102,8 +105,13 @@ export function getAllGeminiMdFilenames(): string[] {
  * This is used when the filename is not explicitly set and we want to find
  * the highest priority existing configuration file.
  */
-export async function discoverContextFilenames(baseDir: string = path.join(homedir(), OTTO_CONFIG_DIR)): Promise<string[]> {
-  const foundFiles = await findContextFilesInDirectory(baseDir, DEFAULT_CONTEXT_FILENAMES);
+export async function discoverContextFilenames(
+  baseDir: string = path.join(homedir(), OTTO_CONFIG_DIR),
+): Promise<string[]> {
+  const foundFiles = await findContextFilesInDirectory(
+    baseDir,
+    DEFAULT_CONTEXT_FILENAMES,
+  );
 
   if (foundFiles.length > 0) {
     return [path.basename(foundFiles[0])];
@@ -167,7 +175,10 @@ export const COMMON_IGNORE_PATTERNS = [
 /**
  * Finds context files in a directory based on priority patterns.
  */
-async function findContextFilesInDirectory(baseDir: string, filePatterns: string[]): Promise<string[]> {
+async function findContextFilesInDirectory(
+  baseDir: string,
+  filePatterns: string[],
+): Promise<string[]> {
   const foundFiles: string[] = [];
 
   try {
@@ -187,14 +198,16 @@ async function findContextFilesInDirectory(baseDir: string, filePatterns: string
           cwd: baseDir,
           absolute: true,
           nodir: true,
-          ignore: COMMON_IGNORE_PATTERNS
+          ignore: COMMON_IGNORE_PATTERNS,
         });
         if (matches.length > 0) {
           foundFiles.push(...matches);
           break; // Use first pattern that has matches
         }
       } catch (error) {
-        console.warn(`Warning: failed to glob pattern ${pattern} in ${baseDir}: ${error}`);
+        console.warn(
+          `Warning: failed to glob pattern ${pattern} in ${baseDir}: ${error}`,
+        );
       }
     } else {
       // Handle direct file paths
@@ -202,12 +215,14 @@ async function findContextFilesInDirectory(baseDir: string, filePatterns: string
 
       // Check if the file path matches any ignore patterns
       const relativePath = path.relative(baseDir, filePath);
-      const shouldIgnore = COMMON_IGNORE_PATTERNS.some(ignorePattern => {
+      const shouldIgnore = COMMON_IGNORE_PATTERNS.some((ignorePattern) => {
         // Remove /** suffix for directory matching
         const cleanPattern = ignorePattern.replace('/**', '');
-        return relativePath.startsWith(cleanPattern) ||
-               relativePath.includes(`/${cleanPattern}/`) ||
-               relativePath.includes(`\\${cleanPattern}\\`);
+        return (
+          relativePath.startsWith(cleanPattern) ||
+          relativePath.includes(`/${cleanPattern}/`) ||
+          relativePath.includes(`\\${cleanPattern}\\`)
+        );
       });
 
       if (shouldIgnore) {
@@ -306,33 +321,18 @@ export class MemoryTool extends BaseTool<SaveMemoryParams, ToolResult> {
     processedText = processedText.replace(/^(-+\s*)+/, '').trim();
     const newMemoryItem = `- ${processedText}`;
 
-    // 正确性:按文件串行化 read-modify-write,防止并发(最多 6 个 Sub-Agent +
-    // 异步飞书消息分发)同时写同一记忆文件 → "后写覆盖先写、事实丢失"。
-    const prev =
-      MemoryTool.memoryWriteChains.get(memoryFilePath) ?? Promise.resolve();
-    const run = prev
-      .catch(() => undefined)
-      .then(() =>
-        MemoryTool.writeMemoryEntryLocked(
-          memoryFilePath,
-          newMemoryItem,
-          fsAdapter,
-        ),
-      );
-    MemoryTool.memoryWriteChains.set(memoryFilePath, run);
-    try {
-      await run;
-    } finally {
-      if (MemoryTool.memoryWriteChains.get(memoryFilePath) === run) {
-        MemoryTool.memoryWriteChains.delete(memoryFilePath);
-      }
-    }
+    // save_memory 和后台去重共用同一个按文件串行边界，防止任一方的
+    // read-modify-replace 覆盖另一方刚写入的事实。
+    await withMemoryFileWriteLock(memoryFilePath, () =>
+      MemoryTool.writeMemoryEntryLocked(
+        memoryFilePath,
+        newMemoryItem,
+        fsAdapter,
+      ),
+    );
   }
 
-  /** 按文件串行化的记忆写入链(进程内 mutex,消除并发丢更新)。 */
-  private static memoryWriteChains = new Map<string, Promise<void>>();
-
-  /** 记忆写入临界区:read-modify-write,由 memoryWriteChains 保证同文件串行。 */
+  /** 记忆写入临界区，由共享的 memoryFileLock 保证同文件串行。 */
   private static async writeMemoryEntryLocked(
     memoryFilePath: string,
     newMemoryItem: string,
@@ -430,13 +430,18 @@ export class MemoryTool extends BaseTool<SaveMemoryParams, ToolResult> {
     try {
       // 权限检查：写记忆需要 memory:self:write 权限
       try {
-        const { getEnterpriseSync } = await import('../orchestration/enterpriseSync.js');
+        const { getEnterpriseSync } =
+          await import('../orchestration/enterpriseSync.js');
         const sync = getEnterpriseSync(this.config.getProjectRoot());
-        const provider = this.config as Config & { getFeishuUser?: () => string };
+        const provider = this.config as Config & {
+          getFeishuUser?: () => string;
+        };
         const userId = provider.getFeishuUser?.() || 'local';
         // 个人记忆写入只需要 self:write，降级放行（企业未绑定时）
         await sync.checkPermission(userId, 'memory:self:write').catch(() => {});
-      } catch { /* 企业未绑定降级放行 */ }
+      } catch {
+        /* 企业未绑定降级放行 */
+      }
 
       // Use the static method with actual fs promises
       // 飞书会话:若 config 指定了按会话隔离的记忆文件,存到该文件(每 chat 独立);
@@ -446,7 +451,8 @@ export class MemoryTool extends BaseTool<SaveMemoryParams, ToolResult> {
         sessionFile || (await getProjectMemoryFilePath(this.config));
       await MemoryTool.performAddMemoryEntry(fact, memoryFilePath, {
         readFile: fs.readFile,
-        writeFile: fs.writeFile,
+        writeFile: async (filePath, content) =>
+          atomicWriteTextFile(filePath, content),
         mkdir: fs.mkdir,
       });
       const successMessage = `Okay, I've remembered that: "${fact}"`;

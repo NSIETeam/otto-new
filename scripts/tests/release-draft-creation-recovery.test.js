@@ -202,6 +202,7 @@ describe('release draft creation recovery', () => {
           tag: TAG,
           canonicalCommit: SOURCE_COMMIT,
           packageIdentity: PACKAGE_IDENTITY,
+          assetProfile: 'production',
         },
         runId: '123456',
         canonicalTagPreexisting: true,
@@ -226,6 +227,7 @@ describe('release draft creation recovery', () => {
           legacyRepository: REPOSITORIES.legacy,
           canonicalCommit: SOURCE_COMMIT,
           packageIdentity: PACKAGE_IDENTITY,
+          assetProfile: 'production',
         }),
       ).toEqual(intent);
     } finally {
@@ -245,8 +247,93 @@ describe('release draft creation recovery', () => {
         legacyRepository: REPOSITORIES.legacy,
         canonicalCommit: SOURCE_COMMIT,
         packageIdentity: PACKAGE_IDENTITY,
+        assetProfile: 'production',
       }),
     ).toThrow('digest');
+  });
+
+  it('binds an unsigned transition to null package identity without touching legacy', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'otto-transition-intent-'));
+    try {
+      const transitionNames = assetNames().slice(0, 8);
+      await Promise.all(
+        transitionNames.map((name, index) =>
+          writeFile(path.join(root, name), `transition-${index}`),
+        ),
+      );
+      await writeFile(path.join(root, 'release-notes.md'), BODY);
+      const identity = await buildExpectedDraftIdentity({
+        artifactDirectory: root,
+        version: VERSION,
+        packageIdentity: null,
+        prerelease: true,
+        assetProfile: 'unsigned-transition',
+      });
+      const legacyAccess = () => {
+        throw new Error('transition must not access legacy');
+      };
+      const adapter = {
+        async getRepositoryIdentity(endpoint) {
+          if (endpoint.key === 'legacy') legacyAccess();
+          return endpoint.repository;
+        },
+        async getBranchCommit(endpoint) {
+          if (endpoint.key === 'legacy') legacyAccess();
+          return SOURCE_COMMIT;
+        },
+        async getTagCommit(endpoint) {
+          if (endpoint.key === 'legacy') legacyAccess();
+          return SOURCE_COMMIT;
+        },
+        async getRelease(endpoint) {
+          if (endpoint.key === 'legacy') legacyAccess();
+          return null;
+        },
+        async getLatest(endpoint) {
+          if (endpoint.key === 'legacy') legacyAccess();
+          return { id: 91, tagName: 'v1.9.13' };
+        },
+      };
+      const intent = await captureReleaseCreationIntent({
+        adapter,
+        endpoints: endpoints(),
+        expected: {
+          ...identity,
+          tag: TAG,
+          canonicalCommit: SOURCE_COMMIT,
+          packageIdentity: null,
+        },
+        runId: '123456',
+        canonicalTagPreexisting: true,
+        createLegacy: false,
+      });
+
+      expect(intent.expected.assetProfile).toBe('unsigned-transition');
+      expect(intent.expected.packageIdentity).toBeNull();
+      expect(intent.legacyMainCommit).toBeNull();
+      expect(intent.expected.targets.legacy).toBeNull();
+      expect(intent.expected.tagCommits.legacy).toBeNull();
+      await verifyReleaseCreationIntent({
+        adapter,
+        endpoints: endpoints(),
+        intent,
+      });
+      const serialized = `${JSON.stringify(intent, null, 2)}\n`;
+      expect(
+        parseReleaseCreationIntent(serialized, {
+          sha256: digest(serialized),
+          runId: '123456',
+          tag: TAG,
+          canonicalRepository: REPOSITORIES.canonical,
+          legacyRepository: REPOSITORIES.legacy,
+          canonicalCommit: SOURCE_COMMIT,
+          packageIdentity: null,
+          assetProfile: 'unsigned-transition',
+        }),
+      ).toEqual(intent);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('rechecks the uploaded intent twice immediately before first mutation', async () => {

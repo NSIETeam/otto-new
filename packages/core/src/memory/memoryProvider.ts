@@ -23,6 +23,7 @@ import {
   getFeishuSessionMemoryPath,
   MEMORY_SECTION_HEADER,
 } from '../tools/memoryTool.js';
+import { atomicWriteTextFile } from './globalMemoryMaintenance.js';
 
 /**
  * 记忆作用域:三层。
@@ -67,7 +68,8 @@ export interface MemoryFsAdapter {
 
 const DEFAULT_FS_ADAPTER: MemoryFsAdapter = {
   readFile: fs.readFile,
-  writeFile: fs.writeFile,
+  writeFile: async (filePath, content) =>
+    atomicWriteTextFile(filePath, content),
   mkdir: fs.mkdir,
 };
 
@@ -95,8 +97,8 @@ function resolveScopePath(
 /**
  * 基于文件的 MemoryProvider:三层全部落地为 Markdown 文件。
  *
- * 写入直接委托 MemoryTool.performAddMemoryEntry —— 复用其进程内按文件串行的
- * 写锁(memoryWriteChains)+ 同事实去重 + MAX_MEMORY_FILE_SIZE 上限,
+ * 写入直接委托 MemoryTool.performAddMemoryEntry —— 复用共享的按文件串行锁、
+ * 原子替换、同事实去重和 MAX_MEMORY_FILE_SIZE 上限,
  * 不重复造并发模型。读取做空文件/缺失文件的安全兜底。
  */
 export class FileMemoryProvider implements MemoryProvider {

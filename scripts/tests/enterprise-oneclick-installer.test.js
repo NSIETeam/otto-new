@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -196,6 +197,264 @@ describe('enterprise one-click service layout', () => {
     expect(service).toContain('license-public-keys.json');
     expect(installer).toContain('export OTTO_LICENSE_TRUST_FILE=');
   });
+
+  it('keeps the one-click outer stop budget beyond the server drain contract', () => {
+    const runtime = readFileSync(RUNTIME_ENTRY, 'utf8');
+    const serverSource = readFileSync(
+      path.resolve('packages/server/src/enterprise/server.ts'),
+      'utf8',
+    );
+    const service = readFileSync(SYSTEMD_SERVICE, 'utf8');
+    const upgrader = readFileSync(UPGRADE_SH, 'utf8');
+    expect(runtime).toContain('ENTERPRISE_TASK_DRAIN_TIMEOUT_MS');
+    expect(runtime).toContain('const SHUTDOWN_HTTP_GRACE_MS = 15_000');
+    expect(runtime).toContain(
+      'ENTERPRISE_TASK_DRAIN_TIMEOUT_MS + SHUTDOWN_HTTP_GRACE_MS',
+    );
+    const forceBody =
+      runtime.match(
+        /const forceTimer = setTimeout\(\(\) => \{([\s\S]*?)\n\s*\}, FORCE_SHUTDOWN_TIMEOUT_MS\);/u,
+      )?.[1] ?? '';
+    expect(forceBody).toContain('server.closeAllConnections?.()');
+    expect(forceBody).not.toContain('closeEnterpriseDatabase()');
+    expect(runtime).not.toContain('}, 15_000);');
+    expect(runtime).toContain("shutdown('readiness publication failure', 1)");
+    const drainMs = Number(
+      /ENTERPRISE_TASK_DRAIN_TIMEOUT_MS\s*=\s*([\d_]+)/u
+        .exec(serverSource)?.[1]
+        ?.replaceAll('_', ''),
+    );
+    const httpGraceMs = Number(
+      /SHUTDOWN_HTTP_GRACE_MS\s*=\s*([\d_]+)/u
+        .exec(runtime)?.[1]
+        ?.replaceAll('_', ''),
+    );
+    const systemdStopMs =
+      Number(/^TimeoutStopSec=(\d+)$/mu.exec(service)?.[1]) * 1_000;
+    expect(systemdStopMs).toBeGreaterThan(drainMs + httpGraceMs);
+    const serviceInstall = upgrader.indexOf(
+      'templates/otto-enterprise.service" "$SERVICE_UNIT"',
+    );
+    expect(serviceInstall).toBeGreaterThan(-1);
+    expect(
+      upgrader.indexOf('systemctl daemon-reload', serviceInstall),
+    ).toBeGreaterThan(serviceInstall);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'handles a real SIGTERM by waiting for server drain before closing SQLite',
+    async () => {
+      const sandbox = mkdtempSync(path.join(tmpdir(), 'otto-runtime-signal-'));
+      const eventFile = path.join(sandbox, 'events.log');
+      const trustFile = path.join(sandbox, 'license-public-keys.json');
+      const runtimeEntry = path.join(sandbox, 'run.mjs');
+      mkdirSync(path.join(sandbox, 'src', 'enterprise'), { recursive: true });
+      writeFileSync(path.join(sandbox, 'package.json'), '{"type":"module"}\n');
+      writeFileSync(
+        trustFile,
+        JSON.stringify([
+          '-----BEGIN PUBLIC KEY-----\nfixture\n-----END PUBLIC KEY-----\n',
+        ]),
+      );
+      writeFileSync(runtimeEntry, readFileSync(RUNTIME_ENTRY, 'utf8'));
+      writeFileSync(
+        path.join(sandbox, 'src', 'enterprise', 'db.js'),
+        `import fs from 'node:fs';
+export function closeEnterpriseDatabase() {
+  fs.appendFileSync(process.env.EVENT_FILE, 'db-close\\n');
+}
+`,
+      );
+      writeFileSync(
+        path.join(sandbox, 'src', 'enterprise', 'server.js'),
+        `import fs from 'node:fs';
+export const ENTERPRISE_TASK_DRAIN_TIMEOUT_MS = 30_000;
+export function startEnterpriseServer() {
+  fs.appendFileSync(process.env.EVENT_FILE, 'started\\n');
+  const server = {
+    close(callback) {
+      fs.appendFileSync(process.env.EVENT_FILE, 'close-start\\n');
+      setTimeout(() => {
+        fs.appendFileSync(process.env.EVENT_FILE, 'close-callback\\n');
+        callback();
+      }, 250);
+      return server;
+    },
+    closeAllConnections() {
+      fs.appendFileSync(process.env.EVENT_FILE, 'forced\\n');
+    },
+    once() { return server; },
+    address() { return { address: '127.0.0.1', port: 17777 }; },
+  };
+  return server;
+}
+`,
+      );
+
+      const child = spawn(process.execPath, [runtimeEntry], {
+        cwd: sandbox,
+        env: {
+          ...process.env,
+          EVENT_FILE: eventFile,
+          OTTO_ENTERPRISE_HOST: '127.0.0.1',
+          OTTO_ENTERPRISE_PORT: '17777',
+          OTTO_ENTERPRISE_PUBLIC_URL: 'https://otto.example.test',
+          OTTO_APP_VERSION: '1.9.14',
+          OTTO_BUILD_COMMIT: 'a'.repeat(40),
+          OTTO_ENTERPRISE_ADMIN_TOKEN:
+            'runtime-signal-admin-token-at-least-32-chars',
+          OTTO_ENTERPRISE_TRUST_PROXY_HOPS: '1',
+          OTTO_LICENSE_TRUST_FILE: trustFile,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr.on('data', (chunk) => {
+        stderr += String(chunk);
+      });
+      try {
+        const startedDeadline = Date.now() + 5_000;
+        while (
+          (!existsSync(eventFile) ||
+            !readFileSync(eventFile, 'utf8').includes('started')) &&
+          Date.now() < startedDeadline
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(readFileSync(eventFile, 'utf8')).toContain('started');
+        const signalAt = Date.now();
+        expect(child.kill('SIGTERM')).toBe(true);
+        const { code, signal } = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(
+            () => reject(new Error('runtime did not exit after SIGTERM')),
+            5_000,
+          );
+          child.once('exit', (code, signal) => {
+            clearTimeout(timeout);
+            resolve({ code, signal });
+          });
+        });
+        expect(code, stderr).toBe(0);
+        expect(signal).toBeNull();
+        expect(Date.now() - signalAt).toBeGreaterThanOrEqual(200);
+        expect(readFileSync(eventFile, 'utf8').trim().split('\n')).toEqual([
+          'started',
+          'close-start',
+          'close-callback',
+          'db-close',
+        ]);
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill('SIGKILL');
+        }
+        rmSync(sandbox, { recursive: true, force: true });
+      }
+    },
+    10_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'does not close SQLite when readiness failure shutdown reports an in-flight error',
+    async () => {
+      const sandbox = mkdtempSync(path.join(tmpdir(), 'otto-runtime-ready-'));
+      const eventFile = path.join(sandbox, 'events.log');
+      const trustFile = path.join(sandbox, 'license-public-keys.json');
+      const readinessFile = path.join(sandbox, 'ready.json');
+      const runtimeEntry = path.join(sandbox, 'run.mjs');
+      mkdirSync(path.join(sandbox, 'src', 'enterprise'), { recursive: true });
+      writeFileSync(path.join(sandbox, 'package.json'), '{"type":"module"}\n');
+      writeFileSync(
+        trustFile,
+        JSON.stringify([
+          '-----BEGIN PUBLIC KEY-----\nfixture\n-----END PUBLIC KEY-----\n',
+        ]),
+      );
+      writeFileSync(runtimeEntry, readFileSync(RUNTIME_ENTRY, 'utf8'));
+      writeFileSync(
+        path.join(sandbox, 'src', 'enterprise', 'db.js'),
+        `import fs from 'node:fs';
+export function closeEnterpriseDatabase() {
+  fs.appendFileSync(process.env.EVENT_FILE, 'db-close\\n');
+}
+`,
+      );
+      writeFileSync(
+        path.join(sandbox, 'src', 'enterprise', 'server.js'),
+        `import fs from 'node:fs';
+export const ENTERPRISE_TASK_DRAIN_TIMEOUT_MS = 30_000;
+export function startEnterpriseServer() {
+  fs.appendFileSync(process.env.EVENT_FILE, 'started\\n');
+  const server = {
+    close(callback) {
+      fs.appendFileSync(process.env.EVENT_FILE, 'close-start\\n');
+      setTimeout(() => {
+        fs.appendFileSync(process.env.EVENT_FILE, 'close-error\\n');
+        callback(new Error('completion checkpoint still pending'));
+      }, 50);
+      return server;
+    },
+    closeAllConnections() {
+      fs.appendFileSync(process.env.EVENT_FILE, 'forced\\n');
+    },
+    once(event, callback) {
+      if (event === 'listening') setImmediate(callback);
+      return server;
+    },
+    address() { return { address: '0.0.0.0', port: 17777 }; },
+  };
+  return server;
+}
+`,
+      );
+      const child = spawn(process.execPath, [runtimeEntry], {
+        cwd: sandbox,
+        env: {
+          ...process.env,
+          EVENT_FILE: eventFile,
+          OTTO_ENTERPRISE_HOST: '127.0.0.1',
+          OTTO_ENTERPRISE_PORT: '17777',
+          OTTO_ENTERPRISE_READY_FILE: readinessFile,
+          OTTO_ENTERPRISE_PUBLIC_URL: 'https://otto.example.test',
+          OTTO_APP_VERSION: '1.9.14',
+          OTTO_BUILD_COMMIT: 'b'.repeat(40),
+          OTTO_ENTERPRISE_ADMIN_TOKEN:
+            'runtime-readiness-admin-token-at-least-32-chars',
+          OTTO_ENTERPRISE_TRUST_PROXY_HOPS: '1',
+          OTTO_LICENSE_TRUST_FILE: trustFile,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stderr = '';
+      child.stderr.on('data', (chunk) => {
+        stderr += String(chunk);
+      });
+      try {
+        const deadline = Date.now() + 5_000;
+        while (
+          (!existsSync(eventFile) ||
+            !readFileSync(eventFile, 'utf8').includes('close-error')) &&
+          Date.now() < deadline
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(child.exitCode).toBeNull();
+        expect(stderr).toContain('cannot publish canary readiness');
+        expect(stderr).toContain('completion checkpoint still pending');
+        expect(readFileSync(eventFile, 'utf8').trim().split('\n')).toEqual([
+          'started',
+          'close-start',
+          'close-error',
+        ]);
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill('SIGKILL');
+        }
+        rmSync(sandbox, { recursive: true, force: true });
+      }
+    },
+    10_000,
+  );
 });
 
 describe('enterprise one-click schema contract', () => {
@@ -788,7 +1047,7 @@ describe('enterprise one-click schema contract', () => {
   it('takes a consistent database snapshot before a formal cutover', () => {
     const upgrader = readFileSync(UPGRADE_SH, 'utf8');
     const stopBeforeSnapshot = upgrader.indexOf(
-      'systemctl stop otto-enterprise\n  SERVICE_STOPPED=1',
+      'SERVICE_STOPPED=1\n  systemctl stop otto-enterprise',
     );
     const sqliteSnapshot = upgrader.indexOf(
       '"${SCRIPT_DIR}/tools/db-tool.mjs" backup',
@@ -951,7 +1210,56 @@ describe('enterprise one-click runtime configuration contract', () => {
     );
     expect(upgrade).toContain('rm -f "$MANAGED_DATABASE_KEY_PATH"');
     expect(upgrade).toContain('拒绝覆盖');
+    const managedKeyBranch = upgrade.indexOf(
+      'if [ "$DATABASE_KEY_MANAGED" -eq 1 ]; then',
+    );
+    const cleanupArmed = upgrade.indexOf(
+      'DATABASE_KEY_CREATED=1',
+      managedKeyBranch,
+    );
+    const managedKeyInstall = upgrade.indexOf(
+      'install -o root -g otto-enterprise -m 0640',
+      managedKeyBranch,
+    );
+    expect(cleanupArmed).toBeGreaterThan(managedKeyBranch);
+    expect(managedKeyInstall).toBeGreaterThan(cleanupArmed);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'removes a newly created managed key when installation fails after creation',
+    () => {
+      const sandbox = mkdtempSync(path.join(tmpdir(), 'otto-key-cleanup-'));
+      const managedKey = path.join(sandbox, 'database-sqlcipher.key');
+      try {
+        const result = spawnSync(
+          'bash',
+          [
+            '-c',
+            `set -Eeuo pipefail
+DATABASE_KEY_CREATED=0
+MANAGED_DATABASE_KEY_PATH="$1"
+cleanup() {
+  if [ "$DATABASE_KEY_CREATED" -eq 1 ] && [ -f "$MANAGED_DATABASE_KEY_PATH" ]; then
+    rm -f "$MANAGED_DATABASE_KEY_PATH"
+  fi
+}
+trap cleanup EXIT
+DATABASE_KEY_CREATED=1
+printf 'partial-key' > "$MANAGED_DATABASE_KEY_PATH"
+false
+`,
+            'otto-key-cleanup-test',
+            managedKey,
+          ],
+          { encoding: 'utf8' },
+        );
+        expect(result.status).not.toBe(0);
+        expect(existsSync(managedKey)).toBe(false);
+      } finally {
+        rmSync(sandbox, { recursive: true, force: true });
+      }
+    },
+  );
   it('requires independently readable key custody before enabling backup replicas', () => {
     const installer = readFileSync(INSTALL_SH, 'utf8');
 
@@ -994,11 +1302,15 @@ describe('enterprise one-click health contract', () => {
     const runtime = readFileSync(RUNTIME_ENTRY, 'utf8');
 
     expect(upgrader).toContain(
-      'CANARY_READY_FILE="${TXN_DIR}/canary-ready.json"',
+      'CANARY_READY_FILE="${CANARY_DIR}/canary-ready.json"',
     );
     expect(upgrader).toContain('export OTTO_ENTERPRISE_PORT="0"');
     expect(upgrader).toContain(
       'export OTTO_ENTERPRISE_READY_FILE="$CANARY_READY_FILE"',
+    );
+    expect(upgrader).toContain('export OTTO_ENTERPRISE_CANARY_MODE="1"');
+    expect(upgrader).toContain(
+      'unset OTTO_ENTERPRISE_CANARY_MODE OTTO_ENTERPRISE_READY_FILE',
     );
     expect(upgrader).toContain('升级 canary 启动后提前退出');
     expect(upgrader).toContain('升级 canary 就绪文件无效');
@@ -1135,7 +1447,7 @@ describe('enterprise CI deployment gateway contract', () => {
       'require_root_owned_regular_file "$DEPLOY_CONFIG_PATH"',
     );
     expect(gateway).toContain(
-      'GATEWAY_PROTOCOL="otto-enterprise-ci-deploy-v4"',
+      'GATEWAY_PROTOCOL="otto-enterprise-ci-deploy-v5"',
     );
     expect(preflight).toContain(
       'GATEWAY_SHA256="$(sha256sum "$GATEWAY_PATH" | awk',
@@ -1290,6 +1602,179 @@ describe('enterprise CI deployment gateway contract', () => {
     );
     expect(installer).not.toContain('rm -f -- "$PRODUCTION_LOCK"');
     expect(installer).not.toContain('exec 9>&-');
+  });
+
+  it('durably reconciles and rolls back only a locked one-click upgrade', () => {
+    const gateway = readFileSync(CI_DEPLOY_GATEWAY, 'utf8');
+    const upgrade = readFileSync(UPGRADE_SH, 'utf8');
+    const installer = readFileSync(INSTALL_SH, 'utf8');
+
+    for (const canaryScript of [installer, upgrade]) {
+      expect(canaryScript).toContain('export OTTO_ENTERPRISE_CANARY_MODE="1"');
+      expect(canaryScript).toContain(
+        'unset OTTO_ENTERPRISE_CANARY_MODE OTTO_ENTERPRISE_READY_FILE',
+      );
+      expect(canaryScript).toContain(
+        'CANARY_READY_FILE="${CANARY_DIR}/canary-ready.json"',
+      );
+    }
+    expect(installer).not.toMatch(
+      /write_env "\$ENV_TEMP"[\s\S]*?OTTO_ENTERPRISE_CANARY_MODE/,
+    );
+    expect(upgrade).toContain(
+      'OLD_RESIDENT_STATE_BACKUP="${TXN_DIR}/resident-recurring-tasks.json.before"',
+    );
+    expect(upgrade).toContain(
+      'OLD_RESIDENT_STATE_ABSENT="${TXN_DIR}/resident-recurring-tasks.absent"',
+    );
+    expect(upgrade).toContain(
+      '"$OLD_RESIDENT_STATE_BACKUP" "$RESIDENT_STATE_PATH"',
+    );
+    expect(upgrade).toContain(
+      '"$CANARY_RESIDENT_STATE" "$RESIDENT_STATE_PATH"',
+    );
+    expect(upgrade).toContain(
+      'if [ "$preserve_transaction" -eq 0 ] && [ -z "$ROLLBACK_DIR" ]; then',
+    );
+    expect(upgrade).toContain(
+      'install -o root -g root -m 0600 "$CONFIG_BACKUP" "$CONFIG_PATH" \\\n          || rollback_ok=0',
+    );
+    expect(upgrade).toContain('write_rollback_verified_witness()');
+    const oldReleaseVerified = upgrade.indexOf('old_release_verified=1');
+    const durableRollbackWitness = upgrade.indexOf(
+      'if ! write_rollback_verified_witness; then',
+    );
+    expect(oldReleaseVerified).toBeGreaterThan(-1);
+    expect(durableRollbackWitness).toBeGreaterThan(oldReleaseVerified);
+    expect(upgrade).toContain("'OTTO_ENTERPRISE_CANARY_MODE',");
+    expect(upgrade).toContain("'OTTO_ENTERPRISE_READY_FILE',");
+    expect(upgrade).toContain(
+      'DATABASE_KEY_SNAPSHOT="$TXN_DIR/database-key-created"',
+    );
+    expect(upgrade).toContain(
+      'DATABASE_KEY_SNAPSHOT="$TXN_DIR/database-key-preserved"',
+    );
+    const firstStopArmed = upgrade.indexOf(
+      'SERVICE_STOPPED=1\n  systemctl stop otto-enterprise',
+    );
+    const firstStop = upgrade.indexOf(
+      'systemctl stop otto-enterprise',
+      firstStopArmed,
+    );
+    const gracefulState = upgrade.indexOf(
+      'GRACEFUL_ACTIVE_STATE="$(systemctl show',
+    );
+    const snapshotStart = upgrade.indexOf('if [ -e "$RESIDENT_STATE_PATH" ]');
+    expect(firstStopArmed).toBeGreaterThan(-1);
+    expect(firstStop).toBeGreaterThan(firstStopArmed);
+    expect(gracefulState).toBeGreaterThan(firstStop);
+    expect(snapshotStart).toBeGreaterThan(gracefulState);
+    expect(upgrade).toContain('[ "$GRACEFUL_RESULT" = success ]');
+    expect(upgrade).toContain('[ "$GRACEFUL_MAIN_STATUS" = 0 ]');
+    const rollbackSync = upgrade.indexOf('/usr/bin/sync -f "$TXN_DIR"');
+    const firstLiveDataMutation = upgrade.indexOf(
+      '"${CANARY_DIR}/data.db" "${DATA_DIR}/data.db"',
+    );
+    expect(rollbackSync).toBeGreaterThan(-1);
+    expect(firstLiveDataMutation).toBeGreaterThan(rollbackSync);
+
+    expect(gateway).toContain('write_once_durable()');
+    expect(gateway).toContain(
+      'os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW',
+    );
+    expect(gateway).toContain(
+      'os.link(next_path, final_path, follow_symlinks=False)',
+    );
+    expect(gateway).toContain('os.fsync(descriptor)');
+    expect(gateway).toContain('os.fsync(directory)');
+    expect(gateway).toContain('/usr/bin/sync -f "$marker_file"');
+    expect(gateway).toContain('if [ "$COMMAND" = \'reconcile-deployment\' ]');
+    expect(gateway).toContain(
+      'printf \'recovered_%s\\n\' "$DEPLOYMENT_RECEIPT"',
+    );
+    expect(gateway).toContain('complete_rolled_back_receipt_if_previous()');
+    expect(gateway).toContain('printf \'recovered_%s\\n\' "$ROLLBACK_RECEIPT"');
+    expect(gateway).not.toContain('find_matching_rolled_back_deployment()');
+    expect(gateway).toContain(
+      'the exact requested enterprise reconciliation transaction does not exist',
+    );
+    expect(gateway).toContain('require_complete_upgrade_rollback_snapshot()');
+    expect(gateway).toContain(
+      'require_complete_upgrade_rollback_snapshot "$transaction_dir"',
+    );
+    expect(gateway).toContain('rollback-witness.expected');
+    expect(gateway).toContain('upgrade/rollback-verified');
+    expect(gateway).toContain('database-key-preserved');
+    expect(gateway).toContain(
+      'automated stable deployment requires an existing one-click current symlink',
+    );
+    expect(gateway).not.toContain("DEPLOY_ACTION='install'");
+
+    const stagedState = gateway.indexOf(
+      'DEPLOYMENT_STATE_STAGING="${STAGING_DIR}/deployment-state"',
+    );
+    const durableState = gateway.indexOf(
+      'write_once_durable "$STATE_FILE" "$STATE_CONTENT"',
+      stagedState,
+    );
+    const publishState = gateway.indexOf(
+      'mv -- "$DEPLOYMENT_STATE_STAGING" "$DEPLOYMENT_STATE_DIR"',
+      durableState,
+    );
+    const runUpgrade = gateway.indexOf(
+      '"${PACKAGE_ROOT}/${DEPLOY_ACTION}.sh" "${DEPLOY_ARGUMENTS[@]}"',
+      publishState,
+    );
+    expect(stagedState).toBeGreaterThan(-1);
+    expect(durableState).toBeGreaterThan(stagedState);
+    expect(publishState).toBeGreaterThan(durableState);
+    expect(runUpgrade).toBeGreaterThan(publishState);
+    expect(gateway).not.toContain('} > "$STATE_FILE"');
+
+    const finalizeMarker = gateway.indexOf(
+      'write_once_durable "${DEPLOYMENT_STATE_DIR}/finalized"',
+    );
+    const finalizeGarbageCollection = gateway.indexOf(
+      'rm -rf --one-file-system -- "${DEPLOYMENT_STATE_DIR}/upgrade"',
+      finalizeMarker,
+    );
+    expect(finalizeMarker).toBeGreaterThan(-1);
+    expect(finalizeGarbageCollection).toBeGreaterThan(finalizeMarker);
+    const finalizeStart = gateway.indexOf(
+      'if [ "$COMMAND" = \'finalize-deployment\' ]; then',
+    );
+    const finalizedRetry = gateway.indexOf(
+      'if [ -e "${DEPLOYMENT_STATE_DIR}/finalized" ]',
+      finalizeStart,
+    );
+    const firstFinalizeSnapshotRequirement = gateway.indexOf(
+      'complete_deployment_receipt "$DEPLOYMENT_STATE_DIR"',
+      finalizeStart,
+    );
+    expect(finalizedRetry).toBeGreaterThan(finalizeStart);
+    expect(firstFinalizeSnapshotRequirement).toBeGreaterThan(finalizedRetry);
+
+    const rollbackStart = gateway.indexOf(
+      'if [ "$COMMAND" = \'rollback-enterprise\' ]; then',
+    );
+    const rollbackStaticCheck = gateway.indexOf(
+      'enterprise rollback is missing resident task state snapshot identity',
+      rollbackStart,
+    );
+    const rollbackStop = gateway.indexOf(
+      'systemctl stop otto-enterprise',
+      rollbackStart,
+    );
+    const rollbackMarker = gateway.indexOf(
+      'write_once_durable "${DEPLOYMENT_STATE_DIR}/rolled-back"',
+      rollbackStop,
+    );
+    expect(rollbackStaticCheck).toBeGreaterThan(rollbackStart);
+    expect(rollbackStop).toBeGreaterThan(rollbackStaticCheck);
+    expect(rollbackMarker).toBeGreaterThan(rollbackStop);
+    expect(gateway).toContain(
+      '/var/lib/otto-enterprise/resident-recurring-tasks.json',
+    );
   });
 
   it('uses one fixed root-only bootstrap temp directory independent of TMPDIR', () => {
@@ -1468,11 +1953,12 @@ describe('enterprise CI deployment gateway contract', () => {
     expect(installer).toContain('UPLOADS_ROOT="${STATE_ROOT}/uploads"');
     expect(installer).toContain('STAGES_ROOT="${STATE_ROOT}/staging"');
     expect(installer).toContain('LOCKS_ROOT="${STATE_ROOT}/locks"');
+    expect(installer).toContain('DEPLOYMENTS_ROOT="${STATE_ROOT}/deployments"');
     expect(installer).toContain(
       'install -d -o root -g root -m 0711 \\\n  "$STATE_ROOT" "$UPLOADS_ROOT" "$UPLOAD_ROOT" "$MIRROR_UPLOAD_ROOT"',
     );
     expect(installer).toContain(
-      'install -d -o root -g root -m 0700 \\\n  "$STAGES_ROOT" "$LOCKS_ROOT" "$STAGING_ROOT" "$MIRROR_STAGING_ROOT"',
+      'install -d -o root -g root -m 0700 \\\n  "$STAGES_ROOT" "$LOCKS_ROOT" "$DEPLOYMENTS_ROOT" \\\n  "$STAGING_ROOT" "$MIRROR_STAGING_ROOT"',
     );
     expect(gateway).toContain('STATE_ROOT="/var/lib/otto-ci-deploy"');
     for (const root of [
@@ -1480,6 +1966,7 @@ describe('enterprise CI deployment gateway contract', () => {
       '$UPLOADS_ROOT',
       '$STAGES_ROOT',
       '$LOCKS_ROOT',
+      '$DEPLOYMENTS_ROOT',
       '$UPLOAD_ROOT',
       '$MIRROR_UPLOAD_ROOT',
       '$STAGING_ROOT',
@@ -1817,11 +2304,9 @@ describe('enterprise CI deployment gateway contract', () => {
     expect(gateway).toContain('build_commit[:12] != expected_build');
     expect(gateway).toContain('source_input[:12] != expected_source');
     expect(gateway).toContain(
-      'local expected_current_release="${INSTALL_ROOT}/releases/${expected_version}-${expected_build_prefix}"',
+      'local expected_release="${INSTALL_ROOT}/releases/${expected_version}-${expected_build_prefix}"',
     );
-    expect(gateway).toContain(
-      '[ "$current_release" = "$expected_current_release" ]',
-    );
+    expect(gateway).toContain('[ "$current_release" = "$expected_release" ]');
     expect(gateway).toContain(
       'require_root_owned_directory_chain "$current_release"',
     );
@@ -2012,6 +2497,52 @@ describe('enterprise CI deployment gateway contract', () => {
 });
 
 describe('enterprise one-click provenance contract', () => {
+  it('deletes incremental outputs before rebuilding packaged server code', () => {
+    const bundle = readFileSync(BUNDLE_SCRIPT, 'utf8');
+    const buildLoop = bundle.match(
+      /for \(const workspace of enterpriseBuildWorkspaces\) \{([\s\S]*?)\n\}/,
+    )?.[1];
+
+    expect(bundle).toContain(
+      "const enterpriseBuildWorkspaces = ['otto-core', 'otto-server'];",
+    );
+    expect(buildLoop).toBeDefined();
+    expect(buildLoop).toContain(
+      "path.join(repoRoot, 'packages', packageDirectory, 'dist')",
+    );
+    expect(buildLoop).toContain('recursive: true');
+    expect(buildLoop).toContain('force: true');
+    expect(buildLoop.indexOf('rmSync(')).toBeLessThan(
+      buildLoop.indexOf("run(npmCommand, ['run', 'build'"),
+    );
+  });
+
+  it('packages every server runtime adapter export and starts the extracted archive offline', () => {
+    const bundle = readFileSync(BUNDLE_SCRIPT, 'utf8');
+    expect(bundle).toContain("'services/recurringTaskRegistry.js'");
+    expect(bundle).toContain("'memory/globalMemoryMaintenance.js'");
+    expect(bundle).toContain(
+      "export * from './src/services/recurringTaskRegistry.js';",
+    );
+    expect(bundle).toContain(
+      "export * from './src/memory/globalMemoryMaintenance.js';",
+    );
+    expect(bundle).toContain(
+      "export * from './src/customer-modules/index.js';",
+    );
+    expect(bundle).toContain("path.join(coreDist, 'customer-modules')");
+    expect(bundle).toContain(
+      "typeof coreAdapter.atomicWriteTextFile !== 'function'",
+    );
+    expect(bundle).toContain(
+      "run('tar', ['-xzf', archive, '-C', archiveSmokeRoot])",
+    );
+    expect(bundle).toContain(
+      "path.join(archiveSmokeRoot, finalPackageName, 'release')",
+    );
+    expect(bundle.match(/smokeEnterpriseRuntime\(/gu)?.length).toBe(3);
+  });
+
   it('normalizes executable modes inside archives built on Windows', () => {
     const bundle = readFileSync(BUNDLE_SCRIPT, 'utf8');
 
@@ -2038,9 +2569,108 @@ describe('enterprise one-click provenance contract', () => {
         /const sourceInputFiles = \[([\s\S]*?)\n\]\.sort\(\);/,
       )?.[1] ?? '';
 
-    for (const input of ['tsconfig.json', 'scripts/build_package.js']) {
+    for (const input of [
+      'tsconfig.json',
+      'scripts/build_package.js',
+      'packages/core/src/services/recurringTaskRegistry.ts',
+      'packages/core/src/memory/globalMemoryMaintenance.ts',
+      'packages/core/src/customer-modules',
+    ]) {
       expect(sourceScope).toContain(`  '${input}',`);
-      expect(sourceInputFiles).toContain(`  '${input}',`);
+      expect(sourceInputFiles).toContain(input);
     }
+  });
+});
+
+describe('enterprise upgrade retry and installed-layout contract', () => {
+  it('uses the direct current/manifest.json layout verified by install and upgrade', () => {
+    const gateway = readFileSync(CI_DEPLOY_GATEWAY, 'utf8');
+    const integration = readFileSync(
+      path.resolve('scripts/tests/enterprise-ci-linux-integration.sh'),
+      'utf8',
+    );
+
+    expect(gateway).toContain(
+      'require_root_owned_regular_file "${current_release}/manifest.json"',
+    );
+    expect(gateway).toContain(
+      'CURRENT_RELEASE_MANIFEST="${CURRENT_RELEASE}/manifest.json"',
+    );
+    expect(gateway).toContain(
+      'PREVIOUS_MANIFEST="${PREVIOUS_CURRENT}/manifest.json"',
+    );
+    expect(gateway).not.toContain('${current_release}/release/manifest.json');
+    expect(integration).toContain(
+      '/opt/otto-enterprise/releases/1.9.14-aaaaaaaaaaaa/manifest.json',
+    );
+    expect(integration).not.toContain(
+      '/opt/otto-enterprise/releases/1.9.14-aaaaaaaaaaaa/release/manifest.json',
+    );
+  });
+
+  it('atomically stages new targets and only reuses an exact verified leftover', () => {
+    const upgrade = readFileSync(UPGRADE_SH, 'utf8');
+    const exactManifest = upgrade.indexOf(
+      'cmp -s -- "${SCRIPT_DIR}/release/manifest.json"',
+    );
+    const existingVerify = upgrade.indexOf(
+      '"$TARGET_RELEASE" >/dev/null',
+      exactManifest,
+    );
+    const stage = upgrade.indexOf(
+      'TARGET_RELEASE_STAGE="${TARGET_RELEASE}.next-$(date -u +%Y%m%dT%H%M%SZ)-$$"',
+    );
+    const stageCopy = upgrade.indexOf(
+      'cp -a "${SCRIPT_DIR}/release" "$TARGET_RELEASE_STAGE"',
+      stage,
+    );
+    const stageVerify = upgrade.indexOf(
+      '"$TARGET_RELEASE_STAGE" >/dev/null',
+      stageCopy,
+    );
+    const stageSync = upgrade.indexOf(
+      '/usr/bin/sync -f "$TARGET_RELEASE_STAGE"',
+      stageVerify,
+    );
+    const atomicPublish = upgrade.indexOf(
+      'mv -T -- "$TARGET_RELEASE_STAGE" "$TARGET_RELEASE"',
+      stageSync,
+    );
+
+    expect(exactManifest).toBeGreaterThan(-1);
+    expect(existingVerify).toBeGreaterThan(exactManifest);
+    expect(stage).toBeGreaterThan(existingVerify);
+    expect(stageCopy).toBeGreaterThan(stage);
+    expect(stageVerify).toBeGreaterThan(stageCopy);
+    expect(stageSync).toBeGreaterThan(stageVerify);
+    expect(atomicPublish).toBeGreaterThan(stageSync);
+    expect(upgrade).toContain(
+      'rm -rf --one-file-system -- "$TARGET_RELEASE_STAGE"',
+    );
+    expect(upgrade).not.toContain(
+      'rm -rf --one-file-system -- "$TARGET_RELEASE"',
+    );
+  });
+
+  it('keeps shell helpers outside the durable witness Node heredoc', () => {
+    const upgrade = readFileSync(UPGRADE_SH, 'utf8');
+    const witnessStart = upgrade.indexOf('write_rollback_verified_witness() {');
+    const heredocEnd = upgrade.indexOf('\nNODE\n', witnessStart);
+    const syncHelper = upgrade.indexOf(
+      'sync_live_deployment_filesystems() {',
+      witnessStart,
+    );
+    expect(heredocEnd).toBeGreaterThan(witnessStart);
+    expect(syncHelper).toBeGreaterThan(heredocEnd);
+  });
+
+  it('never adopts an older unfinished transaction by package identity', () => {
+    const gateway = readFileSync(CI_DEPLOY_GATEWAY, 'utf8');
+    expect(gateway).toContain(
+      '[ "$UNFINISHED_TRANSACTION_ID" = "$TRANSACTION_ID" ]',
+    );
+    expect(gateway).toContain(
+      'an older exact deployment transaction requires explicit reconciliation before a new run',
+    );
   });
 });

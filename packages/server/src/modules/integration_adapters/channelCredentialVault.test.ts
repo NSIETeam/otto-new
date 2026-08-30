@@ -15,8 +15,13 @@ function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-channel-vault-'));
   roots.push(root);
   const protector: ChannelCredentialProtectorV1 = {
-    protect: vi.fn((value: string) => `protected:${Buffer.from(value).toString('base64url')}`),
-    unprotect: vi.fn((value: string) => Buffer.from(value.slice('protected:'.length), 'base64url').toString()),
+    protect: vi.fn(
+      (value: string) =>
+        `protected:${Buffer.from(value).toString('base64url')}`,
+    ),
+    unprotect: vi.fn((value: string) =>
+      Buffer.from(value.slice('protected:'.length), 'base64url').toString(),
+    ),
   };
   const vault = new JsonChannelCredentialVaultV1(
     path.join(root, 'channels.json'),
@@ -36,7 +41,8 @@ function fixture() {
 }
 
 afterEach(() => {
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0))
+    fs.rmSync(root, { recursive: true, force: true });
 });
 
 describe('JsonChannelCredentialVaultV1', () => {
@@ -49,28 +55,39 @@ describe('JsonChannelCredentialVaultV1', () => {
     const raw = fs.readFileSync(path.join(root, 'channels.json'), 'utf8');
     expect(raw).not.toContain('refresh-token-secret');
     expect(raw).not.toContain('a-replayed-value-is-ignored');
-    expect(fs.statSync(path.join(root, 'channels.json')).mode & 0o777).toBe(0o600);
-    await expect(vault.loadCredential({
-      installationId: installation.installationId,
-      provider: 'feishu',
-      tenantId: 'tenant-1',
-    })).resolves.toBe('refresh-token-secret');
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(path.join(root, 'channels.json')).mode & 0o777).toBe(
+        0o600,
+      );
+    }
+    await expect(
+      vault.loadCredential({
+        installationId: installation.installationId,
+        provider: 'feishu',
+        tenantId: 'tenant-1',
+      }),
+    ).resolves.toBe('refresh-token-secret');
     expect(vault.listInstallations()).toEqual([installation]);
   });
 
   it('rejects idempotency conflicts and cross-tenant reads or removal', async () => {
     const { vault, installation } = fixture();
     await vault.commit(installation, 'secret');
-    await expect(vault.commit({ ...installation, tenantId: 'tenant-2' }, 'other'))
-      .rejects.toThrow('idempotency conflict');
+    await expect(
+      vault.commit({ ...installation, tenantId: 'tenant-2' }, 'other'),
+    ).rejects.toThrow('idempotency conflict');
     const wrongTenant = {
       installationId: installation.installationId,
       provider: 'feishu' as const,
       tenantId: 'tenant-2',
     };
-    await expect(vault.loadCredential(wrongTenant)).rejects.toThrow('tenant mismatch');
+    await expect(vault.loadCredential(wrongTenant)).rejects.toThrow(
+      'tenant mismatch',
+    );
     await expect(vault.remove(wrongTenant)).rejects.toThrow('tenant mismatch');
-    await expect(vault.remove({ ...wrongTenant, tenantId: 'tenant-1' })).resolves.toBe(true);
+    await expect(
+      vault.remove({ ...wrongTenant, tenantId: 'tenant-1' }),
+    ).resolves.toBe(true);
   });
 
   it('fails closed when a protector returns plaintext', async () => {
@@ -79,7 +96,9 @@ describe('JsonChannelCredentialVaultV1', () => {
       path.join(root, 'unsafe.json'),
       { protect: (value) => value, unprotect: (value) => value },
     );
-    await expect(vault.commit(installation, 'secret')).rejects.toThrow('unsafe output');
+    await expect(vault.commit(installation, 'secret')).rejects.toThrow(
+      'unsafe output',
+    );
     expect(fs.existsSync(path.join(root, 'unsafe.json'))).toBe(false);
   });
 
@@ -87,13 +106,21 @@ describe('JsonChannelCredentialVaultV1', () => {
     const { root, vault, protector, installation } = fixture();
     await vault.commit(installation, 'secret');
     vi.mocked(protector.unprotect).mockRejectedValueOnce(
-      Object.assign(new Error('protection key is unavailable'), { code: 'KEY_NOT_FOUND' }),
+      Object.assign(new Error('protection key is unavailable'), {
+        code: 'KEY_NOT_FOUND',
+      }),
     );
 
-    await expect(vault.loadCredential({
-      installationId: installation.installationId, provider: 'feishu', tenantId: 'tenant-1',
-    })).rejects.toMatchObject({ code: 'KEY_NOT_FOUND' });
+    await expect(
+      vault.loadCredential({
+        installationId: installation.installationId,
+        provider: 'feishu',
+        tenantId: 'tenant-1',
+      }),
+    ).rejects.toMatchObject({ code: 'KEY_NOT_FOUND' });
     expect(vault.listInstallations()).toEqual([installation]);
-    expect(fs.readFileSync(path.join(root, 'channels.json'), 'utf8')).not.toContain('secret');
+    expect(
+      fs.readFileSync(path.join(root, 'channels.json'), 'utf8'),
+    ).not.toContain('secret');
   });
 });

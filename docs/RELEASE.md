@@ -12,7 +12,7 @@ PostgreSQL 配置需走独立的迁移、能力兼容和容灾验收流程；本
 
 - [发布前检查](./release-preflight.md)：人工与自动硬门禁、签名和外部前置条件。
 - [GitHub Actions 发布契约](../.github/workflows/README.md)：SHA-256 绑定的双仓发布前
-  创建意图与 `latest` 快照、可幂等清理的草稿、企业部署、正式仓优先/兼容仓最后公开、更新镜像及精确恢复此前
+  创建意图与 `latest` 快照、可幂等清理的草稿、企业部署、正式仓公开并复核、独立清单更新镜像、兼容仓最后公开，以及精确恢复此前
   `latest` 的唯一受支持流程。已公开 Release 不得退回草稿，版本号不得复用。
 
 不得直接运行 `gh release create` / `gh release upload`，不得覆盖同版本资产，也不得用

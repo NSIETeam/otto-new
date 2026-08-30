@@ -131,6 +131,68 @@ function run(command, args, options = {}) {
   return options.capture ? String(result.stdout).trim() : '';
 }
 
+function smokeEnterpriseRuntime(releaseRoot, dataRoot) {
+  mkdirSync(dataRoot, { recursive: true });
+  const coreAdapterUrl = pathToFileURL(
+    path.join(releaseRoot, 'node_modules', 'otto-core', 'dist', 'index.js'),
+  ).href;
+  const serverUrl = pathToFileURL(
+    path.join(releaseRoot, 'src', 'enterprise', 'server.js'),
+  ).href;
+  const databaseUrl = pathToFileURL(
+    path.join(releaseRoot, 'src', 'enterprise', 'db.js'),
+  ).href;
+  const program = `
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const coreAdapter = await import(${JSON.stringify(coreAdapterUrl)});
+    if (typeof coreAdapter.atomicWriteTextFile !== 'function') {
+      throw new Error('enterprise core adapter is missing atomicWriteTextFile');
+    }
+    const database = await import(${JSON.stringify(databaseUrl)});
+    const { startEnterpriseServer } = await import(${JSON.stringify(serverUrl)});
+    const server = startEnterpriseServer({
+      host: '127.0.0.1',
+      port: 0,
+      adminToken: 'enterprise-offline-smoke-admin-token-0001',
+      appVersion: ${JSON.stringify(version)},
+      buildCommit: '0'.repeat(40),
+      smsSender: null,
+      repairSmsSender: null,
+      repairFeishuSender: null,
+    });
+    if (!server.listening) {
+      await new Promise((resolve, reject) => {
+        server.once('listening', resolve);
+        server.once('error', reject);
+      });
+    }
+    await new Promise((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    database.closeEnterpriseDatabase();
+    const statePath = path.join(
+      process.env.OTTO_ENTERPRISE_DIR,
+      'resident-recurring-tasks.json',
+    );
+    if (!fs.existsSync(statePath) || fs.statSync(statePath).size < 1) {
+      throw new Error('enterprise recurring-task state was not writable');
+    }
+  `;
+  run(process.execPath, ['--input-type=module', '--eval', program], {
+    env: {
+      ...process.env,
+      OTTO_ENTERPRISE_DIR: dataRoot,
+      OTTO_ENTERPRISE_CANARY_MODE: '1',
+      OTTO_ENTERPRISE_READY_FILE: path.join(dataRoot, 'ready.json'),
+      OTTO_LICENSE_ENFORCE: 'false',
+      // Signed Linux bindings cannot load on a non-Linux release host. The
+      // Ubuntu installation canary is the fail-closed SQLCipher proof.
+      OTTO_DATABASE_ENCRYPTION: 'disabled',
+    },
+  });
+}
+
 function sha(bufferOrString, algorithm = 'sha256') {
   return createHash(algorithm).update(bufferOrString).digest('hex');
 }
@@ -223,13 +285,18 @@ function filesBelow(root, current = root) {
   return output.sort();
 }
 
-console.log('[bundle] 构建 otto-core 与 otto-server');
-run(npmCommand, ['run', 'build', '--workspace', 'otto-core'], {
-  shell: process.platform === 'win32',
-});
-run(npmCommand, ['run', 'build', '--workspace', 'otto-server'], {
-  shell: process.platform === 'win32',
-});
+const enterpriseBuildWorkspaces = ['otto-core', 'otto-server'];
+console.log('[bundle] 清理并构建 otto-core 与 otto-server');
+for (const workspace of enterpriseBuildWorkspaces) {
+  const packageDirectory = workspace.slice('otto-'.length);
+  rmSync(path.join(repoRoot, 'packages', packageDirectory, 'dist'), {
+    recursive: true,
+    force: true,
+  });
+  run(npmCommand, ['run', 'build', '--workspace', workspace], {
+    shell: process.platform === 'win32',
+  });
+}
 
 const sourceCommit = run('git', ['rev-parse', 'HEAD'], { capture: true });
 const sqlCipherNodeRoot = path.join(repoRoot, 'native', 'sqlcipher-node');
@@ -256,6 +323,9 @@ const sourceScope = [
   'packages/core/package.json',
   'packages/core/tsconfig.json',
   'packages/core/src/services/aliyunSmsSender.ts',
+  'packages/core/src/services/recurringTaskRegistry.ts',
+  'packages/core/src/memory/globalMemoryMaintenance.ts',
+  'packages/core/src/customer-modules',
   'deployment/enterprise-oneclick',
   'scripts/build-enterprise-oneclick.mjs',
   'scripts/enterprise-runtime-dependencies.mjs',
@@ -282,6 +352,13 @@ const sourceInputFiles = [
   'packages/core/package.json',
   'packages/core/tsconfig.json',
   'packages/core/src/services/aliyunSmsSender.ts',
+  'packages/core/src/services/recurringTaskRegistry.ts',
+  'packages/core/src/memory/globalMemoryMaintenance.ts',
+  ...filesBelow(
+    path.join(repoRoot, 'packages', 'core', 'src', 'customer-modules'),
+  ).map((relative) =>
+    path.join('packages/core/src/customer-modules', relative),
+  ),
   'scripts/build-enterprise-oneclick.mjs',
   'scripts/enterprise-runtime-dependencies.mjs',
   'scripts/verify-enterprise-package-signature.mjs',
@@ -347,28 +424,36 @@ try {
     cpSync(source, target);
   }
 
-  const smsSource = path.join(
-    repoRoot,
-    'packages',
-    'core',
-    'dist',
-    'src',
-    'services',
-    'aliyunSmsSender.js',
-  );
-  const smsTarget = path.join(
+  const coreDist = path.join(repoRoot, 'packages', 'core', 'dist', 'src');
+  const coreAdapterDist = path.join(
     releaseRoot,
     'node_modules',
     'otto-core',
     'dist',
     'src',
-    'services',
-    'aliyunSmsSender.js',
   );
-  cpSync(smsSource, smsTarget);
+  for (const relative of [
+    'services/aliyunSmsSender.js',
+    'services/recurringTaskRegistry.js',
+    'memory/globalMemoryMaintenance.js',
+    ...filesBelow(path.join(coreDist, 'customer-modules'))
+      .filter((file) => file.endsWith('.js'))
+      .map((file) => path.posix.join('customer-modules', file)),
+  ]) {
+    const source = path.join(coreDist, relative);
+    const target = path.join(coreAdapterDist, relative);
+    if (!existsSync(source)) {
+      throw new Error(`missing built enterprise core runtime: ${source}`);
+    }
+    mkdirSync(path.dirname(target), { recursive: true });
+    cpSync(source, target);
+  }
   writeFileSync(
     path.join(releaseRoot, 'node_modules', 'otto-core', 'dist', 'index.js'),
     `export * from './src/services/aliyunSmsSender.js';
+export * from './src/services/recurringTaskRegistry.js';
+export * from './src/memory/globalMemoryMaintenance.js';
+export * from './src/customer-modules/index.js';
 
 export const FEATURE_FLAGS = {
   park_service: '公园服务',
@@ -534,24 +619,7 @@ export class FeatureFlagManager {
   );
 
   const smokeDataRoot = path.join(temporaryRoot, 'smoke-data');
-  mkdirSync(smokeDataRoot, { recursive: true });
-  run(
-    process.execPath,
-    [
-      '--input-type=module',
-      '--eval',
-      `await import(${JSON.stringify(pathToFileURL(path.join(releaseRoot, 'src', 'enterprise', 'server.js')).href)});`,
-    ],
-    {
-      env: {
-        ...process.env,
-        OTTO_ENTERPRISE_DIR: smokeDataRoot,
-        // Signed Linux bindings cannot load on a non-Linux release host. The
-        // Ubuntu installation canary is the fail-closed SQLCipher proof.
-        OTTO_DATABASE_ENCRYPTION: 'disabled',
-      },
-    },
-  );
+  smokeEnterpriseRuntime(releaseRoot, smokeDataRoot);
 
   const releaseFiles = filesBelow(releaseRoot);
   const fileHashes = Object.fromEntries(
@@ -720,6 +788,16 @@ export class FeatureFlagManager {
       `archive contains non-portable entries: ${nonPortableEntries.join(', ')}`,
     );
   }
+  // Test the bytes that will actually be delivered, not only the staging
+  // directory. Extraction followed by an offline bind/close catches missing
+  // ESM exports and incomplete workspace dependency closures in the archive.
+  const archiveSmokeRoot = path.join(temporaryRoot, 'archive-smoke');
+  mkdirSync(archiveSmokeRoot, { recursive: true });
+  run('tar', ['-xzf', archive, '-C', archiveSmokeRoot]);
+  smokeEnterpriseRuntime(
+    path.join(archiveSmokeRoot, finalPackageName, 'release'),
+    path.join(temporaryRoot, 'archive-smoke-data'),
+  );
   const archiveHash = shaFile(archive);
   writeFileSync(checksum, `${archiveHash}  ${path.basename(archive)}\n`);
   if (!enterpriseSigningPrivateKey) {

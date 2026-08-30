@@ -3,11 +3,9 @@
  */
 
 import path from 'node:path';
+import type { RecurringTaskRegistry } from 'otto-core';
 
-import type {
-  Database,
-  EncryptedFieldCipher,
-} from '../data_platform/index.js';
+import type { Database, EncryptedFieldCipher } from '../data_platform/index.js';
 import {
   FederationGatewayClient,
   type FederationClientOptions,
@@ -83,13 +81,14 @@ function activeConfiguration(options: FederationCompositionOptions): {
   const gatewayUrl = options.gatewayUrl();
   if (!gatewayUrl) throw new Error('federation gateway URL is not configured');
   const configuredKeyPath = options.signingKeyPath?.() || null;
-  const signer = options.signer ?? loadOrCreateFederationSigner({
-    keyPath: configuredKeyPath || path.join(
-      options.dataDirectory,
-      'federation-signing-key.pem',
-    ),
-    createIfMissing: configuredKeyPath === null,
-  });
+  const signer =
+    options.signer ??
+    loadOrCreateFederationSigner({
+      keyPath:
+        configuredKeyPath ||
+        path.join(options.dataDirectory, 'federation-signing-key.pem'),
+      createIfMissing: configuredKeyPath === null,
+    });
   const clientOptions: FederationClientOptions = {
     baseUrl: gatewayUrl,
     deploymentId: options.deploymentId(),
@@ -136,7 +135,9 @@ export function createFederationComposition(
         clearFederationClaimInRepository(store, messageId),
       claim: client.claim.bind(client),
       storeClaimed: (
-        claimed: Parameters<typeof storeClaimedFederationEnvelopeInRepository>[1],
+        claimed: Parameters<
+          typeof storeClaimedFederationEnvelopeInRepository
+        >[1],
       ) => storeClaimedFederationEnvelopeInRepository(store, claimed),
       setRuntimeState: (key: string, value: unknown) =>
         setFederationRuntimeStateInRepository(store, key, value),
@@ -166,7 +167,8 @@ export function createFederationComposition(
         signingKeyId: keyId,
         queue: getFederationQueueSummaryInRepository(store),
         lastCycle: getFederationRuntimeStateInRepository(store, 'last_cycle'),
-        lastError: error ?? getFederationRuntimeStateInRepository(store, 'last_error'),
+        lastError:
+          error ?? getFederationRuntimeStateInRepository(store, 'last_error'),
         privacy: {
           gatewayPayload: 'e2ee-ciphertext-only',
           privateKeyLocation: 'customer-server-only',
@@ -181,8 +183,12 @@ export function createFederationComposition(
       }
       const url = new URL(origin);
       if (
-        url.protocol !== 'https:' || url.username || url.password ||
-        url.search || url.hash || url.pathname !== '/'
+        url.protocol !== 'https:' ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash ||
+        url.pathname !== '/'
       ) {
         throw new Error('enterprise public origin must be an HTTPS origin');
       }
@@ -293,7 +299,8 @@ export function createFederationComposition(
     }) {
       const attachment = getFederationChatAttachmentInRepository(store, input);
       if (
-        !attachment || attachment.direction !== 'inbound' ||
+        !attachment ||
+        attachment.direction !== 'inbound' ||
         attachment.status !== 'referenced'
       ) {
         throw new Error('federation attachment download was not found');
@@ -304,7 +311,10 @@ export function createFederationComposition(
       ownerAccountId: string;
       contactId: string;
       ciphertext: string;
-      type?: Extract<FederationMessageType, 'chat.message' | 'a2a.request' | 'a2a.response'>;
+      type?: Extract<
+        FederationMessageType,
+        'chat.message' | 'a2a.request' | 'a2a.response'
+      >;
       messageId?: string;
       inReplyTo?: string;
       a2aGrantId?: string;
@@ -411,10 +421,11 @@ export function createFederationComposition(
       unblockFederationDeploymentInRepository(store, deploymentId),
     listFederationBlocks: () => listFederationBlocksInRepository(store),
     runFederationCycle: () => runFederationCycle(runtimeServices()),
-    startFederationRuntime() {
+    startFederationRuntime(taskRegistry?: RecurringTaskRegistry) {
       if (!options.enabled()) return () => undefined;
       return startFederationRuntime(runtimeServices(), {
         intervalMs: options.pollIntervalMs?.(),
+        taskRegistry,
       });
     },
   };

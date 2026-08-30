@@ -154,6 +154,8 @@ const ENV_KEYS = [
   'GITHUB_SHA',
   'OTTO_ENTERPRISE_TRUST_PROXY_HOPS',
   'OTTO_ENTERPRISE_TRUSTED_PROXIES',
+  'OTTO_ENTERPRISE_CANARY_MODE',
+  'OTTO_ENTERPRISE_READY_FILE',
   'ALIYUN_SMS_NOTIFICATION_TEMPLATE_ID',
   'OTTO_ENTERPRISE_FEISHU_APP_ID',
   'OTTO_ENTERPRISE_FEISHU_APP_SECRET',
@@ -226,6 +228,172 @@ beforeEach(() => {
 });
 
 describe('企业常驻任务注册', () => {
+  it('persists enterprise checkpoints under OTTO_ENTERPRISE_DIR across restart', async () => {
+    process.env.OTTO_ENTERPRISE_DIR = tmpDir;
+    vi.resetModules();
+    const mod: ServerModule = await import('./server.js');
+    const database: DatabaseModule = await import('./db.js');
+    closeDatabases.push(database.closeEnterpriseDatabase);
+    const first = mod.createEnterpriseRecurringTaskRegistry();
+    let markRun!: () => void;
+    const didRun = new Promise<void>((resolve) => {
+      markRun = resolve;
+    });
+    const run = vi.fn(() => {
+      markRun();
+    });
+    first.register({
+      name: 'test.restart-checkpoint',
+      source: 'enterprise restart contract',
+      intervalMs: 60_000,
+      initialDelayMs: 0,
+      missedRunPolicy: 'run-once',
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => 'delivery-v1',
+      run,
+    });
+    await didRun;
+    await first.shutdown();
+
+    const statePath = mod.enterpriseRecurringTaskStatePath();
+    expect(statePath).toBe(path.join(tmpDir, 'resident-recurring-tasks.json'));
+    expect(JSON.parse(fs.readFileSync(statePath, 'utf8'))).toMatchObject({
+      version: 1,
+      tasks: [
+        {
+          name: 'test.restart-checkpoint',
+          lastCompletedInputVersion: 'delivery-v1',
+        },
+      ],
+    });
+
+    const second = mod.createEnterpriseRecurringTaskRegistry();
+    const replay = vi.fn();
+    second.register({
+      name: 'test.restart-checkpoint',
+      source: 'enterprise restart contract',
+      intervalMs: 60_000,
+      initialDelayMs: 0,
+      missedRunPolicy: 'run-once',
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => 'delivery-v1',
+      run: replay,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(replay).not.toHaveBeenCalled();
+    await second.shutdown();
+  });
+
+  it('fails closed before listen when enterprise checkpoint state is corrupt', async () => {
+    process.env.OTTO_ENTERPRISE_DIR = tmpDir;
+    const statePath = path.join(tmpDir, 'resident-recurring-tasks.json');
+    fs.writeFileSync(statePath, '{broken', 'utf8');
+    vi.resetModules();
+    const mod: ServerModule = await import('./server.js');
+    const database: DatabaseModule = await import('./db.js');
+    closeDatabases.push(database.closeEnterpriseDatabase);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(() => mod.createEnterpriseRecurringTaskRegistry()).toThrow(
+        /unreadable or corrupt/u,
+      );
+    } finally {
+      log.mockRestore();
+    }
+    expect(fs.readFileSync(statePath, 'utf8')).toBe('{broken');
+  });
+
+  it('runs a loopback readiness canary with no resident or external tasks', async () => {
+    process.env.OTTO_ENTERPRISE_DIR = tmpDir;
+    process.env.OTTO_ENTERPRISE_CANARY_MODE = '1';
+    process.env.OTTO_ENTERPRISE_READY_FILE = path.join(tmpDir, 'ready.json');
+    vi.resetModules();
+    const mod: ServerModule = await import('./server.js');
+    const database: DatabaseModule = await import('./db.js');
+    closeDatabases.push(database.closeEnterpriseDatabase);
+    const registry = new RecurringTaskRegistry({ allowPaidBackground: true });
+    const server = mod.startEnterpriseServer({
+      host: '127.0.0.1',
+      port: 0,
+      adminToken: ADMIN_TOKEN,
+      smsSender: null,
+      repairSmsSender: null,
+      repairFeishuSender: null,
+      taskRegistry: registry,
+    });
+    servers.push(server);
+    expect(registry.list()).toEqual([]);
+    await new Promise<void>((resolve, reject) => {
+      server.close((error?: Error) => (error ? reject(error) : resolve()));
+    });
+    servers = servers.filter((item) => item !== server);
+  });
+
+  it('rejects canary task suppression without loopback and absolute readiness', async () => {
+    process.env.OTTO_ENTERPRISE_DIR = tmpDir;
+    process.env.OTTO_ENTERPRISE_CANARY_MODE = '1';
+    vi.resetModules();
+    const mod: ServerModule = await import('./server.js');
+    const database: DatabaseModule = await import('./db.js');
+    closeDatabases.push(database.closeEnterpriseDatabase);
+    expect(() =>
+      mod.startEnterpriseServer({
+        host: '127.0.0.1',
+        port: 0,
+        adminToken: ADMIN_TOKEN,
+        taskRegistry: new RecurringTaskRegistry(),
+      }),
+    ).toThrow(/requires loopback host and an absolute readiness file/u);
+    process.env.OTTO_ENTERPRISE_READY_FILE = path.join(tmpDir, 'ready.json');
+    expect(() =>
+      mod.startEnterpriseServer({
+        host: '0.0.0.0',
+        port: 0,
+        adminToken: ADMIN_TOKEN,
+        appVersion: '1.9.14',
+        buildCommit: 'a'.repeat(40),
+        taskRegistry: new RecurringTaskRegistry(),
+      }),
+    ).toThrow(/requires loopback host and an absolute readiness file/u);
+  });
+
+  it('rejects a canary readiness path outside OTTO_ENTERPRISE_DIR', async () => {
+    process.env.OTTO_ENTERPRISE_DIR = path.join(tmpDir, 'isolated-canary');
+    process.env.OTTO_ENTERPRISE_CANARY_MODE = '1';
+    process.env.OTTO_ENTERPRISE_READY_FILE = path.join(
+      tmpDir,
+      'isolated-canary',
+      '..',
+      'outside-ready.json',
+    );
+    vi.resetModules();
+    const mod: ServerModule = await import('./server.js');
+    const database: DatabaseModule = await import('./db.js');
+    closeDatabases.push(database.closeEnterpriseDatabase);
+    expect(() =>
+      mod.startEnterpriseServer({
+        host: '127.0.0.1',
+        port: 0,
+        adminToken: ADMIN_TOKEN,
+        taskRegistry: new RecurringTaskRegistry(),
+      }),
+    ).toThrow(/must be a direct child of OTTO_ENTERPRISE_DIR/u);
+
+    process.env.OTTO_ENTERPRISE_READY_FILE = path.join(
+      process.env.OTTO_ENTERPRISE_DIR,
+      'nested',
+      'ready.json',
+    );
+    expect(() =>
+      mod.startEnterpriseServer({
+        host: '127.0.0.1',
+        port: 0,
+        adminToken: ADMIN_TOKEN,
+        taskRegistry: new RecurringTaskRegistry(),
+      }),
+    ).toThrow(/must be a direct child of OTTO_ENTERPRISE_DIR/u);
+  });
+
   it('登记 MLS 清理和通知投递，并在服务关闭时全部停止', async () => {
     process.env.OTTO_ENTERPRISE_DIR = tmpDir;
     vi.resetModules();
@@ -244,12 +412,82 @@ describe('企业常驻任务注册', () => {
     });
     servers.push(server);
 
-    expect(registry.list()).toMatchObject([
-      { name: 'enterprise.local-mls-resource-maintenance', estimatedCostUsdPerRun: 0 },
-      { name: 'enterprise.ticket-notification-delivery', estimatedCostUsdPerRun: 0 },
+    expect(registry.list().map((task) => task.name)).toEqual([
+      'server.private-deployment-control-sync',
+      'enterprise.private-deployment-bootstrap',
+      'enterprise.data-protection-backup',
+      'enterprise.local-mls-resource-maintenance',
+      'enterprise.ticket-notification-delivery',
     ]);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     servers = servers.filter((item) => item !== server);
+    expect(registry.list()).toEqual([]);
+  });
+
+  it('waits for an accepted external write to be marked before close resolves', async () => {
+    process.env.OTTO_ENTERPRISE_DIR = tmpDir;
+    vi.resetModules();
+    const mod: ServerModule = await import('./server.js');
+    const database: DatabaseModule = await import('./db.js');
+    closeDatabases.push(database.closeEnterpriseDatabase);
+    const registry = new RecurringTaskRegistry({ allowPaidBackground: true });
+    const server = mod.startEnterpriseServer({
+      host: '127.0.0.1',
+      port: 0,
+      adminToken: ADMIN_TOKEN,
+      smsSender: null,
+      repairSmsSender: null,
+      repairFeishuSender: null,
+      taskRegistry: registry,
+    });
+    servers.push(server);
+    if (!server.listening) {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+    }
+
+    const events: string[] = [];
+    let accepted!: () => void;
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const acceptedGate = new Promise<void>((resolve) => {
+      accepted = resolve;
+    });
+    registry.register({
+      name: 'test.accepted-external-write',
+      source: 'enterprise shutdown contract',
+      intervalMs: 60_000,
+      initialDelayMs: 0,
+      estimatedCostUsdPerRun: 0,
+      missedRunPolicy: 'run-once',
+      getInputVersion: () => 'delivery-1',
+      run: async () => {
+        events.push('sent');
+        started();
+        await acceptedGate;
+        events.push('marked');
+      },
+    });
+    await didStart;
+    let closeResolved = false;
+    const closing = new Promise<void>((resolve, reject) => {
+      server.close((error?: Error) => {
+        if (error) reject(error);
+        else {
+          events.push('closed');
+          closeResolved = true;
+          resolve();
+        }
+      });
+    });
+    await Promise.resolve();
+    expect(closeResolved).toBe(false);
+    expect(events).toEqual(['sent']);
+    accepted();
+    await closing;
+    servers = servers.filter((item) => item !== server);
+    expect(events).toEqual(['sent', 'marked', 'closed']);
     expect(registry.list()).toEqual([]);
   });
 });
@@ -782,10 +1020,9 @@ describe('受保护 vs 公开路由边界', () => {
       ]),
     );
 
-    const privateStatus = await fetch(
-      `${base}/enterprise/deployment/status`,
-      { headers: { 'x-otto-admin-token': ADMIN_TOKEN } },
-    );
+    const privateStatus = await fetch(`${base}/enterprise/deployment/status`, {
+      headers: { 'x-otto-admin-token': ADMIN_TOKEN },
+    });
     expect(privateStatus.status).toBe(200);
     await expect(privateStatus.json()).resolves.toMatchObject({
       runtime: {

@@ -566,6 +566,7 @@ fi
 
 CANARY_DIR="${TXN_DIR}/canary"
 mkdir -p "$CANARY_DIR"
+CANARY_READY_FILE="${CANARY_DIR}/canary-ready.json"
 if [ -n "$MIGRATION_DB" ]; then
   cp "$MIGRATION_DB" "${CANARY_DIR}/data.db"
 fi
@@ -573,6 +574,8 @@ fi
 export OTTO_ENTERPRISE_DIR="$CANARY_DIR"
 export OTTO_ENTERPRISE_HOST="127.0.0.1"
 export OTTO_ENTERPRISE_PORT="17777"
+export OTTO_ENTERPRISE_READY_FILE="$CANARY_READY_FILE"
+export OTTO_ENTERPRISE_CANARY_MODE="1"
 export OTTO_ENTERPRISE_PUBLIC_URL
 export OTTO_ENTERPRISE_ADMIN_TOKEN
 export OTTO_ENTERPRISE_TRUST_PROXY_HOPS="1"
@@ -725,6 +728,7 @@ done
   otto_die "隔离 canary 未通过" 5
 }
 canary_cleanup
+unset OTTO_ENTERPRISE_CANARY_MODE OTTO_ENTERPRISE_READY_FILE
 
 if ! id otto-enterprise >/dev/null 2>&1; then
   useradd --system --home-dir "$DATA_DIR" --shell /usr/sbin/nologin \

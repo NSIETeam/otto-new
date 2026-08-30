@@ -58,7 +58,7 @@ describe('MemoryTool', () => {
 
   // Create a mock Config instance
   const mockConfig = {
-    getProjectRoot: vi.fn().mockReturnValue('/mock/project')
+    getProjectRoot: vi.fn().mockReturnValue('/mock/project'),
   } as unknown as Config;
 
   beforeEach(() => {
@@ -108,10 +108,7 @@ describe('MemoryTool', () => {
   });
 
   describe('performAddMemoryEntry (static method)', () => {
-    const testFilePath = path.join(
-      '/mock/project',
-      DEFAULT_CONTEXT_FILENAME,
-    );
+    const testFilePath = path.join('/mock/project', DEFAULT_CONTEXT_FILENAME);
 
     it('should create section and save a fact if file does not exist', async () => {
       mockFsAdapter.readFile.mockRejectedValue({ code: 'ENOENT' }); // Simulate file not found
@@ -226,22 +223,16 @@ describe('MemoryTool', () => {
       const params = { fact: 'The sky is blue' };
       const result = await memoryTool.execute(params, mockAbortSignal);
 
-      const expectedFilePath = path.join(
-        '/mock/project',
-        'OTTO.md'
-      );
-
-      // For this test, we expect the actual fs methods to be passed
-      const expectedFsArgument = {
-        readFile: fs.readFile,
-        writeFile: fs.writeFile,
-        mkdir: fs.mkdir,
-      };
+      const expectedFilePath = path.join('/mock/project', 'OTTO.md');
 
       expect(performAddMemoryEntrySpy).toHaveBeenCalledWith(
         params.fact,
         expectedFilePath,
-        expectedFsArgument,
+        expect.objectContaining({
+          readFile: fs.readFile,
+          writeFile: expect.any(Function),
+          mkdir: fs.mkdir,
+        }),
       );
       const successMessage = `Okay, I've remembered that: "${params.fact}"`;
       expect(result.llmContent).toBe(

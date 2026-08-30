@@ -30,6 +30,30 @@ on:
         required: false
         type: boolean
         default: false
+      defer_finalize:
+        description: 'Keep the verified rollback window open for the parent release transaction.'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      committed:
+        description: 'Whether this call switched to a new enterprise package.'
+        value: ${{ jobs.deploy.outputs.committed }}
+      transaction_id:
+        description: 'Exact durable deployment transaction identifier.'
+        value: ${{ jobs.deploy.outputs.transaction_id }}
+      previous_version:
+        description: 'Version restored if the parent release transaction compensates.'
+        value: ${{ jobs.deploy.outputs.previous_version }}
+      previous_package:
+        description: 'Package identity restored by compensation.'
+        value: ${{ jobs.deploy.outputs.previous_package }}
+      previous_source:
+        description: 'Source commit restored by compensation.'
+        value: ${{ jobs.deploy.outputs.previous_source }}
+      public_verified:
+        description: 'Whether the public enterprise acceptance checks passed.'
+        value: ${{ jobs.deploy.outputs.public_verified }}
   workflow_dispatch:
     inputs:
       version:
@@ -84,16 +108,49 @@ jobs:
           test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
           echo 'Standalone enterprise deployment received production approval.'
 
+  validate-exact-manual-source:
+    name: Validate exact latest internal source before secrets
+    needs: manual-production-approval
+    if: ${{ inputs.use_workflow_artifact != true && needs.manual-production-approval.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require the requested commit to be exact latest internal
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REPOSITORY" = NSIETeam/otto-new
+          [[ "$REQUESTED_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          LATEST_INTERNAL_COMMIT="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/heads/internal" --jq '.object.sha')"
+          [ "$REQUESTED_SOURCE_COMMIT" = "$LATEST_INTERNAL_COMMIT" ] || {
+            echo "Standalone deployment source is not exact latest internal." >&2
+            printf 'requested=%s latest=%s\n' \
+              "$REQUESTED_SOURCE_COMMIT" "$LATEST_INTERNAL_COMMIT" >&2
+            exit 1
+          }
+
   validate-deployment-principals:
     name: Validate isolated deployment principals
-    needs: manual-production-approval
+    needs:
+      - manual-production-approval
+      - validate-exact-manual-source
     if: >-
       ${{
         always()
         && !cancelled()
         && (
           inputs.use_workflow_artifact == true
-          || needs.manual-production-approval.result == 'success'
+          || (
+            needs.manual-production-approval.result == 'success'
+            && needs.validate-exact-manual-source.result == 'success'
+          )
         )
       }}
     runs-on: ubuntu-latest
@@ -153,7 +210,7 @@ jobs:
             local output
             output="$(ssh "${SSH_OPTIONS[@]}" -i "$key" "${user}@${DEPLOY_HOST}" -- \
               /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy preflight)"
-            [[ "$output" =~ ^protocol=otto-enterprise-ci-deploy-v4\ gateway=[0-9a-f]{64}\ publish=[0-9a-f]{64}\ rollback=[0-9a-f]{64}\ key=[0-9a-f]{16}\ config=/etc/otto-enterprise/enterprise.env\ deploy_user=${DEPLOY_USER}\ rollback_user=${ROLLBACK_DEPLOY_USER}$ ]]
+            [[ "$output" =~ ^protocol=otto-enterprise-ci-deploy-v5\ gateway=[0-9a-f]{64}\ publish=[0-9a-f]{64}\ rollback=[0-9a-f]{64}\ key=[0-9a-f]{16}\ config=/etc/otto-enterprise/enterprise.env\ deploy_user=${DEPLOY_USER}\ rollback_user=${ROLLBACK_DEPLOY_USER}$ ]]
           }
           reject_cross_login() {
             local key="$1"
@@ -220,6 +277,13 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+    outputs:
+      committed: ${{ steps.deploy.outputs.committed }}
+      transaction_id: ${{ steps.deploy.outputs.transaction_id }}
+      previous_version: ${{ steps.deploy.outputs.previous_version }}
+      previous_package: ${{ steps.deploy.outputs.previous_package }}
+      previous_source: ${{ steps.deploy.outputs.previous_source }}
+      public_verified: ${{ steps.public_state.outputs.verified }}
 
     steps:
       - name: Reject replayed production workflow attempts
@@ -294,10 +358,8 @@ jobs:
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          ROLLBACK_DEPLOY_USER: ${{ secrets.ROLLBACK_DEPLOY_USER }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          ROLLBACK_DEPLOY_SSH_KEY: ${{ secrets.ROLLBACK_DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
           ENTERPRISE_PUBLIC_URL: ${{ secrets.OTTO_ENTERPRISE_PUBLIC_URL }}
@@ -306,26 +368,18 @@ jobs:
           [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
           [[ "$DEPLOY_HOST" != *'..'* ]]
           [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
-          [[ "$ROLLBACK_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
-          [ "$DEPLOY_USER" != "$ROLLBACK_DEPLOY_USER" ]
           [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
           [ "$DEPLOY_PORT" -ge 1 ] && [ "$DEPLOY_PORT" -le 65535 ]
           test -n "$DEPLOY_SSH_KEY"
-          test -n "$ROLLBACK_DEPLOY_SSH_KEY"
           test -n "$DEPLOY_KNOWN_HOSTS"
           KEY_AUDIT_DIR="$(mktemp -d)"
           chmod 0700 "$KEY_AUDIT_DIR"
           trap 'rm -rf -- "$KEY_AUDIT_DIR"' EXIT
           umask 077
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_AUDIT_DIR/deploy"
-          printf '%s\n' "$ROLLBACK_DEPLOY_SSH_KEY" > "$KEY_AUDIT_DIR/rollback"
           DEPLOY_KEY_FINGERPRINT="$(ssh-keygen -y -P '' -f "$KEY_AUDIT_DIR/deploy" | \
             ssh-keygen -lf - -E sha256 | awk '{print $2}')"
-          ROLLBACK_KEY_FINGERPRINT="$(ssh-keygen -y -P '' -f "$KEY_AUDIT_DIR/rollback" | \
-            ssh-keygen -lf - -E sha256 | awk '{print $2}')"
           [[ "$DEPLOY_KEY_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
-          [[ "$ROLLBACK_KEY_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
-          [ "$DEPLOY_KEY_FINGERPRINT" != "$ROLLBACK_KEY_FINGERPRINT" ]
           test -n "$SIGNING_PUBLIC_KEY"
           test -n "$ENTERPRISE_PUBLIC_URL"
           ENTERPRISE_PUBLIC_URL="$ENTERPRISE_PUBLIC_URL" node --input-type=module -e '
@@ -412,7 +466,7 @@ jobs:
           set -euo pipefail
           EXPECTED_KEY_ID="$(printf '%s\n' "$OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY" | \
             openssl pkey -pubin -outform DER | sha256sum | awk '{print substr($1,1,16)}')"
-          EXPECTED_PREFLIGHT="protocol=otto-enterprise-ci-deploy-v4 gateway=$(sha256sum deployment/enterprise-oneclick/ci-deploy-gateway.sh | awk '{print $1}') publish=$(sha256sum deployment/enterprise-oneclick/ci/publish-update-mirror.sh | awk '{print $1}') rollback=$(sha256sum deployment/enterprise-oneclick/ci/rollback-update-mirror.sh | awk '{print $1}') key=${EXPECTED_KEY_ID} config=/etc/otto-enterprise/enterprise.env deploy_user=${DEPLOY_USER} rollback_user=${ROLLBACK_DEPLOY_USER}"
+          EXPECTED_PREFLIGHT="protocol=otto-enterprise-ci-deploy-v5 gateway=$(sha256sum deployment/enterprise-oneclick/ci-deploy-gateway.sh | awk '{print $1}') publish=$(sha256sum deployment/enterprise-oneclick/ci/publish-update-mirror.sh | awk '{print $1}') rollback=$(sha256sum deployment/enterprise-oneclick/ci/rollback-update-mirror.sh | awk '{print $1}') key=${EXPECTED_KEY_ID} config=/etc/otto-enterprise/enterprise.env deploy_user=${DEPLOY_USER} rollback_user=${ROLLBACK_DEPLOY_USER}"
           ACTUAL_PREFLIGHT="$(ssh -i ~/.ssh/id_deploy -p "$DEPLOY_PORT" \
             -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
             -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
@@ -471,6 +525,7 @@ jobs:
           upload_file "signature-${PACKAGE_ID}" "${ARCHIVE_PATH}.sig"
 
       - name: Deploy through the root-owned signed-package gateway
+        id: deploy
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -490,6 +545,12 @@ jobs:
             fi
           fi
           DEPLOY_TRANSACTION_ID="${{ steps.version.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # Persist the deterministic transaction identity before the first SSH
+          # mutation. If every transport reconciliation attempt is lost, the
+          # failed job still exposes the exact server-side transaction for
+          # audited manual recovery instead of an identity guess.
+          echo 'committed=false' >> "$GITHUB_OUTPUT"
+          echo "transaction_id=$DEPLOY_TRANSACTION_ID" >> "$GITHUB_OUTPUT"
           SSH_OPTIONS=(
             -i ~/.ssh/id_deploy
             -p "$DEPLOY_PORT"
@@ -501,30 +562,142 @@ jobs:
             -o ServerAliveCountMax=3
           )
           DEPLOY_STATUS=0
-          ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+          DEPLOY_OUTPUT=''
+          if DEPLOY_OUTPUT="$(ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
               /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
               deploy "$DEPLOY_TRANSACTION_ID" \
               "${{ steps.package.outputs.archive_name }}" \
               "${{ steps.version.outputs.version }}" \
               "${{ steps.version.outputs.package_id }}" \
               "${{ steps.version.outputs.source_commit }}" \
-              "$DRY_RUN_INPUT" \
-            || DEPLOY_STATUS=$?
+              "$DRY_RUN_INPUT")"; then
+            DEPLOY_STATUS=0
+          else
+            DEPLOY_STATUS=$?
+          fi
+          printf '%s\n' "$DEPLOY_OUTPUT"
           if [ "$DEPLOY_STATUS" -ne 0 ]; then
             if [ "$DRY_RUN_INPUT" = 'true' ]; then
               exit "$DEPLOY_STATUS"
             fi
             echo "Deployment transport returned ${DEPLOY_STATUS}; reconciling the exact signed server identity." >&2
-            ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
-              /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
-              verify-deployment \
-              "${{ steps.version.outputs.version }}" \
-              "${{ steps.version.outputs.package_id }}" \
-              "${{ steps.version.outputs.source_commit }}"
+            RECONCILE_OUTPUT=''
+            RECONCILE_STATUS=255
+            for attempt in 1 2 3 4 5 6; do
+              if RECONCILE_OUTPUT="$(ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+                /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+                reconcile-deployment \
+                "$DEPLOY_TRANSACTION_ID" \
+                "${{ steps.version.outputs.version }}" \
+                "${{ steps.version.outputs.package_id }}" \
+                "${{ steps.version.outputs.source_commit }}")"; then
+                RECONCILE_STATUS=0
+                break
+              else
+                RECONCILE_STATUS=$?
+              fi
+              [ "$RECONCILE_STATUS" -eq 255 ] && [ "$attempt" -lt 6 ] || {
+                echo "Exact enterprise reconciliation failed; transaction=${DEPLOY_TRANSACTION_ID} status=${RECONCILE_STATUS}." >&2
+                exit "$RECONCILE_STATUS"
+              }
+              sleep 2
+            done
+            [ "$RECONCILE_STATUS" -eq 0 ]
+            DEPLOY_OUTPUT="$RECONCILE_OUTPUT"
+            printf '%s\n' "$DEPLOY_OUTPUT"
           fi
+          if [ "$DRY_RUN_INPUT" = true ]; then
+            echo 'committed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mapfile -t ALREADY_LINES < <(
+            printf '%s\n' "$DEPLOY_OUTPUT" | grep -E \
+              '^already_deployed version=[0-9]+\.[0-9]+\.[0-9]+ package=[0-9a-f]{12}-[0-9a-f]{12} source=[0-9a-f]{40}$' || true
+          )
+          if [ "${#ALREADY_LINES[@]}" -eq 1 ]; then
+            EXPECTED_ALREADY="already_deployed version=${{ steps.version.outputs.version }} package=${{ steps.version.outputs.package_id }} source=${{ steps.version.outputs.source_commit }}"
+            [ "${ALREADY_LINES[0]}" = "$EXPECTED_ALREADY" ] || {
+              echo 'Deployment gateway returned an already-deployed receipt for a different identity.' >&2
+              exit 1
+            }
+            echo 'committed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ "${#ALREADY_LINES[@]}" -eq 0 ] || {
+            echo 'Deployment gateway returned multiple already-deployed receipts.' >&2
+            exit 1
+          }
+          mapfile -t ROLLED_BACK_LINES < <(
+            printf '%s\n' "$DEPLOY_OUTPUT" | grep -E \
+              '^recovered_rolled_back transaction=v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[0-9]+ restored_version=[0-9]+\.[0-9]+\.[0-9]+ restored_package=[0-9a-f]{12}-[0-9a-f]{12} restored_source=[0-9a-f]{40} replaced_version=[0-9]+\.[0-9]+\.[0-9]+ replaced_package=[0-9a-f]{12}-[0-9a-f]{12} replaced_source=[0-9a-f]{40}$' || true
+          )
+          if [ "${#ROLLED_BACK_LINES[@]}" -eq 1 ]; then
+            ROLLBACK_RECEIPT="${ROLLED_BACK_LINES[0]#recovered_}"
+            RECEIPT_TRANSACTION="$(printf '%s\n' "$ROLLBACK_RECEIPT" | sed -E 's/^rolled_back transaction=([^ ]+) .*$/\1/')"
+            RESTORED_VERSION="$(printf '%s\n' "$ROLLBACK_RECEIPT" | sed -E 's/^.* restored_version=([^ ]+) .*$/\1/')"
+            RESTORED_PACKAGE="$(printf '%s\n' "$ROLLBACK_RECEIPT" | sed -E 's/^.* restored_package=([^ ]+) .*$/\1/')"
+            RESTORED_SOURCE="$(printf '%s\n' "$ROLLBACK_RECEIPT" | sed -E 's/^.* restored_source=([^ ]+) .*$/\1/')"
+            [ "$RECEIPT_TRANSACTION" = "$DEPLOY_TRANSACTION_ID" ] || {
+              echo 'Recovered rollback receipt is not bound to this workflow transaction.' >&2
+              exit 1
+            }
+            EXPECTED_REPLACED="replaced_version=${{ steps.version.outputs.version }} replaced_package=${{ steps.version.outputs.package_id }} replaced_source=${{ steps.version.outputs.source_commit }}"
+            [ "${ROLLBACK_RECEIPT##* restored_source=${RESTORED_SOURCE} }" = "$EXPECTED_REPLACED" ] || {
+              echo 'Recovered rollback receipt is not bound to the requested signed identity.' >&2
+              exit 1
+            }
+            echo 'committed=false' >> "$GITHUB_OUTPUT"
+            echo "transaction_id=$RECEIPT_TRANSACTION" >> "$GITHUB_OUTPUT"
+            echo "previous_version=$RESTORED_VERSION" >> "$GITHUB_OUTPUT"
+            echo "previous_package=$RESTORED_PACKAGE" >> "$GITHUB_OUTPUT"
+            echo "previous_source=$RESTORED_SOURCE" >> "$GITHUB_OUTPUT"
+            echo 'Enterprise upgrade failed before acceptance and the locked previous deployment was durably restored.' >&2
+            exit 1
+          fi
+          [ "${#ROLLED_BACK_LINES[@]}" -eq 0 ] || {
+            echo 'Deployment gateway returned multiple recovered rollback receipts.' >&2
+            exit 1
+          }
+          mapfile -t RECEIPT_LINES < <(
+            printf '%s\n' "$DEPLOY_OUTPUT" | grep -E \
+              '^(recovered_)?deployed transaction=v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[0-9]+ version=[0-9]+\.[0-9]+\.[0-9]+ package=[0-9a-f]{12}-[0-9a-f]{12} source=[0-9a-f]{40} previous_version=[0-9]+\.[0-9]+\.[0-9]+ previous_package=[0-9a-f]{12}-[0-9a-f]{12} previous_source=[0-9a-f]{40}$' || true
+          )
+          [ "${#RECEIPT_LINES[@]}" -eq 1 ] || {
+            echo 'Deployment gateway did not return one exact committed receipt.' >&2
+            exit 1
+          }
+          RAW_RECEIPT="${RECEIPT_LINES[0]}"
+          RECEIPT="${RAW_RECEIPT#recovered_}"
+          RECEIPT_TRANSACTION="$(printf '%s\n' "$RECEIPT" | sed -E 's/^deployed transaction=([^ ]+) .*$/\1/')"
+          [[ "$RECEIPT_TRANSACTION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[0-9]+$ ]]
+          EXPECTED_RECEIPT_PREFIX="deployed transaction=${RECEIPT_TRANSACTION} version=${{ steps.version.outputs.version }} package=${{ steps.version.outputs.package_id }} source=${{ steps.version.outputs.source_commit }}"
+          [ "${RECEIPT%% previous_version=*}" = "$EXPECTED_RECEIPT_PREFIX" ] || {
+            echo 'Deployment gateway returned a committed receipt for a different identity.' >&2
+            exit 1
+          }
+          [ "$RECEIPT_TRANSACTION" = "$DEPLOY_TRANSACTION_ID" ] || {
+            echo 'Deployment receipt is not bound to this workflow transaction.' >&2
+            exit 1
+          }
+          PREVIOUS_VERSION="$(printf '%s\n' "$RECEIPT" | sed -E 's/^.* previous_version=([^ ]+) .*$/\1/')"
+          PREVIOUS_PACKAGE="$(printf '%s\n' "$RECEIPT" | sed -E 's/^.* previous_package=([^ ]+) .*$/\1/')"
+          PREVIOUS_SOURCE="${RECEIPT##* previous_source=}"
+          if [ "$PREVIOUS_VERSION" = absent ]; then
+            [ "$PREVIOUS_PACKAGE" = absent ] && [ "$PREVIOUS_SOURCE" = absent ]
+          else
+            [[ "$PREVIOUS_PACKAGE" =~ ^[0-9a-f]{12}-[0-9a-f]{12}$ ]]
+            [[ "$PREVIOUS_SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          fi
+          echo 'committed=true' >> "$GITHUB_OUTPUT"
+          echo "transaction_id=$RECEIPT_TRANSACTION" >> "$GITHUB_OUTPUT"
+          echo "previous_version=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
+          echo "previous_package=$PREVIOUS_PACKAGE" >> "$GITHUB_OUTPUT"
+          echo "previous_source=$PREVIOUS_SOURCE" >> "$GITHUB_OUTPUT"
 
       - name: Verify public enterprise identity
+        id: public_verify
         if: ${{ inputs.dry_run == false }}
+        continue-on-error: true
         shell: bash
         env:
           ENTERPRISE_PUBLIC_URL: ${{ secrets.OTTO_ENTERPRISE_PUBLIC_URL }}
@@ -601,6 +774,20 @@ jobs:
             fi
           done
 
+      - name: Record public verification outcome
+        id: public_state
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ '${{ inputs.dry_run }}' = true ]; then
+            echo 'verified=true' >> "$GITHUB_OUTPUT"
+          elif [ '${{ steps.public_verify.outcome }}' = success ]; then
+            echo 'verified=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'verified=false' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Remove server upload transaction
         if: ${{ always() && steps.ssh.outcome == 'success' }}
         shell: bash
@@ -622,3 +809,197 @@ jobs:
         if: always()
         shell: bash
         run: rm -f -- ~/.ssh/id_deploy ~/.ssh/known_hosts
+
+  finalize-enterprise-deployment:
+    name: Finalize publicly verified enterprise deployment
+    needs: deploy
+    if: >-
+      ${{
+        always()
+        && needs.deploy.result == 'success'
+        && needs.deploy.outputs.committed == 'true'
+        && needs.deploy.outputs.public_verified == 'true'
+        && inputs.defer_finalize != true
+      }}
+    runs-on: ubuntu-latest
+    environment: production-automation
+    timeout-minutes: 15
+    permissions: {}
+    steps:
+      - name: Finalize the exact deployment transaction
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          [ "$DEPLOY_PORT" -ge 1 ] && [ "$DEPLOY_PORT" -le 65535 ]
+          install -d -m 0700 ~/.ssh
+          trap 'rm -f -- ~/.ssh/id_deploy ~/.ssh/known_hosts' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 0600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+          VERSION='${{ inputs.version }}'
+          VERSION="${VERSION#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          TRANSACTION_ID='${{ needs.deploy.outputs.transaction_id }}'
+          [[ "$TRANSACTION_ID" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[0-9]+$ ]]
+          EXPECTED_PATTERN="^finalized deployed transaction=${TRANSACTION_ID} version=${VERSION} package=${{ inputs.package_identity }} source=${{ inputs.source_commit }} previous_version=[0-9]+\\.[0-9]+\\.[0-9]+ previous_package=[0-9a-f]{12}-[0-9a-f]{12} previous_source=[0-9a-f]{40}$"
+          OUTPUT=''
+          for attempt in 1 2 3 4 5 6; do
+            STATUS=0
+            if OUTPUT="$(ssh -i ~/.ssh/id_deploy -p "$DEPLOY_PORT" \
+              -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
+              -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+              /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+              finalize-deployment "$TRANSACTION_ID" \
+              "$VERSION" "${{ inputs.package_identity }}" \
+              "${{ inputs.source_commit }}")"; then
+              STATUS=0
+            else
+              STATUS=$?
+            fi
+            if [[ "$OUTPUT" =~ $EXPECTED_PATTERN ]]; then
+              break
+            fi
+            [ "$STATUS" -eq 255 ] && [ "$attempt" -lt 6 ] || {
+              echo "Enterprise finalization failed without its exact receipt; status=${STATUS}." >&2
+              exit 1
+            }
+            sleep 2
+          done
+          [[ "$OUTPUT" =~ $EXPECTED_PATTERN ]]
+          printf '%s\n' "$OUTPUT"
+
+  rollback-enterprise-deployment:
+    name: Roll back enterprise deployment after failed public verification
+    needs: deploy
+    if: >-
+      ${{
+        always()
+        && needs.deploy.outputs.committed == 'true'
+        && (
+          needs.deploy.result != 'success'
+          || needs.deploy.outputs.public_verified != 'true'
+        )
+      }}
+    runs-on: ubuntu-latest
+    environment: production-automation
+    timeout-minutes: 30
+    permissions: {}
+    steps:
+      - name: Roll back with the isolated rollback principal
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          ROLLBACK_DEPLOY_USER: ${{ secrets.ROLLBACK_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          ROLLBACK_DEPLOY_SSH_KEY: ${{ secrets.ROLLBACK_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+          [[ "$ROLLBACK_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          [ "$DEPLOY_PORT" -ge 1 ] && [ "$DEPLOY_PORT" -le 65535 ]
+          install -d -m 0700 ~/.ssh
+          trap 'rm -f -- ~/.ssh/id_rollback ~/.ssh/known_hosts' EXIT
+          printf '%s\n' "$ROLLBACK_DEPLOY_SSH_KEY" > ~/.ssh/id_rollback
+          chmod 0600 ~/.ssh/id_rollback
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+          VERSION='${{ inputs.version }}'
+          VERSION="${VERSION#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          TRANSACTION_ID='${{ needs.deploy.outputs.transaction_id }}'
+          [[ "$TRANSACTION_ID" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[0-9]+$ ]]
+          EXPECTED="rolled_back transaction=${TRANSACTION_ID} restored_version=${{ needs.deploy.outputs.previous_version }} restored_package=${{ needs.deploy.outputs.previous_package }} restored_source=${{ needs.deploy.outputs.previous_source }} replaced_version=${VERSION} replaced_package=${{ inputs.package_identity }} replaced_source=${{ inputs.source_commit }}"
+          OUTPUT=''
+          for attempt in 1 2 3 4 5 6; do
+            STATUS=0
+            if OUTPUT="$(ssh -i ~/.ssh/id_rollback -p "$DEPLOY_PORT" \
+              -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
+              -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+              "${ROLLBACK_DEPLOY_USER}@${DEPLOY_HOST}" -- \
+              /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+              rollback-enterprise "$TRANSACTION_ID" \
+              "$VERSION" "${{ inputs.package_identity }}" \
+              "${{ inputs.source_commit }}")"; then
+              STATUS=0
+            else
+              STATUS=$?
+            fi
+            if [ "$OUTPUT" = "$EXPECTED" ]; then
+              break
+            fi
+            [ "$STATUS" -eq 255 ] && [ "$attempt" -lt 6 ] || {
+              echo "Enterprise rollback failed without its exact receipt; status=${STATUS}." >&2
+              exit 1
+            }
+            sleep 2
+          done
+          [ "$OUTPUT" = "$EXPECTED" ]
+          printf '%s\n' "$OUTPUT"
+
+      - name: Verify restored public enterprise identity
+        if: ${{ needs.deploy.outputs.previous_version != 'absent' }}
+        shell: bash
+        env:
+          ENTERPRISE_PUBLIC_URL: ${{ secrets.OTTO_ENTERPRISE_PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+          PUBLIC_ORIGIN="$(ENTERPRISE_PUBLIC_URL="$ENTERPRISE_PUBLIC_URL" node --input-type=module -e '
+            const url = new URL(process.env.ENTERPRISE_PUBLIC_URL);
+            if (url.protocol !== "https:" || url.username || url.password ||
+                (url.pathname !== "/" && url.pathname !== "") || url.search || url.hash) process.exit(2);
+            process.stdout.write(url.origin);
+          ')"
+          curl --noproxy '*' --proto '=https' --tlsv1.2 \
+            --fail-with-body --silent --show-error --max-redirs 0 \
+            --connect-timeout 15 --max-time 120 --retry 5 --retry-all-errors \
+            "${PUBLIC_ORIGIN}/enterprise/health?rollback_run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --output restored-health.json
+          jq -e --arg version '${{ needs.deploy.outputs.previous_version }}' \
+            '.status == "ok" and .service == "otto-enterprise"
+             and .version == $version and .appVersion == $version' \
+            restored-health.json >/dev/null
+
+  report-enterprise-public-verification-failure:
+    name: Report failed public verification after compensation
+    needs:
+      - deploy
+      - rollback-enterprise-deployment
+    if: >-
+      ${{
+        always()
+        && (
+          needs.deploy.outputs.public_verified == 'false'
+          || (
+            needs.deploy.outputs.committed == 'true'
+            && needs.deploy.result != 'success'
+          )
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Fail the deployment after proving rollback outcome
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ '${{ needs.deploy.outputs.committed }}' = true ]; then
+            test '${{ needs.rollback-enterprise-deployment.result }}' = success
+            echo 'Enterprise deployment did not complete its full acceptance transaction; the exact previous deployment was restored.' >&2
+          else
+            echo 'Public enterprise verification failed; no new deployment transaction was committed.' >&2
+          fi
+          exit 1

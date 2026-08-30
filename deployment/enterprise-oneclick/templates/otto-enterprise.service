@@ -15,7 +15,9 @@ Environment=OTTO_LICENSE_TRUST_FILE=/opt/otto-enterprise/current/license-public-
 ExecStart=/opt/otto-enterprise/runtime/current/bin/node /opt/otto-enterprise/current/run.mjs
 Restart=on-failure
 RestartSec=3
-TimeoutStopSec=20
+# run.mjs owns a 30s resident-write drain plus 15s HTTP grace watchdog.
+# systemd must remain outside that boundary so it never SIGKILLs first.
+TimeoutStopSec=60
 KillSignal=SIGTERM
 UMask=0077
 

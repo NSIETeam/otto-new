@@ -20,7 +20,7 @@ export HOME=/root USER=root LOGNAME=root SHELL=/bin/bash
 cd /
 
 GATEWAY_PATH="/usr/local/sbin/otto-enterprise-ci-deploy"
-GATEWAY_PROTOCOL="otto-enterprise-ci-deploy-v4"
+GATEWAY_PROTOCOL="otto-enterprise-ci-deploy-v5"
 LIBEXEC_ROOT="/usr/local/libexec/otto-enterprise-ci"
 PUBLISH_HELPER_PATH="${LIBEXEC_ROOT}/publish-update-mirror"
 ROLLBACK_HELPER_PATH="${LIBEXEC_ROOT}/rollback-update-mirror"
@@ -32,6 +32,7 @@ STATE_ROOT="/var/lib/otto-ci-deploy"
 UPLOADS_ROOT="${STATE_ROOT}/uploads"
 STAGES_ROOT="${STATE_ROOT}/staging"
 LOCKS_ROOT="${STATE_ROOT}/locks"
+DEPLOYMENTS_ROOT="${STATE_ROOT}/deployments"
 UPLOAD_ROOT="${UPLOADS_ROOT}/enterprise"
 MIRROR_UPLOAD_ROOT="${UPLOADS_ROOT}/mirror"
 STAGING_ROOT="${STAGES_ROOT}/enterprise"
@@ -288,35 +289,20 @@ for asset in assets:
 PY
 }
 
-verify_current_deployment() {
-  local expected_version="$1"
-  local package_id="$2"
-  local expected_source_commit="$3"
+verify_release_identity_at_path() {
+  local current_release="$1"
+  local expected_version="$2"
+  local package_id="$3"
+  local expected_source_commit="$4"
   local expected_build_prefix="${package_id%%-*}"
   local expected_source_input_prefix="${package_id#*-}"
-  local expected_current_release="${INSTALL_ROOT}/releases/${expected_version}-${expected_build_prefix}"
-  local current_release
-  local deploy_config_path
-  local -a verify_env=(
-    /usr/bin/env -i
-    PATH=/usr/sbin:/usr/bin:/sbin:/bin
-    LC_ALL=C
-    HOME=/root
-    USER=root
-    LOGNAME=root
-    SHELL=/bin/bash
-  )
-
-  [ -L "${INSTALL_ROOT}/current" ] \
-    || fail 'enterprise current release is not a managed symlink'
-  current_release="$(readlink -f "${INSTALL_ROOT}/current")"
-  [ "$current_release" = "$expected_current_release" ] \
+  local expected_release="${INSTALL_ROOT}/releases/${expected_version}-${expected_build_prefix}"
+  [ "$current_release" = "$expected_release" ] \
     || fail "deployed release identity is unexpected: $current_release"
   require_root_owned_directory_chain "$current_release"
-  require_root_owned_directory_chain "${current_release}/release"
-  require_root_owned_regular_file "${current_release}/release/manifest.json"
+  require_root_owned_regular_file "${current_release}/manifest.json"
   /usr/bin/python3 -I -S - \
-    "${current_release}/release/manifest.json" "$expected_version" \
+    "${current_release}/manifest.json" "$expected_version" \
     "$expected_build_prefix" "$expected_source_input_prefix" \
     "$expected_source_commit" <<'PY'
 import json
@@ -338,6 +324,30 @@ if (
 ):
     raise SystemExit('current deployment manifest identity is unexpected')
 PY
+}
+
+verify_current_deployment() {
+  local expected_version="$1"
+  local package_id="$2"
+  local expected_source_commit="$3"
+  local current_release
+  local deploy_config_path
+  local -a verify_env=(
+    /usr/bin/env -i
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    LC_ALL=C
+    HOME=/root
+    USER=root
+    LOGNAME=root
+    SHELL=/bin/bash
+  )
+
+  [ -L "${INSTALL_ROOT}/current" ] \
+    || fail 'enterprise current release is not a managed symlink'
+  current_release="$(readlink -f "${INSTALL_ROOT}/current")"
+  verify_release_identity_at_path \
+    "$current_release" "$expected_version" "$package_id" \
+    "$expected_source_commit"
   IFS= read -r deploy_config_path < "$CONFIG_PATH_FILE" \
     || fail 'deployment config path is unreadable'
   [[ "$deploy_config_path" =~ ^/etc/otto-enterprise/[A-Za-z0-9._-]+\.env$ ]] \
@@ -349,6 +359,333 @@ PY
   "${verify_env[@]}" \
     OTTO_CONFIG_PATH="$deploy_config_path" \
     "${INSTALL_ROOT}/deploy/verify.sh"
+}
+
+sync_live_deployment_filesystems() {
+  local deploy_config_path durability_path
+  IFS= read -r deploy_config_path < "$CONFIG_PATH_FILE" \
+    || fail 'deployment config path is unreadable for durability barrier'
+  [[ "$deploy_config_path" =~ ^/etc/otto-enterprise/[A-Za-z0-9._-]+\.env$ ]] \
+    || fail 'server-pinned deployment config path is invalid for durability barrier'
+  for durability_path in \
+    "$INSTALL_ROOT" \
+    /var/lib/otto-enterprise \
+    "$(dirname -- "$deploy_config_path")" \
+    /etc/systemd/system; do
+    [ -d "$durability_path" ] && [ ! -L "$durability_path" ] \
+      || fail "deployment durability path is missing or unsafe: $durability_path"
+    /usr/bin/sync -f "$durability_path"
+  done
+}
+
+read_deployment_state_field() {
+  local state_file="$1"
+  local key="$2"
+  local -a matches
+  mapfile -t matches < <(grep -E "^${key}=[^[:space:]]+$" "$state_file" || true)
+  [ "${#matches[@]}" -eq 1 ] \
+    || fail "deployment state field is missing or ambiguous: $key"
+  printf '%s\n' "${matches[0]#*=}"
+}
+
+require_deployment_transaction() {
+  local transaction_id="$1"
+  local expected_version="$2"
+  local expected_package="$3"
+  local expected_source="$4"
+  local transaction_dir="${DEPLOYMENTS_ROOT}/${transaction_id}"
+  local state_file="${transaction_dir}/state"
+  [[ "$transaction_id" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[0-9]+$ ]] \
+    || fail 'invalid enterprise deployment transaction id'
+  [[ "$expected_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    || fail 'invalid expected enterprise version'
+  [[ "$expected_package" =~ ^[0-9a-f]{12}-[0-9a-f]{12}$ ]] \
+    || fail 'invalid expected enterprise package identity'
+  [[ "$expected_source" =~ ^[0-9a-f]{40}$ ]] \
+    || fail 'invalid expected enterprise source commit'
+  require_root_owned_directory "$transaction_dir"
+  [ "$(stat -c '%u:%g:%a' "$transaction_dir")" = '0:0:700' ] \
+    || fail 'enterprise deployment transaction owner or mode is invalid'
+  require_root_owned_regular_file "$state_file"
+  [ "$(stat -c '%u:%g:%a' "$state_file")" = '0:0:600' ] \
+    || fail 'enterprise deployment state owner or mode is invalid'
+  [ "$(read_deployment_state_field "$state_file" format)" = \
+      'otto-enterprise-deployment-state-v1' ] \
+    || fail 'enterprise deployment state format is invalid'
+  [ "$(read_deployment_state_field "$state_file" transaction)" = "$transaction_id" ] \
+    || fail 'enterprise deployment transaction binding changed'
+  [ "$(read_deployment_state_field "$state_file" target_version)" = "$expected_version" ] \
+    || fail 'enterprise deployment version binding changed'
+  [ "$(read_deployment_state_field "$state_file" target_package)" = "$expected_package" ] \
+    || fail 'enterprise deployment package binding changed'
+  [ "$(read_deployment_state_field "$state_file" target_source)" = "$expected_source" ] \
+    || fail 'enterprise deployment source binding changed'
+  printf '%s\n' "$transaction_dir"
+}
+
+deployment_receipt_for_state() {
+  local transaction_dir="$1"
+  local state_file="${transaction_dir}/state"
+  printf 'deployed transaction=%s version=%s package=%s source=%s previous_version=%s previous_package=%s previous_source=%s\n' \
+    "$(read_deployment_state_field "$state_file" transaction)" \
+    "$(read_deployment_state_field "$state_file" target_version)" \
+    "$(read_deployment_state_field "$state_file" target_package)" \
+    "$(read_deployment_state_field "$state_file" target_source)" \
+    "$(read_deployment_state_field "$state_file" previous_version)" \
+    "$(read_deployment_state_field "$state_file" previous_package)" \
+    "$(read_deployment_state_field "$state_file" previous_source)"
+}
+
+rollback_receipt_for_state() {
+  local transaction_dir="$1"
+  local state_file="${transaction_dir}/state"
+  printf 'rolled_back transaction=%s restored_version=%s restored_package=%s restored_source=%s replaced_version=%s replaced_package=%s replaced_source=%s\n' \
+    "$(read_deployment_state_field "$state_file" transaction)" \
+    "$(read_deployment_state_field "$state_file" previous_version)" \
+    "$(read_deployment_state_field "$state_file" previous_package)" \
+    "$(read_deployment_state_field "$state_file" previous_source)" \
+    "$(read_deployment_state_field "$state_file" target_version)" \
+    "$(read_deployment_state_field "$state_file" target_package)" \
+    "$(read_deployment_state_field "$state_file" target_source)"
+}
+
+rollback_witness_for_state() {
+  local transaction_dir="$1"
+  local state_file="${transaction_dir}/state"
+  printf 'otto-enterprise-rollback-witness-v1 transaction=%s target_version=%s target_package=%s target_source=%s previous_version=%s previous_package=%s previous_source=%s\n' \
+    "$(read_deployment_state_field "$state_file" transaction)" \
+    "$(read_deployment_state_field "$state_file" target_version)" \
+    "$(read_deployment_state_field "$state_file" target_package)" \
+    "$(read_deployment_state_field "$state_file" target_source)" \
+    "$(read_deployment_state_field "$state_file" previous_version)" \
+    "$(read_deployment_state_field "$state_file" previous_package)" \
+    "$(read_deployment_state_field "$state_file" previous_source)"
+}
+
+write_once_durable() {
+  local marker_file="$1"
+  local expected_content="$2"
+  local marker_directory
+  local marker_next="${marker_file}.next"
+  marker_directory="$(dirname -- "$marker_file")"
+  require_root_owned_directory "$marker_directory"
+  if [ -e "$marker_file" ] || [ -L "$marker_file" ]; then
+    require_root_owned_regular_file "$marker_file"
+    [ "$(stat -c '%u:%g:%a' "$marker_file")" = '0:0:600' ] \
+      || fail "durable marker owner or mode is invalid: $marker_file"
+    [ "$(<"$marker_file")" = "$expected_content" ] \
+      || fail "durable marker content changed: $marker_file"
+    if [ -e "$marker_next" ] || [ -L "$marker_next" ]; then
+      require_root_owned_regular_file "$marker_next"
+      [ "$(stat -c '%u:%g:%a' "$marker_next")" = '0:0:600' ] \
+        && [ "$(<"$marker_next")" = "$expected_content" ] \
+        || fail "durable marker staging content is invalid: $marker_next"
+      rm -f -- "$marker_next"
+    fi
+    /usr/bin/sync -f "$marker_file"
+    /usr/bin/sync -f "$marker_directory"
+    return 0
+  fi
+  if [ -e "$marker_next" ] || [ -L "$marker_next" ]; then
+    require_root_owned_regular_file "$marker_next"
+    [ "$(stat -c '%u:%g:%a' "$marker_next")" = '0:0:600' ] \
+      || fail "durable marker staging owner or mode is invalid: $marker_next"
+    rm -f -- "$marker_next"
+  fi
+  /usr/bin/python3 -I -S - \
+    "$marker_next" "$marker_file" "$expected_content" <<'PY'
+import os
+import pathlib
+import sys
+
+next_path = pathlib.Path(sys.argv[1])
+final_path = pathlib.Path(sys.argv[2])
+payload = (sys.argv[3] + '\n').encode('utf-8')
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
+descriptor = os.open(next_path, flags, 0o600)
+try:
+    offset = 0
+    while offset < len(payload):
+        offset += os.write(descriptor, payload[offset:])
+    os.fchmod(descriptor, 0o600)
+    os.fchown(descriptor, 0, 0)
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+try:
+    os.link(next_path, final_path, follow_symlinks=False)
+finally:
+    if next_path.exists():
+        next_path.unlink()
+directory = os.open(final_path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+  require_root_owned_regular_file "$marker_file"
+  [ "$(stat -c '%u:%g:%a' "$marker_file")" = '0:0:600' ] \
+    || fail "new durable marker owner or mode is invalid: $marker_file"
+  [ "$(<"$marker_file")" = "$expected_content" ] \
+    || fail "new durable marker content is invalid: $marker_file"
+}
+
+complete_deployment_receipt() {
+  local transaction_dir="$1"
+  local receipt_file="${transaction_dir}/receipt"
+  local expected_receipt
+  require_complete_upgrade_rollback_snapshot "$transaction_dir"
+  sync_live_deployment_filesystems
+  expected_receipt="$(deployment_receipt_for_state "$transaction_dir")"
+  write_once_durable "$receipt_file" "$expected_receipt"
+  printf '%s\n' "$expected_receipt"
+}
+
+require_complete_upgrade_rollback_snapshot() {
+  local transaction_dir="$1"
+  local state_file="${transaction_dir}/state"
+  local upgrade_dir="${transaction_dir}/upgrade"
+  local expected_witness witness_file resident_backup resident_absent
+  local database_key_created database_key_preserved database_key_snapshot
+  [ "$(read_deployment_state_field "$state_file" action)" = upgrade ] \
+    || fail 'enterprise rollback snapshot is not bound to an upgrade'
+  require_root_owned_directory "$upgrade_dir"
+  [ "$(stat -c '%u:%g:%a' "$upgrade_dir")" = '0:0:700' ] \
+    || fail 'enterprise rollback snapshot directory owner or mode is invalid'
+  for snapshot in \
+    data.db.before enterprise.env.before otto-enterprise.service.before; do
+    require_root_owned_regular_file "${upgrade_dir}/${snapshot}"
+  done
+  [ "$(stat -c '%u:%g:%a' "${upgrade_dir}/data.db.before")" = '0:0:600' ] \
+    && [ "$(stat -c '%u:%g:%a' "${upgrade_dir}/enterprise.env.before")" = '0:0:600' ] \
+    && [ "$(stat -c '%u:%g:%a' "${upgrade_dir}/otto-enterprise.service.before")" = '0:0:644' ] \
+    || fail 'enterprise rollback snapshot file owner or mode is invalid'
+  require_root_owned_directory "${upgrade_dir}/deploy.before"
+  resident_backup="${upgrade_dir}/resident-recurring-tasks.json.before"
+  resident_absent="${upgrade_dir}/resident-recurring-tasks.absent"
+  if { [ -e "$resident_backup" ] || [ -L "$resident_backup" ]; } \
+    && { [ -e "$resident_absent" ] || [ -L "$resident_absent" ]; }; then
+    fail 'enterprise rollback snapshot has conflicting resident task state'
+  elif [ -e "$resident_backup" ] || [ -L "$resident_backup" ]; then
+    require_root_owned_regular_file "$resident_backup"
+    [ "$(stat -c '%u:%g:%a' "$resident_backup")" = '0:0:600' ] \
+      || fail 'resident task state rollback snapshot owner or mode is invalid'
+  elif [ -e "$resident_absent" ] || [ -L "$resident_absent" ]; then
+    require_root_owned_regular_file "$resident_absent"
+    [ "$(stat -c '%u:%g:%a' "$resident_absent")" = '0:0:600' ] \
+      && [ ! -s "$resident_absent" ] \
+      || fail 'resident task state absence snapshot is invalid'
+  else
+    fail 'enterprise rollback snapshot lacks resident task state identity'
+  fi
+  database_key_created="${upgrade_dir}/database-key-created"
+  database_key_preserved="${upgrade_dir}/database-key-preserved"
+  if { [ -e "$database_key_created" ] || [ -L "$database_key_created" ]; } \
+    && { [ -e "$database_key_preserved" ] || [ -L "$database_key_preserved" ]; }; then
+    fail 'enterprise rollback snapshot has conflicting database key identity'
+  elif [ -e "$database_key_created" ] || [ -L "$database_key_created" ]; then
+    database_key_snapshot="$database_key_created"
+  elif [ -e "$database_key_preserved" ] || [ -L "$database_key_preserved" ]; then
+    database_key_snapshot="$database_key_preserved"
+  else
+    fail 'enterprise rollback snapshot lacks database key identity'
+  fi
+  require_root_owned_regular_file "$database_key_snapshot"
+  [ "$(stat -c '%u:%g:%a' "$database_key_snapshot")" = '0:0:600' ] \
+    && [ ! -s "$database_key_snapshot" ] \
+    || fail 'database key rollback identity marker is invalid'
+  witness_file="${transaction_dir}/rollback-witness.expected"
+  require_root_owned_regular_file "$witness_file"
+  [ "$(stat -c '%u:%g:%a' "$witness_file")" = '0:0:600' ] \
+    || fail 'enterprise rollback witness owner or mode is invalid'
+  expected_witness="$(rollback_witness_for_state "$transaction_dir")"
+  [ "$(<"$witness_file")" = "$expected_witness" ] \
+    || fail 'enterprise rollback witness binding changed'
+  /usr/bin/sync -f "$upgrade_dir"
+}
+
+find_unfinished_deployment() {
+  local -a transaction_directories unfinished=()
+  local transaction_dir transaction_id state_file deployment_receipt rollback_receipt
+  [ -z "$(find "$DEPLOYMENTS_ROOT" -mindepth 1 -maxdepth 1 ! -type d -print -quit)" ] \
+    || fail 'enterprise deployment state root contains a non-directory entry'
+  mapfile -d '' transaction_directories < <(
+    find "$DEPLOYMENTS_ROOT" -mindepth 1 -maxdepth 1 -type d -print0
+  )
+  for transaction_dir in "${transaction_directories[@]}"; do
+    transaction_id="${transaction_dir##*/}"
+    [[ "$transaction_id" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[0-9]+$ ]] \
+      || fail "unexpected enterprise deployment transaction directory: $transaction_id"
+    require_root_owned_directory "$transaction_dir"
+    [ "$(stat -c '%u:%g:%a' "$transaction_dir")" = '0:0:700' ] \
+      || fail "enterprise deployment transaction owner or mode is invalid: $transaction_id"
+    state_file="${transaction_dir}/state"
+    require_root_owned_regular_file "$state_file"
+    [ "$(stat -c '%u:%g:%a' "$state_file")" = '0:0:600' ] \
+      || fail "enterprise deployment state owner or mode is invalid: $transaction_id"
+    [ "$(read_deployment_state_field "$state_file" format)" = \
+        'otto-enterprise-deployment-state-v1' ] \
+      || fail "enterprise deployment state format is invalid: $transaction_id"
+    [ "$(read_deployment_state_field "$state_file" transaction)" = "$transaction_id" ] \
+      || fail "enterprise deployment transaction binding changed: $transaction_id"
+    if { [ -e "${transaction_dir}/finalized" ] || [ -L "${transaction_dir}/finalized" ]; } \
+      && { [ -e "${transaction_dir}/rolled-back" ] || [ -L "${transaction_dir}/rolled-back" ]; }; then
+      fail "enterprise deployment transaction has conflicting terminal markers: $transaction_id"
+    elif [ -e "${transaction_dir}/finalized" ] || [ -L "${transaction_dir}/finalized" ]; then
+      deployment_receipt="$(deployment_receipt_for_state "$transaction_dir")"
+      write_once_durable "${transaction_dir}/finalized" "$deployment_receipt"
+    elif [ -e "${transaction_dir}/rolled-back" ] || [ -L "${transaction_dir}/rolled-back" ]; then
+      rollback_receipt="$(rollback_receipt_for_state "$transaction_dir")"
+      write_once_durable "${transaction_dir}/rolled-back" "$rollback_receipt"
+    else
+      unfinished+=("$transaction_dir")
+    fi
+  done
+  [ "${#unfinished[@]}" -le 1 ] \
+    || fail 'multiple unfinished enterprise deployment transactions require manual recovery'
+  if [ "${#unfinished[@]}" -eq 1 ]; then
+    printf '%s\n' "${unfinished[0]}"
+  fi
+}
+
+complete_rolled_back_receipt_if_previous() {
+  local transaction_dir="$1"
+  local state_file="${transaction_dir}/state"
+  local previous_version previous_package previous_source previous_current
+  local current_release expected_receipt expected_witness witness_file verified_file
+  previous_version="$(read_deployment_state_field "$state_file" previous_version)"
+  previous_package="$(read_deployment_state_field "$state_file" previous_package)"
+  previous_source="$(read_deployment_state_field "$state_file" previous_source)"
+  previous_current="$(read_deployment_state_field "$state_file" previous_current)"
+  [[ "$previous_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    && [[ "$previous_package" =~ ^[0-9a-f]{12}-[0-9a-f]{12}$ ]] \
+    && [[ "$previous_source" =~ ^[0-9a-f]{40}$ ]] \
+    || fail 'previous enterprise deployment identity is invalid during recovery'
+  [[ "$previous_current" =~ ^/opt/otto-enterprise/releases/[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{12}$ ]] \
+    || fail 'previous enterprise current target is invalid during recovery'
+  [ -L "${INSTALL_ROOT}/current" ] \
+    || fail 'enterprise current release is not a managed symlink during recovery'
+  current_release="$(readlink -f -- "${INSTALL_ROOT}/current")"
+  [ "$current_release" = "$previous_current" ] \
+    || fail 'failed enterprise deployment did not restore the locked previous current release'
+  witness_file="${transaction_dir}/rollback-witness.expected"
+  verified_file="${transaction_dir}/upgrade/rollback-verified"
+  expected_witness="$(rollback_witness_for_state "$transaction_dir")"
+  for witness_path in "$witness_file" "$verified_file"; do
+    require_root_owned_regular_file "$witness_path"
+    [ "$(stat -c '%u:%g:%a' "$witness_path")" = '0:0:600' ] \
+      || fail 'enterprise rollback verification witness owner or mode is invalid'
+    [ "$(<"$witness_path")" = "$expected_witness" ] \
+      || fail 'enterprise rollback verification witness binding changed'
+    /usr/bin/sync -f "$witness_path"
+  done
+  /usr/bin/sync -f "$transaction_dir"
+  verify_current_deployment \
+    "$previous_version" "$previous_package" "$previous_source"
+  sync_live_deployment_filesystems
+  expected_receipt="$(rollback_receipt_for_state "$transaction_dir")"
+  write_once_durable "${transaction_dir}/rolled-back" "$expected_receipt"
+  printf '%s\n' "$expected_receipt"
 }
 
 [ "$(id -u)" -eq 0 ] || fail 'gateway must run as root through sudo -n'
@@ -383,6 +720,7 @@ require_root_owned_directory "$UPLOAD_ROOT"
 require_root_owned_directory "$MIRROR_UPLOAD_ROOT"
 require_root_owned_directory "$STAGING_ROOT"
 require_root_owned_directory "$MIRROR_STAGING_ROOT"
+require_root_owned_directory "$DEPLOYMENTS_ROOT"
 
 IFS= read -r DEPLOY_USER < "$DEPLOY_USER_FILE" || \
   fail 'pinned deploy user is unreadable'
@@ -440,14 +778,17 @@ COMMAND="${1:-}"
 case "${SUDO_USER:-}" in
   "$DEPLOY_USER")
     CALLER_ROLE='deploy'
-    [ "$COMMAND" != 'rollback-mirror' ] \
-      || fail 'deploy principal is not authorized to roll back the update mirror'
+    case "$COMMAND" in
+      rollback-mirror|rollback-enterprise)
+        fail 'deploy principal is not authorized to perform rollback operations'
+        ;;
+    esac
     ;;
   "$ROLLBACK_USER")
     CALLER_ROLE='rollback'
     case "$COMMAND" in
-      preflight|rollback-mirror) ;;
-      *) fail 'rollback principal may only preflight or roll back the update mirror' ;;
+      preflight|rollback-mirror|rollback-enterprise) ;;
+      *) fail 'rollback principal may only preflight or perform a locked rollback' ;;
     esac
     ;;
   *) fail 'gateway caller does not match a pinned automation principal' ;;
@@ -781,21 +1122,133 @@ if [ "$COMMAND" = 'preflight' ]; then
 fi
 
 if [ "$COMMAND" = 'verify-deployment' ]; then
-  [ "$#" -eq 4 ] || fail 'usage: verify-deployment VERSION PACKAGE_ID SOURCE_COMMIT'
-  EXPECTED_VERSION="$2"
-  PACKAGE_ID="$3"
-  EXPECTED_SOURCE_COMMIT="$4"
-  [[ "$EXPECTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
-    || fail 'invalid expected version'
-  [[ "$PACKAGE_ID" =~ ^[0-9a-f]{12}-[0-9a-f]{12}$ ]] \
-    || fail 'invalid package identity'
-  [[ "$EXPECTED_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
-    || fail 'invalid expected source commit'
+  [ "$#" -eq 5 ] \
+    || fail 'usage: verify-deployment TRANSACTION VERSION PACKAGE_ID SOURCE_COMMIT'
+  TRANSACTION_ID="$2"
+  EXPECTED_VERSION="$3"
+  PACKAGE_ID="$4"
+  EXPECTED_SOURCE_COMMIT="$5"
   acquire_production_lock
+  DEPLOYMENT_STATE_DIR="$(require_deployment_transaction \
+    "$TRANSACTION_ID" "$EXPECTED_VERSION" "$PACKAGE_ID" \
+    "$EXPECTED_SOURCE_COMMIT")"
   verify_current_deployment \
     "$EXPECTED_VERSION" "$PACKAGE_ID" "$EXPECTED_SOURCE_COMMIT"
-  printf '[Otto CI Deploy] verified version=%s package=%s source=%s\n' \
+  sync_live_deployment_filesystems
+  complete_deployment_receipt "$DEPLOYMENT_STATE_DIR"
+  exit 0
+fi
+
+if [ "$COMMAND" = 'reconcile-deployment' ]; then
+  [ "$#" -eq 5 ] \
+    || fail 'usage: reconcile-deployment REQUESTED_TRANSACTION VERSION PACKAGE_ID SOURCE_COMMIT'
+  REQUESTED_TRANSACTION_ID="$2"
+  EXPECTED_VERSION="$3"
+  PACKAGE_ID="$4"
+  EXPECTED_SOURCE_COMMIT="$5"
+  [[ "$REQUESTED_TRANSACTION_ID" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[0-9]+$ ]] \
+    || fail 'invalid requested enterprise reconciliation transaction'
+  [[ "$EXPECTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    || fail 'invalid expected enterprise version'
+  [[ "$PACKAGE_ID" =~ ^[0-9a-f]{12}-[0-9a-f]{12}$ ]] \
+    || fail 'invalid expected enterprise package identity'
+  [[ "$EXPECTED_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
+    || fail 'invalid expected enterprise source commit'
+  acquire_production_lock
+  REQUESTED_TRANSACTION_DIR="${DEPLOYMENTS_ROOT}/${REQUESTED_TRANSACTION_ID}"
+  [ -e "$REQUESTED_TRANSACTION_DIR" ] \
+    && [ ! -L "$REQUESTED_TRANSACTION_DIR" ] \
+    || fail 'the exact requested enterprise reconciliation transaction does not exist'
+  DEPLOYMENT_STATE_DIR="$(require_deployment_transaction \
+    "$REQUESTED_TRANSACTION_ID" "$EXPECTED_VERSION" "$PACKAGE_ID" \
+    "$EXPECTED_SOURCE_COMMIT")"
+  # Validate every other transaction and reject any unrelated unfinished
+  # deployment before reconciling this exact workflow-owned transaction.
+  UNFINISHED_DEPLOYMENT="$(find_unfinished_deployment)"
+  [ -z "$UNFINISHED_DEPLOYMENT" ] \
+    || [ "$UNFINISHED_DEPLOYMENT" = "$DEPLOYMENT_STATE_DIR" ] \
+    || fail 'another unfinished enterprise deployment blocks reconciliation'
+  TRANSACTION_ID="${DEPLOYMENT_STATE_DIR##*/}"
+  require_deployment_transaction \
+    "$TRANSACTION_ID" "$EXPECTED_VERSION" "$PACKAGE_ID" \
+    "$EXPECTED_SOURCE_COMMIT" >/dev/null
+  if [ -e "${DEPLOYMENT_STATE_DIR}/rolled-back" ] \
+    || [ -L "${DEPLOYMENT_STATE_DIR}/rolled-back" ]; then
+    ROLLBACK_RECEIPT="$(complete_rolled_back_receipt_if_previous \
+      "$DEPLOYMENT_STATE_DIR")"
+    printf 'recovered_%s\n' "$ROLLBACK_RECEIPT"
+  else
+    STATE_FILE="${DEPLOYMENT_STATE_DIR}/state"
+    CURRENT_RELEASE=''
+    if [ -L "${INSTALL_ROOT}/current" ]; then
+      CURRENT_RELEASE="$(readlink -f -- "${INSTALL_ROOT}/current")"
+    fi
+    TARGET_RELEASE="${INSTALL_ROOT}/releases/${EXPECTED_VERSION}-${PACKAGE_ID%%-*}"
+    PREVIOUS_CURRENT="$(read_deployment_state_field "$STATE_FILE" previous_current)"
+    if [ "$CURRENT_RELEASE" = "$TARGET_RELEASE" ]; then
+      verify_current_deployment \
+        "$EXPECTED_VERSION" "$PACKAGE_ID" "$EXPECTED_SOURCE_COMMIT"
+      DEPLOYMENT_RECEIPT="$(complete_deployment_receipt "$DEPLOYMENT_STATE_DIR")"
+      printf 'recovered_%s\n' "$DEPLOYMENT_RECEIPT"
+    elif [ "$CURRENT_RELEASE" = "$PREVIOUS_CURRENT" ]; then
+      ROLLBACK_RECEIPT="$(complete_rolled_back_receipt_if_previous \
+        "$DEPLOYMENT_STATE_DIR")"
+      printf 'recovered_%s\n' "$ROLLBACK_RECEIPT"
+    else
+      fail 'unfinished enterprise deployment is neither the locked target nor previous release'
+    fi
+  fi
+  exit 0
+fi
+
+if [ "$COMMAND" = 'finalize-deployment' ]; then
+  [ "$#" -eq 5 ] \
+    || fail 'usage: finalize-deployment TRANSACTION VERSION PACKAGE_ID SOURCE_COMMIT'
+  TRANSACTION_ID="$2"
+  EXPECTED_VERSION="$3"
+  PACKAGE_ID="$4"
+  EXPECTED_SOURCE_COMMIT="$5"
+  acquire_production_lock
+  DEPLOYMENT_STATE_DIR="$(require_deployment_transaction \
+    "$TRANSACTION_ID" "$EXPECTED_VERSION" "$PACKAGE_ID" \
+    "$EXPECTED_SOURCE_COMMIT")"
+  verify_current_deployment \
     "$EXPECTED_VERSION" "$PACKAGE_ID" "$EXPECTED_SOURCE_COMMIT"
+  # Re-establish the live-filesystem durability barrier before either the
+  # first terminal marker or an idempotent replay after a lost SSH response.
+  sync_live_deployment_filesystems
+  EXPECTED_RECEIPT="$(deployment_receipt_for_state "$DEPLOYMENT_STATE_DIR")"
+  [ ! -e "${DEPLOYMENT_STATE_DIR}/rolled-back" ] \
+    && [ ! -L "${DEPLOYMENT_STATE_DIR}/rolled-back" ] \
+    || fail 'cannot finalize a rolled-back enterprise deployment'
+  if [ -e "${DEPLOYMENT_STATE_DIR}/finalized" ] \
+    || [ -L "${DEPLOYMENT_STATE_DIR}/finalized" ]; then
+    # A prior attempt may have durably committed and garbage-collected the
+    # rollback snapshot before its SSH response was delivered. Re-establish
+    # both durability barriers and replay the exact same receipt.
+    write_once_durable "${DEPLOYMENT_STATE_DIR}/receipt" "$EXPECTED_RECEIPT"
+    write_once_durable "${DEPLOYMENT_STATE_DIR}/finalized" "$EXPECTED_RECEIPT"
+    if [ -e "${DEPLOYMENT_STATE_DIR}/upgrade" ] \
+      || [ -L "${DEPLOYMENT_STATE_DIR}/upgrade" ]; then
+      require_root_owned_directory "${DEPLOYMENT_STATE_DIR}/upgrade"
+      rm -rf --one-file-system -- "${DEPLOYMENT_STATE_DIR}/upgrade"
+      /usr/bin/sync -f "$DEPLOYMENT_STATE_DIR"
+    fi
+    printf 'finalized %s\n' "$EXPECTED_RECEIPT"
+    exit 0
+  fi
+  EXPECTED_RECEIPT="$(complete_deployment_receipt "$DEPLOYMENT_STATE_DIR")"
+  # Commit the terminal state durably before treating the rollback snapshot as
+  # garbage. A crash can therefore leave extra backup bytes, never an allowed
+  # rollback transaction with its backup already deleted.
+  write_once_durable "${DEPLOYMENT_STATE_DIR}/finalized" "$EXPECTED_RECEIPT"
+  if [ -e "${DEPLOYMENT_STATE_DIR}/upgrade" ] \
+    || [ -L "${DEPLOYMENT_STATE_DIR}/upgrade" ]; then
+    require_root_owned_directory "${DEPLOYMENT_STATE_DIR}/upgrade"
+    rm -rf --one-file-system -- "${DEPLOYMENT_STATE_DIR}/upgrade"
+    /usr/bin/sync -f "$DEPLOYMENT_STATE_DIR"
+  fi
+  printf 'finalized %s\n' "$EXPECTED_RECEIPT"
   exit 0
 fi
 
@@ -885,6 +1338,131 @@ if [ "$COMMAND" = 'rollback-mirror' ]; then
     || fail 'invalid mirror transaction id'
   acquire_production_lock
   "$ROLLBACK_HELPER_PATH" "$TRANSACTION_ID"
+  exit 0
+fi
+
+if [ "$COMMAND" = 'rollback-enterprise' ]; then
+  [ "$#" -eq 5 ] \
+    || fail 'usage: rollback-enterprise TRANSACTION VERSION PACKAGE_ID SOURCE_COMMIT'
+  TRANSACTION_ID="$2"
+  EXPECTED_VERSION="$3"
+  PACKAGE_ID="$4"
+  EXPECTED_SOURCE_COMMIT="$5"
+  acquire_production_lock
+  DEPLOYMENT_STATE_DIR="$(require_deployment_transaction \
+    "$TRANSACTION_ID" "$EXPECTED_VERSION" "$PACKAGE_ID" \
+    "$EXPECTED_SOURCE_COMMIT")"
+  STATE_FILE="${DEPLOYMENT_STATE_DIR}/state"
+  [ ! -e "${DEPLOYMENT_STATE_DIR}/finalized" ] \
+    && [ ! -L "${DEPLOYMENT_STATE_DIR}/finalized" ] \
+    || fail 'finalized enterprise deployment is outside the rollback window'
+  PREVIOUS_VERSION="$(read_deployment_state_field "$STATE_FILE" previous_version)"
+  PREVIOUS_PACKAGE="$(read_deployment_state_field "$STATE_FILE" previous_package)"
+  PREVIOUS_SOURCE="$(read_deployment_state_field "$STATE_FILE" previous_source)"
+  DEPLOY_ACTION="$(read_deployment_state_field "$STATE_FILE" action)"
+  ROLLBACK_RECEIPT="rolled_back transaction=${TRANSACTION_ID} restored_version=${PREVIOUS_VERSION} restored_package=${PREVIOUS_PACKAGE} restored_source=${PREVIOUS_SOURCE} replaced_version=${EXPECTED_VERSION} replaced_package=${PACKAGE_ID} replaced_source=${EXPECTED_SOURCE_COMMIT}"
+  if [ -e "${DEPLOYMENT_STATE_DIR}/rolled-back" ]; then
+    require_root_owned_regular_file "${DEPLOYMENT_STATE_DIR}/rolled-back"
+    [ "$(<"${DEPLOYMENT_STATE_DIR}/rolled-back")" = "$ROLLBACK_RECEIPT" ] \
+      || fail 'enterprise rollback receipt changed'
+    verify_current_deployment \
+      "$PREVIOUS_VERSION" "$PREVIOUS_PACKAGE" "$PREVIOUS_SOURCE"
+    sync_live_deployment_filesystems
+    write_once_durable "${DEPLOYMENT_STATE_DIR}/rolled-back" "$ROLLBACK_RECEIPT"
+    printf '%s\n' "$ROLLBACK_RECEIPT"
+    exit 0
+  fi
+  EXPECTED_DEPLOY_RECEIPT="$(complete_deployment_receipt "$DEPLOYMENT_STATE_DIR")"
+  IFS= read -r DEPLOY_CONFIG_PATH < "$CONFIG_PATH_FILE" \
+    || fail 'deployment config path is unreadable'
+  [[ "$DEPLOY_CONFIG_PATH" =~ ^/etc/otto-enterprise/[A-Za-z0-9._-]+\.env$ ]] \
+    || fail 'server-pinned deployment config path is invalid'
+  [ "$DEPLOY_ACTION" = upgrade ] \
+    || fail 'automated enterprise rollback only supports a locked one-click upgrade'
+  UPGRADE_STATE="${DEPLOYMENT_STATE_DIR}/upgrade"
+  require_root_owned_directory "$UPGRADE_STATE"
+  [ "$(stat -c '%u:%g:%a' "$UPGRADE_STATE")" = '0:0:700' ] \
+    || fail 'enterprise rollback backup owner or mode is invalid'
+  for backup_file in \
+    data.db.before enterprise.env.before otto-enterprise.service.before; do
+    require_root_owned_regular_file "${UPGRADE_STATE}/${backup_file}"
+  done
+  RESIDENT_STATE_BACKUP="${UPGRADE_STATE}/resident-recurring-tasks.json.before"
+  RESIDENT_STATE_ABSENT="${UPGRADE_STATE}/resident-recurring-tasks.absent"
+  if { [ -e "$RESIDENT_STATE_BACKUP" ] || [ -L "$RESIDENT_STATE_BACKUP" ]; } \
+    && { [ -e "$RESIDENT_STATE_ABSENT" ] || [ -L "$RESIDENT_STATE_ABSENT" ]; }; then
+    fail 'enterprise rollback contains conflicting resident task state snapshots'
+  elif [ -e "$RESIDENT_STATE_BACKUP" ] || [ -L "$RESIDENT_STATE_BACKUP" ]; then
+    require_root_owned_regular_file "$RESIDENT_STATE_BACKUP"
+    [ "$(stat -c '%u:%g:%a' "$RESIDENT_STATE_BACKUP")" = '0:0:600' ] \
+      || fail 'resident task state backup owner or mode is invalid'
+    RESIDENT_STATE_WAS_PRESENT=true
+  elif [ -e "$RESIDENT_STATE_ABSENT" ] || [ -L "$RESIDENT_STATE_ABSENT" ]; then
+    require_root_owned_regular_file "$RESIDENT_STATE_ABSENT"
+    [ "$(stat -c '%u:%g:%a' "$RESIDENT_STATE_ABSENT")" = '0:0:600' ] \
+      || fail 'resident task state absence marker owner or mode is invalid'
+    [ ! -s "$RESIDENT_STATE_ABSENT" ] \
+      || fail 'resident task state absence marker is not empty'
+    RESIDENT_STATE_WAS_PRESENT=false
+  else
+    fail 'enterprise rollback is missing resident task state snapshot identity'
+  fi
+  require_root_owned_directory "${UPGRADE_STATE}/deploy.before"
+  PREVIOUS_CURRENT="$(read_deployment_state_field "$STATE_FILE" previous_current)"
+  [[ "$PREVIOUS_CURRENT" =~ ^/opt/otto-enterprise/releases/[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{12}$ ]] \
+    || fail 'previous enterprise current target is invalid'
+  require_root_owned_directory_chain "$PREVIOUS_CURRENT"
+  [ -L "${INSTALL_ROOT}/current" ] \
+    || fail 'enterprise current release is not a managed symlink before rollback'
+  CURRENT_BEFORE_ROLLBACK="$(readlink -f -- "${INSTALL_ROOT}/current")"
+  TARGET_CURRENT="${INSTALL_ROOT}/releases/${EXPECTED_VERSION}-${PACKAGE_ID%%-*}"
+  case "$CURRENT_BEFORE_ROLLBACK" in
+    "$TARGET_CURRENT")
+      verify_release_identity_at_path \
+        "$CURRENT_BEFORE_ROLLBACK" "$EXPECTED_VERSION" "$PACKAGE_ID" \
+        "$EXPECTED_SOURCE_COMMIT"
+      ;;
+    "$PREVIOUS_CURRENT")
+      verify_release_identity_at_path \
+        "$CURRENT_BEFORE_ROLLBACK" "$PREVIOUS_VERSION" "$PREVIOUS_PACKAGE" \
+        "$PREVIOUS_SOURCE"
+      ;;
+    *) fail 'current enterprise release is neither the locked target nor previous identity' ;;
+  esac
+  # All state, action, backup and release identity checks complete before the
+  # first service mutation. Re-running the following restore is idempotent even
+  # when a previous attempt crashed after switching current but before receipt.
+  systemctl stop otto-enterprise
+  install -o otto-enterprise -g otto-enterprise -m 0600 \
+    "${UPGRADE_STATE}/data.db.before" /var/lib/otto-enterprise/data.db
+  if [ "$RESIDENT_STATE_WAS_PRESENT" = true ]; then
+    install -o otto-enterprise -g otto-enterprise -m 0600 \
+      "$RESIDENT_STATE_BACKUP" \
+      /var/lib/otto-enterprise/resident-recurring-tasks.json
+  else
+    rm -f -- /var/lib/otto-enterprise/resident-recurring-tasks.json
+  fi
+  install -o root -g root -m 0600 \
+    "${UPGRADE_STATE}/enterprise.env.before" "$DEPLOY_CONFIG_PATH"
+  install -o root -g root -m 0644 \
+    "${UPGRADE_STATE}/otto-enterprise.service.before" \
+    /etc/systemd/system/otto-enterprise.service
+  rm -rf --one-file-system -- "${INSTALL_ROOT}/deploy.rollback"
+  cp -a -- "${UPGRADE_STATE}/deploy.before" "${INSTALL_ROOT}/deploy.rollback"
+  rm -rf --one-file-system -- "${INSTALL_ROOT}/deploy"
+  mv -- "${INSTALL_ROOT}/deploy.rollback" "${INSTALL_ROOT}/deploy"
+  if [ -f "${UPGRADE_STATE}/database-key-created" ]; then
+    rm -f -- "$(dirname -- "$DEPLOY_CONFIG_PATH")/database-sqlcipher.key"
+  fi
+  ln -sfn -- "$PREVIOUS_CURRENT" "${INSTALL_ROOT}/current.rollback"
+  mv -Tf -- "${INSTALL_ROOT}/current.rollback" "${INSTALL_ROOT}/current"
+  systemctl daemon-reload
+  systemctl start otto-enterprise
+  verify_current_deployment \
+    "$PREVIOUS_VERSION" "$PREVIOUS_PACKAGE" "$PREVIOUS_SOURCE"
+  sync_live_deployment_filesystems
+  write_once_durable "${DEPLOYMENT_STATE_DIR}/rolled-back" "$ROLLBACK_RECEIPT"
+  printf '%s\n' "$ROLLBACK_RECEIPT"
   exit 0
 fi
 
@@ -1044,10 +1622,12 @@ if (
     raise SystemExit('signed package manifest does not match the locked package identity')
 PY
 
+UNFINISHED_DEPLOYMENT="$(find_unfinished_deployment)"
+
 if [ -L "${INSTALL_ROOT}/current" ]; then
   CURRENT_RELEASE="$(readlink -f -- "${INSTALL_ROOT}/current")"
   require_root_owned_directory_chain "$CURRENT_RELEASE"
-  CURRENT_RELEASE_MANIFEST="${CURRENT_RELEASE}/release/manifest.json"
+  CURRENT_RELEASE_MANIFEST="${CURRENT_RELEASE}/manifest.json"
   require_root_owned_regular_file "$CURRENT_RELEASE_MANIFEST"
   VERSION_RELATION="$(/usr/bin/python3 -I -S - \
     "$CURRENT_RELEASE_MANIFEST" "$EXPECTED_VERSION" \
@@ -1092,14 +1672,30 @@ PY
     same)
       verify_current_deployment \
         "$EXPECTED_VERSION" "$PACKAGE_ID" "$EXPECTED_SOURCE_COMMIT"
-      printf '[Otto CI Deploy] action=verify version=%s package=%s dry_run=%s\n' \
-        "$EXPECTED_VERSION" "$PACKAGE_ID" "$DRY_RUN"
+      if [ -n "$UNFINISHED_DEPLOYMENT" ]; then
+        [ "$DRY_RUN" = false ] \
+          || fail 'dry-run cannot reconcile an unfinished enterprise deployment transaction'
+        UNFINISHED_TRANSACTION_ID="${UNFINISHED_DEPLOYMENT##*/}"
+        [ "$UNFINISHED_TRANSACTION_ID" = "$TRANSACTION_ID" ] \
+          || fail 'an older exact deployment transaction requires explicit reconciliation before a new run'
+        require_deployment_transaction \
+          "$UNFINISHED_TRANSACTION_ID" "$EXPECTED_VERSION" "$PACKAGE_ID" \
+          "$EXPECTED_SOURCE_COMMIT" >/dev/null
+        DEPLOYMENT_RECEIPT="$(complete_deployment_receipt "$UNFINISHED_DEPLOYMENT")"
+        printf 'recovered_%s\n' "$DEPLOYMENT_RECEIPT"
+        exit 0
+      fi
+      printf 'already_deployed version=%s package=%s source=%s\n' \
+        "$EXPECTED_VERSION" "$PACKAGE_ID" "$EXPECTED_SOURCE_COMMIT"
       exit 0
       ;;
     upgrade) ;;
     *) fail 'enterprise version comparison returned an unexpected result' ;;
   esac
 fi
+
+[ -z "$UNFINISHED_DEPLOYMENT" ] \
+  || fail 'an unfinished enterprise deployment transaction must be reconciled before another upgrade'
 
 IFS= read -r DEPLOY_CONFIG_PATH < "$CONFIG_PATH_FILE" || \
   fail 'deployment config path is unreadable'
@@ -1111,9 +1707,71 @@ require_root_owned_regular_file "$DEPLOY_CONFIG_PATH"
 if [ -L "${INSTALL_ROOT}/current" ]; then
   DEPLOY_ACTION='upgrade'
 elif [ ! -e "${INSTALL_ROOT}/current" ]; then
-  DEPLOY_ACTION='install'
+  fail 'automated stable deployment requires an existing one-click current symlink; perform the first install through the audited installer'
 else
   fail 'enterprise current path exists but is not a symlink'
+fi
+
+DEPLOYMENT_STATE_DIR=''
+if [ "$DRY_RUN" = false ]; then
+  DEPLOYMENT_STATE_DIR="${DEPLOYMENTS_ROOT}/${TRANSACTION_ID}"
+  [ ! -e "$DEPLOYMENT_STATE_DIR" ] && [ ! -L "$DEPLOYMENT_STATE_DIR" ] \
+    || fail 'enterprise deployment transaction already exists; refusing replay'
+  DEPLOYMENT_STATE_STAGING="${STAGING_DIR}/deployment-state"
+  [ ! -e "$DEPLOYMENT_STATE_STAGING" ] \
+    && [ ! -L "$DEPLOYMENT_STATE_STAGING" ] \
+    || fail 'enterprise deployment state staging path already exists'
+  install -d -o root -g root -m 0700 "$DEPLOYMENT_STATE_STAGING"
+  PREVIOUS_CURRENT="$(readlink -f -- "${INSTALL_ROOT}/current")"
+  require_root_owned_directory_chain "$PREVIOUS_CURRENT"
+  PREVIOUS_MANIFEST="${PREVIOUS_CURRENT}/manifest.json"
+  require_root_owned_regular_file "$PREVIOUS_MANIFEST"
+  read -r PREVIOUS_VERSION PREVIOUS_PACKAGE PREVIOUS_SOURCE < <(
+    /usr/bin/python3 -I -S - "$PREVIOUS_MANIFEST" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+version = manifest.get('version', '')
+build = manifest.get('buildCommit', '')
+source_input = manifest.get('sourceInputSha256', '')
+source = manifest.get('sourceCommit', '')
+if (
+    not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version)
+    or not re.fullmatch(r'[0-9a-f]{40}', build)
+    or not re.fullmatch(r'[0-9a-f]{64}', source_input)
+    or not re.fullmatch(r'[0-9a-f]{40}', source)
+):
+    raise SystemExit('previous enterprise release identity is invalid')
+print(version, f'{build[:12]}-{source_input[:12]}', source)
+PY
+  ) || fail 'could not lock the previous enterprise deployment identity'
+  install -d -o root -g root -m 0700 \
+    "${DEPLOYMENT_STATE_STAGING}/upgrade"
+  STATE_FILE="${DEPLOYMENT_STATE_STAGING}/state"
+  STATE_CONTENT="$(printf '%s\n' \
+    'format=otto-enterprise-deployment-state-v1' \
+    "transaction=${TRANSACTION_ID}" \
+    "action=${DEPLOY_ACTION}" \
+    "target_version=${EXPECTED_VERSION}" \
+    "target_package=${PACKAGE_ID}" \
+    "target_source=${EXPECTED_SOURCE_COMMIT}" \
+    "previous_version=${PREVIOUS_VERSION}" \
+    "previous_package=${PREVIOUS_PACKAGE}" \
+    "previous_source=${PREVIOUS_SOURCE}" \
+    "previous_current=${PREVIOUS_CURRENT}")"
+  write_once_durable "$STATE_FILE" "$STATE_CONTENT"
+  ROLLBACK_WITNESS_CONTENT="$(rollback_witness_for_state \
+    "$DEPLOYMENT_STATE_STAGING")"
+  write_once_durable \
+    "${DEPLOYMENT_STATE_STAGING}/rollback-witness.expected" \
+    "$ROLLBACK_WITNESS_CONTENT"
+  /usr/bin/sync -f "$DEPLOYMENT_STATE_STAGING"
+  mv -- "$DEPLOYMENT_STATE_STAGING" "$DEPLOYMENT_STATE_DIR"
+  /usr/bin/sync -f "$DEPLOYMENT_STATE_DIR"
+  /usr/bin/sync -f "$DEPLOYMENTS_ROOT"
 fi
 
 DEPLOY_ARGUMENTS=(--config "$DEPLOY_CONFIG_PATH")
@@ -1130,14 +1788,35 @@ if [ "$DRY_RUN" = 'true' ]; then
   DEPLOY_ARGUMENTS+=(--dry-run)
 elif [ "$DEPLOY_ACTION" = 'upgrade' ]; then
   "${CLEAN_ENV[@]}" "${PACKAGE_ROOT}/backup-now.sh" "$DEPLOY_CONFIG_PATH"
+  DEPLOY_ARGUMENTS+=(--rollback-dir "${DEPLOYMENT_STATE_DIR}/upgrade")
+  DEPLOY_ARGUMENTS+=(--rollback-witness-file \
+    "${DEPLOYMENT_STATE_DIR}/rollback-witness.expected")
 fi
 
-"${CLEAN_ENV[@]}" \
-  "${PACKAGE_ROOT}/${DEPLOY_ACTION}.sh" "${DEPLOY_ARGUMENTS[@]}"
+DEPLOY_STATUS=0
+if "${CLEAN_ENV[@]}" \
+  "${PACKAGE_ROOT}/${DEPLOY_ACTION}.sh" "${DEPLOY_ARGUMENTS[@]}"; then
+  DEPLOY_STATUS=0
+else
+  DEPLOY_STATUS=$?
+fi
+
+if [ "$DEPLOY_STATUS" -ne 0 ]; then
+  if [ "$DRY_RUN" = false ] && [ "$DEPLOY_ACTION" = upgrade ]; then
+    # upgrade.sh retains the caller-provided snapshot and, when possible,
+    # restores and verifies the previous release in its EXIT trap.  Bind that
+    # verified outcome to a durable terminal receipt so a lost SSH response can
+    # be reconciled and cannot leave an unfinalized transaction blocking every
+    # future deployment.
+    complete_rolled_back_receipt_if_previous "$DEPLOYMENT_STATE_DIR"
+  fi
+  exit "$DEPLOY_STATUS"
+fi
 
 if [ "$DRY_RUN" = 'false' ]; then
   verify_current_deployment \
     "$EXPECTED_VERSION" "$PACKAGE_ID" "$EXPECTED_SOURCE_COMMIT"
+  complete_deployment_receipt "$DEPLOYMENT_STATE_DIR"
 fi
 
 printf '[Otto CI Deploy] action=%s version=%s package=%s dry_run=%s\n' \

@@ -198,7 +198,7 @@ describe('enterprise production deployment workflow', () => {
   });
 
   it('matches the exact preinstalled root trust boundary before upload', () => {
-    expect(workflow).toContain('protocol=otto-enterprise-ci-deploy-v4');
+    expect(workflow).toContain('protocol=otto-enterprise-ci-deploy-v5');
     expect(workflow).toContain(
       'deploy_user=${DEPLOY_USER} rollback_user=${ROLLBACK_DEPLOY_USER}',
     );
@@ -231,7 +231,25 @@ describe('enterprise production deployment workflow', () => {
     expect(workflow).toContain(
       'Deployment transport returned ${DEPLOY_STATUS}; reconciling the exact signed server identity.',
     );
-    expect(workflow).toContain('verify-deployment');
+    expect(workflow).toContain('reconcile-deployment');
+    expect(workflow).toContain(
+      'echo "transaction_id=$DEPLOY_TRANSACTION_ID" >> "$GITHUB_OUTPUT"',
+    );
+    expect(workflow).toContain('for attempt in 1 2 3 4 5 6; do');
+    expect(workflow).toContain('RECONCILE_STATUS=255');
+    expect(workflow).toContain(
+      '[ "$RECONCILE_STATUS" -eq 255 ] && [ "$attempt" -lt 6 ]',
+    );
+    expect(workflow).toContain(
+      'Exact enterprise reconciliation failed; transaction=${DEPLOY_TRANSACTION_ID}',
+    );
+    expect(workflow).toContain('recovered_rolled_back transaction=');
+    expect(workflow).toContain(
+      '[ "$RECEIPT_TRANSACTION" = "$DEPLOY_TRANSACTION_ID" ]',
+    );
+    expect(workflow).toContain(
+      'Deployment receipt is not bound to this workflow transaction.',
+    );
     expect(workflow).toContain(
       'ENTERPRISE_PUBLIC_URL: ${{ secrets.OTTO_ENTERPRISE_PUBLIC_URL }}',
     );

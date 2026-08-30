@@ -13,6 +13,7 @@ const context: ChannelTaskMessageContext = {
   installationId: 'install-1',
   tenantId: 'tenant-1',
   userId: 'user-1',
+  deviceId: 'device-1',
   messageId: 'message-1',
   receivedAtMs: Date.now(),
   signatureVerified: true,
@@ -26,7 +27,20 @@ const run: ControllableWorkflowRun = {
   definitionId: 'daily-inspection',
   status: 'waiting_approval',
   updatedAt: '2026-08-29T10:00:00.000Z',
-  steps: [{ stepId: 'send', status: 'waiting_approval', approvalId: 'approval-1' }],
+  steps: [{
+    stepId: 'send',
+    status: 'waiting_approval',
+    approvalId: 'approval-1',
+    input: {
+      origin: {
+        provider: context.provider,
+        installationId: context.installationId,
+        tenantId: context.tenantId,
+        userId: context.userId,
+        deviceId: context.deviceId,
+      },
+    },
+  }],
 };
 
 function backend(): WorkflowControlBackend {
@@ -75,5 +89,43 @@ describe('WorkflowTaskControlPort', () => {
       requiresApproval: true,
     });
     expect(create).toHaveBeenCalledWith({ request: '执行每日巡检', idempotencyKey: 'idem-3', context });
+  });
+
+  it('does not expose or mutate workflows owned by another channel identity', async () => {
+    const control = backend();
+    const port = new WorkflowTaskControlPort(control, { create: vi.fn() });
+    const otherUser = { ...context, userId: 'user-2' };
+
+    expect(await port.list(otherUser)).toEqual([]);
+    expect(await port.status(run.id, otherUser)).toBeNull();
+    await expect(port.pause(run.id, 'idem-pause', otherUser)).rejects.toThrow('workflow was not found');
+    await expect(port.approve('approval-1', 'idem-approve', otherUser)).rejects.toThrow('workflow approval was not found');
+    await expect(port.deny('approval-1', 'idem-deny', otherUser)).rejects.toThrow('workflow approval was not found');
+
+    expect(control.pause).not.toHaveBeenCalled();
+    expect(control.approve).not.toHaveBeenCalled();
+    expect(control.cancel).not.toHaveBeenCalled();
+  });
+
+  it('does not route a workflow to another Otto device for the same user', async () => {
+    const control = backend();
+    const port = new WorkflowTaskControlPort(control, { create: vi.fn() });
+    const otherDevice = { ...context, deviceId: 'device-2' };
+
+    expect(await port.status(run.id, otherDevice)).toBeNull();
+    await expect(port.resume(run.id, 'idem-resume', otherDevice)).rejects.toThrow('workflow was not found');
+    expect(control.resume).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for local workflows without a persisted channel owner', async () => {
+    const control = backend();
+    vi.mocked(control.list).mockResolvedValue([{ ...run, steps: [{ stepId: 'send', status: 'queued', input: {} }] }]);
+    vi.mocked(control.get).mockResolvedValue({ ...run, steps: [{ stepId: 'send', status: 'queued', input: {} }] });
+    const port = new WorkflowTaskControlPort(control, { create: vi.fn() });
+
+    expect(await port.list(context)).toEqual([]);
+    expect(await port.status(run.id, context)).toBeNull();
+    await expect(port.cancel(run.id, 'idem-cancel', context)).rejects.toThrow('workflow was not found');
+    expect(control.cancel).not.toHaveBeenCalled();
   });
 });

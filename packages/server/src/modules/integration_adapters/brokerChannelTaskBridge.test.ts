@@ -9,6 +9,7 @@ const installation = {
   grantedScopes: ['im:message'], connectedAtMs: 1,
 };
 const message = {
+  deviceId: 'device-1',
   messageId: 'message-1', tenantId: 'tenant-1', userId: 'provider-user-1',
   text: '/cancel task-1', receivedAtMs: 2_000,
 };
@@ -35,7 +36,7 @@ describe('BrokerChannelTaskBridgeV1', () => {
     );
     await expect(bridge.handle(installation, message)).resolves.toBe('ack');
     expect(gateway.handle).toHaveBeenCalledWith('/cancel task-1', expect.objectContaining({
-      userId: 'otto-user-1', signatureVerified: true, identityBound: true,
+      userId: 'otto-user-1', deviceId: 'device-1', signatureVerified: true, identityBound: true,
     }));
     expect(replies.send).toHaveBeenCalledWith(expect.objectContaining({
       target: 'provider-user-1',

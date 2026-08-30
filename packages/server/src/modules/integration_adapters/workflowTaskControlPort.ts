@@ -21,6 +21,7 @@ export interface ControllableWorkflowRun {
     stepId: string;
     status: string;
     approvalId?: string;
+    input: Record<string, unknown>;
   }>;
 }
 
@@ -104,6 +105,7 @@ export class DurableChannelTaskProposalBackendV1 implements ChannelTaskProposalB
             installationId: input.context.installationId,
             tenantId: input.context.tenantId,
             userId: input.context.userId,
+            deviceId: input.context.deviceId,
             messageId: input.context.messageId,
             receivedAtMs: input.context.receivedAtMs,
           },
@@ -132,6 +134,20 @@ function summary(run: ControllableWorkflowRun): ChannelTaskSummary {
   };
 }
 
+function isOwnedByChannel(run: ControllableWorkflowRun, context: ChannelTaskMessageContext): boolean {
+  return run.steps.some((step) => {
+    const origin = step.input.origin;
+    if (!origin || typeof origin !== 'object' || Array.isArray(origin)) return false;
+    const record = origin as Record<string, unknown>;
+    return record.provider === context.provider
+      && record.installationId === context.installationId
+      && record.tenantId === context.tenantId
+      && record.userId === context.userId
+      && typeof context.deviceId === 'string'
+      && record.deviceId === context.deviceId;
+  });
+}
+
 /** Bridges authenticated chat controls to the durable workflow supervisor. */
 export class WorkflowTaskControlPort implements ChannelTaskControlPort {
   constructor(
@@ -139,31 +155,32 @@ export class WorkflowTaskControlPort implements ChannelTaskControlPort {
     private readonly proposals: ChannelTaskProposalBackend,
   ) {}
 
-  async list(_context: ChannelTaskMessageContext): Promise<ChannelTaskSummary[]> {
-    return (await this.backend.list()).map(summary);
+  async list(context: ChannelTaskMessageContext): Promise<ChannelTaskSummary[]> {
+    return (await this.backend.list()).filter((run) => isOwnedByChannel(run, context)).map(summary);
   }
 
-  async status(taskId: string, _context: ChannelTaskMessageContext): Promise<ChannelTaskSummary | null> {
+  async status(taskId: string, context: ChannelTaskMessageContext): Promise<ChannelTaskSummary | null> {
     const run = await this.backend.get(taskId);
-    return run ? summary(run) : null;
+    return run && isOwnedByChannel(run, context) ? summary(run) : null;
   }
 
-  pause(taskId: string, _idempotencyKey: string, _context: ChannelTaskMessageContext): Promise<ChannelTaskSummary> {
-    return this.mutate(() => this.backend.pause(taskId), taskId);
+  pause(taskId: string, _idempotencyKey: string, context: ChannelTaskMessageContext): Promise<ChannelTaskSummary> {
+    return this.mutateOwned(taskId, context, () => this.backend.pause(taskId));
   }
 
-  resume(taskId: string, _idempotencyKey: string, _context: ChannelTaskMessageContext): Promise<ChannelTaskSummary> {
-    return this.mutate(() => this.backend.resume(taskId), taskId);
+  resume(taskId: string, _idempotencyKey: string, context: ChannelTaskMessageContext): Promise<ChannelTaskSummary> {
+    return this.mutateOwned(taskId, context, () => this.backend.resume(taskId));
   }
 
-  cancel(taskId: string, _idempotencyKey: string, _context: ChannelTaskMessageContext): Promise<ChannelTaskSummary> {
-    return this.mutate(() => this.backend.cancel(taskId), taskId);
+  cancel(taskId: string, _idempotencyKey: string, context: ChannelTaskMessageContext): Promise<ChannelTaskSummary> {
+    return this.mutateOwned(taskId, context, () => this.backend.cancel(taskId));
   }
 
   takeOver(taskId: string, _idempotencyKey: string, context: ChannelTaskMessageContext): Promise<ChannelTaskSummary> {
-    return this.mutate(
-      () => this.backend.takeOver(taskId, `Remote takeover by ${context.provider}:${context.userId}`),
+    return this.mutateOwned(
       taskId,
+      context,
+      () => this.backend.takeOver(taskId, `Remote takeover by ${context.provider}:${context.userId}`),
     );
   }
 
@@ -171,8 +188,9 @@ export class WorkflowTaskControlPort implements ChannelTaskControlPort {
     return this.proposals.create({ request, idempotencyKey, context });
   }
 
-  async approve(approvalId: string, _idempotencyKey: string, _context: ChannelTaskMessageContext): Promise<ChannelTaskSummary> {
+  async approve(approvalId: string, _idempotencyKey: string, context: ChannelTaskMessageContext): Promise<ChannelTaskSummary> {
     const match = (await this.backend.list())
+      .filter((run) => isOwnedByChannel(run, context))
       .flatMap((run) => run.steps.map((step) => ({ run, step })))
       .find(({ step }) => step.status === 'waiting_approval' && step.approvalId === approvalId);
     if (!match) throw new Error('workflow approval was not found');
@@ -182,8 +200,9 @@ export class WorkflowTaskControlPort implements ChannelTaskControlPort {
     );
   }
 
-  async deny(approvalId: string, _idempotencyKey: string, _context: ChannelTaskMessageContext): Promise<void> {
+  async deny(approvalId: string, _idempotencyKey: string, context: ChannelTaskMessageContext): Promise<void> {
     const match = (await this.backend.list())
+      .filter((run) => isOwnedByChannel(run, context))
       .find((run) => run.steps.some((step) => step.status === 'waiting_approval' && step.approvalId === approvalId));
     if (!match) throw new Error('workflow approval was not found');
     await this.mutate(() => this.backend.cancel(match.id), match.id);
@@ -196,5 +215,15 @@ export class WorkflowTaskControlPort implements ChannelTaskControlPort {
     const run = await operation();
     if (!run) throw new Error(`workflow was not found: ${taskId}`);
     return summary(run);
+  }
+
+  private async mutateOwned(
+    taskId: string,
+    context: ChannelTaskMessageContext,
+    operation: () => Promise<ControllableWorkflowRun | null>,
+  ): Promise<ChannelTaskSummary> {
+    const current = await this.backend.get(taskId);
+    if (!current || !isOwnedByChannel(current, context)) throw new Error(`workflow was not found: ${taskId}`);
+    return this.mutate(operation, taskId);
   }
 }

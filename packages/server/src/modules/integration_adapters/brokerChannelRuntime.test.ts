@@ -74,7 +74,7 @@ describe('BrokerChannelRuntimeV1', () => {
     ));
     expect(onInbound).toHaveBeenCalledWith(
       installation,
-      expect.objectContaining({ messageId: 'message-1', tenantId: 'tenant-1' }),
+      expect.objectContaining({ messageId: 'message-1', tenantId: 'tenant-1', deviceId: 'device-1' }),
     );
   });
 

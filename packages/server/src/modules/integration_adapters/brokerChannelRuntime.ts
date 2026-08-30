@@ -11,6 +11,8 @@ import type {
 import type { ChannelRuntimeAdapterV1 } from './managedChannelConnector.js';
 
 export interface BrokerInboundChannelMessage {
+  /** Locally trusted device id from the encrypted installation credential, never from the broker frame. */
+  deviceId: string;
   messageId: string;
   tenantId: string;
   userId: string;
@@ -272,6 +274,7 @@ export class BrokerChannelRuntimeV1 implements ChannelRuntimeAdapterV1 {
       typeof frame.receivedAtMs !== 'number' || !Number.isFinite(frame.receivedAtMs)
     ) return;
     const message: BrokerInboundChannelMessage = {
+      deviceId: state.credential.deviceId,
       messageId: frame.messageId.trim(),
       tenantId: frame.tenantId,
       userId: frame.userId.trim(),

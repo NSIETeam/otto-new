@@ -13,7 +13,6 @@ import type { BrokerInboundChannelMessage } from './brokerChannelRuntime.js';
 export interface BoundChannelIdentity {
   canonicalUserId: string;
   active: boolean;
-  deviceId?: string;
 }
 
 export interface ChannelIdentityResolverV1 {
@@ -63,7 +62,7 @@ export class BrokerChannelTaskBridgeV1 {
       installationId: installation.installationId,
       tenantId: installation.tenantId,
       userId: identity.canonicalUserId,
-      ...(identity.deviceId ? { deviceId: identity.deviceId } : {}),
+      deviceId: message.deviceId,
       messageId: message.messageId,
       receivedAtMs: message.receivedAtMs,
       signatureVerified: true,

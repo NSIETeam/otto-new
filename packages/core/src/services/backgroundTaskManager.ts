@@ -6,6 +6,7 @@
 
 
 import { EventEmitter } from 'events';
+import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -18,31 +19,7 @@ function defaultStorageDir(): string {
 
 /** Tail of `output` kept on disk so a restored task still shows recent activity. */
 const PERSISTED_OUTPUT_TAIL = 8_192;
-
-/**
- * 简单的 CRC32 实现，用于生成任务ID哈希
- */
-function crc32(str: string): number {
-  let crc = 0xFFFFFFFF;
-  for (let i = 0; i < str.length; i++) {
-    crc ^= str.charCodeAt(i);
-    for (let j = 0; j < 8; j++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xEDB88320 : 0);
-    }
-  }
-  return (crc ^ 0xFFFFFFFF) >>> 0;
-}
-
-/**
- * 生成基于内容的短哈希 ID
- */
-function generateTaskId(command: string, directory?: string): string {
-  const timestamp = Date.now();
-  const content = `${command}|${directory || ''}|${timestamp}`;
-  const hash = crc32(content);
-  // 返回 7 位十六进制哈希，类似 git 短哈希
-  return hash.toString(16).padStart(8, '0').slice(0, 7);
-}
+const TASK_ID = /^[a-f0-9]{7,32}$/u;
 
 export interface BackgroundTask {
   id: string;
@@ -100,6 +77,8 @@ export interface BackgroundTaskManagerOptions {
    * entirely (used by tests that don't want to touch the real home dir).
    */
   storageDir?: string | null;
+  /** Hard cap for the compatibility UI mirror. Durable Workflow remains authoritative. */
+  maxTasks?: number;
 }
 
 export class BackgroundTaskManager extends EventEmitter {
@@ -107,6 +86,7 @@ export class BackgroundTaskManager extends EventEmitter {
   private readonly stopFunctions = new Map<string, () => void>();
   /** Resolved persistence directory, or null when persistence is disabled. */
   private readonly storageDir: string | null;
+  private readonly maxTasks: number;
 
   constructor(options: BackgroundTaskManagerOptions = {}) {
     super();
@@ -114,7 +94,12 @@ export class BackgroundTaskManager extends EventEmitter {
       options.storageDir === null
         ? null
         : (options.storageDir ?? defaultStorageDir());
+    this.maxTasks = options.maxTasks ?? 1_000;
+    if (!Number.isSafeInteger(this.maxTasks) || this.maxTasks < 1 || this.maxTasks > 10_000) {
+      throw new Error('background task compatibility record limit is invalid');
+    }
     this.loadFromDisk();
+    this.pruneTerminalTasks(this.maxTasks);
   }
 
   /** Persist ACP delegates and any compatibility record linked to Workflow. */
@@ -126,7 +111,12 @@ export class BackgroundTaskManager extends EventEmitter {
    * 创建一个新的后台任务
    */
   createTask(command: string, directory?: string, kind?: 'shell' | 'claude-code' | 'codex'): BackgroundTask {
-    const id = generateTaskId(command, directory);
+    this.pruneTerminalTasks(this.maxTasks - 1);
+    if (this.tasks.size >= this.maxTasks) {
+      throw new Error('background task compatibility record limit reached with no terminal task to prune');
+    }
+    let id: string;
+    do { id = randomBytes(8).toString('hex'); } while (this.tasks.has(id));
     const task: BackgroundTask = {
       id,
       command,
@@ -153,15 +143,32 @@ export class BackgroundTaskManager extends EventEmitter {
   updateProgress(taskId: string, progress: DelegateProgress): BackgroundTask | undefined {
     const task = this.tasks.get(taskId);
     if (!task) return undefined;
-    if (progress.currentTool !== undefined) task.currentTool = progress.currentTool;
-    if (progress.sessionId !== undefined) task.sessionId = progress.sessionId;
-    task.toolCallCount = progress.toolCallCount;
-    if (progress.plan !== undefined) task.plan = progress.plan;
-    if (progress.tokenUsed !== undefined) task.tokenUsed = progress.tokenUsed;
-    if (progress.tokenSize !== undefined) task.tokenSize = progress.tokenSize;
-    task.lastActivityAt = progress.lastActivityAt;
+    if (progress.currentTool !== undefined) task.currentTool = progress.currentTool.slice(0, 500);
+    if (progress.sessionId !== undefined) task.sessionId = progress.sessionId.slice(0, 500);
+    task.toolCallCount = Number.isSafeInteger(progress.toolCallCount) && progress.toolCallCount >= 0
+      ? progress.toolCallCount : task.toolCallCount;
+    if (progress.plan !== undefined) {
+      task.plan = progress.plan.slice(0, 100).map((entry) => ({
+        ...entry,
+        content: entry.content.slice(0, 1_000),
+      }));
+    }
+    if (progress.tokenUsed !== undefined && Number.isFinite(progress.tokenUsed) && progress.tokenUsed >= 0) task.tokenUsed = progress.tokenUsed;
+    if (progress.tokenSize !== undefined && Number.isFinite(progress.tokenSize) && progress.tokenSize >= 0) task.tokenSize = progress.tokenSize;
+    task.lastActivityAt = Number.isFinite(progress.lastActivityAt) ? progress.lastActivityAt : Date.now();
     this.persist(task);
     this.emit('task-progress', { type: 'task-progress', task });
+    return task;
+  }
+
+  /** Store only a bounded final snapshot; the durable Workflow trace owns full history. */
+  setResult(taskId: string, result: { answer?: string; sessionId?: string }): BackgroundTask | undefined {
+    const task = this.tasks.get(taskId);
+    if (!task) return undefined;
+    if (result.answer !== undefined) task.answer = result.answer.slice(0, 32_000);
+    if (result.sessionId !== undefined) task.sessionId = result.sessionId.slice(0, 500);
+    task.lastActivityAt = Date.now();
+    this.persist(task);
     return task;
   }
 
@@ -243,6 +250,7 @@ export class BackgroundTaskManager extends EventEmitter {
 
   /** Maximum size of task.output in characters. Older content is pruned. */
   static readonly OUTPUT_CAP = 200_000;
+  static readonly STDERR_CAP = 100_000;
 
   /**
    * 更新任务输出
@@ -267,6 +275,10 @@ export class BackgroundTaskManager extends EventEmitter {
     const task = this.tasks.get(taskId);
     if (task?.status === 'running') {
       task.stderr += stderr;
+      if (task.stderr.length > BackgroundTaskManager.STDERR_CAP) {
+        const pruneTo = Math.floor(BackgroundTaskManager.STDERR_CAP * 0.7);
+        task.stderr = '…[earlier stderr pruned]…\n' + task.stderr.slice(task.stderr.length - pruneTo);
+      }
       this.emit('task-stderr', { type: 'task-stderr', taskId, stderr });
     }
   }
@@ -398,6 +410,7 @@ export class BackgroundTaskManager extends EventEmitter {
   // All disk I/O is best-effort: a failure must never break task tracking.
 
   private taskFile(id: string): string | null {
+    if (!TASK_ID.test(id)) return null;
     return this.storageDir ? path.join(this.storageDir, `${id}.json`) : null;
   }
 
@@ -406,7 +419,7 @@ export class BackgroundTaskManager extends EventEmitter {
     const file = this.taskFile(task.id);
     if (!file || !this.isPersistable(task)) return;
     try {
-      fs.mkdirSync(this.storageDir!, { recursive: true });
+      fs.mkdirSync(this.storageDir!, { recursive: true, mode: 0o700 });
       // Persist a bounded output tail — enough for a restored snapshot, not
       // the full (potentially huge) transcript.
       const snapshot: BackgroundTask = {
@@ -418,8 +431,9 @@ export class BackgroundTaskManager extends EventEmitter {
         stderr: '',
       };
       const tmp = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(snapshot, null, 2), 'utf8');
+      fs.writeFileSync(tmp, JSON.stringify(snapshot, null, 2), { encoding: 'utf8', mode: 0o600 });
       fs.renameSync(tmp, file);
+      fs.chmodSync(file, 0o600);
     } catch {
       // best effort — never throw from persistence
     }
@@ -444,15 +458,18 @@ export class BackgroundTaskManager extends EventEmitter {
     if (!this.storageDir) return;
     let files: string[];
     try {
-      files = fs.readdirSync(this.storageDir).filter((f) => f.endsWith('.json'));
+      files = fs.readdirSync(this.storageDir).filter((f) => /^[a-f0-9]{7,32}\.json$/u.test(f));
     } catch {
       return; // dir doesn't exist yet — nothing to load
     }
     for (const f of files) {
       try {
-        const raw = fs.readFileSync(path.join(this.storageDir, f), 'utf8');
+        const target = path.join(this.storageDir, f);
+        const metadata = fs.lstatSync(target);
+        if (!metadata.isFile() || metadata.isSymbolicLink()) continue;
+        const raw = fs.readFileSync(target, 'utf8');
         const task = JSON.parse(raw) as BackgroundTask;
-        if (!task?.id) continue;
+        if (!task?.id || !TASK_ID.test(task.id) || f !== `${task.id}.json`) continue;
         if (task.status === 'running') {
           task.status = 'interrupted';
           const recovery = task.sessionId
@@ -471,6 +488,19 @@ export class BackgroundTaskManager extends EventEmitter {
       } catch {
         // skip corrupt records
       }
+    }
+  }
+
+  private pruneTerminalTasks(targetSize: number): void {
+    if (this.tasks.size <= targetSize) return;
+    const terminal = [...this.tasks.values()]
+      .filter((task) => task.status !== 'running')
+      .sort((a, b) => (a.endTime ?? a.startTime) - (b.endTime ?? b.startTime) || a.id.localeCompare(b.id));
+    for (const task of terminal) {
+      if (this.tasks.size <= targetSize) break;
+      this.tasks.delete(task.id);
+      this.stopFunctions.delete(task.id);
+      this.removePersisted(task.id);
     }
   }
 }

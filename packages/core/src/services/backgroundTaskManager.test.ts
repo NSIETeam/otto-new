@@ -129,6 +129,60 @@ describe('BackgroundTaskManager persistence', () => {
     // No throw, task tracked in-memory only.
     expect(mgr.getTask(task.id)!.status).toBe('completed');
   });
+
+  it('uses collision-resistant ids instead of the deleted seven-character CRC path', () => {
+    const mgr = new BackgroundTaskManager({ storageDir: null });
+    const ids = Array.from({ length: 100 }, () => mgr.createTask('same', '/same', 'shell').id);
+    expect(new Set(ids).size).toBe(100);
+    expect(ids.every((id) => /^[a-f0-9]{16}$/u.test(id))).toBe(true);
+  });
+
+  it('bounds terminal compatibility records while preserving running tasks', () => {
+    const mgr = new BackgroundTaskManager({ storageDir: null, maxTasks: 2 });
+    const old = mgr.createTask('[Codex] old', '/old', 'codex');
+    mgr.completeTask(old.id);
+    const running = mgr.createTask('[Codex] running', '/running', 'codex');
+    const newest = mgr.createTask('[Codex] newest', '/newest', 'codex');
+    expect(mgr.getTask(old.id)).toBeUndefined();
+    expect(mgr.getAllTasks().map((task) => task.id).sort()).toEqual([running.id, newest.id].sort());
+    expect(() => mgr.createTask('[Codex] overflow', '/overflow', 'codex'))
+      .toThrow('no terminal task to prune');
+  });
+
+  it('bounds stderr retained by the compatibility mirror', () => {
+    const mgr = new BackgroundTaskManager({ storageDir: null });
+    const task = mgr.createTask('noisy', '/proj', 'shell');
+    mgr.appendStderr(task.id, 'x'.repeat(BackgroundTaskManager.STDERR_CAP + 10));
+    expect(mgr.getTask(task.id)!.stderr.length).toBeLessThanOrEqual(BackgroundTaskManager.STDERR_CAP);
+    expect(mgr.getTask(task.id)!.stderr).toContain('earlier stderr pruned');
+  });
+
+  it('bounds final answers and structured progress instead of retaining full transcripts', () => {
+    const mgr = new BackgroundTaskManager({ storageDir: null });
+    const task = mgr.createTask('[Codex] long', '/proj', 'codex');
+    mgr.setResult(task.id, { answer: 'a'.repeat(40_000), sessionId: 's'.repeat(600) });
+    mgr.updateProgress(task.id, progress({
+      currentTool: 't'.repeat(600),
+      plan: Array.from({ length: 120 }, () => ({ content: 'p'.repeat(1_200), status: 'pending' as const })),
+    }));
+
+    expect(mgr.getTask(task.id)!.answer).toHaveLength(32_000);
+    expect(mgr.getTask(task.id)!.sessionId).toHaveLength(500);
+    expect(mgr.getTask(task.id)!.currentTool).toHaveLength(500);
+    expect(mgr.getTask(task.id)!.plan).toHaveLength(100);
+    expect(mgr.getTask(task.id)!.plan![0]!.content).toHaveLength(1_000);
+  });
+
+  it('ignores a symlinked compatibility record instead of reading outside storage', () => {
+    const outside = path.join(dir, 'outside.json');
+    const id = '0123456789abcdef';
+    fs.writeFileSync(outside, JSON.stringify({ id, status: 'running' }));
+    fs.symlinkSync(outside, path.join(dir, `${id}.json`));
+
+    const mgr = new BackgroundTaskManager({ storageDir: dir });
+    expect(mgr.getTask(id)).toBeUndefined();
+    expect(fs.readFileSync(outside, 'utf8')).toContain('running');
+  });
 });
 
 describe('BackgroundTaskManager stop ownership', () => {

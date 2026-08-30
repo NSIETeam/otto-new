@@ -461,12 +461,11 @@ export class DelegateToAgentTool extends BaseTool<
       });
 
       // Write the final answer + native session id into the task record.
-      const task = taskManager.getTask(taskId);
-      if (task) {
-        task.answer = result.answer || result.transcript;
-        if (result.sessionId) task.sessionId = result.sessionId;
-        if (result.progress) taskManager.updateProgress(taskId, result.progress);
-      }
+      taskManager.setResult(taskId, {
+        answer: result.answer || result.transcript,
+        ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+      });
+      if (result.progress) taskManager.updateProgress(taskId, result.progress);
 
       if (result.status === 'success') {
         await this.workflowJournal.settle(workflowRunId, {

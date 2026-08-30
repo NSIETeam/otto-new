@@ -3,7 +3,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type {
   EnterpriseAccount,
   EnterpriseOrganizationFeatures,
@@ -44,6 +44,17 @@ const features: EnterpriseOrganizationFeatures = {
   knowledge: false,
   skill_market: false,
 };
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 const park: EnterprisePark = {
   id: 'park-1',
@@ -233,6 +244,54 @@ describe('organization structure editor', () => {
 });
 
 describe('commercial feature entitlement boundaries', () => {
+  it('ignores an older feature refresh that resolves after a newer request', async () => {
+    const older = deferred<{
+      configured: EnterpriseOrganizationFeatures;
+      entitled: EnterpriseOrganizationFeatures;
+      effective: EnterpriseOrganizationFeatures;
+    }>();
+    const newer = deferred<{
+      configured: EnterpriseOrganizationFeatures;
+      entitled: EnterpriseOrganizationFeatures;
+      effective: EnterpriseOrganizationFeatures;
+    }>();
+    const newerFeatures = { ...features, park_service: false, knowledge: true };
+    const featureStateGet = vi.fn()
+      .mockImplementationOnce(() => older.promise)
+      .mockImplementationOnce(() => newer.promise);
+    const firstLoaded = vi.fn();
+    const secondLoaded = vi.fn();
+    Object.assign(window.otto, {
+      enterpriseOrganizationFeaturesGet: vi.fn(async () => features),
+      enterpriseOrganizationFeatureStateGet: featureStateGet,
+      enterpriseOrganizationDepartments: vi.fn(async () => []),
+    });
+
+    const view = render(
+      <EnterpriseAdministrationPanel accounts={[]} onFeaturesLoaded={firstLoaded} />,
+    );
+    await waitFor(() => expect(featureStateGet).toHaveBeenCalledTimes(1));
+    view.rerender(
+      <EnterpriseAdministrationPanel accounts={[]} onFeaturesLoaded={secondLoaded} />,
+    );
+    await waitFor(() => expect(featureStateGet).toHaveBeenCalledTimes(2));
+
+    await act(async () => newer.resolve({
+      configured: newerFeatures,
+      entitled: newerFeatures,
+      effective: newerFeatures,
+    }));
+    await waitFor(() => expect(secondLoaded).toHaveBeenLastCalledWith(newerFeatures));
+
+    await act(async () => older.resolve({
+      configured: features,
+      entitled: features,
+      effective: features,
+    }));
+    expect(firstLoaded).toHaveBeenCalledTimes(1);
+    expect(secondLoaded).toHaveBeenLastCalledWith(newerFeatures);
+  });
+
   it('shows configured-but-unlicensed capabilities without calling protected APIs', async () => {
     const effective = {
       ...features,

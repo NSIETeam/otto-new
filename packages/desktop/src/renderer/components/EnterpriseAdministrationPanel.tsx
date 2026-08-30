@@ -5,7 +5,7 @@
  * 另一份 renderer 本地组织状态。
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   EnterpriseAccount,
   EnterpriseOrganizationDepartment,
@@ -57,12 +57,14 @@ export function EnterpriseAdministrationPanel({
   activeSection,
   onChanged,
   onFeaturesLoaded,
+  onFeaturesLoadError,
 }: {
   accounts: EnterpriseAccount[];
   /** undefined 保持旧的完整展示；null 仅保留状态、不显示配置区。 */
   activeSection?: EnterpriseAdministrationSection | null;
   onChanged?: () => void;
   onFeaturesLoaded?: (features: EnterpriseOrganizationFeatures | null) => void;
+  onFeaturesLoadError?: (message: string | null) => void;
 }): React.JSX.Element {
   const [featureState, setFeatureState] = useState<EnterpriseOrganizationFeatureState | null>(null);
   const features = featureState?.effective ?? null;
@@ -77,17 +79,30 @@ export function EnterpriseAdministrationPanel({
   const [parkRoomNumber, setParkRoomNumber] = useState('');
   const [specialistSelections, setSpecialistSelections] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const refreshRequestRef = useRef(0);
 
   const refresh = useCallback(async (): Promise<void> => {
+    const requestId = ++refreshRequestRef.current;
+    const isCurrentRequest = (): boolean => refreshRequestRef.current === requestId;
+    let featureStateLoaded = false;
+    setRefreshing(true);
     setFeatureState(null);
     setDepartments([]);
     setPark(null);
     setParkServices([]);
     setSpecialists([]);
     onFeaturesLoaded?.(null);
-    if (!window.otto.enterpriseOrganizationFeaturesGet) return;
+    onFeaturesLoadError?.(null);
+    if (!window.otto.enterpriseOrganizationFeaturesGet) {
+      const message = '当前客户端不支持读取企业能力，请升级或重新启动 Otto';
+      setError(message);
+      onFeaturesLoadError?.(message);
+      setRefreshing(false);
+      return;
+    }
     try {
       const nextState = typeof window.otto.enterpriseOrganizationFeatureStateGet === 'function'
         ? await window.otto.enterpriseOrganizationFeatureStateGet()
@@ -96,15 +111,19 @@ export function EnterpriseAdministrationPanel({
             entitled: { ...NO_EFFECTIVE_FEATURES },
             effective: { ...NO_EFFECTIVE_FEATURES },
           }));
+      if (!isCurrentRequest()) return;
+      featureStateLoaded = true;
       const nextFeatures = nextState.effective;
       setFeatureState(nextState);
       onFeaturesLoaded?.(nextFeatures);
       const nextDepartments = nextFeatures.enterprise_tree
         ? await window.otto.enterpriseOrganizationDepartments()
         : [];
+      if (!isCurrentRequest()) return;
       setDepartments(nextDepartments);
       if (nextFeatures.park_service) {
         const nextPark = await window.otto.enterpriseParkView();
+        if (!isCurrentRequest()) return;
         setPark(nextPark);
         setParkAddress(nextPark?.tenantAddress ?? '');
         setParkRoomNumber(nextPark?.tenantRoomNumber ?? '');
@@ -113,6 +132,7 @@ export function EnterpriseAdministrationPanel({
             window.otto.enterpriseParkServices(),
             window.otto.enterpriseParkSpecialists(),
           ]);
+          if (!isCurrentRequest()) return;
           setParkServices(services);
           setSpecialists(people);
         } else {
@@ -126,12 +146,20 @@ export function EnterpriseAdministrationPanel({
       }
       setError(null);
     } catch (cause) {
-      setError(cleanError(cause));
+      if (!isCurrentRequest()) return;
+      const message = cleanError(cause);
+      setError(message);
+      if (!featureStateLoaded) onFeaturesLoadError?.(message);
+    } finally {
+      if (isCurrentRequest()) setRefreshing(false);
     }
-  }, [onFeaturesLoaded]);
+  }, [onFeaturesLoadError, onFeaturesLoaded]);
 
   useEffect(() => {
     void refresh();
+    return () => {
+      refreshRequestRef.current += 1;
+    };
   }, [refresh]);
 
   const run = async (operation: () => Promise<unknown>, success: string): Promise<boolean> => {
@@ -167,7 +195,7 @@ export function EnterpriseAdministrationPanel({
       hidden={activeSection === null}
     >
       <div className="otto-enterprise-config__toolbar">
-        <button type="button" className="otto-enterprise-config__refresh" disabled={busy} onClick={() => void refresh()}>刷新</button>
+        <button type="button" className="otto-enterprise-config__refresh" disabled={busy || refreshing} onClick={() => void refresh()}>刷新</button>
       </div>
 
       {error ? <div className="otto-account-invite__error" role="alert">{error}</div> : null}

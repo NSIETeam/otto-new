@@ -161,6 +161,12 @@ async function readyCreateButton(): Promise<HTMLButtonElement> {
   return button;
 }
 
+async function readyAssignmentButton(name: string): Promise<HTMLButtonElement> {
+  const button = await screen.findByRole('button', { name: `安排职位 ${name}` }) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  return button;
+}
+
 function openManagementSection(label: '组织结构' | '成员目录' | '企业资料' | '产业园端' | '企业能力'): void {
   fireEvent.click(screen.getByRole('tab', { name: new RegExp(label) }));
 }
@@ -184,6 +190,8 @@ describe('企业管理分区导航', () => {
     expect(screen.queryByText('CEO 企业管理中心')).toBeNull();
     await waitFor(() => expect(screen.getByRole('tab', { name: /成员目录/ }).textContent)
       .toContain('1 名成员'));
+    await waitFor(() => expect(screen.getByRole('tab', { name: /组织结构/ }).textContent)
+      .toContain('1 个部门'));
 
     fireEvent.keyDown(membersTab, { key: 'ArrowRight' });
     expect(screen.getByRole('tab', { name: /企业资料/ }).getAttribute('aria-selected')).toBe('true');
@@ -557,6 +565,84 @@ describe('企业账号目录', () => {
     })));
   });
 
+  it('组织结构尚未加载完成时锁定职位安排入口', async () => {
+    const employee = {
+      ...CREATED_ACCOUNT,
+      department: null,
+      positionTitle: null,
+      role: '成员',
+    };
+    const pendingStructure = deferred<typeof ORGANIZATION_STRUCTURE>();
+    Object.assign(window.otto, {
+      enterpriseAccounts: vi.fn(async () => [ADMIN, employee]),
+      enterpriseOrganizationDepartments: vi.fn(() => pendingStructure.promise),
+    });
+    render(<AccountManagementPage currentAccount={ADMIN} onBack={() => undefined} />);
+
+    const trigger = await screen.findByRole('button', { name: '安排职位 新成员' }) as HTMLButtonElement;
+    expect(trigger.disabled).toBe(true);
+    fireEvent.click(trigger);
+    expect(screen.queryByRole('dialog', { name: '安排员工职位' })).toBeNull();
+
+    await act(async () => pendingStructure.resolve(ORGANIZATION_STRUCTURE));
+    await waitFor(() => expect(trigger.disabled).toBe(false));
+  });
+
+  it('企业能力读取失败时保持职位安排锁定并在成员页显示原因', async () => {
+    const employee = { ...CREATED_ACCOUNT, role: '成员' };
+    const departments = vi.fn(async () => ORGANIZATION_STRUCTURE);
+    Object.assign(window.otto, {
+      enterpriseAccounts: vi.fn(async () => [ADMIN, employee]),
+      enterpriseOrganizationFeatureStateGet: vi.fn(async () => {
+        throw new Error('企业能力服务暂时不可用');
+      }),
+      enterpriseOrganizationDepartments: departments,
+    });
+    render(<AccountManagementPage currentAccount={ADMIN} onBack={() => undefined} />);
+
+    const alert = await screen.findByText(/无法读取企业能力，职位安排已安全锁定/);
+    expect(alert.textContent).toContain('企业能力服务暂时不可用');
+    const trigger = await screen.findByRole('button', { name: '安排职位 新成员' }) as HTMLButtonElement;
+    expect(trigger.disabled).toBe(true);
+    expect(departments).not.toHaveBeenCalled();
+  });
+
+  it('组织结构读取失败时保持职位安排锁定并显示重试指引', async () => {
+    const employee = { ...CREATED_ACCOUNT, role: '成员' };
+    Object.assign(window.otto, {
+      enterpriseAccounts: vi.fn(async () => [ADMIN, employee]),
+      enterpriseOrganizationDepartments: vi.fn(async () => {
+        throw new Error('组织结构服务暂时不可用');
+      }),
+    });
+    render(<AccountManagementPage currentAccount={ADMIN} onBack={() => undefined} />);
+
+    const alert = await screen.findByText(/无法读取组织结构，职位安排已安全锁定/);
+    expect(alert.textContent).toContain('请切换到“组织结构”后点击刷新重试');
+    const trigger = await screen.findByRole('button', { name: '安排职位 新成员' }) as HTMLButtonElement;
+    expect(trigger.disabled).toBe(true);
+  });
+
+  it('企业树未实际生效时不请求受许可证保护的组织结构接口', async () => {
+    const employee = { ...CREATED_ACCOUNT, role: '成员' };
+    const effective = { ...FEATURES, enterprise_tree: false };
+    const departments = vi.fn(async () => ORGANIZATION_STRUCTURE);
+    Object.assign(window.otto, {
+      enterpriseAccounts: vi.fn(async () => [ADMIN, employee]),
+      enterpriseOrganizationFeatureStateGet: vi.fn(async () => ({
+        configured: FEATURES,
+        entitled: effective,
+        effective,
+      })),
+      enterpriseOrganizationDepartments: departments,
+    });
+    render(<AccountManagementPage currentAccount={ADMIN} onBack={() => undefined} />);
+
+    const trigger = await screen.findByRole('button', { name: '安排职位 新成员' }) as HTMLButtonElement;
+    await waitFor(() => expect(trigger.disabled).toBe(false));
+    expect(departments).not.toHaveBeenCalled();
+  });
+
   it('CEO 可从成员目录按真实部门/职位 ID 安排员工', async () => {
     const employee = {
       ...CREATED_ACCOUNT,
@@ -583,7 +669,7 @@ describe('企业账号目录', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '安排职位 新成员' }));
+    fireEvent.click(await readyAssignmentButton('新成员'));
     expect(screen.getByRole('dialog', { name: '安排员工职位' })).toBeTruthy();
     fireEvent.change(screen.getByRole('combobox', { name: '安排职位部门' }), {
       target: { value: '产品部' },
@@ -627,7 +713,7 @@ describe('企业账号目录', () => {
     });
     render(<AccountManagementPage currentAccount={ADMIN} onBack={() => undefined} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '安排职位 新成员' }));
+    fireEvent.click(await readyAssignmentButton('新成员'));
     fireEvent.change(screen.getByRole('combobox', { name: '安排职位部门' }), {
       target: { value: '海外事业部' },
     });

@@ -228,7 +228,10 @@ export function AccountManagementPage({
   const [parkAnnouncementError, setParkAnnouncementError] = useState<string | null>(null);
   const [parkSurveyError, setParkSurveyError] = useState<string | null>(null);
   const [configurationFeatures, setConfigurationFeatures] = useState<EnterpriseOrganizationFeatures | null>(null);
+  const [configurationFeaturesError, setConfigurationFeaturesError] = useState<string | null>(null);
   const [organizationDepartments, setOrganizationDepartments] = useState<EnterpriseOrganizationDepartment[]>([]);
+  const [organizationStructureLoading, setOrganizationStructureLoading] = useState(currentAccount.isAdmin);
+  const [organizationStructureError, setOrganizationStructureError] = useState<string | null>(null);
   const [copied, setCopied] = useState<'link' | 'code' | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const dialogRef = useRef<HTMLElement>(null);
@@ -238,6 +241,7 @@ export function AccountManagementPage({
   const assignmentFocusRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const organizationStructureRequestRef = useRef(0);
   const invite = inviteContext?.invite;
   const isParkAdminOrganization = Boolean(
     currentPark?.isAdminOrganization || (
@@ -331,25 +335,71 @@ export function AccountManagementPage({
   }, [invite]);
 
   const refreshOrganizationStructure = useCallback(async (): Promise<void> => {
-    if (
-      !currentAccount.isAdmin ||
-      configurationFeatures?.enterprise_tree !== true ||
-      !window.otto.enterpriseOrganizationDepartments
-    ) {
-      setOrganizationDepartments([]);
+    const requestId = ++organizationStructureRequestRef.current;
+    const isCurrentRequest = (): boolean => organizationStructureRequestRef.current === requestId;
+    if (!currentAccount.isAdmin) {
+      if (isCurrentRequest()) {
+        setOrganizationDepartments([]);
+        setOrganizationStructureLoading(false);
+        setOrganizationStructureError(null);
+      }
       return;
     }
-    try {
-      setOrganizationDepartments(await window.otto.enterpriseOrganizationDepartments());
-    } catch {
-      // enterprise_tree 关闭时服务端返回 403；安排入口保持 fail-closed。
-      setOrganizationDepartments([]);
+    if (configurationFeatures === null) {
+      if (isCurrentRequest()) {
+        setOrganizationDepartments([]);
+        setOrganizationStructureLoading(true);
+        setOrganizationStructureError(null);
+      }
+      return;
     }
-  }, [configurationFeatures?.enterprise_tree, currentAccount.isAdmin]);
+    if (configurationFeatures.enterprise_tree !== true) {
+      if (isCurrentRequest()) {
+        setOrganizationDepartments([]);
+        setOrganizationStructureLoading(false);
+        setOrganizationStructureError(null);
+      }
+      return;
+    }
+    if (!window.otto.enterpriseOrganizationDepartments) {
+      if (isCurrentRequest()) {
+        setOrganizationDepartments([]);
+        setOrganizationStructureLoading(false);
+        setOrganizationStructureError('当前客户端不支持读取组织结构，请升级或重新启动 Otto');
+      }
+      return;
+    }
+    if (isCurrentRequest()) {
+      setOrganizationStructureLoading(true);
+      setOrganizationStructureError(null);
+    }
+    try {
+      const departments = await window.otto.enterpriseOrganizationDepartments();
+      if (isCurrentRequest()) {
+        setOrganizationDepartments(departments);
+        setOrganizationStructureError(null);
+      }
+    } catch (cause) {
+      if (isCurrentRequest()) {
+        setOrganizationDepartments([]);
+        setOrganizationStructureError(errorMessage(cause));
+      }
+    } finally {
+      if (isCurrentRequest()) setOrganizationStructureLoading(false);
+    }
+  }, [configurationFeatures, currentAccount.isAdmin]);
 
   useEffect(() => {
     void refreshOrganizationStructure();
+    return () => {
+      organizationStructureRequestRef.current += 1;
+    };
   }, [refreshOrganizationStructure]);
+
+  const handleConfigurationFeaturesError = useCallback((message: string | null): void => {
+    setConfigurationFeaturesError(message);
+    if (message) setOrganizationStructureLoading(false);
+  }, []);
 
   useEffect(() => {
     if (!editing) return undefined;
@@ -483,6 +533,12 @@ export function AccountManagementPage({
   };
 
   const openAssignment = (account: EnterpriseAccount): void => {
+    if (
+      configurationFeatures === null ||
+      organizationStructureLoading ||
+      configurationFeaturesError ||
+      organizationStructureError
+    ) return;
     const matchedDepartment = organizationDepartments.find((department) => (
       department.id === account.departmentId || department.name === account.department
     ));
@@ -974,6 +1030,7 @@ export function AccountManagementPage({
             onOrganizationChanged?.();
           }}
           onFeaturesLoaded={setConfigurationFeatures}
+          onFeaturesLoadError={handleConfigurationFeaturesError}
         />
       ) : null}
 
@@ -1080,6 +1137,9 @@ export function AccountManagementPage({
         </header>
 
         {error && !editing ? <div className="otto-account-page__error" role="alert">{error}</div> : null}
+        {organizationStructureLoading ? <div className="otto-account-invite__loading" role="status">正在同步组织结构，完成后即可安排职位。</div> : null}
+        {configurationFeaturesError ? <div className="otto-account-page__error" role="alert">无法读取企业能力，职位安排已安全锁定：{configurationFeaturesError}。请切换到“组织结构”后点击刷新重试。</div> : null}
+        {organizationStructureError ? <div className="otto-account-page__error" role="alert">无法读取组织结构，职位安排已安全锁定：{organizationStructureError}。请切换到“组织结构”后点击刷新重试。</div> : null}
         <div className="otto-account-table">
           <table aria-label="账号列表">
             <thead>
@@ -1116,7 +1176,7 @@ export function AccountManagementPage({
                   <td><div className="otto-account-table__state">{account.isAdmin ? <span className="is-admin">管理员</span> : <span>成员</span>}<span className={account.status === 'active' ? 'is-active' : 'is-disabled'}>{account.status === 'active' ? '可登录' : '已停用'}</span>{account.tags.includes('维修工作人员') ? <span className="is-admin">维修人员</span> : null}{account.phone ? <span className="is-sms">短信</span> : null}{account.feishuOpenId ? <span className="is-sms">飞书</span> : null}</div></td>
                   <td>
                     <div className="otto-account-table__actions">
-                      <button type="button" className="is-primary" onClick={() => openAssignment(account)} aria-label={`安排职位 ${account.name}`}>安排职位</button>
+                      <button type="button" className="is-primary" onClick={() => openAssignment(account)} aria-label={`安排职位 ${account.name}`} disabled={configurationFeatures === null || organizationStructureLoading || Boolean(configurationFeaturesError) || Boolean(organizationStructureError)}>安排职位</button>
                       <button type="button" onClick={() => openEdit(account)} aria-label={`编辑 ${account.name}`}>编辑身份</button>
                     </div>
                   </td>

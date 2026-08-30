@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -34,7 +34,7 @@ jobs:
       # engines 字段（原 >=20）与 README 承诺的 Node 20+ 也是错的、已一并修正为
       # >=22.16.0，否则企业在线备份会在运行时缺少 node:sqlite.backup。
       - name: 🔧 Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.23.1'
           cache: 'npm'
@@ -45,7 +45,7 @@ jobs:
       # 在无预编译二进制可用时必然失败。钉住 3.11（最后一个自带 distutils
       # 的版本）并让 node-gyp 用它，而非 runner 默认的新版 python3。
       - name: 🐍 Setup Python 3.11 (node-gyp 需要 distutils)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.11'
 
@@ -67,7 +67,7 @@ jobs:
 
       - name: Preserve E2EE adversarial evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2ee-adversarial-ci-evidence
           path: artifacts/security/e2ee-adversarial-report.json
@@ -76,6 +76,7 @@ jobs:
       - name: 🩺 Cheap anomaly checks
         run: |
           npm run doctor
+          npm run code-map:check
           git diff --check
           git fetch --no-tags origin \
             '+refs/heads/internal:refs/remotes/origin/internal'
@@ -105,7 +106,7 @@ jobs:
 
       - name: 📎 Preserve deterministic evaluation evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: deterministic-agent-safety-evidence
           path: |

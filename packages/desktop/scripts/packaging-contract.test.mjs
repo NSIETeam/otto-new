@@ -182,7 +182,7 @@ describe('desktop packaging contract', () => {
       '!**/node_modules/better-sqlite3/deps/**',
     );
     expect(packageJson.build.files).toContain(
-      '!**/node_modules/better-sqlite3/build/Release/obj/**',
+      '!**/node_modules/better-sqlite3/build/**',
     );
     expect(packageJson.build.files).toContain(
       '!**/node_modules/playwright-core/lib/vite/**',
@@ -212,11 +212,14 @@ describe('desktop packaging contract', () => {
     );
   });
 
-  it('excludes known native build trees and duplicate browser payloads without removing runtime binaries', async () => {
+  it('keeps the desktop package lean while preserving external runtime entrypoints', async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
     );
     const files = packageJson.build.files;
+    expect(packageJson.build.mac.electronLanguages).toEqual(
+      expect.arrayContaining(['en', 'zh_CN', 'zh_TW']),
+    );
     for (const exclusion of [
       '!**/node_modules/@otto/native/target/**',
       '!**/node_modules/@otto/native/src/**',
@@ -224,11 +227,16 @@ describe('desktop packaging contract', () => {
       '!**/node_modules/@otto/native/bin/**',
       '!**/node_modules/better-sqlite3/deps/**',
       '!**/node_modules/better-sqlite3/src/**',
-      '!**/node_modules/better-sqlite3/build/Release/obj/**',
+      '!**/node_modules/better-sqlite3/build/**',
       '!**/node_modules/pdf-parse/lib/pdf.js/v1.9.426/**',
       '!**/node_modules/pdf-parse/lib/pdf.js/v1.10.88/**',
       '!**/node_modules/pdf-parse/lib/pdf.js/v2.0.550/**',
+      '!**/node_modules/pdf-parse/**/pdf.worker.js',
+      '!**/node_modules/playwright/lib/**',
       '!**/node_modules/playwright-core/lib/vite/**',
+      '!**/node_modules/playwright-core/lib/tools/**',
+      '!**/node_modules/react-dom/**',
+      '!**/node_modules/xlsx/dist/**',
       '!**/node_modules/**/spec/**',
       '!**/node_modules/**/specs/**',
       '!**/node_modules/**/__mocks__/**',
@@ -240,8 +248,13 @@ describe('desktop packaging contract', () => {
     ]) {
       expect(files).toContain(exclusion);
     }
+    expect(files).not.toContain('!**/node_modules/better-sqlite3/lib/**');
+    expect(afterPack.SQLCIPHER_RESOURCE_FILES).toContain('better_sqlite3.node');
     expect(files).not.toContain(
-      '!**/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
+      '!**/node_modules/pdf-parse/lib/pdf.js/v1.10.100/build/pdf.js',
+    );
+    expect(files).not.toContain(
+      '!**/node_modules/playwright-core/lib/server/**',
     );
     expect(packageJson.build.files).toContain(
       'node_modules/@otto/native/dist/index.js',

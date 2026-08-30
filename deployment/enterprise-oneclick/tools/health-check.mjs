@@ -5,12 +5,20 @@ function fail(message) {
   process.exit(5);
 }
 
-async function fetchJson(url, headers = undefined) {
+async function fetchJson(
+  url,
+  { headers = undefined, redirect = 'error', expectedUrl = undefined } = {},
+) {
   try {
     const response = await fetch(url, {
       headers,
+      redirect,
       signal: AbortSignal.timeout(10_000),
     });
+    const exactUrl = expectedUrl ?? url;
+    if (new URL(response.url).href !== new URL(exactUrl).href) {
+      fail(`health response URL changed from ${exactUrl}`);
+    }
     const body = await response.json();
     if (!response.ok) {
       fail(`HTTP ${response.status} from ${url}: ${JSON.stringify(body)}`);
@@ -62,31 +70,57 @@ const requiredCapabilities = [
 ];
 
 const publicHealth = await fetchJson(`${baseUrl}/enterprise/health`);
+const publicLegal = await fetchJson(`${baseUrl}/enterprise/legal`);
+const legalDocuments = Array.isArray(publicLegal)
+  ? publicLegal
+  : publicLegal?.documents;
 const missingCapabilities = requiredCapabilities.filter(
   (capability) => !publicHealth.capabilities?.includes(capability),
 );
-const privatePublicFields = [
-  'buildCommit',
-  'schemaVersion',
-  'db',
-  'deployment',
-  'machineFingerprint',
-  'license',
-  'runtimeHealth',
-  'sms',
-].filter((field) => Object.hasOwn(publicHealth, field));
+const expectedPublicFields = [
+  'apiVersion',
+  'appVersion',
+  'capabilities',
+  'service',
+  'status',
+  'version',
+];
+const actualPublicFields = Object.keys(publicHealth).sort();
 
 if (
   publicHealth.status !== 'ok' ||
   publicHealth.service !== 'otto-enterprise' ||
   publicHealth.apiVersion !== 4 ||
   publicHealth.version !== expectedVersion ||
+  publicHealth.appVersion !== expectedVersion ||
   missingCapabilities.length > 0
 ) {
   fail(`public health identity mismatch: ${JSON.stringify(publicHealth)}`);
 }
-if (privatePublicFields.length > 0) {
-  fail(`public health leaks private fields: ${privatePublicFields.join(', ')}`);
+if (
+  JSON.stringify(actualPublicFields) !== JSON.stringify(expectedPublicFields)
+) {
+  fail(
+    `public health fields are not the exact compatibility contract: ${actualPublicFields.join(', ')}`,
+  );
+}
+if (!Array.isArray(legalDocuments) || legalDocuments.length < 2) {
+  fail('public legal documents are missing');
+}
+for (const document of legalDocuments) {
+  const documentHash =
+    typeof document?.hash === 'string' ? document.hash : document?.sha256;
+  if (
+    typeof document?.id !== 'string' ||
+    !document.id ||
+    typeof document?.version !== 'string' ||
+    !document.version ||
+    !/^[0-9a-f]{64}$/.test(documentHash || '')
+  ) {
+    fail(
+      `public legal document identity is invalid: ${JSON.stringify(document)}`,
+    );
+  }
 }
 
 const configuredBuild = process.env.OTTO_BUILD_COMMIT?.trim();
@@ -105,10 +139,34 @@ if (!adminToken)
   );
 const deploymentStatus = await fetchJson(
   `${baseUrl}/enterprise/deployment/status`,
-  { 'x-otto-admin-token': adminToken },
+  {
+    headers: { 'x-otto-admin-token': adminToken },
+    redirect: 'error',
+    expectedUrl: `${baseUrl}/enterprise/deployment/status`,
+  },
 );
+if (
+  deploymentStatus.runtime?.version !== expectedVersion ||
+  deploymentStatus.runtime?.buildCommit !== expectedBuild
+) {
+  fail(
+    `authenticated runtime identity mismatch: ${JSON.stringify(
+      deploymentStatus.runtime ?? null,
+    )}`,
+  );
+}
 if (deploymentStatus.license?.enforce !== true) {
   fail('deployment License enforcement is not active');
+}
+if (
+  deploymentStatus.database?.ready !== true ||
+  deploymentStatus.database?.schemaVersion !== expectedSchema
+) {
+  fail(
+    `private database readiness mismatch: ${JSON.stringify(
+      deploymentStatus.database,
+    )}`,
+  );
 }
 if (deploymentStatus.operationsSecurity?.sqlCipher?.state !== 'active') {
   fail('SQLCipher encryption is not active');
@@ -132,6 +190,7 @@ process.stdout.write(
   `${JSON.stringify({
     ok: true,
     health: publicHealth,
+    legalDocuments: legalDocuments.map(({ id, version }) => ({ id, version })),
     database: {
       schemaVersion: expectedSchema,
       integrity: 'verified-during-migration',

@@ -304,20 +304,73 @@ async function listen(
 }
 
 describe('clustered PostgreSQL enterprise server', () => {
-  it('publishes PostgreSQL authority readiness without touching SQLite', async () => {
+  it('publishes only the public compatibility contract while probing PostgreSQL readiness', async () => {
     const { baseUrl } = await listen();
     const response = await fetch(`${baseUrl}/enterprise/health`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    const body = await response.json();
+    expect(body).toMatchObject({
       status: 'ok',
-      topology: { mode: 'clustered-enterprise', database: 'postgresql' },
-      authority: { ready: true, backend: 'postgresql', schemaVersion: 4 },
+      service: 'otto-enterprise',
+      apiVersion: 4,
       capabilities: expect.arrayContaining([
         'sms_registration',
         'personal_registration',
         'data_governance_v1',
       ]),
     });
+    expect(Object.keys(body).sort()).toEqual([
+      'apiVersion',
+      'appVersion',
+      'capabilities',
+      'service',
+      'status',
+      'version',
+    ]);
+  });
+
+  it('does not expose clustered readiness details through the public health route', async () => {
+    const repo = repository();
+    repo.readiness = vi.fn(async () => {
+      throw new Error(
+        'PostgreSQL schema version 23 does not match current version 24; secret=/etc/otto-enterprise/private.env',
+      );
+    });
+    const { baseUrl } = await listen(repo);
+    const response = await fetch(`${baseUrl}/enterprise/health`);
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toEqual({
+      status: 'unavailable',
+      service: 'otto-enterprise',
+      apiVersion: 4,
+      version: '1.9.10',
+      appVersion: '1.9.10',
+      capabilities: [],
+      error: 'enterprise service unavailable',
+    });
+    expect(JSON.stringify(body)).not.toMatch(
+      /schema|23|24|secret|private\.env|\/etc\//i,
+    );
+  });
+
+  it('does not expose repository details through the public legal route', async () => {
+    const repo = repository();
+    repo.getDataGovernanceProfile = vi.fn(async () => {
+      throw new Error(
+        'database operation failed at /etc/otto-enterprise/private.env?token=secret',
+      );
+    });
+    const { baseUrl } = await listen(repo);
+    const response = await fetch(`${baseUrl}/enterprise/legal`);
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toEqual({
+      error: 'enterprise legal documents unavailable',
+    });
+    expect(JSON.stringify(body)).not.toMatch(
+      /database|token|secret|private\.env/i,
+    );
   });
 
   it('serves password login and session lookup from the async repository', async () => {
@@ -1269,10 +1322,9 @@ describe('clustered PostgreSQL enterprise server', () => {
       ],
     ] as const) {
       const response = await request;
-      expect(
-        response.status,
-        `${path}: ${await response.clone().text()}`,
-      ).toBe(200);
+      expect(response.status, `${path}: ${await response.clone().text()}`).toBe(
+        200,
+      );
     }
 
     const featureStateResponse = await fetch(

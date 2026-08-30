@@ -755,7 +755,6 @@ export function createClusteredEnterpriseServer(
   const port = options.port ?? DEFAULT_PORT;
   const adminToken =
     options.adminToken?.trim() || randomBytes(24).toString('base64url');
-  const startedAt = options.startedAt ?? new Date().toISOString();
   const publicBaseUrl = resolveEnterprisePublicBaseUrl({
     configuredUrl: options.publicUrl,
   });
@@ -814,32 +813,30 @@ export function createClusteredEnterpriseServer(
     const method = req.method || 'GET';
     try {
       if (path === '/enterprise/health' && method === 'GET') {
-        const [infrastructure, databaseProbe, authority] = await Promise.all([
-          options.infrastructureReadiness?.(),
-          options.databaseReadiness?.(),
-          repository.readiness(),
-        ]);
-        const database = infrastructure?.database ?? databaseProbe ?? authority;
+        try {
+          await Promise.all([
+            options.infrastructureReadiness?.(),
+            options.databaseReadiness?.(),
+            repository.readiness(),
+          ]);
+        } catch {
+          sendJson(res, 503, {
+            status: 'unavailable',
+            service: 'otto-enterprise',
+            apiVersion: 4,
+            version: options.appVersion || 'unknown',
+            appVersion: options.appVersion || 'unknown',
+            capabilities: [],
+            error: 'enterprise service unavailable',
+          });
+          return;
+        }
         sendJson(res, 200, {
           status: 'ok',
+          service: 'otto-enterprise',
           apiVersion: 4,
-          deployment: {
-            version: options.appVersion || 'unknown',
-            buildCommit: options.buildCommit || 'unknown',
-            startedAt,
-          },
-          topology: options.topologyDescription ?? {
-            mode: 'clustered-enterprise',
-            database: 'postgresql',
-          },
-          database,
-          services: infrastructure
-            ? {
-                cache: infrastructure.cache,
-                attachments: infrastructure.attachments,
-              }
-            : undefined,
-          authority,
+          version: options.appVersion || 'unknown',
+          appVersion: options.appVersion || 'unknown',
           capabilities: [
             'password_auth',
             'sms_registration',
@@ -887,7 +884,15 @@ export function createClusteredEnterpriseServer(
       }
 
       if (path === '/enterprise/legal' && method === 'GET') {
-        const profile = await repository.getDataGovernanceProfile(null);
+        let profile;
+        try {
+          profile = await repository.getDataGovernanceProfile(null);
+        } catch {
+          sendJson(res, 503, {
+            error: 'enterprise legal documents unavailable',
+          });
+          return;
+        }
         if ((req.headers.accept || '').includes('text/html')) {
           sendLegalPage(res, profile);
         } else {
@@ -1331,13 +1336,10 @@ export function createClusteredEnterpriseServer(
           resourceId: 'current',
         });
         const signedEnvelope = stored?.payload.signedEnvelope as
-          | { payload?: Record<string, unknown> }
-          | undefined;
+          { payload?: Record<string, unknown> } | undefined;
         const claims = signedEnvelope?.payload;
         const leaseEndpoint =
-          typeof claims?.leaseEndpoint === 'string'
-            ? claims.leaseEndpoint
-            : '';
+          typeof claims?.leaseEndpoint === 'string' ? claims.leaseEndpoint : '';
         const machineFingerprint =
           typeof claims?.machineFingerprint === 'string'
             ? claims.machineFingerprint

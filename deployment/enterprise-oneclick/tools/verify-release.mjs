@@ -39,6 +39,10 @@ if (options.size > 0) fail(`unsupported option: ${[...options].join(', ')}`);
 const allowedReleaseChannels = allowLegacyLstc
   ? ['stable', 'transition', 'lstc']
   : ['stable', 'transition'];
+const requireStrictProvenance =
+  !allowLegacyLstc && !allowLegacySqlite && !allowRegistrationLegalHotfix;
+const EMPTY_SHA256 =
+  'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
 const root = path.resolve(process.argv[2] || '');
 if (!process.argv[2]) fail('用法：verify-release.mjs <release-dir>');
@@ -69,6 +73,15 @@ if (
   typeof manifest.version !== 'string' ||
   !allowedReleaseChannels.includes(manifest.releaseChannel) ||
   !/^[0-9a-f]{40}$/.test(manifest.buildCommit || '') ||
+  (requireStrictProvenance &&
+    (manifest.buildIdentityKind !== 'release-content-sha1' ||
+      !/^[0-9a-f]{40}$/.test(manifest.sourceCommit || '') ||
+      manifest.sourceTreeDirty !== false ||
+      manifest.sourceDiffSha256 !== EMPTY_SHA256 ||
+      !/^[0-9a-f]{64}$/.test(manifest.sourceInputSha256 || '') ||
+      manifest.runtime?.node !== '22.23.1' ||
+      JSON.stringify(manifest.runtime?.supportedArchitectures) !==
+        JSON.stringify(['linux-x64', 'linux-arm64']))) ||
   typeof manifest.files !== 'object' ||
   Array.isArray(manifest.files) ||
   typeof manifest.database !== 'object' ||
@@ -83,7 +96,7 @@ if (
         { length: manifest.database.schemaTo - 1 },
         (_, index) => index + 2,
       ),
-  ) ||
+    ) ||
   manifest.database.futureSchemaPolicy !== 'reject' ||
   (!allowLegacySqlite &&
     (manifest.database.encryption !== 'sqlcipher-required' ||

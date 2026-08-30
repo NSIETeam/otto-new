@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { finished } from 'node:stream/promises';
 import asar from '@electron/asar';
 import { afterEach, describe, expect, it } from 'vitest';
 import { verifyPackagedOttoNative } from './verify-packaged-otto-native.mjs';
@@ -38,7 +39,13 @@ async function fixture({ omitModule = false } = {}) {
   }
   const archivePath = path.join(root, 'resources', 'app.asar');
   fs.mkdirSync(path.dirname(archivePath), { recursive: true });
-  await asar.createPackage(source, archivePath);
+  // @electron/asar resolves createPackage() after calling WriteStream.end(),
+  // before the stream is guaranteed to have flushed the archive body on disk.
+  // Waiting for this fixture's own stream keeps parallel archives isolated and
+  // prevents readers from observing correctly sized, but still zero-filled,
+  // package entries on Windows.
+  const archiveWriteStream = await asar.createPackage(source, archivePath);
+  await finished(archiveWriteStream);
 
   const binary = Buffer.alloc(70 * 1024);
   binary.write('MZ', 0, 'ascii');

@@ -137,7 +137,7 @@ describe('server integration baseline', () => {
         releaseWorkflow: 'name: unsafe release',
       }),
     ).toContain(
-      'release workflow must require latest origin/internal as an ancestor and restrict additional commits to release refs',
+      'release workflow must require source to exactly equal latest origin/internal and restrict automatic runs to version tags',
     );
   });
 });

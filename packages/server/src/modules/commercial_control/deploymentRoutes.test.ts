@@ -28,10 +28,14 @@ function routeInput(memberPrincipal: { organizationId: string } | null) {
       method: 'POST',
       req: {} as IncomingMessage,
       res: {} as ServerResponse,
-      url: new URL('https://enterprise.example.test/enterprise/deployment/update-policy'),
+      url: new URL(
+        'https://enterprise.example.test/enterprise/deployment/update-policy',
+      ),
       principal: null,
       memberPrincipal,
-      services: { resolveDeploymentUpdatePolicy } as unknown as DeploymentRouteServices,
+      services: {
+        resolveDeploymentUpdatePolicy,
+      } as unknown as DeploymentRouteServices,
       readBody,
       sendJSON,
     },
@@ -44,11 +48,9 @@ describe('deployment update policy route', () => {
     await expect(handleDeploymentRoute(route.input)).resolves.toBe(true);
     expect(route.readBody).not.toHaveBeenCalled();
     expect(route.resolveDeploymentUpdatePolicy).not.toHaveBeenCalled();
-    expect(route.sendJSON).toHaveBeenCalledWith(
-      route.input.res,
-      401,
-      { error: 'member authentication required' },
-    );
+    expect(route.sendJSON).toHaveBeenCalledWith(route.input.res, 401, {
+      error: 'member authentication required',
+    });
   });
 
   it('forwards only the requested distribution and current version', async () => {
@@ -58,14 +60,10 @@ describe('deployment update policy route', () => {
       distributionId: 'otto-green',
       currentVersion: '1.9.10',
     });
-    expect(route.sendJSON).toHaveBeenCalledWith(
-      route.input.res,
-      200,
-      {
-        status: 'not_configured',
-        reason: 'online_license_required',
-      },
-    );
+    expect(route.sendJSON).toHaveBeenCalledWith(route.input.res, 200, {
+      status: 'not_configured',
+      reason: 'online_license_required',
+    });
   });
 });
 
@@ -77,7 +75,10 @@ describe('deployment operations security status route', () => {
         mode: 'local-offline',
         replicas: 1,
         database: { backend: 'sqlite', replicas: 1, target: 'data.db' },
-        attachments: { backend: 'encrypted-filesystem', target: '.otto-enterprise' },
+        attachments: {
+          backend: 'encrypted-filesystem',
+          target: '.otto-enterprise',
+        },
         cache: { backend: 'memory' },
       },
       sqlCipher: {
@@ -93,7 +94,10 @@ describe('deployment operations security status route', () => {
       },
     } as const;
     const services = {
-      getPrivateDeploymentStatus: vi.fn(() => ({ license: { status: 'active' } })),
+      getPrivateDeploymentStatus: vi.fn(() => ({
+        license: { status: 'active' },
+      })),
+      getDatabaseReadiness: vi.fn(() => ({ ready: true, schemaVersion: 24 })),
       getDataProtectionStatus: vi.fn(() => ({ backupCount: 2 })),
       getOperationsSecurityStatus: vi.fn(() => operationsSecurity),
     } as unknown as DeploymentRouteServices;
@@ -105,9 +109,15 @@ describe('deployment operations security status route', () => {
         method: 'GET',
         req: {} as IncomingMessage,
         res,
-        url: new URL('https://enterprise.example.test/enterprise/deployment/status'),
+        url: new URL(
+          'https://enterprise.example.test/enterprise/deployment/status',
+        ),
         principal: { organizationId: 'org_1' },
         memberPrincipal: { organizationId: 'org_1' },
+        runtime: {
+          version: '1.9.14',
+          buildCommit: 'a'.repeat(40),
+        },
         services,
         readBody: vi.fn(),
         sendJSON,
@@ -116,6 +126,11 @@ describe('deployment operations security status route', () => {
 
     expect(sendJSON).toHaveBeenCalledWith(res, 200, {
       license: { status: 'active' },
+      runtime: {
+        version: '1.9.14',
+        buildCommit: 'a'.repeat(40),
+      },
+      database: { ready: true, schemaVersion: 24 },
       dataProtection: { backupCount: 2 },
       operationsSecurity,
     });

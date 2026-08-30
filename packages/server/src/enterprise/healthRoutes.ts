@@ -6,7 +6,6 @@ import type { ServerResponse } from 'node:http';
 
 import * as db from './db.js';
 import type { DeploymentInfo } from './server.js';
-import type { PrivateDeploymentReadiness } from '../modules/deployment_lifecycle/index.js';
 
 interface HealthRouteDeps {
   path: string;
@@ -15,7 +14,6 @@ interface HealthRouteDeps {
   apiVersion: number;
   capabilities: readonly string[];
   deploymentInfo: DeploymentInfo;
-  readiness(): PrivateDeploymentReadiness;
   sendJSON(res: ServerResponse, status: number, data: unknown): void;
 }
 
@@ -26,7 +24,6 @@ export function handleHealthRoute({
   apiVersion,
   capabilities,
   deploymentInfo,
-  readiness,
   sendJSON,
 }: HealthRouteDeps): boolean {
   if (path !== '/enterprise/health' || method !== 'GET') {
@@ -44,7 +41,6 @@ export function handleHealthRoute({
       // diagnostics are available only from authenticated deployment routes.
       appVersion: deploymentInfo.version,
       capabilities: [...capabilities],
-      readiness: readiness(),
     });
   } catch {
     sendJSON(res, 503, {
@@ -54,7 +50,6 @@ export function handleHealthRoute({
       version: deploymentInfo.version,
       appVersion: deploymentInfo.version,
       capabilities: [...capabilities],
-      readiness: readiness(),
       error: 'enterprise database unavailable',
     });
   }

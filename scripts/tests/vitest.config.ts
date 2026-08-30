@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['scripts/tests/**/*.test.js'],
+    include: ['scripts/tests/**/*.test.js', 'scripts/tests/**/*.contract.js'],
     setupFiles: ['scripts/tests/test-setup.ts'],
     // 性能优化：限制并发和资源使用
     pool: 'forks', // 使用 forks 池，比 threads 更稳定且内存隔离更好

@@ -41,6 +41,22 @@ const ENV_EXAMPLE = path.resolve(
 );
 const README = path.resolve('deployment/enterprise-oneclick/README.zh-CN.md');
 const BUNDLE_SCRIPT = path.resolve('scripts/build-enterprise-oneclick.mjs');
+const CI_DEPLOY_GATEWAY = path.resolve(
+  'deployment/enterprise-oneclick/ci-deploy-gateway.sh',
+);
+const CI_DEPLOY_GATEWAY_INSTALLER = path.resolve(
+  'deployment/enterprise-oneclick/install-ci-deploy-gateway.sh',
+);
+const PUBLISH_UPDATE_MIRROR = path.resolve(
+  'deployment/enterprise-oneclick/ci/publish-update-mirror.sh',
+);
+const ROLLBACK_UPDATE_MIRROR = path.resolve(
+  'deployment/enterprise-oneclick/ci/rollback-update-mirror.sh',
+);
+const DEPLOY_SERVER_WORKFLOW = path.resolve(
+  '.github/workflows/deploy-server.yml',
+);
+const RELEASE_WORKFLOW = path.resolve('.github/workflows/release.yml');
 const SERVER_DATABASE = path.resolve('packages/server/src/enterprise/db.ts');
 const RUNTIME_ENTRY = path.resolve(
   'deployment/enterprise-oneclick/runtime/run.mjs',
@@ -209,6 +225,7 @@ describe('enterprise one-click schema contract', () => {
       'privacy_self_service',
     ];
     const adminToken = 'health-check-admin-token-at-least-32-characters';
+    const build = 'a'.repeat(40);
     const fixture = spawn(
       process.execPath,
       [
@@ -223,12 +240,29 @@ describe('enterprise one-click schema contract', () => {
               response.end(JSON.stringify(health));
               return;
             }
+            if (request.url === '/enterprise/legal') {
+              response.end(JSON.stringify({
+                documents: [
+                  { id: 'privacy', version: '2026-08-30', hash: 'a'.repeat(64) },
+                  { id: 'terms', version: '2026-08-30', sha256: 'b'.repeat(64) },
+                ],
+              }));
+              return;
+            }
             if (
               request.url === '/enterprise/deployment/status'
               && request.headers['x-otto-admin-token'] === process.env.ADMIN_TOKEN
             ) {
               response.end(JSON.stringify({
+                runtime: {
+                  version: health.appVersion,
+                  buildCommit: process.env.BUILD_COMMIT,
+                },
                 license: { enforce: true },
+                database: {
+                  ready: true,
+                  schemaVersion: ${ENTERPRISE_SCHEMA_VERSION},
+                },
                 operationsSecurity: { sqlCipher: { state: 'active' } },
               }));
               return;
@@ -245,11 +279,13 @@ describe('enterprise one-click schema contract', () => {
         env: {
           ...process.env,
           ADMIN_TOKEN: adminToken,
+          BUILD_COMMIT: build,
           HEALTH_FIXTURE: JSON.stringify({
             status: 'ok',
             service: 'otto-enterprise',
             apiVersion: 4,
             version: '1.9.14',
+            appVersion: '1.9.14',
             capabilities,
           }),
         },
@@ -260,7 +296,6 @@ describe('enterprise one-click schema contract', () => {
     try {
       const port = Number(await readFirstLine(fixture.stdout));
       expect(Number.isInteger(port)).toBe(true);
-      const build = 'a'.repeat(40);
       const result = spawnSync(
         process.execPath,
         [
@@ -285,6 +320,10 @@ describe('enterprise one-click schema contract', () => {
       expect(JSON.parse(result.stdout)).toMatchObject({
         ok: true,
         health: { version: '1.9.14' },
+        legalDocuments: [
+          { id: 'privacy', version: '2026-08-30' },
+          { id: 'terms', version: '2026-08-30' },
+        ],
         database: {
           schemaVersion: ENTERPRISE_SCHEMA_VERSION,
           integrity: 'verified-during-migration',
@@ -340,8 +379,22 @@ describe('enterprise one-click schema contract', () => {
       "operationsSecurity?.sqlCipher?.state !== 'active'",
     );
     expect(healthCheck).toContain('/enterprise/deployment/status');
+    expect(healthCheck).toContain(
+      'deploymentStatus.database?.schemaVersion !== expectedSchema',
+    );
+    expect(healthCheck).toContain("redirect: 'error'");
+    expect(healthCheck).toContain('const exactUrl = expectedUrl ?? url');
+    expect(healthCheck).toContain(
+      'publicHealth.appVersion !== expectedVersion',
+    );
+    expect(healthCheck).toContain(
+      'expectedUrl: `${baseUrl}/enterprise/deployment/status`',
+    );
+    expect(healthCheck).toContain('/enterprise/legal');
     expect(healthCheck).toContain("'x-otto-admin-token': adminToken");
-    expect(healthCheck).toContain('public health leaks private fields');
+    expect(healthCheck).toContain(
+      'public health fields are not the exact compatibility contract',
+    );
     expect(verifyRelease).toContain('manifest.database.schemaTo - 1');
     expect(verifyRelease).toContain("options.delete('--allow-legacy-lstc')");
     expect(verifyRelease).toContain("? ['stable', 'transition', 'lstc']");
@@ -489,7 +542,16 @@ describe('enterprise one-click schema contract', () => {
         version: '1.9.0-test',
         releaseChannel: 'transition',
         buildCommit: '0'.repeat(40),
+        buildIdentityKind: 'release-content-sha1',
         sourceCommit: '1'.repeat(40),
+        sourceTreeDirty: false,
+        sourceDiffSha256:
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        sourceInputSha256: '2'.repeat(64),
+        runtime: {
+          node: '22.23.1',
+          supportedArchitectures: ['linux-x64', 'linux-arm64'],
+        },
         database: {
           schemaFrom: SUPPORTED_SCHEMA_VERSIONS,
           schemaTo: ENTERPRISE_SCHEMA_VERSION,
@@ -964,6 +1026,988 @@ describe('enterprise one-click health contract', () => {
       expect(healthCheck).toContain(`  '${capability}',`);
       expect(readme).toContain(`\`${capability}\``);
     }
+  });
+});
+
+describe('enterprise CI deployment gateway contract', () => {
+  it('isolates every root script from caller-controlled shell and Python state', () => {
+    const gateway = readFileSync(CI_DEPLOY_GATEWAY, 'utf8');
+    const installer = readFileSync(CI_DEPLOY_GATEWAY_INSTALLER, 'utf8');
+    const publisher = readFileSync(PUBLISH_UPDATE_MIRROR, 'utf8');
+    const rollback = readFileSync(ROLLBACK_UPDATE_MIRROR, 'utf8');
+    for (const rootScript of [gateway, installer, publisher, rollback]) {
+      expect(rootScript.startsWith('#!/bin/bash -p\n')).toBe(true);
+      const unsetBlock =
+        rootScript.match(/^unset (?:[^\r\n]*\\\r?\n)*[^\r\n]*$/m)?.[0] ?? '';
+      const unsetVariables = unsetBlock.split(/[\s\\]+/);
+      for (const unsafeVariable of [
+        'BASH_ENV',
+        'ENV',
+        'CDPATH',
+        'TMPDIR',
+        'PYTHONHOME',
+        'PYTHONPATH',
+        'OPENSSL_CONF',
+        'OPENSSL_MODULES',
+        'OPENSSL_ENGINES',
+        'TAR_OPTIONS',
+        'GZIP',
+        'XZ_OPT',
+        'BZIP2',
+        'NODE_OPTIONS',
+        'NODE_PATH',
+        'NODE_EXTRA_CA_CERTS',
+        'LD_PRELOAD',
+        'LD_LIBRARY_PATH',
+        'XDG_CONFIG_HOME',
+        'XDG_CACHE_HOME',
+      ]) {
+        expect(unsetVariables).toContain(unsafeVariable);
+      }
+      expect(rootScript).toContain(
+        'readonly PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+      );
+      expect(rootScript).toContain('export LC_ALL=C');
+      expect(rootScript).toContain(
+        'export HOME=/root USER=root LOGNAME=root SHELL=/bin/bash',
+      );
+    }
+    for (const unattendedRootScript of [gateway, publisher, rollback]) {
+      expect(unattendedRootScript).toContain('cd /');
+    }
+    expect(
+      gateway.match(/\/usr\/bin\/python3 -I -S -/g).length,
+    ).toBeGreaterThanOrEqual(5);
+    expect(gateway).not.toMatch(/(^|\s)python3\s+-/m);
+    expect(gateway).toContain('CLEAN_ENV=(');
+    expect(gateway).toContain('/usr/bin/env -i');
+    expect(gateway).toContain(
+      '"${CLEAN_ENV[@]}" "${PACKAGE_ROOT}/backup-now.sh" "$DEPLOY_CONFIG_PATH"',
+    );
+    expect(gateway).toContain(
+      '"${PACKAGE_ROOT}/${DEPLOY_ACTION}.sh" "${DEPLOY_ARGUMENTS[@]}"',
+    );
+    expect(gateway).toContain(
+      '"${verify_env[@]}" \\\n    OTTO_CONFIG_PATH="$deploy_config_path" \\\n    "${INSTALL_ROOT}/deploy/verify.sh"',
+    );
+    expect(gateway).toContain(
+      'if [ "$COMMAND" = \'verify-deployment\' ]; then',
+    );
+  });
+
+  it('preflights the root-owned trust anchor, config and fixed helpers through sudo -n', () => {
+    const gateway = readFileSync(CI_DEPLOY_GATEWAY, 'utf8');
+    const installer = readFileSync(CI_DEPLOY_GATEWAY_INSTALLER, 'utf8');
+    const readme = readFileSync(README, 'utf8');
+    const preflightStart = gateway.indexOf('if [ "$COMMAND" = \'preflight\' ]');
+    const publishStart = gateway.indexOf(
+      'if [ "$COMMAND" = \'publish-mirror\' ]',
+    );
+    const preflight = gateway.slice(preflightStart, publishStart);
+
+    expect(preflightStart).toBeGreaterThan(-1);
+    expect(publishStart).toBeGreaterThan(preflightStart);
+    expect(gateway).toContain(
+      'require_root_owned_regular_file "$GATEWAY_PATH"',
+    );
+    expect(gateway).toContain(
+      'require_root_owned_regular_file "$TRUST_KEY_PATH"',
+    );
+    expect(gateway).toContain(
+      'require_root_owned_regular_file "$CONFIG_PATH_FILE"',
+    );
+    expect(gateway).toContain(
+      'PUBLISH_HELPER_PATH="${LIBEXEC_ROOT}/publish-update-mirror"',
+    );
+    expect(gateway).toContain(
+      'ROLLBACK_HELPER_PATH="${LIBEXEC_ROOT}/rollback-update-mirror"',
+    );
+    expect(gateway).toContain(
+      'require_root_owned_directory_chain "$trusted_directory"',
+    );
+    expect(gateway).toContain(
+      'require_root_owned_regular_file "$PUBLISH_HELPER_PATH"',
+    );
+    expect(gateway).toContain(
+      'require_root_owned_regular_file "$ROLLBACK_HELPER_PATH"',
+    );
+    expect(preflight).toContain(
+      'require_root_owned_regular_file "$DEPLOY_CONFIG_PATH"',
+    );
+    expect(gateway).toContain(
+      'GATEWAY_PROTOCOL="otto-enterprise-ci-deploy-v4"',
+    );
+    expect(preflight).toContain(
+      'GATEWAY_SHA256="$(sha256sum "$GATEWAY_PATH" | awk',
+    );
+    expect(preflight).toContain(
+      'PUBLISH_HELPER_SHA256="$(sha256sum "$PUBLISH_HELPER_PATH" | awk',
+    );
+    expect(preflight).toContain(
+      'ROLLBACK_HELPER_SHA256="$(sha256sum "$ROLLBACK_HELPER_PATH" | awk',
+    );
+    expect(preflight).toContain(
+      "printf 'protocol=%s gateway=%s publish=%s rollback=%s key=%s config=%s deploy_user=%s rollback_user=%s\\n'",
+    );
+    expect(preflight).toContain(
+      '"$ROLLBACK_HELPER_SHA256" "$TRUST_KEY_ID" "$DEPLOY_CONFIG_PATH"',
+    );
+
+    for (const installation of [
+      'install -o root -g root -m 0700 "$GATEWAY_SOURCE" "$GATEWAY_TEMP"',
+      'install -o root -g root -m 0700 "$PUBLISH_SOURCE" "$PUBLISH_TEMP"',
+      'install -o root -g root -m 0700 "$ROLLBACK_SOURCE" "$ROLLBACK_TEMP"',
+      'install -o root -g root -m 0600 -- "$PUBLIC_KEY" "$TRUST_KEY_TEMP"',
+    ]) {
+      expect(installer).toContain(installation);
+    }
+    for (const installation of [
+      'atomic_install_fixed_file "$GATEWAY_TEMP" "$GATEWAY_PATH" 0755',
+      'atomic_install_fixed_file "$PUBLISH_TEMP" "$PUBLISH_PATH" 0755',
+      'atomic_install_fixed_file "$ROLLBACK_TEMP" "$ROLLBACK_PATH" 0755',
+      'atomic_install_fixed_file "$TRUST_KEY_TEMP" "$TRUST_KEY_PATH" 0644',
+    ]) {
+      expect(installer).toContain(installation);
+    }
+    expect(installer).toContain(
+      'require_root_controlled_ancestry "$SCRIPT_DIR"',
+    );
+    expect(installer).toContain('require_root_controlled_file "$source_file"');
+    expect(installer).toContain(
+      'PUBLIC_KEY_REAL="$(readlink -f -- "$PUBLIC_KEY")"',
+    );
+    expect(installer).toContain(
+      'require_root_controlled_ancestry "$(dirname -- "$PUBLIC_KEY")"',
+    );
+    expect(installer).toContain('require_root_controlled_file "$PUBLIC_KEY"');
+    expect(installer).toContain(
+      '[[ "$DEPLOY_CONFIG_PATH" =~ ^/etc/otto-enterprise/[A-Za-z0-9._-]+\\.env$ ]]',
+    );
+    expect(installer).toContain(
+      'require_root_controlled_ancestry "$(dirname -- "$DEPLOY_CONFIG_PATH")"',
+    );
+    expect(installer).toContain(
+      'require_root_controlled_file "$DEPLOY_CONFIG_PATH"',
+    );
+    expect(gateway).toContain(
+      'require_root_owned_directory_chain "$(dirname -- "$DEPLOY_CONFIG_PATH")"',
+    );
+    expect(gateway).toContain('[ "$DEPLOY_USER_UID" != "$ROLLBACK_USER_UID" ]');
+    expect(gateway).toContain('[ "$DEPLOY_USER_GID" != "$ROLLBACK_USER_GID" ]');
+    expect(gateway).toContain('audit_automation_principal "$DEPLOY_USER"');
+    expect(gateway).toContain('audit_automation_principal "$ROLLBACK_USER"');
+    expect(gateway).toContain('/usr/bin/sudo -n -l -U "$principal"');
+    expect(gateway).toContain('[ "$all_groups" = "$primary_group" ]');
+    expect(gateway).toContain('[ "${#privilege_rules[@]}" -eq 1 ]');
+    expect(
+      gateway.indexOf('audit_automation_principal "$ROLLBACK_USER"'),
+    ).toBeLessThan(gateway.indexOf('COMMAND="${1:-}"'));
+    expect(gateway).toContain('if ! /usr/bin/find "$TRANSACTION_UPLOAD_ROOT"');
+    expect(gateway).toContain(
+      "fail 'could not enumerate pending upload transactions'",
+    );
+    expect(installer).toContain('[ "$(stat -c \'%u\' "$directory")" = \'0\' ]');
+    expect(gateway).toContain('[ "$(stat -c \'%u\' "$directory")" = \'0\' ]');
+    const fixedDirectoryInstall = installer.slice(
+      installer.indexOf('install -d -o root -g root -m 0755 \\'),
+      installer.indexOf('install -d -o root -g root -m 0711 \\'),
+    );
+    expect(fixedDirectoryInstall).toContain(
+      '/usr/local/sbin "$LIBEXEC_DIR" /etc/sudoers.d',
+    );
+    expect(fixedDirectoryInstall).not.toContain('/etc/otto-enterprise');
+    expect(installer).toContain(
+      'atomic_install_fixed_file "$CONFIG_PATH_TEMP" "$CONFIG_PATH_FILE" 0600',
+    );
+    expect(installer).toContain('runuser -u "$DEPLOY_USER" --');
+    expect(installer).toContain('DEPLOY_USER_UID="$(id -u "$DEPLOY_USER")"');
+    expect(installer).toContain('DEPLOY_USER_GID="$(id -g "$DEPLOY_USER")"');
+    expect(installer).toContain(
+      '[ "$DEPLOY_USER_UID" != "$ROLLBACK_USER_UID" ]',
+    );
+    expect(installer).toContain(
+      "|| fail 'deploy and rollback users must have distinct UIDs'",
+    );
+    expect(installer).toContain(
+      '[ "$DEPLOY_USER_GID" != "$ROLLBACK_USER_GID" ]',
+    );
+    expect(installer).toContain(
+      "|| fail 'deploy and rollback users must have distinct primary GIDs'",
+    );
+    expect(readme).toContain('UID 与主 GID 均不得相同');
+    expect(readme).toContain('只比较 SHA-256 fingerprint');
+    expect(installer).toContain(
+      "|| fail 'deploy user must be an unprivileged non-root account'",
+    );
+    expect(installer).toContain('sudo -n -l -- "$GATEWAY_PATH" >/dev/null');
+    expect(installer).toContain('audit_automation_principal "$DEPLOY_USER"');
+    expect(installer).toContain('audit_automation_principal "$ROLLBACK_USER"');
+    expect(installer).toContain('sudo -n -l -U "$principal"');
+    expect(installer).toContain('[ "$all_groups" = "$primary_group" ]');
+    expect(installer).toContain(
+      'expected_rule="(root) NOPASSWD: $GATEWAY_PATH"',
+    );
+    expect(installer).toContain('[ "${#privilege_rules[@]}" -eq 1 ]');
+    expect(installer).toContain(
+      'STARTING_FIXED_GENERATION="$(snapshot_fixed_generation)"',
+    );
+    expect(installer).toContain(
+      'LOCKED_FIXED_GENERATION="$(snapshot_fixed_generation)"',
+    );
+    expect(installer).toContain(
+      "|| fail 'stale gateway installer observed a different locked trust generation'",
+    );
+    const lockedGenerationCheck = installer.indexOf(
+      '[ "$LOCKED_FIXED_GENERATION" = "$STARTING_FIXED_GENERATION" ]',
+    );
+    const directorySnapshot = installer.indexOf(
+      'for index in "${!DIRECTORY_TARGETS[@]}"; do',
+    );
+    expect(lockedGenerationCheck).toBeGreaterThan(-1);
+    expect(directorySnapshot).toBeGreaterThan(lockedGenerationCheck);
+    expect(
+      installer.indexOf("DIRECTORY_ROLLBACK_ARMED='true'"),
+    ).toBeGreaterThan(directorySnapshot);
+    expect(installer).toContain(
+      'must never roll back directory state committed',
+    );
+    expect(installer).toContain(
+      "|| fail 'refusing to downgrade the installed gateway protocol'",
+    );
+    expect(installer).toContain('rm -f -- "$target"');
+    expect(installer).toContain(
+      '&& /usr/bin/sync -f "$(dirname -- "$target")"',
+    );
+    expect(installer).toContain(
+      'DIRECTORY_METADATA[$index]="$(stat -c \'%u:%g:%a\' "$target")"',
+    );
+    expect(installer).toContain('rollback_install_directories()');
+    expect(installer).toContain('chown "$uid:$gid" "$target"');
+    expect(installer).toContain('chmod "$mode" "$target"');
+    expect(installer).toContain('rmdir -- "$target"');
+    expect(installer).toContain(
+      'The fixed lock inode and its root-only hierarchy are permanent',
+    );
+    expect(installer).not.toContain('rm -f -- "$PRODUCTION_LOCK"');
+    expect(installer).not.toContain('exec 9>&-');
+  });
+
+  it('uses one fixed root-only bootstrap temp directory independent of TMPDIR', () => {
+    const installer = readFileSync(CI_DEPLOY_GATEWAY_INSTALLER, 'utf8');
+
+    expect(installer).toMatch(/unset[\s\S]*?\bTMPDIR\b/);
+    expect(installer).toContain(
+      'BOOTSTRAP_TEMP_DIR="$(mktemp -d /var/tmp/otto-ci-gateway-bootstrap.XXXXXXXX)"',
+    );
+    expect(installer).toContain(
+      '[ "$(stat -c \'%u:%g:%a\' "$BOOTSTRAP_TEMP_DIR")" = \'0:0:700\' ]',
+    );
+    expect(installer).toContain(
+      'TRUST_KEY_TEMP="${BOOTSTRAP_TEMP_DIR}/trusted-public.pem"',
+    );
+    expect(installer).toContain('GATEWAY_TEMP="${BOOTSTRAP_TEMP_DIR}/gateway"');
+    expect(installer).toContain('trap installer_exit EXIT');
+    expect(installer).toContain('rm -rf -- "$BOOTSTRAP_TEMP_DIR"');
+    expect(installer).not.toMatch(
+      /\bmktemp\b(?! -d \/var\/tmp\/otto-ci-gateway-bootstrap\.XXXXXXXX)/,
+    );
+  });
+
+  it('documents an independently trusted, bounded, and self-cleaning first bootstrap', () => {
+    const readme = readFileSync(README, 'utf8');
+    expect(readme).toContain(
+      "SHELL=/usr/bin/bash /usr/bin/bash -p <<'ROOT_BOOTSTRAP'",
+    );
+    expect(readme).toContain('TRUSTED_PYTHON=/usr/bin/python3.12');
+    expect(readme).toContain('TRUSTED_OPENSSL=/usr/bin/openssl');
+    expect(readme).toContain('"$TRUSTED_PYTHON" -I -S - \\');
+    expect(readme).not.toContain('/usr/bin/node "$TRUSTED_VERIFIER"');
+    expect(readme).toContain('require_root_controlled_path()');
+    expect(readme).toContain(
+      '[ "$(readlink -f -- "$trusted_path")" = "$trusted_path" ]',
+    );
+    expect(readme).toContain(
+      'for trusted_file in "$TRUSTED_PUBLIC_KEY" "$TRUSTED_PYTHON" "$TRUSTED_OPENSSL"; do',
+    );
+    expect(readme).toContain(
+      'BOOTSTRAP_DIR="$(mktemp -d /var/tmp/otto-ci-gateway-bootstrap.XXXXXXXX)"',
+    );
+    expect(readme).toContain(
+      '[ "$(stat -c \'%u:%g:%a\' -- "$BOOTSTRAP_DIR")" = \'0:0:700\' ]',
+    );
+    expect(readme).toContain('trap cleanup_bootstrap EXIT');
+    expect(readme).toContain("trap 'exit 130' HUP INT TERM");
+    expect(readme).toContain(
+      'rm -rf --one-file-system -- "$BOOTSTRAP_DIR" || status=1',
+    );
+
+    expect(readme).toContain('MAX_ARCHIVE_BYTES=$((8 * 1024 * 1024 * 1024))');
+    expect(readme).toContain('MAX_SIGNATURE_BYTES=$((16 * 1024))');
+    expect(readme).toContain('MAX_CHECKSUM_BYTES=256');
+    expect(readme).toContain('SPACE_RESERVE_BYTES=$((256 * 1024 * 1024))');
+    expect(readme).toContain(
+      'open_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK',
+    );
+    expect(readme).toContain('descriptor = os.open(source_path, open_flags)');
+    expect(readme).toContain('source_stat = os.fstat(descriptor)');
+    expect(readme).toContain('if not stat.S_ISREG(source_stat.st_mode):');
+    expect(readme).toContain(
+      'if source_stat.st_size <= 0 or source_stat.st_size > cap:',
+    );
+    expect(readme).toContain(
+      'required_bytes = sum(item[3] for item in opened) + reserve_bytes',
+    );
+    expect(readme).toContain(
+      'os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW',
+    );
+    expect(readme).toContain(
+      "raise ValueError(f'upload grew while copying: {source_path}')",
+    );
+    expect(readme).toContain('os.fsync(target_fd)');
+    expect(readme).toContain('os.fsync(directory_fd)');
+    expect(readme).toContain(
+      '[ "$(stat -c \'%u:%g:%a\' -- "$snapshot_file")" = \'0:0:600\' ]',
+    );
+    expect(readme).toContain(
+      'REQUIRED_BYTES=$((UNPACKED_BYTES + SPACE_RESERVE_BYTES))',
+    );
+
+    expect(readme).toContain('object_pairs_hook=reject_duplicates');
+    expect(readme).toContain('set(envelope) != expected_fields');
+    expect(readme).toContain("envelope['file'] != expected_name");
+    expect(readme).toContain("actual_digest != envelope['sha256']");
+    expect(readme).toContain("re.escape(expected_name.encode('ascii'))");
+    expect(readme).toContain(
+      "checksum_match.group(1).decode('ascii') != actual_digest",
+    );
+    expect(readme).toContain("[openssl_path, 'pkeyutl', '-verify', '-pubin'");
+    expect(readme).not.toContain('/usr/bin/sha256sum -c');
+
+    expect(readme).toContain('-xzf "$SNAPSHOT_ARCHIVE" -C "$EXTRACT_DIR"');
+    expect(readme.indexOf('SNAPSHOT_ARCHIVE=')).toBeLessThan(
+      readme.indexOf('"$TRUSTED_PYTHON" -I -S -'),
+    );
+    expect(readme.indexOf('"$TRUSTED_PYTHON" -I -S -')).toBeLessThan(
+      readme.indexOf('-xzf "$SNAPSHOT_ARCHIVE"'),
+    );
+    expect(readme).not.toContain(
+      'sudo install -d -o root -g root -m 0755 /var/tmp/otto-ci-gateway-bootstrap',
+    );
+    expect(readme).not.toContain('-C /var/tmp/otto-ci-gateway-bootstrap');
+  });
+
+  it('validates every install path, serializes replacement, and rolls back partial installs', () => {
+    const installer = readFileSync(CI_DEPLOY_GATEWAY_INSTALLER, 'utf8');
+    const firstDirectoryInstall = installer.indexOf(
+      'install -d -o root -g root -m 0711 "$STATE_ROOT"',
+    );
+    const targetPreflight = installer.indexOf(
+      'for target in "${DIRECTORY_TARGETS[@]}"; do',
+    );
+    const productionLock = installer.indexOf('/usr/bin/flock -x -w 600 9');
+    const firstFixedInstall = installer.indexOf(
+      'atomic_install_fixed_file "$GATEWAY_TEMP"',
+    );
+    const preflight = installer.indexOf(
+      'sudo -n -- "$GATEWAY_PATH" preflight >/dev/null',
+    );
+    const rollbackDisarm = installer.lastIndexOf("ROLLBACK_ARMED='false'");
+
+    expect(installer).toContain('require_root_controlled_target()');
+    expect(installer).toContain(
+      '[ ! -L "$current" ] || fail "install target ancestry contains a symlink: $current"',
+    );
+    expect(installer).toContain(
+      'fail "install target ancestry is not root-owned: $current"',
+    );
+    expect(installer).toContain(
+      'fail "install target ancestry is group/other writable: $current"',
+    );
+    expect(targetPreflight).toBeGreaterThan(-1);
+    expect(targetPreflight).toBeLessThan(firstDirectoryInstall);
+    expect(installer).toContain(
+      'PRODUCTION_LOCK="${LOCKS_ROOT}/production.lock"',
+    );
+    expect(installer).toContain('exec 9>"$PRODUCTION_LOCK"');
+    expect(productionLock).toBeGreaterThan(firstDirectoryInstall);
+    expect(productionLock).toBeLessThan(firstFixedInstall);
+
+    expect(installer).toContain('atomic_install_fixed_file()');
+    for (const fixedInstall of [
+      'atomic_install_fixed_file "$GATEWAY_TEMP" "$GATEWAY_PATH" 0755',
+      'atomic_install_fixed_file "$PUBLISH_TEMP" "$PUBLISH_PATH" 0755',
+      'atomic_install_fixed_file "$ROLLBACK_TEMP" "$ROLLBACK_PATH" 0755',
+      'atomic_install_fixed_file "$TRUST_KEY_TEMP" "$TRUST_KEY_PATH" 0644',
+      'atomic_install_fixed_file "$CONFIG_PATH_TEMP" "$CONFIG_PATH_FILE" 0600',
+      'atomic_install_fixed_file "$DEPLOY_USER_TEMP" "$DEPLOY_USER_FILE" 0600',
+      'atomic_install_fixed_file "$SUDOERS_TEMP" "$SUDOERS_PATH" 0440',
+    ]) {
+      expect(installer).toContain(fixedInstall);
+    }
+    expect(installer).toContain(
+      'next_file="${target_directory}/.${target##*/}.otto-install.$$.${RANDOM}.next"',
+    );
+    expect(installer).toContain('mv -fT -- "$next_file" "$target"');
+    expect(installer).toContain('cp --preserve=all -- "$target" "$backup"');
+    expect(installer).toContain('rollback_fixed_files()');
+    expect(installer).toContain('mv -fT -- "$next_file" "$target"');
+    expect(installer).toContain('rm -f -- "$target"');
+    expect(installer).toContain("ROLLBACK_ARMED='true'");
+    expect(rollbackDisarm).toBeGreaterThan(preflight);
+  });
+
+  it('lets only the pinned deploy user stage exact uploads and cleans every candidate', () => {
+    const gateway = readFileSync(CI_DEPLOY_GATEWAY, 'utf8');
+    const publisher = readFileSync(PUBLISH_UPDATE_MIRROR, 'utf8');
+    const rollback = readFileSync(ROLLBACK_UPDATE_MIRROR, 'utf8');
+    const installer = readFileSync(CI_DEPLOY_GATEWAY_INSTALLER, 'utf8');
+    const deployWorkflow = readFileSync(DEPLOY_SERVER_WORKFLOW, 'utf8');
+    const releaseWorkflow = readFileSync(RELEASE_WORKFLOW, 'utf8');
+
+    expect(installer).toContain("STATE_ROOT='/var/lib/otto-ci-deploy'");
+    expect(installer).toContain('UPLOADS_ROOT="${STATE_ROOT}/uploads"');
+    expect(installer).toContain('STAGES_ROOT="${STATE_ROOT}/staging"');
+    expect(installer).toContain('LOCKS_ROOT="${STATE_ROOT}/locks"');
+    expect(installer).toContain(
+      'install -d -o root -g root -m 0711 \\\n  "$STATE_ROOT" "$UPLOADS_ROOT" "$UPLOAD_ROOT" "$MIRROR_UPLOAD_ROOT"',
+    );
+    expect(installer).toContain(
+      'install -d -o root -g root -m 0700 \\\n  "$STAGES_ROOT" "$LOCKS_ROOT" "$STAGING_ROOT" "$MIRROR_STAGING_ROOT"',
+    );
+    expect(gateway).toContain('STATE_ROOT="/var/lib/otto-ci-deploy"');
+    for (const root of [
+      '$STATE_ROOT',
+      '$UPLOADS_ROOT',
+      '$STAGES_ROOT',
+      '$LOCKS_ROOT',
+      '$UPLOAD_ROOT',
+      '$MIRROR_UPLOAD_ROOT',
+      '$STAGING_ROOT',
+      '$MIRROR_STAGING_ROOT',
+    ]) {
+      expect(gateway).toContain(`require_root_owned_directory "${root}"`);
+    }
+    expect(gateway).toContain('case "${SUDO_USER:-}" in');
+    expect(gateway).toContain('"$DEPLOY_USER")');
+    expect(gateway).toContain('|| [ "$COMMAND" = \'upload-file\' ]; then');
+    expect(gateway).toContain('mkdir -m 0700 -- "$TRANSACTION_UPLOAD_DIR"');
+    expect(gateway).toContain(
+      'could not enumerate the upload transaction for quota enforcement',
+    );
+    expect(gateway).toContain('done < "$UPLOAD_SCAN_FILE"');
+    expect(gateway).toContain('chown root:root "$TRANSACTION_UPLOAD_DIR"');
+    expect(gateway).toContain(
+      '[ "$(stat -c \'%u:%g:%a\' "$UPLOAD_DIR")" = \'0:0:700\' ]',
+    );
+    expect(gateway).toContain(
+      '[ "$(stat -c \'%u:%g:%a\' "$MIRROR_UPLOAD_DIR")" = \'0:0:700\' ]',
+    );
+    expect(gateway).toContain(
+      "fail 'upload exceeds its role-specific size limit'",
+    );
+    expect(gateway).toContain('UPLOAD_TIMEOUT_SECONDS=1800');
+    expect(gateway).toContain(
+      'RESULTING_TRANSACTION_BYTES="$((CURRENT_TRANSACTION_BYTES + EXPECTED_SIZE))"',
+    );
+    expect(gateway).toContain(
+      'EXPECTED_SIZE + RESULTING_TRANSACTION_BYTES + 1023',
+    );
+    expect(gateway).toContain('EXPANDED_ARCHIVE_BYTES="$(/usr/bin/python3');
+    expect(gateway).toContain('EXPANDED_ARCHIVE_BYTES + 1023');
+    expect(gateway).toContain(
+      'staging filesystem does not have capacity to unpack the archive and retain the safety reserve',
+    );
+    expect(publisher).toContain('missing_asset_bytes=0');
+    expect(publisher).toContain('MIN_MIRROR_FREE_RESERVE_KIB=262144');
+    expect(publisher).toContain(
+      'mirror filesystem does not have capacity for immutable assets and the safety reserve',
+    );
+    expect(publisher).toContain('newly_installed_assets+=(');
+    expect(publisher).toContain("retain_installed_assets='true'");
+    expect(
+      publisher.indexOf('mkdir -m 0700 -- "$transaction_dir"'),
+    ).toBeGreaterThan(
+      publisher.indexOf(
+        'mirror filesystem does not have capacity for immutable assets and the safety reserve',
+      ),
+    );
+    expect(rollback).toContain(
+      'mirror transaction stopped before claiming publication; no public manifest was changed',
+    );
+    expect(rollback).toContain(
+      'mirror transaction stopped before claiming publication and was already marked rolled back',
+    );
+    expect(rollback).toContain('validate_claimed_asset_ledger');
+    expect(rollback).toContain(
+      'immutable asset audit ledger does not contain the exact asset set',
+    );
+    expect(rollback).toContain(
+      'version-burned immutable asset does not match its audit ledger',
+    );
+    expect(rollback).toContain(
+      'rollback_started="$transaction_dir/rollback-started"',
+    );
+    expect(rollback).toContain('capability_sha256=%s');
+    expect(rollback).toContain('/usr/bin/sync -f "$rollback_started_next"');
+    expect(rollback).toContain(
+      'rollback-started record authorizes convergence even after capability expiry',
+    );
+    expect(rollback).toContain(
+      "'format', 'version', 'packageIdentity', 'sourceCommit', 'assets'",
+    );
+    expect(rollback).toContain("f'Otto-{expected_version}-arm64.dmg.blockmap'");
+    expect(rollback).toContain("f'Otto-{expected_version}-x64.dmg.blockmap'");
+    expect(rollback).toContain(
+      "f'Otto-Setup-{expected_version}-win-x64.exe.blockmap'",
+    );
+    expect(publisher).toContain(
+      'mirror version ${version} was already burned by transaction ${historical_name}',
+    );
+    expect(publisher).toContain(
+      'could not enumerate historical mirror transactions',
+    );
+    expect(publisher).toContain('done < "$historical_scan_file"');
+    expect(publisher).toContain(
+      'current mirror owner has an unfinished rollback; refusing a new publication',
+    );
+    expect(publisher).toContain(
+      'if ! /usr/bin/find "$current_owner_transaction"',
+    );
+    expect(publisher).toContain("-name '.rollback-started.*.next' -print0");
+    expect(publisher).toContain(
+      "fail 'could not enumerate current owner rollback temporary markers'",
+    );
+    expect(rollback).toContain(
+      'mktemp "$transaction_dir/.rollback-started.XXXXXXXX.next"',
+    );
+    expect(rollback).toContain('multiple complete rollback-started');
+    expect(rollback).toContain('printf -v expected_rollback_started');
+    expect(rollback).toContain(
+      '/usr/bin/cmp -n "$(stat -c \'%s\' "$candidate")"',
+    );
+    expect(rollback).toContain(
+      'is uncommitted state, so remove it and rebuild after validation',
+    );
+    expect(rollback).toContain('cleanup_abandoned_publish_temps()');
+    expect(rollback).toContain(
+      '"${downloads_dir}/.${asset_name}.${transaction_id}.next"',
+    );
+    expect(rollback).toContain(
+      '"${STATE_ROOT}/.mirror-rollback-capability.${transaction_id}.next"',
+    );
+    expect(rollback).toContain(
+      "Remove only this transaction's fixed whitelist.",
+    );
+    expect(publisher).toContain(
+      '"$current_owner_ledger_signature" "$current_owner_capability"',
+    );
+    expect(publisher).toContain(
+      'current mirror owner ledger asset set is invalid',
+    );
+    const previousStateSync = publisher.indexOf(
+      '/usr/bin/sync -f "$transaction_dir"',
+    );
+    const publishedLedgerInstall = publisher.indexOf(
+      'install -o root -g root -m 0600 -- "$staging_dir/latest.json" "$published_manifest"',
+    );
+    const signedAssetLedgerInstall = publisher.indexOf(
+      'install -o root -g root -m 0600 -- "$manifest_path" "$asset_ledger"',
+    );
+    const claimingInstall = publisher.indexOf(
+      'install -o root -g root -m 0600 /dev/null "$transaction_dir/claiming"',
+    );
+    const assetInstall = publisher.indexOf(
+      'install -o root -g root -m 0644 -- "$staging_dir/$asset_name" "$asset_next"',
+    );
+    const assetFileSync = publisher.indexOf(
+      '/usr/bin/sync -f "$asset_next"',
+      assetInstall,
+    );
+    const assetRename = publisher.indexOf(
+      'mv -f -- "$asset_next" "$downloads_dir/$asset_name"',
+      assetInstall,
+    );
+    const assetSync = publisher.indexOf(
+      '/usr/bin/sync -f "$downloads_dir"',
+      assetInstall,
+    );
+    const ownerMove = publisher.indexOf(
+      'mv -f -- "$owner_next" "$CURRENT_OWNER_PATH"',
+    );
+    const manifestMove = publisher.indexOf(
+      'mv -f -- "$latest_next" "$current_manifest"',
+    );
+    const latestInstall = publisher.indexOf(
+      'install -o root -g root -m 0644 -- "$staging_dir/latest.json" "$latest_next"',
+    );
+    const latestPreSync = publisher.indexOf(
+      '/usr/bin/sync -f "$releases_dir"',
+      latestInstall,
+    );
+    expect(previousStateSync).toBeGreaterThan(-1);
+    expect(previousStateSync).toBeLessThan(assetInstall);
+    expect(publishedLedgerInstall).toBeGreaterThan(previousStateSync);
+    expect(signedAssetLedgerInstall).toBeGreaterThan(previousStateSync);
+    expect(signedAssetLedgerInstall).toBeLessThan(claimingInstall);
+    expect(publishedLedgerInstall).toBeLessThan(claimingInstall);
+    expect(claimingInstall).toBeLessThan(assetInstall);
+    expect(publisher.indexOf("retain_installed_assets='true'")).toBeLessThan(
+      assetInstall,
+    );
+    expect(assetSync).toBeGreaterThan(assetInstall);
+    expect(assetFileSync).toBeGreaterThan(assetInstall);
+    expect(assetRename).toBeGreaterThan(assetFileSync);
+    expect(assetSync).toBeGreaterThan(assetRename);
+    expect(assetSync).toBeLessThan(ownerMove);
+    expect(latestPreSync).toBeGreaterThan(latestInstall);
+    expect(latestPreSync).toBeLessThan(ownerMove);
+    expect(ownerMove).toBeLessThan(manifestMove);
+    const rollbackNextInstall = rollback.indexOf(
+      'install -o root -g root -m 0644 -- "$previous_manifest" "$rollback_next"',
+    );
+    const rollbackPreSync = rollback.indexOf(
+      '/usr/bin/sync -f "$releases_dir"',
+      rollbackNextInstall,
+    );
+    const rollbackManifestMove = rollback.indexOf(
+      'mv -f -- "$rollback_next" "$current_manifest"',
+    );
+    expect(rollbackPreSync).toBeGreaterThan(rollbackNextInstall);
+    expect(rollbackPreSync).toBeLessThan(rollbackManifestMove);
+    const rollbackOwnerInstall = rollback.indexOf(
+      'install -o root -g root -m 0600 -- "$previous_owner" "$owner_next"',
+    );
+    const rollbackOwnerPreSync = rollback.indexOf(
+      '/usr/bin/sync -f "$STATE_ROOT"',
+      rollbackOwnerInstall,
+    );
+    const rollbackOwnerMove = rollback.indexOf(
+      'mv -f -- "$owner_next" "$CURRENT_OWNER_PATH"',
+    );
+    expect(rollbackOwnerPreSync).toBeGreaterThan(rollbackOwnerInstall);
+    expect(rollbackOwnerPreSync).toBeLessThan(rollbackOwnerMove);
+    expect(gateway).toContain('os.O_EXCL');
+    expect(gateway).toContain("getattr(os, 'O_NOFOLLOW', 0)");
+    expect(gateway).toContain('os.fsync(temporary_fd)');
+    expect(gateway).toContain('os.fsync(directory_fd)');
+    expect(gateway).toContain(
+      "|| fail 'transaction upload directory does not contain the exact file set'",
+    );
+    expect(gateway).toContain(
+      "|| fail 'mirror upload directory does not contain the exact file set'",
+    );
+    expect(gateway).toContain('trap cleanup_deploy_candidate EXIT');
+    expect(gateway).toContain('trap cleanup_mirror_candidate EXIT');
+    expect(gateway).toContain(
+      'rm -rf --one-file-system -- "$STAGING_DIR" "$UPLOAD_DIR"',
+    );
+    expect(gateway).toContain(
+      'rm -rf --one-file-system -- "$MIRROR_STAGING_DIR" "$MIRROR_UPLOAD_DIR"',
+    );
+
+    expect(deployWorkflow).toContain(
+      'prepare-upload enterprise "$DEPLOY_TRANSACTION_ID"',
+    );
+    expect(deployWorkflow).toContain(
+      'upload-file enterprise "$DEPLOY_TRANSACTION_ID" "$role" "$size" "$digest"',
+    );
+    expect(deployWorkflow).toContain(
+      'cleanup-upload enterprise "$DEPLOY_TRANSACTION_ID"',
+    );
+    expect(deployWorkflow).toContain(
+      "if: ${{ always() && steps.ssh.outcome == 'success' }}",
+    );
+    expect(releaseWorkflow).toContain(
+      'prepare-upload mirror "$MIRROR_TRANSACTION_ID"',
+    );
+    expect(releaseWorkflow).toContain(
+      'upload-file mirror "$MIRROR_TRANSACTION_ID" "$role" "$size" "$digest"',
+    );
+    expect(releaseWorkflow).toContain(
+      'cleanup-upload mirror "$MIRROR_TRANSACTION_ID"',
+    );
+    expect(releaseWorkflow).toContain(
+      "if: ${{ always() && steps.mirror_ssh.outcome == 'success' }}",
+    );
+    for (const workflow of [deployWorkflow, releaseWorkflow]) {
+      expect(workflow).not.toContain("install -d -m 0700 '$REMOTE_DIR'");
+      expect(workflow).not.toMatch(/^\s*scp\s/gm);
+    }
+  });
+
+  it('serializes deployment and mirror transactions before mutating root-owned state', () => {
+    const gateway = readFileSync(CI_DEPLOY_GATEWAY, 'utf8');
+    const publisher = readFileSync(PUBLISH_UPDATE_MIRROR, 'utf8');
+    const rollback = readFileSync(ROLLBACK_UPDATE_MIRROR, 'utf8');
+
+    expect(gateway).toContain('acquire_production_lock()');
+    expect(gateway).toContain(
+      'local lock_path="${LOCKS_ROOT}/production.lock"',
+    );
+    expect(gateway).toContain('/usr/bin/flock -x -w 600 9');
+    expect(gateway).toContain(
+      "[ -x /usr/bin/flock ] || fail 'required /usr/bin/flock is unavailable'",
+    );
+    expect(
+      gateway.match(/acquire_production_lock/g).length,
+    ).toBeGreaterThanOrEqual(7);
+    expect(gateway).toContain(
+      '[ "${PRODUCTION_LOCK_HELD:-false}" = \'true\' ]',
+    );
+    const earlyProductionLock = gateway.indexOf(
+      'acquire_production_lock\nverify_running_gateway_identity',
+    );
+    expect(earlyProductionLock).toBeGreaterThan(-1);
+    expect(earlyProductionLock).toBeLessThan(
+      gateway.indexOf('require_root_owned_regular_file "$GATEWAY_PATH"'),
+    );
+    const runningIdentity = gateway.indexOf(
+      'verify_running_gateway_identity\n',
+      earlyProductionLock,
+    );
+    expect(runningIdentity).toBeGreaterThan(earlyProductionLock);
+    expect(runningIdentity).toBeLessThan(
+      gateway.indexOf('for trusted_directory in'),
+    );
+    expect(gateway).toContain('running_gateway_fd="/proc/$$/fd/255"');
+    expect(gateway).toContain(
+      'running gateway inode does not match the locked fixed gateway',
+    );
+    expect(gateway).toContain('mkdir -m 0700 -- "$STAGING_DIR"');
+    expect(gateway).toContain('mkdir -m 0700 -- "$MIRROR_STAGING_DIR"');
+
+    for (const helper of [publisher, rollback]) {
+      expect(helper).toContain(
+        "readonly LOCKS_ROOT='/var/lib/otto-ci-deploy/locks'",
+      );
+      expect(helper).toContain('exec 8>"$mirror_lock_path"');
+      expect(helper).toContain('/usr/bin/flock -x -w 600 8');
+      expect(helper).toContain(
+        "[[ -x /usr/bin/sync ]] || fail 'required /usr/bin/sync is unavailable'",
+      );
+    }
+    expect(publisher.indexOf('/usr/bin/flock -x -w 600 8')).toBeLessThan(
+      publisher.indexOf(
+        'previous_manifest="$transaction_dir/previous-latest.json"',
+      ),
+    );
+    expect(rollback.indexOf('/usr/bin/flock -x -w 600 8')).toBeLessThan(
+      rollback.indexOf('if [[ ! -d "$transaction_dir" ]]; then'),
+    );
+    expect(publisher).toContain('mkdir -m 0700 -- "$transaction_dir"');
+    expect(publisher).toContain('trap cleanup_publish_next_files EXIT');
+    expect(publisher).toContain('publish_next_files+=("$asset_next")');
+    expect(publisher).toContain('publish_next_files+=("$latest_next")');
+    expect(rollback).toContain('trap cleanup_rollback_next_files EXIT');
+    expect(publisher).not.toContain(
+      'install -d -o root -g root -m 0700 "$transaction_dir"',
+    );
+  });
+
+  it('binds the signed release manifest and deployed target to the exact package identity', () => {
+    const gateway = readFileSync(CI_DEPLOY_GATEWAY, 'utf8');
+
+    expect(gateway).toContain('EXPECTED_BUILD_PREFIX="${PACKAGE_ID%%-*}"');
+    expect(gateway).toContain(
+      'EXPECTED_SOURCE_INPUT_PREFIX="${PACKAGE_ID#*-}"',
+    );
+    expect(gateway).toContain(
+      '"$RELEASE_MANIFEST" "$EXPECTED_VERSION" \\\n  "$EXPECTED_BUILD_PREFIX" "$EXPECTED_SOURCE_INPUT_PREFIX"',
+    );
+    expect(gateway).toContain('build_commit[:12] != expected_build');
+    expect(gateway).toContain('source_input[:12] != expected_source');
+    expect(gateway).toContain(
+      'local expected_current_release="${INSTALL_ROOT}/releases/${expected_version}-${expected_build_prefix}"',
+    );
+    expect(gateway).toContain(
+      '[ "$current_release" = "$expected_current_release" ]',
+    );
+    expect(gateway).toContain(
+      'require_root_owned_directory_chain "$current_release"',
+    );
+    expect(gateway).toContain(
+      'require_root_owned_directory_chain "${INSTALL_ROOT}/deploy"',
+    );
+    expect(gateway).toContain(
+      '"$EXPECTED_VERSION" "$PACKAGE_ID" "$EXPECTED_SOURCE_COMMIT"',
+    );
+    expect(gateway).not.toContain(
+      '"${INSTALL_ROOT}/releases/${EXPECTED_VERSION}-"*)',
+    );
+  });
+
+  it('never replaces bytes already published under the same versioned asset name', () => {
+    const publisher = readFileSync(PUBLISH_UPDATE_MIRROR, 'utf8');
+    const immutableCheck = publisher.indexOf(
+      'if [[ -e "$installed_asset" || -L "$installed_asset" ]]; then',
+    );
+    const manifestBackup = publisher.indexOf(
+      'previous_manifest="$transaction_dir/previous-latest.json"',
+    );
+    const assetPublication = publisher.indexOf(
+      'mv -f -- "$asset_next" "$downloads_dir/$asset_name"',
+    );
+
+    expect(immutableCheck).toBeGreaterThan(-1);
+    expect(manifestBackup).toBeGreaterThan(immutableCheck);
+    expect(assetPublication).toBeGreaterThan(manifestBackup);
+    expect(publisher).toContain(
+      'refusing to replace an existing version with different bytes',
+    );
+    expect(publisher).toContain(
+      'require_root_owned_nonwritable_path "$installed_asset"',
+    );
+    expect(publisher).toContain(
+      'existing desktop asset is not web-readable mode 0644',
+    );
+    expect(publisher).toContain(
+      'require_root_owned_nonwritable_path "$current_manifest"',
+    );
+    expect(publisher).toContain(
+      '[[ "$(sha256sum -- "$installed_asset" | awk \'{print $1}\')" == "${manifest_hashes[$asset_name]}" ]]',
+    );
+    expect(publisher).toContain(
+      'if [[ -f "$downloads_dir/$asset_name" ]]; then\n    continue',
+    );
+  });
+
+  it('prevents update-mirror downgrade and same-version manifest mutation', () => {
+    const publisher = readFileSync(PUBLISH_UPDATE_MIRROR, 'utf8');
+
+    expect(publisher).toContain('/usr/bin/python3 -I -S - \\');
+    expect(publisher).toContain(
+      "raise SystemExit('refusing to downgrade the desktop update mirror')",
+    );
+    expect(publisher).toContain(
+      "raise SystemExit('refusing to mutate latest.json for an already published version')",
+    );
+    expect(publisher).toContain(
+      'if candidate_version == current_version and candidate_path.read_bytes() != current_path.read_bytes():',
+    );
+  });
+
+  it('binds mirror publication to the exact deployed enterprise identity', () => {
+    const gateway = readFileSync(CI_DEPLOY_GATEWAY, 'utf8');
+    const publishStart = gateway.indexOf(
+      'if [ "$COMMAND" = \'publish-mirror\' ]; then',
+    );
+    const rollbackStart = gateway.indexOf(
+      'if [ "$COMMAND" = \'rollback-mirror\' ]; then',
+    );
+    const publishBranch = gateway.slice(publishStart, rollbackStart);
+    const identityVerification = publishBranch.indexOf(
+      'verify_current_deployment \\\n    "$EXPECTED_VERSION" "$PACKAGE_ID" "$EXPECTED_SOURCE_COMMIT"',
+    );
+
+    expect(publishStart).toBeGreaterThan(-1);
+    expect(rollbackStart).toBeGreaterThan(publishStart);
+    expect(publishBranch).toContain(
+      '[ "$#" -eq 5 ] || fail \'usage: publish-mirror TRANSACTION VERSION PACKAGE_ID SOURCE_COMMIT\'',
+    );
+    expect(identityVerification).toBeGreaterThan(-1);
+    expect(publishBranch).toContain('verify_update_mirror_manifest \\');
+    expect(publishBranch).toContain(
+      '"$EXPECTED_VERSION" "$PACKAGE_ID" "$EXPECTED_SOURCE_COMMIT"',
+    );
+    expect(
+      publishBranch.indexOf('"$PUBLISH_HELPER_PATH" "$TRANSACTION_ID"'),
+    ).toBeGreaterThan(identityVerification);
+  });
+
+  it('rejects a stale rollback after another transaction owns latest.json', () => {
+    const publisher = readFileSync(PUBLISH_UPDATE_MIRROR, 'utf8');
+    const rollback = readFileSync(ROLLBACK_UPDATE_MIRROR, 'utf8');
+    const ownershipCheck = rollback.indexOf(
+      'if [[ "$current_owner" != "$transaction_id" ]]; then',
+    );
+    const staleFailure = rollback.indexOf(
+      'current public manifest no longer belongs to this transaction; refusing stale rollback',
+    );
+    const manifestIdentityCheck = rollback.indexOf(
+      'cmp -s -- "$current_manifest" "$published_manifest"',
+    );
+    const restore = rollback.lastIndexOf(
+      'mv -f -- "$rollback_next" "$current_manifest"',
+    );
+
+    expect(publisher).toContain(
+      'published_manifest="$transaction_dir/published-latest.json"',
+    );
+    expect(publisher).toContain(
+      'install -o root -g root -m 0600 -- "$staging_dir/latest.json" "$published_manifest"',
+    );
+    expect(publisher).toContain(
+      "readonly CURRENT_OWNER_PATH='/var/lib/otto-ci-deploy/mirror-current-owner'",
+    );
+    expect(publisher).toContain('mv -f -- "$owner_next" "$CURRENT_OWNER_PATH"');
+    expect(publisher).toContain(
+      'install -o root -g root -m 0600 /dev/null "$transaction_dir/committed"',
+    );
+    expect(publisher).toContain(
+      'current_owner_transaction="$transactions_dir/$current_owner_value"',
+    );
+    expect(publisher).toContain('"$current_owner_transaction/claiming"');
+    expect(publisher).toContain('"$current_owner_transaction/committed"');
+    expect(publisher).toContain(
+      "|| fail 'current mirror owner transaction is marked rolled back'",
+    );
+    expect(publisher).toContain(
+      'cmp -s -- "$current_manifest" "$current_owner_manifest"',
+    );
+    expect(rollback).toContain(
+      'published_manifest="$transaction_dir/published-latest.json"',
+    );
+    expect(ownershipCheck).toBeGreaterThan(-1);
+    expect(staleFailure).toBeGreaterThan(ownershipCheck);
+    expect(manifestIdentityCheck).toBeGreaterThan(ownershipCheck);
+    expect(restore).toBeGreaterThan(staleFailure);
+    expect(rollback).toContain('restore_previous_owner');
+    expect(rollback).toContain(
+      'if [[ -f "$transaction_dir/rolled-back" ]]; then',
+    );
+    expect(rollback).toContain(
+      'require_root_owned_nonwritable_path "$transaction_file"',
+    );
+    expect(rollback).toContain(
+      'require_root_owned_nonwritable_path "$current_manifest"',
+    );
+    expect(rollback).toContain(
+      'if [[ "$current_owner" != "$transaction_id" ]]; then\n  if previous_state_is_current; then',
+    );
+    expect(rollback).not.toContain(
+      'if [[ ! -f "$transaction_dir/committed" ]] && previous_state_is_current; then',
+    );
+    expect(rollback).toContain(
+      "|| fail 'current mirror owner has no published manifest; refusing an unverifiable rollback'",
+    );
+    expect(rollback).toContain(
+      "|| fail 'mirror transaction has no published manifest and its previous state is not current'",
+    );
+    expect(publisher).toContain('/usr/bin/sync -f "$STATE_ROOT"');
+    expect(publisher).toContain('/usr/bin/sync -f "$releases_dir"');
+    expect(rollback).toContain('/usr/bin/sync -f "$transaction_dir"');
+    expect(rollback).toContain('/usr/bin/sync -f "$STATE_ROOT"');
+    expect(rollback).toContain('/usr/bin/sync -f "$releases_dir"');
+    expect(rollback).toContain("printf 'restored_manifest_sha256=%s\\n'");
+    expect(rollback).toContain("printf 'restored_manifest_sha256=absent\\n'");
+  });
+
+  it('packages every gateway component and normalizes it to executable mode', () => {
+    const bundle = readFileSync(BUNDLE_SCRIPT, 'utf8');
+    const executableFiles =
+      bundle.match(/const executableFiles = \[([\s\S]*?)\n\s{2}\];/)?.[1] ?? '';
+
+    for (const component of [
+      'ci-deploy-gateway.sh',
+      'install-ci-deploy-gateway.sh',
+      'ci/publish-update-mirror.sh',
+      'ci/rollback-update-mirror.sh',
+    ]) {
+      expect(executableFiles).toContain(`    '${component}',`);
+    }
+    expect(bundle).toContain(
+      'chmodSync(path.join(finalPackageRoot, script), 0o755)',
+    );
   });
 });
 

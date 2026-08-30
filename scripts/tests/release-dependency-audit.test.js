@@ -106,7 +106,7 @@ describe('release dependency audit gate', () => {
     ]);
     const exception = validateExceptionPolicy(
       policy,
-      new Date('2026-08-29T12:00:00Z'),
+      new Date('2026-08-30T12:00:00Z'),
     );
 
     expect(() => validateLockfile(lock, exception)).not.toThrow();
@@ -168,6 +168,16 @@ describe('release dependency audit gate', () => {
     );
   });
 
+  it('reports an audit endpoint failure before treating it as a format change', async () => {
+    const policy = await readJson(policyPath);
+    expect(() =>
+      validateAuditReport(
+        { error: { summary: 'registry unavailable' } },
+        policy.exception,
+      ),
+    ).toThrow('npm audit endpoint returned an error');
+  });
+
   it('rejects advisory identity or remediation changes', async () => {
     const [policy, auditReport] = await Promise.all([
       readJson(policyPath),
@@ -188,6 +198,22 @@ describe('release dependency audit gate', () => {
     };
     expect(() => validateAuditReport(fixedRelease, policy.exception)).toThrow(
       'pptxgenjs audit remediation changed',
+    );
+
+    const changedRange = clone(auditReport);
+    changedRange.vulnerabilities['image-size'].range = '<=2.0.2';
+    expect(() => validateAuditReport(changedRange, policy.exception)).toThrow(
+      'image-size audit record changed',
+    );
+
+    const imageSizeFix = clone(auditReport);
+    imageSizeFix.vulnerabilities['image-size'].fixAvailable = {
+      name: 'image-size',
+      version: '2.0.3',
+      isSemVerMajor: true,
+    };
+    expect(() => validateAuditReport(imageSizeFix, policy.exception)).toThrow(
+      'image-size audit remediation changed',
     );
   });
 

@@ -35,17 +35,16 @@ on:
       - 'v*.*.*'
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
-  artifact-metadata: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: otto-production-${{ github.repository }}
+  queue: max
   cancel-in-progress: false
 
 env:
   NODE_VERSION: '22.23.1'
+  NPM_VERSION: '10.9.8'
   ELECTRON_VERSION: '43.2.0'
   RUST_TOOLCHAIN: '1.97.1'
   SQLCIPHER_SOURCE_REVISION: e2a6040f2ae5cfff2b3e08eb3320007d93cdf3fc
@@ -56,12 +55,152 @@ env:
   UPDATE_MIRROR_ROOT: '/opt/otto-website'
 
 jobs:
+  validate-mode:
+    name: Validate release mode boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Reject unsafe transition parameter combinations
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          UNSIGNED_MAC_TRANSITION: ${{ inputs.unsigned_mac_transition && 'true' || 'false' }}
+          RELEASE_CHANNEL: ${{ inputs.release_channel || 'stable' }}
+          DRAFT_RELEASE: ${{ inputs.draft && 'true' || 'false' }}
+          PRERELEASE: ${{ inputs.prerelease && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ "$REPOSITORY" != "NSIETeam/otto-new" ]; then
+            echo "Release workflow may only run in NSIETeam/otto-new, not $REPOSITORY." >&2
+            exit 1
+          fi
+          if [ "$UNSIGNED_MAC_TRANSITION" = "true" ] || [ "$RELEASE_CHANNEL" = "transition" ]; then
+            if [ "$EVENT_NAME" != "workflow_dispatch" ] \
+              || [ "$UNSIGNED_MAC_TRANSITION" != "true" ] \
+              || [ "$RELEASE_CHANNEL" != "transition" ] \
+              || [ "$DRAFT_RELEASE" != "true" ] \
+              || [ "$PRERELEASE" != "true" ]; then
+              echo "Unsigned transition builds require workflow_dispatch, unsigned_mac_transition=true, release_channel=transition, draft=true, and prerelease=true." >&2
+              exit 1
+            fi
+          fi
+          if [ "$PRERELEASE" = "true" ] && [ "$DRAFT_RELEASE" != "true" ]; then
+            echo "Prerelease artifacts must remain draft-only and cannot deploy or update existing users." >&2
+            exit 1
+          fi
+
+  validate-source:
+    name: Validate immutable release source
+    needs: validate-mode
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      source_commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify locked Node.js runtime
+        shell: bash
+        run: test "$(node --version)" = "v${NODE_VERSION}"
+
+      - name: Resolve and validate release version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="${INPUT_VERSION#v}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          ROOT_VERSION="$(node -p "require('./package.json').version")"
+          DESKTOP_VERSION="$(node -p "require('./packages/desktop/package.json').version")"
+          if [ "$VERSION" != "$ROOT_VERSION" ] || [ "$VERSION" != "$DESKTOP_VERSION" ]; then
+            echo "Version mismatch: target=$VERSION root=$ROOT_VERSION desktop=$DESKTOP_VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Require the exact latest internal commit
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin internal
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          INTERNAL_COMMIT="$(git rev-parse origin/internal)"
+          if [ "$SOURCE_COMMIT" != "$INTERNAL_COMMIT" ]; then
+            echo "Release source must exactly equal the latest origin/internal commit." >&2
+            echo "source=$SOURCE_COMMIT internal=$INTERNAL_COMMIT" >&2
+            exit 1
+          fi
+          if ! git diff --quiet "$INTERNAL_COMMIT" "$SOURCE_COMMIT" -- .github/workflows; then
+            echo "Release workflow changes must land on the default internal branch before creating a release." >&2
+            git diff --name-only "$INTERNAL_COMMIT" "$SOURCE_COMMIT" -- .github/workflows >&2
+            exit 1
+          fi
+          echo "commit=$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
+
+  linux-enterprise-deployment-integration:
+    name: Verify Linux Root Deployment Transactions
+    needs: validate-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Exercise root gateway, signatures, locks and mirror rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --network none \
+            --pids-limit 256 \
+            --memory 512m \
+            --cpus 2 \
+            --security-opt no-new-privileges \
+            --user 0:0 \
+            -e OTTO_CI_INTEGRATION_CONTAINER=1 \
+            -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+            python@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 \
+            bash /workspace/scripts/tests/enterprise-ci-linux-integration.sh
+
   sqlcipher-native:
     name: Build verified SQLCipher native matrix
+    needs: validate-source
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     uses: ./.github/workflows/sqlcipher-native.yml
 
   otto-native:
     name: Build verified Otto native ${{ matrix.target }}
+    needs: validate-source
     strategy:
       fail-fast: false
       matrix:
@@ -81,14 +220,19 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+      artifact-metadata: write
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify locked Node.js runtime
+        shell: bash
+        run: test "$(node --version)" = "v${NODE_VERSION}"
 
       - name: Install locked Rust toolchain target
         shell: bash
@@ -108,12 +252,12 @@ jobs:
             --probe
 
       - name: Attest Otto native runtime and manifest
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: native/otto-native/${{ matrix.target }}/*
 
       - name: Upload exact Otto native runtime
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: otto-native-${{ matrix.target }}
           path: native/otto-native/${{ matrix.target }}
@@ -122,29 +266,44 @@ jobs:
   build:
     name: Check, Build, Draft Release
     runs-on: macos-latest
+    environment: production-approval
     timeout-minutes: 90
     needs:
+      - validate-source
+      - linux-enterprise-deployment-integration
       - sqlcipher-native
       - otto-native
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
-      source_commit: ${{ steps.source.outputs.commit }}
+      version: ${{ needs.validate-source.outputs.version }}
+      tag: ${{ needs.validate-source.outputs.tag }}
+      source_commit: ${{ needs.validate-source.outputs.source_commit }}
+      package_identity: ${{ steps.artifacts.outputs.package_identity }}
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
+      - name: Verify locked JavaScript toolchain
+        shell: bash
+        run: |
+          test "$(node --version)" = "v${NODE_VERSION}"
+          test "$(npm --version)" = "$NPM_VERSION"
+
       - name: Setup Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
 
@@ -152,7 +311,6 @@ jobs:
         run: npm ci
         env:
           PYTHON: python3.11
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enforce release dependency audit
         run: npm run security:dependencies:release
@@ -165,14 +323,14 @@ jobs:
 
       - name: Preserve E2EE adversarial evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2ee-adversarial-release-evidence
           path: artifacts/security/e2ee-adversarial-report.json
           if-no-files-found: error
 
       - name: Download verified SQLCipher native matrix
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sqlcipher-native-matrix
           path: native/sqlcipher
@@ -195,7 +353,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY"
 
       - name: Download verified enterprise Node.js SQLCipher native matrix
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sqlcipher-node-native-matrix
           path: native/sqlcipher-node
@@ -220,19 +378,19 @@ jobs:
             --repo "$GITHUB_REPOSITORY"
 
       - name: Download verified Otto native win32-x64 runtime
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: otto-native-win32-x64
           path: native/otto-native/win32-x64
 
       - name: Download verified Otto native darwin-x64 runtime
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: otto-native-darwin-x64
           path: native/otto-native/darwin-x64
 
       - name: Download verified Otto native darwin-arm64 runtime
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: otto-native-darwin-arm64
           path: native/otto-native/darwin-arm64
@@ -252,50 +410,6 @@ jobs:
               gh attestation verify "$artifact" --repo "$GITHUB_REPOSITORY"
             done < <(find "native/otto-native/$target" -maxdepth 1 -type f -print0)
           done
-
-      - name: Resolve release version
-        id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-          INPUT_VERSION="${{ inputs.version }}"
-          if [ -n "$INPUT_VERSION" ]; then
-            VERSION="${INPUT_VERSION#v}"
-          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-          else
-            VERSION="$(node -p "require('./package.json').version")"
-          fi
-          ROOT_VERSION="$(node -p "require('./package.json').version")"
-          DESKTOP_VERSION="$(node -p "require('./packages/desktop/package.json').version")"
-          if [ "$VERSION" != "$ROOT_VERSION" ] || [ "$VERSION" != "$DESKTOP_VERSION" ]; then
-            echo "Version mismatch: target=$VERSION root=$ROOT_VERSION desktop=$DESKTOP_VERSION" >&2
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Require a release source based on the latest internal commit
-        id: source
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --no-tags origin internal
-          SOURCE_COMMIT="$(git rev-parse HEAD)"
-          INTERNAL_COMMIT="$(git rev-parse origin/internal)"
-          if ! git merge-base --is-ancestor "$INTERNAL_COMMIT" "$SOURCE_COMMIT"; then
-            echo "Release source must contain the latest origin/internal commit." >&2
-            echo "source=$SOURCE_COMMIT internal=$INTERNAL_COMMIT" >&2
-            exit 1
-          fi
-          if [ "$SOURCE_COMMIT" != "$INTERNAL_COMMIT" ] \
-            && [[ "$GITHUB_REF" != refs/heads/release/* ]] \
-            && [[ "$GITHUB_REF" != refs/tags/v* ]]; then
-            echo "Commits beyond origin/internal may only be released from release/* branches or version tags." >&2
-            echo "ref=$GITHUB_REF source=$SOURCE_COMMIT internal=$INTERNAL_COMMIT" >&2
-            exit 1
-          fi
-          echo "commit=$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
 
       - name: Validate enterprise license trust anchor
         if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
@@ -319,7 +433,6 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           ENTERPRISE_SIGNING_PRIVATE_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PRIVATE_KEY }}
           ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
-          LEGACY_RELEASES_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$MAC_CSC_LINK"
@@ -331,7 +444,6 @@ jobs:
           test -n "$APPLE_TEAM_ID"
           test -n "$ENTERPRISE_SIGNING_PRIVATE_KEY"
           test -n "$ENTERPRISE_SIGNING_PUBLIC_KEY"
-          test -n "$LEGACY_RELEASES_TOKEN"
 
       - name: Repository anomaly checks
         run: |
@@ -372,8 +484,6 @@ jobs:
         run: node scripts/make-delivery-zip.mjs --build
         working-directory: packages/desktop
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OTTO_RELEASES_REPO: ${{ env.RELEASES_REPO }}
           OTTO_UPDATE_ASSET_BASE_URL: ${{ env.UPDATE_MIRROR_ASSET_BASE_URL }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -383,7 +493,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          OTTO_ALLOW_UNSIGNED_MAC: ${{ inputs.unsigned_mac_transition && '1' || '0' }}
+          OTTO_ALLOW_UNSIGNED_MAC: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}
 
       - name: Enforce packaged content and installer size budget
         run: npm run release:gate --workspace=packages/desktop
@@ -393,11 +503,11 @@ jobs:
           OTTO_DESKTOP_MAX_INSTALLER_MB: '140'
 
       - name: Verify signed macOS disk images
-        if: ${{ inputs.unsigned_mac_transition != true }}
+        if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.validate-source.outputs.version }}"
           for arch in arm64 x64; do
             dmg="packages/desktop/release/Otto-${VERSION}-${arch}.dmg"
             codesign --verify --verbose=2 "$dmg"
@@ -413,7 +523,7 @@ jobs:
               "$app/Contents/Resources/app.asar" \
               --platform darwin \
               --arch "$arch" \
-              --expected-build-commit "${{ steps.source.outputs.commit }}" \
+              --expected-build-commit "${{ needs.validate-source.outputs.source_commit }}" \
               --packaged \
               --require-code-signature
             hdiutil detach "$mount_point"
@@ -433,17 +543,19 @@ jobs:
         shell: bash
         env:
           OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
+          OTTO_ENTERPRISE_SIGNING_PRIVATE_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PRIVATE_KEY }}
           DESKTOP_TEST_BUILD: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}
         run: |
           set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.validate-source.outputs.version }}"
+          SOURCE_COMMIT="${{ needs.validate-source.outputs.source_commit }}"
           DESKTOP_RELEASE="packages/desktop/release"
           test -f "$DESKTOP_RELEASE/Otto-${VERSION}-arm64.dmg"
           test -f "$DESKTOP_RELEASE/Otto-${VERSION}-x64.dmg"
           test -f "$DESKTOP_RELEASE/Otto-Setup-${VERSION}-win-x64.exe"
           test -f "$DESKTOP_RELEASE/latest.json"
           node packages/desktop/scripts/verify-update-manifest.mjs "$DESKTOP_RELEASE" "$VERSION"
-          FILES=(
+          DESKTOP_FILES=(
             "$DESKTOP_RELEASE/Otto-${VERSION}-arm64.dmg"
             "$DESKTOP_RELEASE/Otto-${VERSION}-arm64.dmg.blockmap"
             "$DESKTOP_RELEASE/Otto-${VERSION}-x64.dmg"
@@ -452,14 +564,32 @@ jobs:
             "$DESKTOP_RELEASE/Otto-Setup-${VERSION}-win-x64.exe.blockmap"
             "$DESKTOP_RELEASE/latest.json"
           )
+          FILES=("${DESKTOP_FILES[@]}")
+          PACKAGE_ID=""
           if [ "$DESKTOP_TEST_BUILD" != "1" ]; then
-            ENTERPRISE_ARCHIVE="$(ls deliverables/otto-enterprise-oneclick-v${VERSION}-*.tar.gz | head -n 1)"
+            mapfile -d '' ENTERPRISE_ARCHIVES < <(
+              find deliverables -maxdepth 1 -type f \
+                -name "otto-enterprise-oneclick-v${VERSION}-*.tar.gz" -print0
+            )
+            [ "${#ENTERPRISE_ARCHIVES[@]}" -eq 1 ]
+            ENTERPRISE_ARCHIVE="${ENTERPRISE_ARCHIVES[0]}"
+            ENTERPRISE_BASENAME="$(basename "$ENTERPRISE_ARCHIVE")"
+            if [[ "$ENTERPRISE_BASENAME" =~ ^otto-enterprise-oneclick-v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{12}-[0-9a-f]{12})\.tar\.gz$ ]]; then
+              [ "${BASH_REMATCH[1]}" = "$VERSION" ]
+              PACKAGE_ID="${BASH_REMATCH[2]}"
+            else
+              echo "Enterprise archive identity is invalid: $ENTERPRISE_BASENAME" >&2
+              exit 1
+            fi
             ENTERPRISE_SHA="${ENTERPRISE_ARCHIVE}.sha256"
             ENTERPRISE_SIGNATURE="${ENTERPRISE_ARCHIVE}.sig"
             test -f "$ENTERPRISE_ARCHIVE"
             test -f "$ENTERPRISE_SHA"
             test -f "$ENTERPRISE_SIGNATURE"
-            sha256sum -c "$ENTERPRISE_SHA"
+            (
+              cd "$(dirname -- "$ENTERPRISE_SHA")"
+              sha256sum -c -- "$(basename -- "$ENTERPRISE_SHA")"
+            )
             node scripts/verify-enterprise-package-signature.mjs \
               "$ENTERPRISE_ARCHIVE" "$ENTERPRISE_SIGNATURE"
             FILES+=("$ENTERPRISE_ARCHIVE" "$ENTERPRISE_SHA" "$ENTERPRISE_SIGNATURE")
@@ -472,6 +602,28 @@ jobs:
               "$(basename "$artifact")" >> "$CHECKSUMS"
           done
           FILES+=("$CHECKSUMS")
+          if [ "$DESKTOP_TEST_BUILD" != "1" ]; then
+            CHECKSUM_SIGNATURE="${CHECKSUMS}.sig"
+            node scripts/release-payload-signature.mjs sign \
+              "$CHECKSUMS" "$CHECKSUM_SIGNATURE"
+            node scripts/release-payload-signature.mjs verify \
+              "$CHECKSUMS" "$CHECKSUM_SIGNATURE"
+            FILES+=("$CHECKSUM_SIGNATURE")
+
+            MIRROR_CHECKSUMS="$DESKTOP_RELEASE/UPDATE-MIRROR-SHA256SUMS"
+            node scripts/update-mirror-manifest.mjs create \
+              "$DESKTOP_RELEASE" "$MIRROR_CHECKSUMS" \
+              "$VERSION" "$PACKAGE_ID" "$SOURCE_COMMIT"
+            MIRROR_SIGNATURE="${MIRROR_CHECKSUMS}.sig"
+            node scripts/release-payload-signature.mjs sign \
+              "$MIRROR_CHECKSUMS" "$MIRROR_SIGNATURE"
+            node scripts/release-payload-signature.mjs verify \
+              "$MIRROR_CHECKSUMS" "$MIRROR_SIGNATURE"
+            node scripts/update-mirror-manifest.mjs verify \
+              "$MIRROR_CHECKSUMS" "$DESKTOP_RELEASE" \
+              "$VERSION" "$PACKAGE_ID" "$SOURCE_COMMIT"
+            FILES+=("$MIRROR_CHECKSUMS" "$MIRROR_SIGNATURE")
+          fi
           FILE_LIST="$RUNNER_TEMP/otto-v${VERSION}-release-files.txt"
           printf '%s\n' "${FILES[@]}" > "$FILE_LIST"
           {
@@ -479,29 +631,39 @@ jobs:
             printf '%s\n' "${FILES[@]}"
             echo "EOF"
             echo "file_list=$FILE_LIST"
+            echo "package_identity=$PACKAGE_ID"
           } >> "$GITHUB_OUTPUT"
 
       - name: Attest desktop release candidate provenance
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
-            packages/desktop/release/Otto-${{ steps.version.outputs.version }}-arm64.dmg
-            packages/desktop/release/Otto-${{ steps.version.outputs.version }}-arm64.dmg.blockmap
-            packages/desktop/release/Otto-${{ steps.version.outputs.version }}-x64.dmg
-            packages/desktop/release/Otto-${{ steps.version.outputs.version }}-x64.dmg.blockmap
-            packages/desktop/release/Otto-Setup-${{ steps.version.outputs.version }}-win-x64.exe
-            packages/desktop/release/Otto-Setup-${{ steps.version.outputs.version }}-win-x64.exe.blockmap
+            packages/desktop/release/Otto-${{ needs.validate-source.outputs.version }}-arm64.dmg
+            packages/desktop/release/Otto-${{ needs.validate-source.outputs.version }}-arm64.dmg.blockmap
+            packages/desktop/release/Otto-${{ needs.validate-source.outputs.version }}-x64.dmg
+            packages/desktop/release/Otto-${{ needs.validate-source.outputs.version }}-x64.dmg.blockmap
+            packages/desktop/release/Otto-Setup-${{ needs.validate-source.outputs.version }}-win-x64.exe
+            packages/desktop/release/Otto-Setup-${{ needs.validate-source.outputs.version }}-win-x64.exe.blockmap
             packages/desktop/release/latest.json
             packages/desktop/release/SHA256SUMS
 
       - name: Attest enterprise release candidate provenance
         if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
-            deliverables/otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz
-            deliverables/otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz.sha256
-            deliverables/otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz.sig
+            deliverables/otto-enterprise-oneclick-v${{ needs.validate-source.outputs.version }}-*.tar.gz
+            deliverables/otto-enterprise-oneclick-v${{ needs.validate-source.outputs.version }}-*.tar.gz.sha256
+            deliverables/otto-enterprise-oneclick-v${{ needs.validate-source.outputs.version }}-*.tar.gz.sig
+
+      - name: Attest signed release manifests
+        if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            packages/desktop/release/SHA256SUMS.sig
+            packages/desktop/release/UPDATE-MIRROR-SHA256SUMS
+            packages/desktop/release/UPDATE-MIRROR-SHA256SUMS.sig
 
       - name: Verify final release candidate provenance
         shell: bash
@@ -520,15 +682,15 @@ jobs:
           DESKTOP_TEST_BUILD: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}
         run: |
           set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.validate-source.outputs.version }}"
           INSTALLER="packages/desktop/release/Otto-Setup-${VERSION}-win-x64.exe"
           INSTALLER_SHA="$(shasum -a 256 "$INSTALLER" | awk '{print $1}')"
-          NOTES_FILE="$RUNNER_TEMP/otto-v${VERSION}-release-notes.md"
+          NOTES_FILE="packages/desktop/release/release-notes.md"
           if [ "$DESKTOP_TEST_BUILD" = "1" ]; then
             {
               echo "## Otto v${VERSION} unsigned transition test candidate"
               echo
-              echo "Source commit: \`${{ steps.source.outputs.commit }}\`"
+              echo "Source commit: \`${{ needs.validate-source.outputs.source_commit }}\`"
               echo
               echo "This draft/prerelease contains unsigned Windows and macOS test artifacts. It is not a production release and is not offered through automatic update."
               echo "The production update mirror and enterprise server remain on the previously published stable version. No enterprise server package is attached."
@@ -540,7 +702,7 @@ jobs:
             {
               echo "## Otto v${VERSION}"
               echo
-              echo "Source commit: \`${{ steps.source.outputs.commit }}\`"
+              echo "Source commit: \`${{ needs.validate-source.outputs.source_commit }}\`"
               echo
               echo "### Windows no-proxy download"
               echo
@@ -557,72 +719,52 @@ jobs:
           echo "path=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: otto-release-v${{ steps.version.outputs.version }}
+          name: otto-release-v${{ needs.validate-source.outputs.version }}
           path: |
             packages/desktop/release/*
-            deliverables/otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz
-            deliverables/otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz.sha256
-            deliverables/otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz.sig
+            deliverables/otto-enterprise-oneclick-v${{ needs.validate-source.outputs.version }}-*.tar.gz
+            deliverables/otto-enterprise-oneclick-v${{ needs.validate-source.outputs.version }}-*.tar.gz.sha256
+            deliverables/otto-enterprise-oneclick-v${{ needs.validate-source.outputs.version }}-*.tar.gz.sig
           retention-days: 30
 
-      - name: Create draft GitHub release
-        if: github.repository == 'NSIETeam/otto-new'
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: ${{ env.RELEASES_REPO }}
-          token: ${{ github.token }}
-          tag_name: ${{ steps.version.outputs.tag }}
-          target_commitish: ${{ steps.source.outputs.commit }}
-          name: Otto v${{ steps.version.outputs.version }}
-          draft: true
-          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
-          files: ${{ steps.artifacts.outputs.files }}
-          body_path: ${{ steps.release_notes.outputs.path }}
-
-      - name: Create legacy compatibility draft release
-        if: ${{ github.repository == 'NSIETeam/otto-new' && !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: ${{ env.LEGACY_RELEASES_REPO }}
-          token: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
-          tag_name: ${{ steps.version.outputs.tag }}
-          # This public repository intentionally contains assets only. Bind its
-          # compatibility tag explicitly instead of leaking the private source
-          # object graph; the release body records the locked canonical RC SHA.
-          target_commitish: main
-          name: Otto v${{ steps.version.outputs.version }}
-          draft: true
-          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
-          files: ${{ steps.artifacts.outputs.files }}
-          body_path: ${{ steps.release_notes.outputs.path }}
-
   verify-windows-signature:
-    name: Verify Windows Authenticode and packaged runtime
+    name: Verify Windows installer and packaged runtime
     needs: build
     runs-on: windows-2025
     timeout-minutes: 15
-    if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
+    permissions:
+      contents: read
+      attestations: read
+    env:
+      DESKTOP_TEST_BUILD: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+
+      - name: Verify locked JavaScript toolchain
+        shell: bash
+        run: |
+          test "$(node --version)" = "v${NODE_VERSION}"
+          test "$(npm --version)" = "$NPM_VERSION"
 
       - name: Install locked JavaScript runtime
         run: npm ci --ignore-scripts
 
       - name: Download release workflow artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: otto-release-v${{ needs.build.outputs.version }}
           path: release-download
 
       - name: Require a valid Authenticode chain
+        if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
         shell: pwsh
         run: |
           $installer = Get-ChildItem -Path release-download -Recurse `
@@ -654,11 +796,13 @@ jobs:
           if (-not (Test-Path -LiteralPath $electron)) { throw 'Installed Otto.exe is missing' }
           if (-not (Test-Path -LiteralPath $binding)) { throw 'Installed SQLCipher binding is missing' }
           if (-not (Test-Path -LiteralPath $nativeRuntime)) { throw 'Installed Otto native runtime is missing' }
-          $nativeSignature = Get-AuthenticodeSignature -LiteralPath $nativeRuntime
-          if ($nativeSignature.Status -ne 'Valid' -or -not $nativeSignature.SignerCertificate) {
-            throw "Otto native Authenticode verification failed: $($nativeSignature.Status) $($nativeSignature.StatusMessage)"
+          if ($env:DESKTOP_TEST_BUILD -ne '1') {
+            $nativeSignature = Get-AuthenticodeSignature -LiteralPath $nativeRuntime
+            if ($nativeSignature.Status -ne 'Valid' -or -not $nativeSignature.SignerCertificate) {
+              throw "Otto native Authenticode verification failed: $($nativeSignature.Status) $($nativeSignature.StatusMessage)"
+            }
+            Write-Host "Otto native signer: $($nativeSignature.SignerCertificate.Subject)"
           }
-          Write-Host "Otto native signer: $($nativeSignature.SignerCertificate.Subject)"
           $env:ELECTRON_RUN_AS_NODE = '1'
           & $electron packages/desktop/scripts/probe-packaged-sqlcipher.mjs `
             --binding $binding
@@ -667,21 +811,612 @@ jobs:
           }
 
           $archive = Join-Path $installRoot 'resources\app.asar'
-          & $electron packages/desktop/scripts/verify-packaged-runtime.mjs `
-            $archive --platform win32 --arch x64 `
-            --expected-build-commit '${{ needs.build.outputs.source_commit }}' `
-            --probe-native --require-native-authenticode
+          $verificationArguments = @(
+            'packages/desktop/scripts/verify-packaged-runtime.mjs',
+            $archive,
+            '--platform', 'win32',
+            '--arch', 'x64',
+            '--expected-build-commit', '${{ needs.build.outputs.source_commit }}',
+            '--probe-native'
+          )
+          if ($env:DESKTOP_TEST_BUILD -ne '1') {
+            $verificationArguments += '--require-native-authenticode'
+          }
+          & $electron @verificationArguments
           if ($LASTEXITCODE -ne 0) {
             throw "Packaged desktop runtime verification failed: $LASTEXITCODE"
           }
 
-  deploy-enterprise:
-    name: Deploy Enterprise Server
+  prepare-release-creation-intent:
+    name: Lock release creation intent before mutation
     needs:
       - build
       - verify-windows-signature
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    environment: production-automation
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      creation_intent_sha256: ${{ steps.capture.outputs.creation_intent_sha256 }}
+      pre_public_latest_sha256: ${{ steps.capture.outputs.pre_public_latest_sha256 }}
+    env:
+      DESKTOP_TEST_BUILD: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}
+    steps:
+      - name: Reject replayed release creation intent capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_RUN_ATTEMPT" != '1' ]; then
+            echo 'Release creation intent may only be captured by a fresh audited workflow run.' >&2
+            exit 1
+          fi
+
+      - name: Checkout exact release source for creation intent
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.build.outputs.source_commit }}
+          persist-credentials: false
+
+      - name: Setup locked Node.js runtime for creation intent
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify locked creation intent runtime
+        shell: bash
+        run: test "$(node --version)" = "v${NODE_VERSION}"
+
+      - name: Revalidate exact source before locking creation intent
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCKED_SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          CURRENT_INTERNAL_COMMIT="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/heads/internal" \
+            --jq '.object.sha')"
+          if [ "$CURRENT_INTERNAL_COMMIT" != "$LOCKED_SOURCE_COMMIT" ]; then
+            echo 'origin/internal changed before the release creation intent was locked.' >&2
+            echo "locked=$LOCKED_SOURCE_COMMIT current=$CURRENT_INTERNAL_COMMIT" >&2
+            exit 1
+          fi
+
+      - name: Download immutable release artifact for creation identity
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: otto-release-v${{ needs.build.outputs.version }}
+          path: release-download
+
+      - name: Capture exact release creation intent and pre-public latest
+        id: capture
+        shell: bash
+        env:
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
+          EXPECTED_PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease && 'true' || 'false' }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.build.outputs.tag }}"
+          CANONICAL_TAG_PREEXISTING=false
+          if [ "$EVENT_NAME" = 'push' ] && [ "$GITHUB_REF" = "refs/tags/${TAG}" ]; then
+            CANONICAL_TAG_PREEXISTING=true
+          fi
+          ASSET_PROFILE=production
+          if [ "$DESKTOP_TEST_BUILD" = '1' ]; then
+            ASSET_PROFILE=unsigned-transition
+          fi
+          install -d -m 0700 release-state
+          CAPTURE_JSON="$(node scripts/release-draft-creation-recovery.mjs \
+            capture \
+            --tag "$TAG" \
+            --canonical-repo "$RELEASES_REPO" \
+            --legacy-repo "$LEGACY_RELEASES_REPO" \
+            --canonical-commit "${{ needs.build.outputs.source_commit }}" \
+            --package-identity "${{ needs.build.outputs.package_identity }}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --artifact-dir release-download \
+            --asset-profile "$ASSET_PROFILE" \
+            --expected-prerelease "$EXPECTED_PRERELEASE" \
+            --canonical-tag-preexisting "$CANONICAL_TAG_PREEXISTING" \
+            --intent-file release-state/creation-intent.json \
+            --pre-public-latest-file release-state/pre-public-latest.json)"
+          CREATION_INTENT_SHA256="$(printf '%s' "$CAPTURE_JSON" | \
+            jq -er '.creationIntentSha256')"
+          PRE_PUBLIC_LATEST_SHA256="$(printf '%s' "$CAPTURE_JSON" | \
+            jq -er '.prePublicLatestSha256')"
+          [[ "$CREATION_INTENT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRE_PUBLIC_LATEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(sha256sum release-state/creation-intent.json | awk '{print $1}')" = \
+            "$CREATION_INTENT_SHA256"
+          test "$(sha256sum release-state/pre-public-latest.json | awk '{print $1}')" = \
+            "$PRE_PUBLIC_LATEST_SHA256"
+          jq -S '.prePublicLatest' release-state/creation-intent.json > \
+            release-state/intent-latest.normalized.json
+          jq -S '.' release-state/pre-public-latest.json > \
+            release-state/latest.normalized.json
+          cmp release-state/intent-latest.normalized.json \
+            release-state/latest.normalized.json
+          rm -f -- release-state/*.normalized.json
+          echo "creation_intent_sha256=$CREATION_INTENT_SHA256" >> "$GITHUB_OUTPUT"
+          echo "pre_public_latest_sha256=$PRE_PUBLIC_LATEST_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload immutable release creation intent before first mutation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: otto-release-creation-intent-${{ needs.build.outputs.tag }}
+          path: release-state
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  create-release-drafts:
+    name: Create verified release drafts
+    needs:
+      - build
+      - verify-windows-signature
+      - prepare-release-creation-intent
+    runs-on: ubuntu-latest
+    environment: production-automation
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      attestations: read
+    outputs:
+      creation_intent_sha256: ${{ steps.verify_creation_intent.outputs.creation_intent_sha256 }}
+      pre_public_latest_sha256: ${{ steps.verify_creation_intent.outputs.pre_public_latest_sha256 }}
+    env:
+      DESKTOP_TEST_BUILD: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}
+    steps:
+      - name: Reject replayed production publication attempts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_RUN_ATTEMPT" != '1' ]; then
+            echo 'Production publication jobs cannot be replayed with Re-run jobs; start a new audited workflow run.' >&2
+            exit 1
+          fi
+
+      - name: Checkout exact release source for latest-pointer capture
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.build.outputs.source_commit }}
+          persist-credentials: false
+
+      - name: Setup locked Node.js runtime for latest-pointer capture
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify locked latest-pointer capture runtime
+        shell: bash
+        run: test "$(node --version)" = "v${NODE_VERSION}"
+
+      - name: Revalidate exact latest internal source before creating drafts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCKED_SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          CURRENT_INTERNAL_COMMIT="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/heads/internal" \
+            --jq '.object.sha')"
+          if [ "$CURRENT_INTERNAL_COMMIT" != "$LOCKED_SOURCE_COMMIT" ]; then
+            echo "origin/internal changed while the release candidate was building; refusing stale drafts." >&2
+            echo "locked=$LOCKED_SOURCE_COMMIT current=$CURRENT_INTERNAL_COMMIT" >&2
+            exit 1
+          fi
+
+      - name: Require mutable release settings for latest-pointer compensation
+        shell: bash
+        env:
+          CANONICAL_ADMIN_TOKEN: ${{ secrets.OTTO_CANONICAL_ADMIN_READ_TOKEN }}
+          LEGACY_ADMIN_TOKEN: ${{ secrets.OTTO_LEGACY_ADMIN_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          RESPONSE_FILE="$(mktemp)"
+          trap 'rm -f -- "$RESPONSE_FILE"' EXIT
+          request_status() {
+            local repository="$1"
+            local token="$2"
+            local endpoint="$3"
+            curl --noproxy '*' --proto '=https' --tlsv1.2 \
+              --silent --show-error --max-redirs 0 \
+              --connect-timeout 15 --max-time 60 \
+              --retry 3 --retry-all-errors \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer ${token}" \
+              --header 'X-GitHub-Api-Version: 2026-03-10' \
+              --output "$RESPONSE_FILE" \
+              --write-out '%{http_code}' \
+              "https://api.github.com/repos/${repository}${endpoint}"
+          }
+          require_mutable_releases() {
+            local repository="$1"
+            local token="$2"
+            local status
+            test -n "$token"
+            status="$(request_status "$repository" "$token" '/actions/permissions')"
+            if [ "$status" != '200' ]; then
+              echo "Release settings token cannot prove Administration:read for ${repository}; HTTP ${status}." >&2
+              exit 1
+            fi
+            status="$(request_status "$repository" "$token" '/immutable-releases')"
+            case "$status" in
+              404) ;;
+              200)
+                echo "Immutable releases are enabled for ${repository}; exact latest-pointer compensation is impossible." >&2
+                exit 1
+                ;;
+              *)
+                echo "Could not prove immutable releases are disabled for ${repository}; HTTP ${status}." >&2
+                exit 1
+                ;;
+            esac
+          }
+          require_mutable_releases "$RELEASES_REPO" "$CANONICAL_ADMIN_TOKEN"
+          require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
+
+      - name: Download verified release workflow artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: otto-release-v${{ needs.build.outputs.version }}
+          path: release-download
+
+      - name: Restage and reverify exact release assets
+        id: assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.build.outputs.version }}"
+          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
+          mkdir release-assets
+          copy_one() {
+            local pattern="$1"
+            mapfile -d '' matches < <(find release-download -type f -name "$pattern" -print0)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "Expected exactly one release artifact matching $pattern, found ${#matches[@]}." >&2
+              exit 1
+            fi
+            cp "${matches[0]}" release-assets/
+          }
+          copy_one "Otto-${VERSION}-arm64.dmg"
+          copy_one "Otto-${VERSION}-arm64.dmg.blockmap"
+          copy_one "Otto-${VERSION}-x64.dmg"
+          copy_one "Otto-${VERSION}-x64.dmg.blockmap"
+          copy_one "Otto-Setup-${VERSION}-win-x64.exe"
+          copy_one "Otto-Setup-${VERSION}-win-x64.exe.blockmap"
+          copy_one latest.json
+          copy_one SHA256SUMS
+          if [ "$DESKTOP_TEST_BUILD" = "1" ]; then
+            mapfile -d '' enterprise_assets < <(find release-download -type f -name 'otto-enterprise-oneclick-*' -print0)
+            if [ "${#enterprise_assets[@]}" -ne 0 ]; then
+              echo "Unsigned transition artifact unexpectedly contains an enterprise package." >&2
+              exit 1
+            fi
+            EXPECTED_ASSET_COUNT=8
+          else
+            copy_one SHA256SUMS.sig
+            copy_one UPDATE-MIRROR-SHA256SUMS
+            copy_one UPDATE-MIRROR-SHA256SUMS.sig
+            copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz"
+            copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sha256"
+            copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sig"
+            EXPECTED_ASSET_COUNT=14
+          fi
+          ACTUAL_ASSET_COUNT="$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          test "$ACTUAL_ASSET_COUNT" = "$EXPECTED_ASSET_COUNT"
+          (
+            cd release-assets
+            sha256sum -c SHA256SUMS
+          )
+          while IFS= read -r -d '' artifact; do
+            gh attestation verify "$artifact" --repo "$GITHUB_REPOSITORY"
+          done < <(find release-assets -maxdepth 1 -type f -print0)
+          mapfile -d '' notes < <(find release-download -type f -name release-notes.md -print0)
+          if [ "${#notes[@]}" -ne 1 ]; then
+            echo "Expected exactly one release notes file, found ${#notes[@]}." >&2
+            exit 1
+          fi
+          grep -F "$SOURCE_COMMIT" "${notes[0]}" >/dev/null
+          echo "notes=${notes[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Reject existing release or tag state
+        shell: bash
+        env:
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.build.outputs.tag }}"
+          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
+          reject_existing() {
+            local repository="$1"
+            local token="$2"
+            local allow_source_tag="$3"
+            local refs_json
+            local release_ids
+            refs_json="$(GH_TOKEN="$token" gh api "repos/${repository}/git/matching-refs/tags/${TAG}")"
+            if printf '%s' "$refs_json" | jq -e --arg ref "refs/tags/${TAG}" \
+              'any(.[]; .ref == $ref)' >/dev/null; then
+              if [ "$allow_source_tag" != "1" ]; then
+                echo "Refusing to overwrite existing tag ${repository}:${TAG}." >&2
+                exit 1
+              fi
+              TAG_COMMIT="$(GH_TOKEN="$token" gh api \
+                "repos/${repository}/commits/${TAG}" --jq '.sha')"
+              if [ "$TAG_COMMIT" != "$SOURCE_COMMIT" ]; then
+                echo "Existing source tag ${repository}:${TAG} does not resolve to locked commit ${SOURCE_COMMIT}." >&2
+                exit 1
+              fi
+            fi
+            release_ids="$(GH_TOKEN="$token" gh api --paginate \
+              "repos/${repository}/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"${TAG}\") | .id")"
+            if [ -n "$release_ids" ]; then
+              echo "Refusing to mutate an existing release for ${repository}:${TAG}. Remove the stale draft explicitly after review." >&2
+              exit 1
+            fi
+          }
+          ALLOW_CANONICAL_SOURCE_TAG=0
+          if [ "$EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/tags/${TAG}" ]; then
+            ALLOW_CANONICAL_SOURCE_TAG=1
+          fi
+          reject_existing "$RELEASES_REPO" "$CANONICAL_TOKEN" \
+            "$ALLOW_CANONICAL_SOURCE_TAG"
+          if [ "$DESKTOP_TEST_BUILD" != "1" ]; then
+            reject_existing "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" 0
+          fi
+
+      - name: Download immutable release creation intent
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: otto-release-creation-intent-${{ needs.build.outputs.tag }}
+          path: release-state
+
+      - name: Verify uploaded creation intent immediately before first mutation
+        id: verify_creation_intent
+        shell: bash
+        env:
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
+          CREATION_INTENT_SHA256: ${{ needs.prepare-release-creation-intent.outputs.creation_intent_sha256 }}
+          PRE_PUBLIC_LATEST_SHA256: ${{ needs.prepare-release-creation-intent.outputs.pre_public_latest_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$CREATION_INTENT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRE_PUBLIC_LATEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(sha256sum release-state/creation-intent.json | awk '{print $1}')" = \
+            "$CREATION_INTENT_SHA256"
+          test "$(sha256sum release-state/pre-public-latest.json | awk '{print $1}')" = \
+            "$PRE_PUBLIC_LATEST_SHA256"
+          jq -S '.prePublicLatest' release-state/creation-intent.json > \
+            release-state/intent-latest.normalized.json
+          jq -S '.' release-state/pre-public-latest.json > \
+            release-state/latest.normalized.json
+          cmp release-state/intent-latest.normalized.json \
+            release-state/latest.normalized.json
+          rm -f -- release-state/*.normalized.json
+          node scripts/release-draft-creation-recovery.mjs \
+            verify-before-create \
+            --tag "${{ needs.build.outputs.tag }}" \
+            --canonical-repo "$RELEASES_REPO" \
+            --legacy-repo "$LEGACY_RELEASES_REPO" \
+            --canonical-commit "${{ needs.build.outputs.source_commit }}" \
+            --package-identity "${{ needs.build.outputs.package_identity }}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --intent-file release-state/creation-intent.json \
+            --intent-sha256 "$CREATION_INTENT_SHA256"
+          echo "creation_intent_sha256=$CREATION_INTENT_SHA256" >> "$GITHUB_OUTPUT"
+          echo "pre_public_latest_sha256=$PRE_PUBLIC_LATEST_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Create canonical and compatibility drafts with GitHub CLI
+        shell: bash
+        env:
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
+          NOTES_FILE: ${{ steps.assets.outputs.notes }}
+          EXPECTED_PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.build.outputs.version }}"
+          TAG="${{ needs.build.outputs.tag }}"
+          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
+          PRERELEASE_ARGS=()
+          if [ "$EXPECTED_PRERELEASE" = "true" ]; then
+            PRERELEASE_ARGS+=(--prerelease)
+          fi
+          GH_TOKEN="$CANONICAL_TOKEN" gh release create "$TAG" release-assets/* \
+            --repo "$RELEASES_REPO" \
+            --target "$SOURCE_COMMIT" \
+            --title "Otto v${VERSION}" \
+            --draft \
+            --notes-file "$NOTES_FILE" \
+            "${PRERELEASE_ARGS[@]}"
+          if [ "$DESKTOP_TEST_BUILD" != "1" ]; then
+            # The legacy public repository intentionally contains assets only;
+            # bind its compatibility tag to its own main branch while the body
+            # records the immutable canonical source commit.
+            GH_TOKEN="$LEGACY_TOKEN" gh release create "$TAG" release-assets/* \
+              --repo "$LEGACY_RELEASES_REPO" \
+              --target main \
+              --title "Otto v${VERSION}" \
+              --draft \
+              --notes-file "$NOTES_FILE" \
+              "${PRERELEASE_ARGS[@]}"
+          fi
+
+      - name: Verify immutable draft state before deployment
+        shell: bash
+        env:
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
+          EXPECTED_PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease && 'true' || 'false' }}
+          NOTES_FILE: ${{ steps.assets.outputs.notes }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.build.outputs.version }}"
+          TAG="${{ needs.build.outputs.tag }}"
+          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
+          EXPECTED_NAME="Otto v${VERSION}"
+          verify_release() {
+            local repository="$1"
+            local token="$2"
+            local expected_target="$3"
+            local release_json
+            local actual_body_file
+            release_json="$(GH_TOKEN="$token" gh api "repos/${repository}/releases/tags/${TAG}")"
+            printf '%s' "$release_json" | jq -e \
+              --arg target "$expected_target" \
+              --arg name "$EXPECTED_NAME" \
+              --argjson prerelease "$EXPECTED_PRERELEASE" \
+              '.draft == true
+               and .prerelease == $prerelease
+               and .name == $name
+               and .target_commitish == $target
+               and all(.assets[]; .state == "uploaded" and .size > 0)' >/dev/null
+            actual_body_file="$(mktemp)"
+            printf '%s' "$release_json" | jq -j '.body // ""' > "$actual_body_file"
+            cmp -- "$NOTES_FILE" "$actual_body_file"
+            rm -f -- "$actual_body_file"
+            mapfile -t expected_assets < <(
+              while IFS= read -r -d '' artifact; do
+                printf '%s\t%s\tsha256:%s\n' \
+                  "$(basename "$artifact")" \
+                  "$(stat -c '%s' "$artifact")" \
+                  "$(sha256sum "$artifact" | awk '{print $1}')"
+              done < <(find release-assets -maxdepth 1 -type f -print0)
+            )
+            mapfile -t expected_assets < <(
+              printf '%s\n' "${expected_assets[@]}" | LC_ALL=C sort
+            )
+            mapfile -t actual_assets < <(
+              printf '%s' "$release_json" | jq -r \
+                '.assets[] | [.name, (.size | tostring), (.digest // "")] | @tsv' | \
+                LC_ALL=C sort
+            )
+            if [ "${#actual_assets[@]}" -ne "${#expected_assets[@]}" ]; then
+              echo "Release asset count mismatch for ${repository}:${TAG}." >&2
+              exit 1
+            fi
+            for index in "${!expected_assets[@]}"; do
+              if [ "${actual_assets[$index]}" != "${expected_assets[$index]}" ]; then
+                echo "Release asset mismatch for ${repository}:${TAG}." >&2
+                printf 'expected: %s\nactual:   %s\n' \
+                  "${expected_assets[$index]}" "${actual_assets[$index]}" >&2
+                exit 1
+              fi
+            done
+          }
+          verify_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT"
+          CANONICAL_TAG_COMMIT="$(GH_TOKEN="$CANONICAL_TOKEN" gh api \
+            "repos/${RELEASES_REPO}/commits/${TAG}" --jq '.sha')"
+          if [ "$CANONICAL_TAG_COMMIT" != "$SOURCE_COMMIT" ]; then
+            echo "Canonical draft tag does not resolve to the locked source commit." >&2
+            exit 1
+          fi
+          if [ "$DESKTOP_TEST_BUILD" = "1" ]; then
+            CANONICAL_BODY="$(GH_TOKEN="$CANONICAL_TOKEN" gh api \
+              "repos/${RELEASES_REPO}/releases/tags/${TAG}" --jq '.body // ""')"
+            printf '%s' "$CANONICAL_BODY" | grep -F \
+              'This draft/prerelease contains unsigned Windows and macOS test artifacts.' >/dev/null
+            printf '%s' "$CANONICAL_BODY" | grep -F \
+              'It is not a production release and is not offered through automatic update.' >/dev/null
+            printf '%s' "$CANONICAL_BODY" | grep -F \
+              'The production update mirror and enterprise server remain on the previously published stable version.' >/dev/null
+          else
+            verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main
+          fi
+
+  cleanup-partial-release-drafts:
+    name: Remove only this run's partial draft creation
+    needs:
+      - build
+      - prepare-release-creation-intent
+      - create-release-drafts
+    runs-on: ubuntu-latest
+    environment: production-automation
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    if: >-
+      ${{
+        always()
+        && needs.build.result == 'success'
+        && needs.prepare-release-creation-intent.result == 'success'
+        && (
+          needs.create-release-drafts.result == 'failure'
+          || needs.create-release-drafts.result == 'cancelled'
+        )
+      }}
+    steps:
+      - name: Checkout locked draft recovery helper
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.build.outputs.source_commit }}
+          persist-credentials: false
+
+      - name: Setup locked Node.js runtime for draft recovery
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify locked draft recovery runtime
+        shell: bash
+        run: test "$(node --version)" = "v${NODE_VERSION}"
+
+      - name: Download immutable pre-mutation creation intent
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: otto-release-creation-intent-${{ needs.build.outputs.tag }}
+          path: release-state
+
+      - name: Delete only verified partial drafts and run-created tags
+        shell: bash
+        env:
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
+          CREATION_INTENT_SHA256: ${{ needs.prepare-release-creation-intent.outputs.creation_intent_sha256 }}
+          PRE_PUBLIC_LATEST_SHA256: ${{ needs.prepare-release-creation-intent.outputs.pre_public_latest_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$CREATION_INTENT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRE_PUBLIC_LATEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(sha256sum release-state/creation-intent.json | awk '{print $1}')" = \
+            "$CREATION_INTENT_SHA256"
+          test "$(sha256sum release-state/pre-public-latest.json | awk '{print $1}')" = \
+            "$PRE_PUBLIC_LATEST_SHA256"
+          jq -S '.prePublicLatest' release-state/creation-intent.json > \
+            release-state/intent-latest.normalized.json
+          jq -S '.' release-state/pre-public-latest.json > \
+            release-state/latest.normalized.json
+          cmp release-state/intent-latest.normalized.json \
+            release-state/latest.normalized.json
+          rm -f -- release-state/*.normalized.json
+          node scripts/release-draft-creation-recovery.mjs \
+            cleanup \
+            --tag "${{ needs.build.outputs.tag }}" \
+            --canonical-repo "$RELEASES_REPO" \
+            --legacy-repo "$LEGACY_RELEASES_REPO" \
+            --canonical-commit "${{ needs.build.outputs.source_commit }}" \
+            --package-identity "${{ needs.build.outputs.package_identity }}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --intent-file release-state/creation-intent.json \
+            --intent-sha256 "$CREATION_INTENT_SHA256"
+
+  validate-deployment-principals:
+    name: Validate isolated deployment principals
+    needs: validate-source
+    runs-on: ubuntu-latest
+    environment: production-automation
+    timeout-minutes: 10
+    permissions: {}
     if: >-
       ${{
         success()
@@ -690,132 +1425,129 @@ jobs:
           || (github.event_name == 'workflow_dispatch' && !inputs.draft)
         )
       }}
-    env:
-      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-      DEPLOY_CONFIG_PATH: ${{ secrets.DEPLOY_CONFIG_PATH || '/etc/otto-enterprise/enterprise.env' }}
-      DEPLOY_SUDO_PASSWORD: ${{ secrets.DEPLOY_SUDO_PASSWORD }}
-
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Validate deployment secrets
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${{ secrets.DEPLOY_HOST }}"
-          test -n "${{ secrets.DEPLOY_USER }}"
-          test -n "${{ secrets.DEPLOY_SSH_KEY }}"
-          test -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}"
-          test -n "$DEPLOY_SUDO_PASSWORD"
-
-      - name: Download release workflow artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: otto-release-v${{ needs.build.outputs.version }}
-          path: release-download
-
-      - name: Verify enterprise package
+      - name: Prove distinct keys and server-side account isolation
         shell: bash
         env:
-          OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ROLLBACK_DEPLOY_USER: ${{ secrets.ROLLBACK_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          ROLLBACK_DEPLOY_SSH_KEY: ${{ secrets.ROLLBACK_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          mkdir -p enterprise-upload
-          ARCHIVE="$(find release-download -type f -name 'otto-enterprise-oneclick-v${{ needs.build.outputs.version }}-*.tar.gz' -print -quit)"
-          CHECKSUM="$(find release-download -type f -name 'otto-enterprise-oneclick-v${{ needs.build.outputs.version }}-*.tar.gz.sha256' -print -quit)"
-          SIGNATURE="$(find release-download -type f -name 'otto-enterprise-oneclick-v${{ needs.build.outputs.version }}-*.tar.gz.sig' -print -quit)"
-          test -n "$ARCHIVE"
-          test -n "$CHECKSUM"
-          test -n "$SIGNATURE"
-          cp "$ARCHIVE" "$CHECKSUM" "$SIGNATURE" enterprise-upload/
-          cd enterprise-upload
-          sha256sum -c ./*.sha256
-          node ../scripts/verify-enterprise-package-signature.mjs \
-            "$(basename "$ARCHIVE")" "$(basename "$SIGNATURE")"
-          ls -lh ./*
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+          [[ "$DEPLOY_HOST" != *'..'* ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [[ "$ROLLBACK_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [ "$DEPLOY_USER" != "$ROLLBACK_DEPLOY_USER" ]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          [ "$DEPLOY_PORT" -ge 1 ] && [ "$DEPLOY_PORT" -le 65535 ]
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$ROLLBACK_DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          PRINCIPAL_AUDIT_DIR="$(mktemp -d)"
+          chmod 0700 "$PRINCIPAL_AUDIT_DIR"
+          trap 'rm -rf -- "$PRINCIPAL_AUDIT_DIR"' EXIT
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$PRINCIPAL_AUDIT_DIR/deploy"
+          printf '%s\n' "$ROLLBACK_DEPLOY_SSH_KEY" > "$PRINCIPAL_AUDIT_DIR/rollback"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$PRINCIPAL_AUDIT_DIR/known_hosts"
+          DEPLOY_KEY_FINGERPRINT="$(ssh-keygen -y -P '' -f "$PRINCIPAL_AUDIT_DIR/deploy" | \
+            ssh-keygen -lf - -E sha256 | awk '{print $2}')"
+          ROLLBACK_KEY_FINGERPRINT="$(ssh-keygen -y -P '' -f "$PRINCIPAL_AUDIT_DIR/rollback" | \
+            ssh-keygen -lf - -E sha256 | awk '{print $2}')"
+          [[ "$DEPLOY_KEY_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
+          [[ "$ROLLBACK_KEY_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
+          [ "$DEPLOY_KEY_FINGERPRINT" != "$ROLLBACK_KEY_FINGERPRINT" ]
+          SSH_OPTIONS=(
+            -p "$DEPLOY_PORT"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+            -o "UserKnownHostsFile=$PRINCIPAL_AUDIT_DIR/known_hosts"
+          )
+          preflight_principal() {
+            local key="$1"
+            local user="$2"
+            local output
+            output="$(ssh "${SSH_OPTIONS[@]}" -i "$key" "${user}@${DEPLOY_HOST}" -- \
+              /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy preflight)"
+            [[ "$output" =~ ^protocol=otto-enterprise-ci-deploy-v4\ gateway=[0-9a-f]{64}\ publish=[0-9a-f]{64}\ rollback=[0-9a-f]{64}\ key=[0-9a-f]{16}\ config=/etc/otto-enterprise/enterprise.env\ deploy_user=${DEPLOY_USER}\ rollback_user=${ROLLBACK_DEPLOY_USER}$ ]]
+          }
+          reject_cross_login() {
+            local key="$1"
+            local user="$2"
+            local stderr_file
+            local status
+            local cross_attempt
+            local -a stderr_lines
+            stderr_file="$(mktemp "$PRINCIPAL_AUDIT_DIR/cross-login.XXXXXX")"
+            chmod 0600 "$stderr_file"
+            for cross_attempt in 1 2 3; do
+              : > "$stderr_file"
+              status=0
+              set +e
+              ssh "${SSH_OPTIONS[@]}" -i "$key" \
+                -o PreferredAuthentications=publickey \
+                -o PasswordAuthentication=no \
+                -o KbdInteractiveAuthentication=no \
+                "${user}@${DEPLOY_HOST}" -- /usr/bin/true \
+                2>"$stderr_file"
+              status="$?"
+              set -e
+              mapfile -t stderr_lines < <(
+                sed -e 's/\r$//' -e '/^[[:space:]]*$/d' "$stderr_file"
+              )
+              if [ "$status" -ne 255 ] || [ "${#stderr_lines[@]}" -ne 1 ]; then
+                echo "Cross-login probe was not an unambiguous public-key rejection; attempt=${cross_attempt} status=${status} stderr_lines=${#stderr_lines[@]}." >&2
+                return 1
+              fi
+              if [[ ! "${stderr_lines[0]}" =~ ^[^[:space:]]+:\ Permission\ denied\ \(publickey\)\.$ ]]; then
+                echo "Cross-login probe returned an ambiguous SSH failure on attempt ${cross_attempt}." >&2
+                return 1
+              fi
+              if [ "$cross_attempt" -lt 3 ]; then
+                sleep 1
+              fi
+            done
+            rm -f -- "$stderr_file"
+          }
+          preflight_principal "$PRINCIPAL_AUDIT_DIR/deploy" "$DEPLOY_USER"
+          preflight_principal "$PRINCIPAL_AUDIT_DIR/rollback" "$ROLLBACK_DEPLOY_USER"
+          reject_cross_login "$PRINCIPAL_AUDIT_DIR/deploy" "$ROLLBACK_DEPLOY_USER"
+          reject_cross_login "$PRINCIPAL_AUDIT_DIR/rollback" "$DEPLOY_USER"
 
-      - name: Configure SSH
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-
-      - name: Upload enterprise package
-        shell: bash
-        run: |
-          set -euo pipefail
-          DEPLOY_TRANSACTION_ID="${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          [[ "$DEPLOY_TRANSACTION_ID" =~ ^v[0-9A-Za-z._-]+-[0-9]+-[0-9]+$ ]]
-          [[ "$DEPLOY_TRANSACTION_ID" != *'..'* ]]
-          REMOTE_DIR="/var/tmp/otto-enterprise-github/$DEPLOY_TRANSACTION_ID"
-          echo "REMOTE_DIR=$REMOTE_DIR" >> "$GITHUB_ENV"
-          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "set -euo pipefail
-             [ ! -L '$REMOTE_DIR' ]
-             install -d -m 0700 '$REMOTE_DIR'"
-          scp -i ~/.ssh/id_deploy -P "${DEPLOY_PORT}" enterprise-upload/otto-enterprise-oneclick-v${{ needs.build.outputs.version }}-* \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$REMOTE_DIR/"
-
-      - name: Install or upgrade on server
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$DEPLOY_CONFIG_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]
-          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "set -euo pipefail
-             cd '$REMOTE_DIR'
-             sha256sum -c ./*.sha256 >/dev/null
-             mapfile -t ARCHIVES < <(find . -maxdepth 1 -type f -name 'otto-enterprise-oneclick-v${{ needs.build.outputs.version }}-*.tar.gz' -printf '%f\\n')
-             [ \"\${#ARCHIVES[@]}\" -eq 1 ]
-             ARCHIVE=\${ARCHIVES[0]}
-             [[ \"\$ARCHIVE\" =~ ^otto-enterprise-oneclick-v[0-9A-Za-z._-]+-[0-9a-f]{12}\\.tar\\.gz$ ]]
-             rm -rf unpack
-             mkdir unpack
-             tar -xzf \"\$ARCHIVE\" -C unpack
-             mapfile -t PKG_DIRS < <(find unpack -mindepth 1 -maxdepth 1 -type d -print)
-             [ \"\${#PKG_DIRS[@]}\" -eq 1 ]
-             if [ -L /opt/otto-enterprise/current ]; then
-               printf '%s\\n' upgrade
-             else
-               printf '%s\\n' install
-             fi" > deployment-action.txt
-          DEPLOY_ACTION="$(cat deployment-action.txt)"
-          case "$DEPLOY_ACTION" in
-            install|upgrade) ;;
-            *) echo "unexpected deployment action: $DEPLOY_ACTION" >&2; exit 4 ;;
-          esac
-          if [ "$DEPLOY_ACTION" = "upgrade" ]; then
-            printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
-            ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-              "set -euo pipefail
-               cd '$REMOTE_DIR'
-               mapfile -t PKG_DIRS < <(find unpack -mindepth 1 -maxdepth 1 -type d -print)
-               [ \"\${#PKG_DIRS[@]}\" -eq 1 ]
-               PKG_DIR=\${PKG_DIRS[0]}
-               sudo -k -S -p '' \"\$PKG_DIR/backup-now.sh\" '${DEPLOY_CONFIG_PATH}'"
-          fi
-          case "$DEPLOY_ACTION" in
-            upgrade) DEPLOY_ENTRYPOINT=upgrade.sh ;;
-            install) DEPLOY_ENTRYPOINT=install.sh ;;
-          esac
-          printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
-          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "set -euo pipefail
-             cd '$REMOTE_DIR'
-             mapfile -t PKG_DIRS < <(find unpack -mindepth 1 -maxdepth 1 -type d -print)
-             [ \"\${#PKG_DIRS[@]}\" -eq 1 ]
-             PKG_DIR=\${PKG_DIRS[0]}
-             sudo -k -S -p '' \"\$PKG_DIR/${DEPLOY_ENTRYPOINT}\" --config '${DEPLOY_CONFIG_PATH}'"
+  deploy-enterprise:
+    name: Deploy Enterprise Server
+    needs:
+      - build
+      - verify-windows-signature
+      - create-release-drafts
+      - validate-deployment-principals
+    permissions:
+      contents: read
+    if: >-
+      ${{
+        success()
+        && (
+          github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && !inputs.draft)
+        )
+      }}
+    uses: ./.github/workflows/deploy-server.yml
+    with:
+      version: ${{ needs.build.outputs.version }}
+      package_identity: ${{ needs.build.outputs.package_identity }}
+      source_commit: ${{ needs.build.outputs.source_commit }}
+      dry_run: false
+      release_repository: NSIETeam/otto-new
+      use_workflow_artifact: true
 
   deploy-update-mirror:
     name: Deploy Desktop Update Mirror
@@ -823,8 +1555,12 @@ jobs:
       - build
       - verify-windows-signature
       - deploy-enterprise
+      - publish-release
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    environment: production-automation
+    timeout-minutes: 90
+    permissions:
+      contents: read
     if: >-
       ${{
         success()
@@ -833,42 +1569,91 @@ jobs:
           || (github.event_name == 'workflow_dispatch' && !inputs.draft)
         )
       }}
-    env:
-      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-      DEPLOY_SUDO_PASSWORD: ${{ secrets.DEPLOY_SUDO_PASSWORD }}
-
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Validate deployment secrets
+      - name: Reject replayed production mirror attempts
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${{ secrets.DEPLOY_HOST }}"
-          test -n "${{ secrets.DEPLOY_USER }}"
-          test -n "${{ secrets.DEPLOY_SSH_KEY }}"
-          test -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}"
-          test -n "$DEPLOY_SUDO_PASSWORD"
+          if [ "$GITHUB_RUN_ATTEMPT" != '1' ]; then
+            echo 'Production mirror jobs cannot be replayed with Re-run jobs; start a new audited workflow run.' >&2
+            exit 1
+          fi
+
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup locked Node.js runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify locked Node.js runtime
+        shell: bash
+        run: test "$(node --version)" = "v${NODE_VERSION}"
+
+      - name: Validate deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ROLLBACK_DEPLOY_USER: ${{ secrets.ROLLBACK_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          ROLLBACK_DEPLOY_SSH_KEY: ${{ secrets.ROLLBACK_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+          [[ "$DEPLOY_HOST" != *'..'* ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [[ "$ROLLBACK_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [ "$DEPLOY_USER" != "$ROLLBACK_DEPLOY_USER" ]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          [ "$DEPLOY_PORT" -ge 1 ] && [ "$DEPLOY_PORT" -le 65535 ]
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$ROLLBACK_DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          KEY_AUDIT_DIR="$(mktemp -d)"
+          chmod 0700 "$KEY_AUDIT_DIR"
+          trap 'rm -rf -- "$KEY_AUDIT_DIR"' EXIT
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_AUDIT_DIR/deploy"
+          printf '%s\n' "$ROLLBACK_DEPLOY_SSH_KEY" > "$KEY_AUDIT_DIR/rollback"
+          DEPLOY_KEY_FINGERPRINT="$(ssh-keygen -y -P '' -f "$KEY_AUDIT_DIR/deploy" | \
+            ssh-keygen -lf - -E sha256 | awk '{print $2}')"
+          ROLLBACK_KEY_FINGERPRINT="$(ssh-keygen -y -P '' -f "$KEY_AUDIT_DIR/rollback" | \
+            ssh-keygen -lf - -E sha256 | awk '{print $2}')"
+          [[ "$DEPLOY_KEY_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
+          [[ "$ROLLBACK_KEY_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
+          [ "$DEPLOY_KEY_FINGERPRINT" != "$ROLLBACK_KEY_FINGERPRINT" ]
 
       - name: Download release workflow artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: otto-release-v${{ needs.build.outputs.version }}
           path: release-download
 
       - name: Prepare and verify mirror payload
         shell: bash
+        env:
+          OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           VERSION="${{ needs.build.outputs.version }}"
+          PACKAGE_ID="${{ needs.build.outputs.package_identity }}"
+          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
           mkdir -p mirror-upload
           copy_one() {
             local pattern="$1"
-            local source
-            source="$(find release-download -type f -name "$pattern" -print -quit)"
-            test -n "$source"
-            cp "$source" mirror-upload/
+            local -a matches
+            mapfile -d '' matches < <(
+              find release-download -type f -name "$pattern" -print0
+            )
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "Expected exactly one mirror artifact matching $pattern, found ${#matches[@]}." >&2
+              exit 1
+            fi
+            cp -- "${matches[0]}" mirror-upload/
           }
           copy_one "Otto-${VERSION}-arm64.dmg"
           copy_one "Otto-${VERSION}-arm64.dmg.blockmap"
@@ -877,166 +1662,526 @@ jobs:
           copy_one "Otto-Setup-${VERSION}-win-x64.exe"
           copy_one "Otto-Setup-${VERSION}-win-x64.exe.blockmap"
           copy_one "latest.json"
+          copy_one "UPDATE-MIRROR-SHA256SUMS"
+          copy_one "UPDATE-MIRROR-SHA256SUMS.sig"
           node packages/desktop/scripts/verify-update-manifest.mjs "mirror-upload" "$VERSION"
-          (
-            cd mirror-upload
-            sha256sum Otto-* latest.json > SHA256SUMS
-          )
-          cp .github/scripts/publish-update-mirror.sh mirror-upload/
-          PAYLOAD_MANIFEST_SHA256="$(sha256sum mirror-upload/SHA256SUMS | awk '{print $1}')"
-          PUBLISH_SCRIPT_SHA256="$(sha256sum mirror-upload/publish-update-mirror.sh | awk '{print $1}')"
-          [[ "$PAYLOAD_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$PUBLISH_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          echo "PAYLOAD_MANIFEST_SHA256=$PAYLOAD_MANIFEST_SHA256" >> "$GITHUB_ENV"
-          echo "PUBLISH_SCRIPT_SHA256=$PUBLISH_SCRIPT_SHA256" >> "$GITHUB_ENV"
+          node scripts/release-payload-signature.mjs verify \
+            mirror-upload/UPDATE-MIRROR-SHA256SUMS \
+            mirror-upload/UPDATE-MIRROR-SHA256SUMS.sig
+          node scripts/update-mirror-manifest.mjs verify \
+            mirror-upload/UPDATE-MIRROR-SHA256SUMS mirror-upload \
+            "$VERSION" "$PACKAGE_ID" "$SOURCE_COMMIT"
 
       - name: Configure SSH
+        id: mirror_ssh
         shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 0600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
 
       - name: Upload and atomically publish mirror
         shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ROLLBACK_DEPLOY_USER: ${{ secrets.ROLLBACK_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
         run: |
           set -euo pipefail
+          VERSION="${{ needs.build.outputs.version }}"
+          TAG="${{ needs.build.outputs.tag }}"
+          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
+          EXPECTED_NAME="Otto v${VERSION}"
+          EXPECTED_PATTERNS=(
+            "Otto-${VERSION}-arm64.dmg"
+            "Otto-${VERSION}-arm64.dmg.blockmap"
+            "Otto-${VERSION}-x64.dmg"
+            "Otto-${VERSION}-x64.dmg.blockmap"
+            "Otto-Setup-${VERSION}-win-x64.exe"
+            "Otto-Setup-${VERSION}-win-x64.exe.blockmap"
+            'latest.json'
+            'SHA256SUMS'
+            'SHA256SUMS.sig'
+            'UPDATE-MIRROR-SHA256SUMS'
+            'UPDATE-MIRROR-SHA256SUMS.sig'
+            "otto-enterprise-oneclick-v${VERSION}-*.tar.gz"
+            "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sha256"
+            "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sig"
+          )
+          expected_assets=()
+          for pattern in "${EXPECTED_PATTERNS[@]}"; do
+            mapfile -d '' matches < <(find release-download -type f -name "$pattern" -print0)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "Expected exactly one immutable release artifact matching $pattern, found ${#matches[@]}." >&2
+              exit 1
+            fi
+            expected_assets+=("$(printf '%s\t%s\tsha256:%s' \
+              "$(basename "${matches[0]}")" \
+              "$(stat -c '%s' "${matches[0]}")" \
+              "$(sha256sum "${matches[0]}" | awk '{print $1}')")")
+          done
+          mapfile -t expected_assets < <(
+            printf '%s\n' "${expected_assets[@]}" | LC_ALL=C sort
+          )
+          mapfile -d '' notes < <(find release-download -type f -name release-notes.md -print0)
+          [ "${#notes[@]}" -eq 1 ]
+          NOTES_FILE="${notes[0]}"
+          verify_public_release() {
+            local repository="$1"
+            local token="$2"
+            local expected_target="$3"
+            local release_json
+            local body_file
+            local expected_release_id
+            local latest_json
+            release_json="$(GH_TOKEN="$token" gh api "repos/${repository}/releases/tags/${TAG}")"
+            printf '%s' "$release_json" | jq -e \
+              --arg target "$expected_target" --arg name "$EXPECTED_NAME" \
+              '.draft == false
+               and .prerelease == false
+               and .name == $name
+               and .target_commitish == $target
+               and all(.assets[]; .state == "uploaded" and .size > 0)' >/dev/null
+            body_file="$(mktemp)"
+            printf '%s' "$release_json" | jq -j '.body // ""' > "$body_file"
+            cmp -- "$NOTES_FILE" "$body_file"
+            rm -f -- "$body_file"
+            mapfile -t actual_assets < <(
+              printf '%s' "$release_json" | jq -r \
+                '.assets[] | [.name, (.size | tostring), (.digest // "")] | @tsv' | \
+                LC_ALL=C sort
+            )
+            [ "${#actual_assets[@]}" -eq "${#expected_assets[@]}" ]
+            for index in "${!expected_assets[@]}"; do
+              if [ "${actual_assets[$index]}" != "${expected_assets[$index]}" ]; then
+                echo "Public Release asset identity changed for ${repository}:${TAG}." >&2
+                exit 1
+              fi
+            done
+            expected_release_id="$(printf '%s' "$release_json" | jq -er '.id')"
+            for attempt in 1 2 3 4 5 6; do
+              if latest_json="$(GH_TOKEN="$token" gh api \
+                "repos/${repository}/releases/latest" 2>/dev/null)" \
+                && printf '%s' "$latest_json" | jq -e \
+                  --argjson id "$expected_release_id" --arg tag "$TAG" \
+                  '.id == $id and .tag_name == $tag
+                   and .draft == false and .prerelease == false' >/dev/null; then
+                return 0
+              fi
+              [ "$attempt" -lt 6 ] && sleep 5
+            done
+            echo "Latest Release identity did not converge to ${repository}:${TAG} id=${expected_release_id}." >&2
+            exit 1
+          }
+          verify_public_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT"
+          CANONICAL_TAG_COMMIT="$(GH_TOKEN="$CANONICAL_TOKEN" gh api \
+            "repos/${RELEASES_REPO}/commits/${TAG}" --jq '.sha')"
+          [ "$CANONICAL_TAG_COMMIT" = "$SOURCE_COMMIT" ]
+          verify_public_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main
+
           MIRROR_TRANSACTION_ID="${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          [[ "$MIRROR_TRANSACTION_ID" =~ ^v[0-9A-Za-z._-]+-[0-9]+-[0-9]+$ ]]
-          [[ "$MIRROR_TRANSACTION_ID" != *'..'* ]]
-          [[ "$PAYLOAD_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$PUBLISH_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          REMOTE_DIR="/var/tmp/otto-update-mirror/$MIRROR_TRANSACTION_ID"
-          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "set -euo pipefail
-             [ ! -L '$REMOTE_DIR' ]
-             install -d -m 0700 '$REMOTE_DIR'"
-          scp -i ~/.ssh/id_deploy -P "${DEPLOY_PORT}" mirror-upload/* \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$REMOTE_DIR/"
-          printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
-          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "set -euo pipefail
-             cd '$REMOTE_DIR'
-             [ ! -L publish-update-mirror.sh ]
-             test \"\$(sha256sum publish-update-mirror.sh | awk '{print \$1}')\" = '$PUBLISH_SCRIPT_SHA256'
-             test \"\$(sha256sum SHA256SUMS | awk '{print \$1}')\" = '$PAYLOAD_MANIFEST_SHA256'
-             sudo -k -S -p '' /bin/bash '$REMOTE_DIR/publish-update-mirror.sh' \
-               '$MIRROR_TRANSACTION_ID' '$PAYLOAD_MANIFEST_SHA256' '$PUBLISH_SCRIPT_SHA256'"
+          [[ "$MIRROR_TRANSACTION_ID" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[0-9]+$ ]]
+          SSH_OPTIONS=(
+            -i ~/.ssh/id_deploy
+            -p "$DEPLOY_PORT"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+          )
+          EXPECTED_KEY_ID="$(printf '%s\n' "$OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY" | \
+            openssl pkey -pubin -outform DER | sha256sum | awk '{print substr($1,1,16)}')"
+          EXPECTED_PREFLIGHT="protocol=otto-enterprise-ci-deploy-v4 gateway=$(sha256sum deployment/enterprise-oneclick/ci-deploy-gateway.sh | awk '{print $1}') publish=$(sha256sum deployment/enterprise-oneclick/ci/publish-update-mirror.sh | awk '{print $1}') rollback=$(sha256sum deployment/enterprise-oneclick/ci/rollback-update-mirror.sh | awk '{print $1}') key=${EXPECTED_KEY_ID} config=/etc/otto-enterprise/enterprise.env deploy_user=${DEPLOY_USER} rollback_user=${ROLLBACK_DEPLOY_USER}"
+          ACTUAL_PREFLIGHT="$(ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+            /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+            preflight)"
+          if [ "$ACTUAL_PREFLIGHT" != "$EXPECTED_PREFLIGHT" ]; then
+            echo 'Installed root gateway, helpers, or signing trust anchor do not match the locked release source.' >&2
+            printf 'expected: %s\nactual:   %s\n' "$EXPECTED_PREFLIGHT" "$ACTUAL_PREFLIGHT" >&2
+            exit 1
+          fi
+          ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+            /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+            prepare-upload mirror "$MIRROR_TRANSACTION_ID"
+          upload_file() {
+            local role="$1"
+            local file="$2"
+            local size
+            local digest
+            local expected_receipt
+            local actual_receipt
+            size="$(stat -c '%s' -- "$file")"
+            digest="$(sha256sum -- "$file" | awk '{print $1}')"
+            expected_receipt="uploaded kind=mirror transaction=${MIRROR_TRANSACTION_ID} role=${role} size=${size} sha256=${digest}"
+            actual_receipt="$(ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+              /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+              upload-file mirror "$MIRROR_TRANSACTION_ID" "$role" "$size" "$digest" \
+              < "$file")"
+            [ "$actual_receipt" = "$expected_receipt" ]
+          }
+          upload_file mac-arm64-installer "mirror-upload/Otto-${VERSION}-arm64.dmg"
+          upload_file mac-arm64-blockmap "mirror-upload/Otto-${VERSION}-arm64.dmg.blockmap"
+          upload_file mac-x64-installer "mirror-upload/Otto-${VERSION}-x64.dmg"
+          upload_file mac-x64-blockmap "mirror-upload/Otto-${VERSION}-x64.dmg.blockmap"
+          upload_file windows-x64-installer "mirror-upload/Otto-Setup-${VERSION}-win-x64.exe"
+          upload_file windows-x64-blockmap "mirror-upload/Otto-Setup-${VERSION}-win-x64.exe.blockmap"
+          upload_file latest-manifest mirror-upload/latest.json
+          upload_file payload-checksums mirror-upload/UPDATE-MIRROR-SHA256SUMS
+          upload_file payload-signature mirror-upload/UPDATE-MIRROR-SHA256SUMS.sig
+          ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+            /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+            publish-mirror "$MIRROR_TRANSACTION_ID" \
+            "${{ needs.build.outputs.version }}" \
+            "${{ needs.build.outputs.package_identity }}" \
+            "${{ needs.build.outputs.source_commit }}"
 
       - name: Verify public mirror
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --retry 3 \
+          curl --noproxy '*' --proto '=https' --tlsv1.2 \
+            --fail-with-body --silent --show-error --max-redirs 0 \
+            --connect-timeout 15 --max-time 120 --retry 3 --retry-all-errors \
             "${UPDATE_MIRROR_MANIFEST_URL}?run=${GITHUB_RUN_ID}" \
             --output remote-latest.json
           cmp mirror-upload/latest.json remote-latest.json
-          curl --fail --silent --show-error --location --retry 3 \
-            "${UPDATE_MIRROR_ASSET_BASE_URL}/Otto-Setup-${{ needs.build.outputs.version }}-win-x64.exe" \
-            --output remote-windows-installer.exe
-          echo "$(sha256sum mirror-upload/Otto-Setup-${{ needs.build.outputs.version }}-win-x64.exe | awk '{print $1}')  remote-windows-installer.exe" \
-            | sha256sum -c -
+          VERSION="${{ needs.build.outputs.version }}"
+          MIRROR_ASSETS=(
+            "Otto-${VERSION}-arm64.dmg"
+            "Otto-${VERSION}-arm64.dmg.blockmap"
+            "Otto-${VERSION}-x64.dmg"
+            "Otto-${VERSION}-x64.dmg.blockmap"
+            "Otto-Setup-${VERSION}-win-x64.exe"
+            "Otto-Setup-${VERSION}-win-x64.exe.blockmap"
+          )
+          mkdir remote-mirror-assets
+          for asset in "${MIRROR_ASSETS[@]}"; do
+            curl --noproxy '*' --proto '=https' --tlsv1.2 \
+              --fail-with-body --silent --show-error --max-redirs 0 \
+              --connect-timeout 15 --max-time 900 --retry 3 --retry-all-errors \
+              "${UPDATE_MIRROR_ASSET_BASE_URL}/${asset}?run=${GITHUB_RUN_ID}" \
+              --output "remote-mirror-assets/${asset}"
+            expected_sha256="$(sha256sum "mirror-upload/${asset}" | awk '{print $1}')"
+            echo "${expected_sha256}  remote-mirror-assets/${asset}" | sha256sum -c -
+          done
+
+      - name: Remove mirror upload transaction
+        if: ${{ always() && steps.mirror_ssh.outcome == 'success' }}
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+        run: |
+          set -euo pipefail
+          MIRROR_TRANSACTION_ID="${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh -i ~/.ssh/id_deploy -p "$DEPLOY_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+            /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+            cleanup-upload mirror "$MIRROR_TRANSACTION_ID"
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f -- ~/.ssh/id_deploy ~/.ssh/known_hosts
 
   publish-release:
     name: Publish Verified Release
     needs:
       - build
       - verify-windows-signature
+      - create-release-drafts
       - deploy-enterprise
-      - deploy-update-mirror
+      - validate-deployment-principals
     runs-on: ubuntu-latest
+    environment: production-automation
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      attestations: read
     if: >-
       ${{
         always()
+        && !cancelled()
         && needs.build.result == 'success'
         && needs.verify-windows-signature.result == 'success'
+        && needs.create-release-drafts.result == 'success'
         && needs.deploy-enterprise.result == 'success'
-        && needs.deploy-update-mirror.result == 'success'
         && (
           github.event_name == 'push'
           || (github.event_name == 'workflow_dispatch' && !inputs.draft)
         )
       }}
     steps:
-      - name: Verify locked release draft provenance
+      - name: Reject replayed production publication attempts
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
-          TAG="${{ needs.build.outputs.tag }}"
-          TARGET_COMMITISH="$(gh api "repos/${RELEASES_REPO}/releases/tags/${TAG}" --jq '.target_commitish')"
-          if [ "$TARGET_COMMITISH" != "$SOURCE_COMMIT" ]; then
-            echo "canonical release draft target $TARGET_COMMITISH does not match locked RC $SOURCE_COMMIT" >&2
+          if [ "$GITHUB_RUN_ATTEMPT" != '1' ]; then
+            echo 'Production publication jobs cannot be replayed with Re-run jobs; start a new audited workflow run.' >&2
             exit 1
           fi
 
-      - name: Verify legacy compatibility provenance
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
-        run: |
-          set -euo pipefail
-          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
-          TAG="${{ needs.build.outputs.tag }}"
-          RELEASE_JSON="$(gh api "repos/${LEGACY_RELEASES_REPO}/releases/tags/${TAG}")"
-          TARGET_COMMITISH="$(printf '%s' "$RELEASE_JSON" | jq -r '.target_commitish')"
-          BODY="$(printf '%s' "$RELEASE_JSON" | jq -r '.body // ""')"
-          test "$TARGET_COMMITISH" = "main"
-          printf '%s' "$BODY" | grep -F "$SOURCE_COMMIT" >/dev/null
+      - name: Checkout exact release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.build.outputs.source_commit }}
 
-      - name: Publish legacy compatibility release
+      - name: Setup locked Node.js runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify locked Node.js runtime
+        shell: bash
+        run: test "$(node --version)" = "v${NODE_VERSION}"
+
+      - name: Reconfirm mutable release settings before publication
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
+          CANONICAL_ADMIN_TOKEN: ${{ secrets.OTTO_CANONICAL_ADMIN_READ_TOKEN }}
+          LEGACY_ADMIN_TOKEN: ${{ secrets.OTTO_LEGACY_ADMIN_READ_TOKEN }}
         run: |
           set -euo pipefail
+          RESPONSE_FILE="$(mktemp)"
+          trap 'rm -f -- "$RESPONSE_FILE"' EXIT
+          request_status() {
+            local repository="$1"
+            local token="$2"
+            local endpoint="$3"
+            curl --noproxy '*' --proto '=https' --tlsv1.2 \
+              --silent --show-error --max-redirs 0 \
+              --connect-timeout 15 --max-time 60 \
+              --retry 3 --retry-all-errors \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer ${token}" \
+              --header 'X-GitHub-Api-Version: 2026-03-10' \
+              --output "$RESPONSE_FILE" \
+              --write-out '%{http_code}' \
+              "https://api.github.com/repos/${repository}${endpoint}"
+          }
+          require_mutable_releases() {
+            local repository="$1"
+            local token="$2"
+            local status
+            test -n "$token"
+            status="$(request_status "$repository" "$token" '/actions/permissions')"
+            if [ "$status" != '200' ]; then
+              echo "Release settings token cannot prove Administration:read for ${repository}; HTTP ${status}." >&2
+              exit 1
+            fi
+            status="$(request_status "$repository" "$token" '/immutable-releases')"
+            case "$status" in
+              404) ;;
+              200)
+                echo "Immutable releases are enabled for ${repository}; exact latest-pointer compensation is impossible." >&2
+                exit 1
+                ;;
+              *)
+                echo "Could not prove immutable releases are disabled for ${repository}; HTTP ${status}." >&2
+                exit 1
+                ;;
+            esac
+          }
+          require_mutable_releases "$RELEASES_REPO" "$CANONICAL_ADMIN_TOKEN"
+          require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
+
+      - name: Download immutable release candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: otto-release-v${{ needs.build.outputs.version }}
+          path: release-download
+
+      - name: Download immutable release creation intent
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: otto-release-creation-intent-${{ needs.build.outputs.tag }}
+          path: release-state
+
+      - name: Reverify, publish, and reverify both release endpoints
+        shell: bash
+        env:
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
+          OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
+          EXPECTED_PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease && 'true' || 'false' }}
+          PRE_PUBLIC_LATEST_SHA256: ${{ needs.create-release-drafts.outputs.pre_public_latest_sha256 }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.build.outputs.version }}"
+          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
+          PACKAGE_ID="${{ needs.build.outputs.package_identity }}"
+          TAG="${{ needs.build.outputs.tag }}"
+          mkdir release-assets
+          copy_one() {
+            local pattern="$1"
+            mapfile -d '' matches < <(find release-download -type f -name "$pattern" -print0)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "Expected exactly one immutable release artifact matching $pattern, found ${#matches[@]}." >&2
+              exit 1
+            fi
+            cp "${matches[0]}" release-assets/
+          }
+          copy_one "Otto-${VERSION}-arm64.dmg"
+          copy_one "Otto-${VERSION}-arm64.dmg.blockmap"
+          copy_one "Otto-${VERSION}-x64.dmg"
+          copy_one "Otto-${VERSION}-x64.dmg.blockmap"
+          copy_one "Otto-Setup-${VERSION}-win-x64.exe"
+          copy_one "Otto-Setup-${VERSION}-win-x64.exe.blockmap"
+          copy_one latest.json
+          copy_one SHA256SUMS
+          copy_one SHA256SUMS.sig
+          copy_one UPDATE-MIRROR-SHA256SUMS
+          copy_one UPDATE-MIRROR-SHA256SUMS.sig
+          copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz"
+          copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sha256"
+          copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sig"
+          test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = 14
+          (
+            cd release-assets
+            sha256sum -c SHA256SUMS
+          )
+          node scripts/release-payload-signature.mjs verify \
+            release-assets/UPDATE-MIRROR-SHA256SUMS \
+            release-assets/UPDATE-MIRROR-SHA256SUMS.sig
+          node scripts/update-mirror-manifest.mjs verify \
+            release-assets/UPDATE-MIRROR-SHA256SUMS release-assets \
+            "$VERSION" "$PACKAGE_ID" "$SOURCE_COMMIT"
+          while IFS= read -r -d '' artifact; do
+            GH_TOKEN="$CANONICAL_TOKEN" gh attestation verify "$artifact" \
+              --repo "$GITHUB_REPOSITORY"
+          done < <(find release-assets -maxdepth 1 -type f -print0)
+          mapfile -d '' notes < <(find release-download -type f -name release-notes.md -print0)
+          if [ "${#notes[@]}" -ne 1 ]; then
+            echo "Expected exactly one immutable release notes file, found ${#notes[@]}." >&2
+            exit 1
+          fi
+          NOTES_FILE="${notes[0]}"
+          EXPECTED_NAME="Otto v${VERSION}"
+          mapfile -t expected_assets < <(
+            while IFS= read -r -d '' artifact; do
+              printf '%s\t%s\tsha256:%s\n' \
+                "$(basename "$artifact")" \
+                "$(stat -c '%s' "$artifact")" \
+                "$(sha256sum "$artifact" | awk '{print $1}')"
+            done < <(find release-assets -maxdepth 1 -type f -print0)
+          )
+          mapfile -t expected_assets < <(
+            printf '%s\n' "${expected_assets[@]}" | LC_ALL=C sort
+          )
+          verify_release() {
+            local repository="$1"
+            local token="$2"
+            local expected_target="$3"
+            local expected_draft="$4"
+            local release_json
+            local actual_body_file
+            local expected_release_id
+            local latest_json
+            release_json="$(GH_TOKEN="$token" gh api "repos/${repository}/releases/tags/${TAG}")"
+            printf '%s' "$release_json" | jq -e \
+              --arg target "$expected_target" \
+              --arg name "$EXPECTED_NAME" \
+              --argjson draft "$expected_draft" \
+              --argjson prerelease "$EXPECTED_PRERELEASE" \
+              '.draft == $draft
+               and .prerelease == $prerelease
+               and .name == $name
+               and .target_commitish == $target
+               and all(.assets[]; .state == "uploaded" and .size > 0)' >/dev/null
+            actual_body_file="$(mktemp)"
+            printf '%s' "$release_json" | jq -j '.body // ""' > "$actual_body_file"
+            cmp -- "$NOTES_FILE" "$actual_body_file"
+            rm -f -- "$actual_body_file"
+            mapfile -t actual_assets < <(
+              printf '%s' "$release_json" | jq -r \
+                '.assets[] | [.name, (.size | tostring), (.digest // "")] | @tsv' | \
+                LC_ALL=C sort
+            )
+            if [ "${#actual_assets[@]}" -ne "${#expected_assets[@]}" ]; then
+              echo "Release asset count changed before publication for ${repository}:${TAG}." >&2
+              exit 1
+            fi
+            for index in "${!expected_assets[@]}"; do
+              if [ "${actual_assets[$index]}" != "${expected_assets[$index]}" ]; then
+                echo "Release asset changed before publication for ${repository}:${TAG}." >&2
+                exit 1
+              fi
+            done
+            if [ "$expected_draft" = false ] \
+              && [ "$EXPECTED_PRERELEASE" = false ]; then
+              expected_release_id="$(printf '%s' "$release_json" | jq -er '.id')"
+              for attempt in 1 2 3 4 5 6; do
+                if latest_json="$(GH_TOKEN="$token" gh api \
+                  "repos/${repository}/releases/latest" 2>/dev/null)" \
+                  && printf '%s' "$latest_json" | jq -e \
+                    --argjson id "$expected_release_id" --arg tag "$TAG" \
+                    '.id == $id and .tag_name == $tag
+                     and .draft == false and .prerelease == false' >/dev/null; then
+                  return 0
+                fi
+                [ "$attempt" -lt 6 ] && sleep 5
+              done
+              echo "Latest Release identity did not converge to ${repository}:${TAG} id=${expected_release_id}." >&2
+              exit 1
+            fi
+          }
           EXTRA_ARGS=(--draft=false)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.prerelease }}" = "true" ]; then
+          if [ "$EXPECTED_PRERELEASE" = "true" ]; then
             EXTRA_ARGS+=(--prerelease)
           else
             EXTRA_ARGS+=(--prerelease=false --latest)
           fi
-          gh release edit "${{ needs.build.outputs.tag }}" \
-            --repo "${LEGACY_RELEASES_REPO}" \
-            "${EXTRA_ARGS[@]}"
 
-      - name: Publish canonical release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          EXTRA_ARGS=(--draft=false)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.prerelease }}" = "true" ]; then
-            EXTRA_ARGS+=(--prerelease)
-          else
-            EXTRA_ARGS+=(--prerelease=false --latest)
-          fi
-          gh release edit "${{ needs.build.outputs.tag }}" \
-            --repo "${RELEASES_REPO}" \
-            "${EXTRA_ARGS[@]}"
+          node scripts/release-visibility-compensation.mjs \
+            verify-pre-public-latest \
+            --tag "$TAG" \
+            --canonical-repo "$RELEASES_REPO" \
+            --legacy-repo "$LEGACY_RELEASES_REPO" \
+            --canonical-commit "$SOURCE_COMMIT" \
+            --pre-public-latest-snapshot release-state/pre-public-latest.json \
+            --pre-public-latest-sha256 "$PRE_PUBLIC_LATEST_SHA256"
 
-      - name: Verify canonical release tag
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
-          TAG="${{ needs.build.outputs.tag }}"
-          RESOLVED_COMMIT="$(gh api "repos/${RELEASES_REPO}/commits/${TAG}" --jq '.sha')"
+          # Publish the canonical source-bound Release first. The legacy endpoint
+          # used by old clients is the final public mutation, so it is never
+          # exposed before the canonical Release is durably verified.
+          verify_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT" true
+          RESOLVED_COMMIT="$(GH_TOKEN="$CANONICAL_TOKEN" gh api \
+            "repos/${RELEASES_REPO}/commits/${TAG}" --jq '.sha')"
           if [ "$RESOLVED_COMMIT" != "$SOURCE_COMMIT" ]; then
-            echo "canonical release tag does not resolve to the locked RC commit: tag=$RESOLVED_COMMIT rc=$SOURCE_COMMIT" >&2
+            echo "Canonical tag changed before publication: tag=$RESOLVED_COMMIT source=$SOURCE_COMMIT" >&2
             exit 1
           fi
+          GH_TOKEN="$CANONICAL_TOKEN" gh release edit "$TAG" \
+            --repo "$RELEASES_REPO" \
+            "${EXTRA_ARGS[@]}"
+          verify_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT" false
+          RESOLVED_COMMIT="$(GH_TOKEN="$CANONICAL_TOKEN" gh api \
+            "repos/${RELEASES_REPO}/commits/${TAG}" --jq '.sha')"
+          if [ "$RESOLVED_COMMIT" != "$SOURCE_COMMIT" ]; then
+            echo "Canonical release tag changed during publication: tag=$RESOLVED_COMMIT source=$SOURCE_COMMIT" >&2
+            exit 1
+          fi
+
+          verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main true
+          GH_TOKEN="$LEGACY_TOKEN" gh release edit "$TAG" \
+            --repo "$LEGACY_RELEASES_REPO" \
+            "${EXTRA_ARGS[@]}"
+          verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main false
 
   rollback-update-mirror:
     name: Roll back Desktop Update Mirror
@@ -1045,15 +2190,208 @@ jobs:
       - deploy-update-mirror
       - publish-release
     runs-on: ubuntu-latest
+    environment: production-automation
+    timeout-minutes: 45
+    permissions:
+      contents: read
     if: >-
       ${{
         always()
+        && github.run_attempt == 1
+        && needs.publish-release.result == 'success'
         && (
           needs.deploy-update-mirror.result == 'failure'
           || needs.deploy-update-mirror.result == 'cancelled'
+          || needs.deploy-update-mirror.result == 'skipped'
+        )
+        && (
+          github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && !inputs.draft)
+        )
+      }}
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Validate deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ROLLBACK_DEPLOY_USER: ${{ secrets.ROLLBACK_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          ROLLBACK_DEPLOY_SSH_KEY: ${{ secrets.ROLLBACK_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+          [[ "$DEPLOY_HOST" != *'..'* ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [[ "$ROLLBACK_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [ "$DEPLOY_USER" != "$ROLLBACK_DEPLOY_USER" ]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          [ "$DEPLOY_PORT" -ge 1 ] && [ "$DEPLOY_PORT" -le 65535 ]
+          test -n "$ROLLBACK_DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+
+      - name: Configure hardened SSH identity
+        shell: bash
+        env:
+          ROLLBACK_DEPLOY_SSH_KEY: ${{ secrets.ROLLBACK_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$ROLLBACK_DEPLOY_SSH_KEY" > ~/.ssh/id_rollback
+          chmod 0600 ~/.ssh/id_rollback
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+
+      - name: Restore previous mirror manifest
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ROLLBACK_DEPLOY_USER: ${{ secrets.ROLLBACK_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          MIRROR_TRANSACTION_ID="${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "$MIRROR_TRANSACTION_ID" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[0-9]+$ ]]
+          SSH_OPTIONS=(
+            -i ~/.ssh/id_rollback
+            -p "$DEPLOY_PORT"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+          )
+          EXPECTED_KEY_ID="$(printf '%s\n' "$OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY" | \
+            openssl pkey -pubin -outform DER | sha256sum | awk '{print substr($1,1,16)}')"
+          EXPECTED_PREFLIGHT="protocol=otto-enterprise-ci-deploy-v4 gateway=$(sha256sum deployment/enterprise-oneclick/ci-deploy-gateway.sh | awk '{print $1}') publish=$(sha256sum deployment/enterprise-oneclick/ci/publish-update-mirror.sh | awk '{print $1}') rollback=$(sha256sum deployment/enterprise-oneclick/ci/rollback-update-mirror.sh | awk '{print $1}') key=${EXPECTED_KEY_ID} config=/etc/otto-enterprise/enterprise.env deploy_user=${DEPLOY_USER} rollback_user=${ROLLBACK_DEPLOY_USER}"
+          ACTUAL_PREFLIGHT="$(ssh "${SSH_OPTIONS[@]}" "${ROLLBACK_DEPLOY_USER}@${DEPLOY_HOST}" -- \
+            /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+            preflight)"
+          if [ "$ACTUAL_PREFLIGHT" != "$EXPECTED_PREFLIGHT" ]; then
+            echo 'Installed root gateway, helpers, or signing trust anchor changed before rollback.' >&2
+            printf 'expected: %s\nactual:   %s\n' "$EXPECTED_PREFLIGHT" "$ACTUAL_PREFLIGHT" >&2
+            exit 1
+          fi
+          RESTORED_SHA256=''
+          for rollback_attempt in 1 2 3 4 5 6; do
+            ROLLBACK_OUTPUT=''
+            ROLLBACK_STATUS=0
+            if ROLLBACK_OUTPUT="$(ssh "${SSH_OPTIONS[@]}" \
+              "${ROLLBACK_DEPLOY_USER}@${DEPLOY_HOST}" -- \
+              /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+              rollback-mirror "$MIRROR_TRANSACTION_ID")"; then
+              ROLLBACK_STATUS=0
+            else
+              ROLLBACK_STATUS=$?
+            fi
+            printf '%s\n' "$ROLLBACK_OUTPUT"
+            mapfile -t RESTORED_LINES < <(
+              printf '%s\n' "$ROLLBACK_OUTPUT" | \
+                grep -E '^restored_manifest_sha256=([0-9a-f]{64}|absent)$' || true
+            )
+            if [ "${#RESTORED_LINES[@]}" -eq 1 ]; then
+              RESTORED_SHA256="${RESTORED_LINES[0]#restored_manifest_sha256=}"
+              break
+            fi
+            if [ "${#RESTORED_LINES[@]}" -gt 1 ]; then
+              echo 'Rollback gateway returned multiple restored manifest identities.' >&2
+              exit 1
+            fi
+            if [ "$ROLLBACK_STATUS" -ne 255 ]; then
+              echo "Rollback gateway failed without an exact receipt; ssh status=${ROLLBACK_STATUS}." >&2
+              exit 1
+            fi
+            echo "Rollback receipt was lost in transport on attempt ${rollback_attempt}; retrying the idempotent transaction." >&2
+            if [ "$rollback_attempt" -lt 6 ]; then
+              sleep 2
+            fi
+          done
+          if [ -z "$RESTORED_SHA256" ]; then
+            echo 'Rollback gateway did not return one exact restored manifest identity after retries.' >&2
+            exit 1
+          fi
+          REMOTE_MANIFEST="$(mktemp)"
+          trap 'rm -f -- "$REMOTE_MANIFEST"' EXIT
+          PUBLIC_RESTORED='false'
+          for retry in 1 2 3 4 5 6; do
+            HTTP_STATUS=''
+            if HTTP_STATUS="$(curl --noproxy '*' --proto '=https' --tlsv1.2 \
+              --silent --show-error --max-redirs 0 \
+              --connect-timeout 15 --max-time 30 --retry 2 --retry-all-errors \
+              --output "$REMOTE_MANIFEST" --write-out '%{http_code}' \
+              "${UPDATE_MIRROR_MANIFEST_URL}?rollback_run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${retry}")"; then
+              if [ "$RESTORED_SHA256" = 'absent' ] \
+                && [ "$HTTP_STATUS" = '404' ]; then
+                PUBLIC_RESTORED='true'
+                break
+              elif [ "$RESTORED_SHA256" != 'absent' ] \
+                && [ "$HTTP_STATUS" = '200' ] \
+                && [ "$(sha256sum "$REMOTE_MANIFEST" | awk '{print $1}')" = "$RESTORED_SHA256" ]; then
+                PUBLIC_RESTORED='true'
+                break
+              fi
+            else
+              echo "Public mirror verification transport failed on attempt ${retry}; retrying." >&2
+            fi
+            if [ "$retry" -lt 6 ]; then
+              sleep 2
+            fi
+          done
+          if [ "$PUBLIC_RESTORED" != 'true' ]; then
+            echo 'Public update mirror did not converge to the exact restored manifest; keeping Releases public.' >&2
+            exit 1
+          fi
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f -- ~/.ssh/id_rollback ~/.ssh/known_hosts
+
+  rollback-release-publication:
+    name: Restore previous latest pointers without retracting Releases
+    needs:
+      - build
+      - create-release-drafts
+      - deploy-enterprise
+      - publish-release
+      - deploy-update-mirror
+      - rollback-update-mirror
+    runs-on: ubuntu-latest
+    environment: production-automation
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    if: >-
+      ${{
+        always()
+        && github.run_attempt == 1
+        && needs.create-release-drafts.result == 'success'
+        && (
+          needs.publish-release.result == 'failure'
+          || needs.publish-release.result == 'cancelled'
           || (
-            needs.deploy-update-mirror.result == 'success'
-            && needs.publish-release.result != 'success'
+            needs.publish-release.result == 'skipped'
+            && (
+              needs.deploy-enterprise.result == 'failure'
+              || needs.deploy-enterprise.result == 'cancelled'
+            )
+          )
+          || (
+            needs.publish-release.result == 'success'
+            && needs.rollback-update-mirror.result == 'success'
+            && (
+              needs.deploy-update-mirror.result == 'failure'
+              || needs.deploy-update-mirror.result == 'cancelled'
+              || needs.deploy-update-mirror.result == 'skipped'
+            )
           )
         )
         && (
@@ -1061,63 +2399,102 @@ jobs:
           || (github.event_name == 'workflow_dispatch' && !inputs.draft)
         )
       }}
-    env:
-      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-      DEPLOY_SUDO_PASSWORD: ${{ secrets.DEPLOY_SUDO_PASSWORD }}
-
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Configure SSH
+      - name: Reconfirm mutable release settings before compensation
         shell: bash
+        env:
+          CANONICAL_ADMIN_TOKEN: ${{ secrets.OTTO_CANONICAL_ADMIN_READ_TOKEN }}
+          LEGACY_ADMIN_TOKEN: ${{ secrets.OTTO_LEGACY_ADMIN_READ_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "${{ secrets.DEPLOY_HOST }}"
-          test -n "${{ secrets.DEPLOY_USER }}"
-          test -n "${{ secrets.DEPLOY_SSH_KEY }}"
-          test -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}"
-          test -n "$DEPLOY_SUDO_PASSWORD"
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
+          RESPONSE_FILE="$(mktemp)"
+          trap 'rm -f -- "$RESPONSE_FILE"' EXIT
+          request_status() {
+            local repository="$1"
+            local token="$2"
+            local endpoint="$3"
+            curl --noproxy '*' --proto '=https' --tlsv1.2 \
+              --silent --show-error --max-redirs 0 \
+              --connect-timeout 15 --max-time 60 \
+              --retry 3 --retry-all-errors --retry-max-time 90 \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer ${token}" \
+              --header 'X-GitHub-Api-Version: 2026-03-10' \
+              --output "$RESPONSE_FILE" \
+              --write-out '%{http_code}' \
+              "https://api.github.com/repos/${repository}${endpoint}"
+          }
+          require_mutable_releases() {
+            local repository="$1"
+            local token="$2"
+            local status
+            test -n "$token"
+            status="$(request_status "$repository" "$token" '/actions/permissions')"
+            if [ "$status" != '200' ]; then
+              echo "Compensation token cannot prove Administration:read for ${repository}; HTTP ${status}. Both Releases remain public." >&2
+              exit 1
+            fi
+            status="$(request_status "$repository" "$token" '/immutable-releases')"
+            case "$status" in
+              404) ;;
+              200)
+                echo "Immutable releases are enabled for ${repository}; refusing a partial compensation. Both Releases remain public." >&2
+                exit 1
+                ;;
+              *)
+                echo "Could not prove immutable releases are disabled for ${repository}; HTTP ${status}. Both Releases remain public." >&2
+                exit 1
+                ;;
+            esac
+          }
+          # Prove both endpoints are mutable before changing either endpoint.
+          require_mutable_releases "$RELEASES_REPO" "$CANONICAL_ADMIN_TOKEN"
+          require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
 
-      - name: Restore previous mirror manifest
+      - name: Checkout locked release visibility compensation helper
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.build.outputs.source_commit }}
+          persist-credentials: false
+
+      - name: Setup locked Node.js runtime for compensation
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify locked compensation runtime
         shell: bash
-        run: |
-          set -euo pipefail
-          MIRROR_TRANSACTION_ID="${{ needs.build.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          [[ "$MIRROR_TRANSACTION_ID" =~ ^v[0-9A-Za-z._-]+-[0-9]+-[0-9]+$ ]]
-          [[ "$MIRROR_TRANSACTION_ID" != *'..'* ]]
-          ROLLBACK_SCRIPT_SHA256="$(sha256sum .github/scripts/rollback-update-mirror.sh | awk '{print $1}')"
-          [[ "$ROLLBACK_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          REMOTE_SCRIPT="/var/tmp/otto-update-mirror-rollback-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
-          scp -i ~/.ssh/id_deploy -P "${DEPLOY_PORT}" \
-            .github/scripts/rollback-update-mirror.sh \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$REMOTE_SCRIPT"
-          printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
-          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "set -euo pipefail
-             [ -f '$REMOTE_SCRIPT' ]
-             [ ! -L '$REMOTE_SCRIPT' ]
-             test \"\$(sha256sum '$REMOTE_SCRIPT' | awk '{print \$1}')\" = '$ROLLBACK_SCRIPT_SHA256'
-             sudo -k -S -p '' /bin/bash '$REMOTE_SCRIPT' \
-               '$MIRROR_TRANSACTION_ID' '$ROLLBACK_SCRIPT_SHA256'"
+        run: test "$(node --version)" = "v${NODE_VERSION}"
 
-      - name: Return failed releases to draft state
-        if: always()
+      - name: Download immutable release artifact for compensation identity
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: otto-release-v${{ needs.build.outputs.version }}
+          path: release-download
+
+      - name: Download immutable release creation intent
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: otto-release-creation-intent-${{ needs.build.outputs.tag }}
+          path: release-state
+
+      - name: Transactionally restore exact previous latest pointers
         shell: bash
         env:
           CANONICAL_TOKEN: ${{ github.token }}
           LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="${{ needs.build.outputs.tag }}"
-          GH_TOKEN="$CANONICAL_TOKEN" gh release edit "$TAG" \
-            --repo "$RELEASES_REPO" --draft=true || true
-          GH_TOKEN="$LEGACY_TOKEN" gh release edit "$TAG" \
-            --repo "$LEGACY_RELEASES_REPO" --draft=true || true
+          node scripts/release-visibility-compensation.mjs \
+            compensate \
+            --tag "${{ needs.build.outputs.tag }}" \
+            --canonical-repo "$RELEASES_REPO" \
+            --legacy-repo "$LEGACY_RELEASES_REPO" \
+            --canonical-commit "${{ needs.build.outputs.source_commit }}" \
+            --canonical-target "${{ needs.build.outputs.source_commit }}" \
+            --legacy-target main \
+            --artifact-dir release-download \
+            --package-identity "${{ needs.build.outputs.package_identity }}" \
+            --expected-prerelease "${{ github.event_name == 'workflow_dispatch' && inputs.prerelease && 'true' || 'false' }}" \
+            --pre-public-latest-snapshot release-state/pre-public-latest.json \
+            --pre-public-latest-sha256 "${{ needs.create-release-drafts.outputs.pre_public_latest_sha256 }}"

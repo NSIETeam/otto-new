@@ -77,22 +77,23 @@ export interface EnterpriseRouteDispatcherDeps {
   atoaClaimTtlMs: number;
   isPublicSimplePark: boolean;
   featureFlags?: FeatureFlagManager;
-  readBody(req: IncomingMessage, maxLength?: number): Promise<Record<string, unknown>>;
+  readBody(
+    req: IncomingMessage,
+    maxLength?: number,
+  ): Promise<Record<string, unknown>>;
   sendJSON(res: ServerResponse, status: number, data: unknown): void;
   extractToken(req: IncomingMessage): string;
   modelGatewayFetch?: typeof fetch;
   /** CONTROL-12 签名指令队列 HTTP 端点（可选；未启用时为 undefined）。 */
-  controlCommandHandle?(
-    deps: {
-      path: string;
-      method: string;
-      url: URL;
-      req: IncomingMessage;
-      res: ServerResponse;
-      readBody(req: IncomingMessage): Promise<Record<string, unknown>>;
-      sendJSON(res: ServerResponse, status: number, data: unknown): void;
-    },
-  ): Promise<boolean>;
+  controlCommandHandle?(deps: {
+    path: string;
+    method: string;
+    url: URL;
+    req: IncomingMessage;
+    res: ServerResponse;
+    readBody(req: IncomingMessage): Promise<Record<string, unknown>>;
+    sendJSON(res: ServerResponse, status: number, data: unknown): void;
+  }): Promise<boolean>;
 }
 
 export async function dispatchEnterpriseRoute({
@@ -161,7 +162,6 @@ export async function dispatchEnterpriseRoute({
       apiVersion,
       capabilities,
       deploymentInfo,
-      readiness: privateDeploymentBootstrap.readiness,
       sendJSON,
     })
   ) {
@@ -194,6 +194,10 @@ export async function dispatchEnterpriseRoute({
       memberPrincipal: memberAccount
         ? { organizationId: memberAccount.organizationId }
         : null,
+      runtime: {
+        version: deploymentInfo.version,
+        buildCommit: deploymentInfo.buildCommit,
+      },
       services: db,
       readBody,
       sendJSON,

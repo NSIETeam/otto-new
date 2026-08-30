@@ -12,6 +12,7 @@ export interface DeploymentRoutePrincipal {
 
 export interface DeploymentRouteServices {
   getPrivateDeploymentStatus(): PrivateDeploymentStatus;
+  getDatabaseReadiness(): { ready: true; schemaVersion: number };
   getDataProtectionStatus(): unknown;
   getOperationsSecurityStatus(): unknown;
   runDataProtectionBackup(
@@ -66,6 +67,7 @@ export interface DeploymentRouteDeps {
   url: URL;
   principal: DeploymentRoutePrincipal | null;
   memberPrincipal?: DeploymentRoutePrincipal | null;
+  runtime: { version: string; buildCommit: string };
   services: DeploymentRouteServices;
   readBody(req: IncomingMessage): Promise<Record<string, unknown>>;
   sendJSON(res: ServerResponse, status: number, data: unknown): void;
@@ -79,6 +81,7 @@ export async function handleDeploymentRoute({
   url,
   principal,
   memberPrincipal,
+  runtime,
   services,
   readBody,
   sendJSON,
@@ -89,12 +92,10 @@ export async function handleDeploymentRoute({
       return true;
     }
     const body = await readBody(req);
-    const distributionId = typeof body.distributionId === 'string'
-      ? body.distributionId.trim()
-      : '';
-    const currentVersion = typeof body.currentVersion === 'string'
-      ? body.currentVersion.trim()
-      : '';
+    const distributionId =
+      typeof body.distributionId === 'string' ? body.distributionId.trim() : '';
+    const currentVersion =
+      typeof body.currentVersion === 'string' ? body.currentVersion.trim() : '';
     const result = await services.resolveDeploymentUpdatePolicy({
       distributionId,
       currentVersion,
@@ -106,6 +107,8 @@ export async function handleDeploymentRoute({
   if (path === '/enterprise/deployment/status' && method === 'GET') {
     sendJSON(res, 200, {
       ...services.getPrivateDeploymentStatus(),
+      runtime,
+      database: services.getDatabaseReadiness(),
       dataProtection: services.getDataProtectionStatus(),
       operationsSecurity: services.getOperationsSecurityStatus(),
     });
@@ -117,7 +120,10 @@ export async function handleDeploymentRoute({
     return true;
   }
 
-  if (path === '/enterprise/deployment/data-protection/backup' && method === 'POST') {
+  if (
+    path === '/enterprise/deployment/data-protection/backup' &&
+    method === 'POST'
+  ) {
     const status = await services.runDataProtectionBackup('manual');
     sendJSON(res, 200, status);
     return true;
@@ -142,7 +148,9 @@ export async function handleDeploymentRoute({
         deployment: services.getPrivateDeploymentStatus(),
       });
     } catch (error) {
-      sendJSON(res, 400, { error: error instanceof Error ? error.message : 'license import failed' });
+      sendJSON(res, 400, {
+        error: error instanceof Error ? error.message : 'license import failed',
+      });
     }
     return true;
   }
@@ -167,9 +175,12 @@ export async function handleDeploymentRoute({
     const body = await readBody(req);
     const settings = services.updateTelemetrySettings({
       enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
-      contentMode: body.contentMode === 'diagnostic_redacted'
-        ? 'diagnostic_redacted'
-        : body.contentMode === 'operational_only' ? 'operational_only' : undefined,
+      contentMode:
+        body.contentMode === 'diagnostic_redacted'
+          ? 'diagnostic_redacted'
+          : body.contentMode === 'operational_only'
+            ? 'operational_only'
+            : undefined,
       endpoint: typeof body.endpoint === 'string' ? body.endpoint : undefined,
     });
     sendJSON(res, 200, {
@@ -192,31 +203,42 @@ export async function handleDeploymentRoute({
           ? req.headers.authorization
           : undefined,
         {
-          timestamp: typeof req.headers['x-otto-timestamp'] === 'string'
-            ? req.headers['x-otto-timestamp']
-            : undefined,
-          nonce: typeof req.headers['x-otto-nonce'] === 'string'
-            ? req.headers['x-otto-nonce']
-            : undefined,
-          signature: typeof req.headers['x-otto-signature'] === 'string'
-            ? req.headers['x-otto-signature']
-            : undefined,
+          timestamp:
+            typeof req.headers['x-otto-timestamp'] === 'string'
+              ? req.headers['x-otto-timestamp']
+              : undefined,
+          nonce:
+            typeof req.headers['x-otto-nonce'] === 'string'
+              ? req.headers['x-otto-nonce']
+              : undefined,
+          signature:
+            typeof req.headers['x-otto-signature'] === 'string'
+              ? req.headers['x-otto-signature']
+              : undefined,
         },
       );
       sendJSON(res, 202, receipt);
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
-      const status = message.includes('not configured') ? 404 :
-        message.includes('authorization') ? 401 : 400;
+      const status = message.includes('not configured')
+        ? 404
+        : message.includes('authorization')
+          ? 401
+          : 400;
       sendJSON(res, status, { error: message || 'telemetry ingest failed' });
     }
     return true;
   }
 
   if (path === '/enterprise/deployment/diagnostics' && method === 'GET') {
-    sendJSON(res, 200, services.exportDeploymentDiagnostics({
-      includeRedactedSamples: url.searchParams.get('includeRedactedSamples') === 'true',
-    }));
+    sendJSON(
+      res,
+      200,
+      services.exportDeploymentDiagnostics({
+        includeRedactedSamples:
+          url.searchParams.get('includeRedactedSamples') === 'true',
+      }),
+    );
     return true;
   }
 

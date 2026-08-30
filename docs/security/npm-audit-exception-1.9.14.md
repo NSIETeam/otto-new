@@ -8,7 +8,7 @@
 
 ## 结论
 
-截至 2026-08-29，完整 `npm audit --json` 仅报告以下两个 high 公告：
+截至 2026-08-30，完整 `npm audit --json` 仅报告以下两个 high 公告：
 
 | 公告                  | 影响                                         | 受影响范围           | 已发布修复 |
 | --------------------- | -------------------------------------------- | -------------------- | ---------- |
@@ -27,7 +27,7 @@ Otto / otto-core
 
 ## 为什么暂时不能升级修复
 
-两个 GitHub Advisory 均标记所有 `<=2.0.2` 版本受影响且没有 patched version。npm 当前给出的 `fixAvailable` 是把 `pptxgenjs@4.0.1` 强制降级为 `1.1.5`，并明确标记为 semver-major；这不是已修复的兼容升级，会替换 Otto 已验证的 PPTX 运行时。
+两个 GitHub Advisory 均标记所有 `<=2.0.2` 版本受影响且没有 patched version。锁定的 npm 10.9.8 在 2026-08-30 给出的 `fixAvailable` 是把直接依赖强制降级到 `pptxgenjs@1.1.5`，并明确标记为 semver-major；这不是包含上游漏洞修复的兼容升级，不能作为安全修复采用。
 
 因此禁止执行 `npm audit fix --force`，也禁止伪造不存在的安全版本。真正的解除条件是：
 
@@ -56,9 +56,9 @@ Release workflow 在 `npm ci` 后运行：
 npm run security:dependencies:release
 ```
 
-该命令显式使用 `https://registry.npmjs.org/` 官方审计端点返回的实时 JSON；CI 明确禁止通过 `--audit-json` 使用快照。门禁要求当前审计结果精确为两个已审核公告，任何额外 high/critical、修复建议变化、公告范围变化或审计端点错误都会失败。
+该命令显式使用 `https://registry.npmjs.org/` 官方审计端点返回的实时 JSON；CI 明确禁止通过 `--audit-json` 使用快照。门禁要求当前审计结果精确为两个已审核公告，并固定 npm 10.9.8 当前给出的强制降级建议；任何额外 high/critical、修复建议变化、公告范围变化或审计端点错误都会失败并触发重新评估。
 
-仓库内的 `config/security/npm-audit-1.9.14.expected.json` 只是 2026-08-29 的脱敏结构快照，用于离线回归测试，不能替代发布审计。
+仓库内的 `config/security/npm-audit-1.9.14.expected.json` 只是 2026-08-30 的脱敏结构快照，用于离线回归测试，不能替代发布审计。
 
 ## 到期处理
 

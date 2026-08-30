@@ -11,9 +11,20 @@
 
 1. Release 源提交必须存在于 `NSIETeam/otto-new`，且包含最新 `origin/internal`。
 2. 安装包、企业服务包、签名、校验和与 `latest.json` 必须由同一次工作流构建。
-3. 工作流先创建新旧两个草稿，再完成验签、企业部署和服务器镜像原子切换。
-4. 全部门禁通过后，先公开旧客户端兼容 Release，再公开 `NSIETeam/otto-new` 正式 Release。
+3. `prepare-release-creation-intent` 在任何 tag/Release 写入前稳定读取两个仓库各自精确的
+   `latest` Release id + tag（允许为 `null`），把它们与本次 run、tag、仓库身份、完整
+   锁定源码 commit、兼容仓 main commit、tag/Release 预存在状态及完整资产身份写入创建
+   意图；创建意图与 latest 快照的 SHA-256 由 job 输出，并在第一次写入前作为不可变
+   artifact 上传。创建失败或取消时，只能据此幂等删除身份完全匹配的 draft 与本 run
+   新建 tag，正式 push 前已有的源码 tag 必须保留。
+4. 工作流创建新旧两个草稿并完成验签、企业部署后，先公开并复核
+   `NSIETeam/otto-new` 正式 Release，最后才公开并复核旧客户端兼容 Release；随后才允许
+   原子切换服务器镜像。
 5. 任一兼容发布失败都必须使整次发版失败；不得只更新新仓后宣称老用户可正常更新。
+   补偿必须重新校验发布前快照摘要，从目标版本移除 `latest`，并按快照中的 id + tag
+   精确恢复两仓此前的 `latest`，不能依赖 GitHub 当时推算的“上一个版本”。
+6. 已公开且可能被客户端观察到的 Release 绝不改回草稿，资产不得删除或覆盖。即使
+   `latest` 已精确恢复，该版本号也永久烧毁；恢复后必须使用新的 patch 版本重新发布。
 
 ## Secret 迁移门禁
 

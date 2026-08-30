@@ -623,22 +623,18 @@ export function validateServerIntegrationBaseline({
   );
   const hasInternalRead =
     /INTERNAL_COMMIT="\$\(git rev-parse origin\/internal\)"/u.test(workflow);
-  const hasAncestorCheck =
-    /git merge-base --is-ancestor "\$INTERNAL_COMMIT" "\$SOURCE_COMMIT"/u.test(
-      workflow,
-    );
-  const restrictsReleaseBranches = workflow.includes('refs/heads/release/*');
-  const restrictsVersionTags = workflow.includes('refs/tags/v*');
+  const hasExactInternalCheck =
+    /if \[ "\$SOURCE_COMMIT" != "\$INTERNAL_COMMIT" \]; then/u.test(workflow);
+  const restrictsVersionTags = workflow.includes("- 'v*.*.*'");
   if (!(
     hasInternalFetch &&
     hasSourceRead &&
     hasInternalRead &&
-    hasAncestorCheck &&
-    restrictsReleaseBranches &&
+    hasExactInternalCheck &&
     restrictsVersionTags
   )) {
     errors.push(
-      'release workflow must require latest origin/internal as an ancestor and restrict additional commits to release refs',
+      'release workflow must require source to exactly equal latest origin/internal and restrict automatic runs to version tags',
     );
   }
   const validationCommand = 'npm run validate:integration-baseline';

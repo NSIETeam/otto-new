@@ -1,5 +1,8 @@
 # Otto Enterprise 私有化部署包
 
+本包是 1.9.14 稳定发布所支持的单机企业服务配置，不是 PostgreSQL/Redis/S3 集群部署
+包。集群迁移和提升必须按独立运行手册完成能力兼容、数据权威与容灾验收。
+
 这是一套面向 Ubuntu 22.04/24.04 的“上传、填配置、执行一条安装命令”迁移包。它会安装固定并校验过 SHA-256 的 Node.js 22 LTS、最小企业服务、systemd 单元，并可选配置 Caddy HTTPS。
 
 它不会携带任何生产数据库、手机号、短信密钥、管理员密码或平台令牌。旧服务器的数据要用包内 `export-migration.sh` 单独导出。
@@ -19,6 +22,354 @@
 - 迁移包是包含账号、手机号、会话和企业密钥的敏感文件，默认权限为 0600；传输完成后请妥善删除。
 - 外层 SHA-256 与包内清单用于发现传输损坏；正式包还必须携带 Ed25519 `.sig`，并使用从独立可信渠道取得的 Otto 发布公钥验签，不能信任签名文件自行提供的公钥。
 - 正式写入前会创建 `/opt/otto-enterprise/.installing` 事务标记；断电或 `SIGKILL` 后标记会保留，重跑将 fail closed，避免把半安装状态当成新服务器。
+
+### 发布自动化的首次网关安装（必须人工完成一次）
+
+GitHub Actions 不接收、保存或传递服务器 sudo 密码。正式自动部署只允许 CI 的 SSH
+账号通过 `sudo -n` 调用固定的 root-owned 网关
+`/usr/local/sbin/otto-enterprise-ci-deploy`；网关会先把上传内容复制到 root-only 暂存区，
+再用服务器预置的 Ed25519 公钥验签。签名、版本、包身份或文件集合有任意不一致都会
+fail closed。
+
+因此，首次启用自动发布前，必须由有 root 权限的管理员通过独立可信通道完成一次
+bootstrap。不要让 CI 自行上传并以 root 身份执行安装网关的脚本，也不要把 sudo 密码
+配置为 GitHub Secret。管理员应先按本说明验证正式包的 Ed25519 签名和 SHA-256，再把
+它解压到 root 管理且 CI 账号不可写的目录；不能直接从 CI 账号的 home、上传目录或其他该账号可写的路径
+运行安装器：
+
+首次 bootstrap 不依赖 Otto 包中的 Node.js。下面的 `TRUSTED_PYTHON` 必须指向 Ubuntu
+系统包管理器从受信软件源预装的**版本化真实文件**（22.04 通常是
+`/usr/bin/python3.10`，24.04 通常是 `/usr/bin/python3.12`），不能使用通常为符号链接的
+`/usr/bin/python3`；`TRUSTED_OPENSSL`、Python 标准库和发布公钥也必须在接触上传文件前
+由管理员通过系统包校验或独立可信介质确认。它们不能来自待验包、上传目录或 CI 工作区。
+
+```bash
+sudo -- /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+  HOME=/root USER=root LOGNAME=root SHELL=/usr/bin/bash /usr/bin/bash -p <<'ROOT_BOOTSTRAP'
+set -Eeuo pipefail
+umask 077
+
+# 按服务器版本修改这些精确路径和值；三个 SOURCE_* 文件可以来自上传区。
+SOURCE_ARCHIVE=/上传区/otto-enterprise-oneclick-v1.9.14-精确包身份.tar.gz
+SOURCE_SIGNATURE="${SOURCE_ARCHIVE}.sig"
+SOURCE_CHECKSUM="${SOURCE_ARCHIVE}.sha256"
+TRUST_ROOT=/root/otto-release-trust
+TRUSTED_PUBLIC_KEY="${TRUST_ROOT}/otto-enterprise-release-public.pem"
+TRUSTED_PYTHON=/usr/bin/python3.12
+TRUSTED_OPENSSL=/usr/bin/openssl
+DEPLOY_USER=你的CI部署专用SSH账号
+ROLLBACK_USER=你的CI回滚专用SSH账号
+DEPLOY_CONFIG=/etc/otto-enterprise/enterprise.env
+BOOTSTRAP_DIR=''
+MAX_ARCHIVE_BYTES=$((8 * 1024 * 1024 * 1024))
+MAX_SIGNATURE_BYTES=$((16 * 1024))
+MAX_CHECKSUM_BYTES=256
+MAX_UNPACKED_BYTES=$((16 * 1024 * 1024 * 1024))
+SPACE_RESERVE_BYTES=$((256 * 1024 * 1024))
+
+fail_bootstrap() {
+  printf 'Otto gateway bootstrap: %s\n' "$*" >&2
+  exit 2
+}
+
+require_root_controlled_path() {
+  local trusted_path="$1" expected_type="$2" current="$1"
+  [[ "$trusted_path" = /* ]] || fail_bootstrap "trusted path is not absolute: $trusted_path"
+  [ "$(readlink -f -- "$trusted_path")" = "$trusted_path" ] \
+    || fail_bootstrap "trusted path is not canonical or contains a symlink: $trusted_path"
+  while :; do
+    [ ! -L "$current" ] || fail_bootstrap "trusted path contains a symlink: $current"
+    [ "$(stat -c '%u:%g' -- "$current")" = '0:0' ] \
+      || fail_bootstrap "trusted path is not root-owned: $current"
+    if find "$current" -maxdepth 0 -perm /022 -print -quit | grep -q .; then
+      fail_bootstrap "trusted path is group/other writable: $current"
+    fi
+    if [ "$current" = "$trusted_path" ]; then
+      case "$expected_type" in
+        file) [ -f "$current" ] || fail_bootstrap "trusted path is not a regular file: $current" ;;
+        directory) [ -d "$current" ] || fail_bootstrap "trusted path is not a directory: $current" ;;
+        *) fail_bootstrap "unknown trusted path type" ;;
+      esac
+    else
+      [ -d "$current" ] || fail_bootstrap "trusted ancestor is not a directory: $current"
+    fi
+    [ "$current" = / ] && break
+    current="$(dirname -- "$current")"
+  done
+}
+
+cleanup_bootstrap() {
+  local status=$?
+  trap - EXIT HUP INT TERM
+  if [ -n "$BOOTSTRAP_DIR" ]; then
+    if [[ "$BOOTSTRAP_DIR" =~ ^/var/tmp/otto-ci-gateway-bootstrap\.[A-Za-z0-9]{8}$ ]] \
+      && [ -d "$BOOTSTRAP_DIR" ] && [ ! -L "$BOOTSTRAP_DIR" ] \
+      && [ "$(stat -c '%u:%g:%a' -- "$BOOTSTRAP_DIR")" = '0:0:700' ]; then
+      rm -rf --one-file-system -- "$BOOTSTRAP_DIR" || status=1
+    else
+      printf 'Otto gateway bootstrap: refusing unsafe cleanup path: %s\n' \
+        "$BOOTSTRAP_DIR" >&2
+      status=1
+    fi
+  fi
+  exit "$status"
+}
+trap cleanup_bootstrap EXIT
+trap 'exit 130' HUP INT TERM
+
+for trusted_file in "$TRUSTED_PUBLIC_KEY" "$TRUSTED_PYTHON" "$TRUSTED_OPENSSL"; do
+  require_root_controlled_path "$trusted_file" file
+done
+require_root_controlled_path "$TRUST_ROOT" directory
+require_root_controlled_path "$DEPLOY_CONFIG" file
+
+ARCHIVE_NAME="$(basename -- "$SOURCE_ARCHIVE")"
+[[ "$ARCHIVE_NAME" =~ ^otto-enterprise-oneclick-v[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{12}-[0-9a-f]{12}\.tar\.gz$ ]] \
+  || fail_bootstrap 'unexpected archive name'
+
+BOOTSTRAP_DIR="$(mktemp -d /var/tmp/otto-ci-gateway-bootstrap.XXXXXXXX)"
+[[ "$BOOTSTRAP_DIR" =~ ^/var/tmp/otto-ci-gateway-bootstrap\.[A-Za-z0-9]{8}$ ]] \
+  && [ "$(stat -c '%u:%g:%a' -- "$BOOTSTRAP_DIR")" = '0:0:700' ] \
+  || fail_bootstrap 'unsafe bootstrap directory'
+SNAPSHOT_ARCHIVE="$BOOTSTRAP_DIR/$ARCHIVE_NAME"
+SNAPSHOT_SIGNATURE="${SNAPSHOT_ARCHIVE}.sig"
+SNAPSHOT_CHECKSUM="${SNAPSHOT_ARCHIVE}.sha256"
+SIGNATURE_BIN="$BOOTSTRAP_DIR/archive-signature.bin"
+
+# 一个可信 Python 进程同时持有三个上传文件的 fd。容量判断使用这些 fd 的 fstat 大小，
+# 复制只读取该精确长度；上传者并发截短、增长、换成 symlink/FIFO 都会 fail closed。
+read -r ARCHIVE_BYTES SIGNATURE_BYTES CHECKSUM_BYTES < <(
+  "$TRUSTED_PYTHON" -I -S - \
+    "$BOOTSTRAP_DIR" "$SPACE_RESERVE_BYTES" \
+    "$SOURCE_ARCHIVE" "$SNAPSHOT_ARCHIVE" "$MAX_ARCHIVE_BYTES" \
+    "$SOURCE_SIGNATURE" "$SNAPSHOT_SIGNATURE" "$MAX_SIGNATURE_BYTES" \
+    "$SOURCE_CHECKSUM" "$SNAPSHOT_CHECKSUM" "$MAX_CHECKSUM_BYTES" <<'PYTHON_COPY'
+import os
+import stat
+import sys
+
+destination_dir = sys.argv[1]
+reserve_bytes = int(sys.argv[2])
+raw_specs = sys.argv[3:]
+if len(raw_specs) != 9 or reserve_bytes != 256 * 1024 * 1024:
+    raise ValueError('invalid bounded-copy arguments')
+specs = [
+    (raw_specs[index], raw_specs[index + 1], int(raw_specs[index + 2]))
+    for index in range(0, len(raw_specs), 3)
+]
+open_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+source_fds = []
+try:
+    for source_path, target_path, cap in specs:
+        descriptor = os.open(source_path, open_flags)
+        source_fds.append((descriptor, source_path, target_path, cap))
+    opened = []
+    for descriptor, source_path, target_path, cap in source_fds:
+        source_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise ValueError(f'upload is not a regular file: {source_path}')
+        if source_stat.st_size <= 0 or source_stat.st_size > cap:
+            raise ValueError(f'upload size is outside its cap: {source_path}')
+        opened.append((descriptor, source_path, target_path, source_stat.st_size))
+    filesystem = os.statvfs(destination_dir)
+    available_bytes = filesystem.f_bavail * filesystem.f_frsize
+    required_bytes = sum(item[3] for item in opened) + reserve_bytes
+    if available_bytes < required_bytes:
+        raise ValueError('insufficient space for bounded snapshots plus reserve')
+
+    copied_sizes = []
+    for descriptor, source_path, target_path, expected_size in opened:
+        target_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
+        target_fd = os.open(target_path, target_flags, 0o600)
+        try:
+            remaining = expected_size
+            while remaining:
+                chunk = os.read(descriptor, min(1024 * 1024, remaining))
+                if not chunk:
+                    raise ValueError(f'upload was truncated while copying: {source_path}')
+                view = memoryview(chunk)
+                while view:
+                    written = os.write(target_fd, view)
+                    if written <= 0:
+                        raise OSError(f'bounded snapshot write made no progress: {target_path}')
+                    view = view[written:]
+                remaining -= len(chunk)
+            if os.read(descriptor, 1):
+                raise ValueError(f'upload grew while copying: {source_path}')
+            os.fsync(target_fd)
+        finally:
+            os.close(target_fd)
+        copied_sizes.append(expected_size)
+    directory_fd = os.open(destination_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+    print(*copied_sizes)
+finally:
+    for descriptor, *_ in source_fds:
+        os.close(descriptor)
+PYTHON_COPY
+)
+[[ "$ARCHIVE_BYTES" =~ ^[0-9]+$ ]] \
+  && [[ "$SIGNATURE_BYTES" =~ ^[0-9]+$ ]] \
+  && [[ "$CHECKSUM_BYTES" =~ ^[0-9]+$ ]] \
+  || fail_bootstrap 'trusted bounded copier returned an invalid result'
+for snapshot_spec in \
+  "$SNAPSHOT_ARCHIVE:$MAX_ARCHIVE_BYTES" \
+  "$SNAPSHOT_SIGNATURE:$MAX_SIGNATURE_BYTES" \
+  "$SNAPSHOT_CHECKSUM:$MAX_CHECKSUM_BYTES"; do
+  snapshot_file="${snapshot_spec%:*}"
+  snapshot_cap="${snapshot_spec##*:}"
+  [ -f "$snapshot_file" ] && [ ! -L "$snapshot_file" ] \
+    && [ "$(stat -c '%u:%g:%a' -- "$snapshot_file")" = '0:0:600' ] \
+    || fail_bootstrap "unsafe root-only snapshot: $snapshot_file"
+  snapshot_bytes="$(stat -c '%s' -- "$snapshot_file")"
+  [ "$snapshot_bytes" -gt 0 ] && [ "$snapshot_bytes" -le "$snapshot_cap" ] \
+    || fail_bootstrap "root-only snapshot exceeds its size cap: $snapshot_file"
+done
+
+# 严格拒绝重复/额外 envelope 字段和多行 checksum；checksum 只作与已签名摘要的交叉比对，
+# 不执行由 checksum 内容驱动的批量校验命令，也不允许它选择其他文件名。
+read -r VERIFIED_DIGEST UNPACKED_BYTES < <(
+  "$TRUSTED_PYTHON" -I -S - \
+    "$SNAPSHOT_ARCHIVE" "$SNAPSHOT_SIGNATURE" "$SNAPSHOT_CHECKSUM" \
+    "$TRUSTED_PUBLIC_KEY" "$TRUSTED_OPENSSL" "$ARCHIVE_NAME" \
+    "$SIGNATURE_BIN" "$MAX_UNPACKED_BYTES" <<'PYTHON_VERIFY'
+import base64
+import hashlib
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import tarfile
+
+(archive_path, envelope_path, checksum_path, public_key_path, openssl_path,
+ expected_name, signature_bin, max_unpacked_text) = sys.argv[1:]
+
+def reject_duplicates(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f'duplicate envelope field: {key}')
+        result[key] = value
+    return result
+
+with open(envelope_path, 'r', encoding='utf-8', errors='strict') as stream:
+    envelope = json.load(stream, object_pairs_hook=reject_duplicates)
+expected_fields = {'algorithm', 'file', 'format', 'keyId', 'sha256', 'signature'}
+if not isinstance(envelope, dict) or set(envelope) != expected_fields:
+    raise ValueError('signature envelope fields are not exact')
+if envelope['format'] != 'otto-enterprise-package-signature-v1':
+    raise ValueError('signature envelope format is invalid')
+if envelope['algorithm'] != 'Ed25519' or envelope['file'] != expected_name:
+    raise ValueError('signature envelope algorithm or filename is invalid')
+if not re.fullmatch(r'[0-9a-f]{64}', envelope['sha256']):
+    raise ValueError('signature envelope digest is invalid')
+if not re.fullmatch(r'[0-9a-f]{16}', envelope['keyId']):
+    raise ValueError('signature envelope key id is invalid')
+if not re.fullmatch(r'[A-Za-z0-9_-]{86}', envelope['signature']):
+    raise ValueError('signature envelope signature encoding is invalid')
+
+digest = hashlib.sha256()
+with open(archive_path, 'rb') as stream:
+    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+        digest.update(chunk)
+actual_digest = digest.hexdigest()
+if actual_digest != envelope['sha256']:
+    raise ValueError('archive digest does not match the signature envelope')
+
+checksum_bytes = pathlib.Path(checksum_path).read_bytes()
+checksum_match = re.fullmatch(
+    rb'([0-9a-f]{64})  (' + re.escape(expected_name.encode('ascii')) + rb')\n?',
+    checksum_bytes,
+)
+if not checksum_match or checksum_match.group(1).decode('ascii') != actual_digest:
+    raise ValueError('checksum must be one exact line bound to the signed archive')
+
+public_der = subprocess.run(
+    [openssl_path, 'pkey', '-pubin', '-in', public_key_path, '-outform', 'DER'],
+    check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+).stdout
+if hashlib.sha256(public_der).hexdigest()[:16] != envelope['keyId']:
+    raise ValueError('trusted public key id does not match the signature envelope')
+signature = base64.b64decode(envelope['signature'] + '==', altchars=b'-_', validate=True)
+if len(signature) != 64:
+    raise ValueError('Ed25519 signature length is invalid')
+with open(signature_bin, 'xb') as stream:
+    os.fchmod(stream.fileno(), 0o600)
+    stream.write(signature)
+subprocess.run(
+    [openssl_path, 'pkeyutl', '-verify', '-pubin', '-inkey', public_key_path,
+     '-rawin', '-in', archive_path, '-sigfile', signature_bin],
+    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+
+unpacked_bytes = 0
+with tarfile.open(archive_path, mode='r:gz') as archive:
+    for member in archive:
+        if member.isreg():
+            unpacked_bytes += member.size
+            if unpacked_bytes > int(max_unpacked_text):
+                raise ValueError('archive exceeds the unpacked-size cap')
+print(actual_digest, unpacked_bytes)
+PYTHON_VERIFY
+)
+[[ "$VERIFIED_DIGEST" =~ ^[0-9a-f]{64}$ ]] \
+  && [[ "$UNPACKED_BYTES" =~ ^[0-9]+$ ]] \
+  || fail_bootstrap 'trusted verifier returned an invalid result'
+AVAILABLE_BYTES="$(df -B1 --output=avail "$BOOTSTRAP_DIR" | tail -n 1 | tr -d ' ')"
+REQUIRED_BYTES=$((UNPACKED_BYTES + SPACE_RESERVE_BYTES))
+[ "$AVAILABLE_BYTES" -ge "$REQUIRED_BYTES" ] \
+  || fail_bootstrap 'insufficient bootstrap space to extract with reserve'
+
+EXTRACT_DIR="$BOOTSTRAP_DIR/extracted"
+install -d -o root -g root -m 0700 -- "$EXTRACT_DIR"
+tar --no-same-owner --no-same-permissions -xzf "$SNAPSHOT_ARCHIVE" -C "$EXTRACT_DIR"
+EXPECTED_PACKAGE_DIR="${ARCHIVE_NAME%.tar.gz}"
+mapfile -d '' PACKAGE_DIRS < <(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 \
+  -type d -name "$EXPECTED_PACKAGE_DIR" -print0)
+[ "${#PACKAGE_DIRS[@]}" -eq 1 ] \
+  || fail_bootstrap 'expected exactly one extracted package directory'
+PACKAGE_DIR="${PACKAGE_DIRS[0]}"
+"$PACKAGE_DIR/install-ci-deploy-gateway.sh" \
+  --deploy-user "$DEPLOY_USER" \
+  --rollback-user "$ROLLBACK_USER" \
+  --public-key "$TRUSTED_PUBLIC_KEY" \
+  --config "$DEPLOY_CONFIG"
+ROOT_BOOTSTRAP
+```
+
+随机目录从创建到安装结束始终保持 `root:root:0700`，严格 `EXIT/HUP/INT/TERM` trap 会在
+成功或失败后删除它。不要复用旧目录，也不要把它改成 CI 账号可写。上传区中的三个文件
+只允许作为 root-only 快照的输入；验签、摘要比对、空间验收、解压和安装都只读取同一份
+快照。`--public-key` 必须是绝对、规范、无符号链接的路径，文件及其目录链必须由 root
+管理且不能由 CI 账号、组或其他用户写入。
+
+安装器会固定安装网关、两个镜像 helper、服务器信任公钥和最小 sudoers 规则。部署账号与
+回滚账号必须是新建的两个不同非 root 专用系统账号，UID 与主 GID 均不得相同，并使用不同的 SSH 私钥；每个账号只能
+属于自己的主组，不得属于 `sudo`、`admin`、`wheel` 或任何其他补充组，也不得已有任何其他
+sudo/NOPASSWD 规则。生产 workflow 会从两把私钥派生公钥，只比较 SHA-256 fingerprint
+并拒绝相同 fingerprint，不会输出私钥或公钥；安装器会审计两个账号的完整有效 sudo 命令集，除
+`(root) NOPASSWD: /usr/local/sbin/otto-enterprise-ci-deploy` 外出现任何规则都会失败。部署账号
+不能执行镜像回滚，回滚账号只能执行只读预检和带事务能力票据的镜像回滚。安装器只验证
+sudo 授权边界，不会在仍持有安装锁时执行 preflight；安装完成后必须分别检查：
+
+```bash
+sudo -u 你的CI部署专用SSH账号 \
+  sudo -n /usr/local/sbin/otto-enterprise-ci-deploy preflight
+sudo -u 你的CI回滚专用SSH账号 \
+  sudo -n /usr/local/sbin/otto-enterprise-ci-deploy preflight
+```
+
+预检必须输出且只输出一行
+`protocol=otto-enterprise-ci-deploy-v4 gateway=<sha256> publish=<sha256> rollback=<sha256> key=<key-id> config=/etc/otto-enterprise/enterprise.env deploy_user=<部署账号> rollback_user=<回滚账号>`，
+其中三个 SHA-256 与本次锁定源码完全一致，key id 与本次企业包签名公钥一致，config
+必须逐字等于生产固定配置路径。任一字段
+不一致都不得触发稳定版发布。每次网关、helper 或信任公钥变化后，服务器管理员都必须
+从锁定源码重新执行上述安装流程；普通发布工作流没有修改 root 信任边界的权限。
 
 ## 一、在旧服务器导出
 
@@ -76,38 +427,21 @@ sudo systemctl start otto-enterprise
    - 迁移包 `.sha256`。
 5. 不要提前关闭旧服务器；保留它作为切回点。
 
-正式包必须同时带有 `.sig`。先从 Otto 单独维护的可信渠道取得 Ed25519
-公钥，再校验发布者身份；签名文件内不会携带或选择公钥：
-
-```bash
-node verify-enterprise-package-signature.mjs \
-  otto-enterprise-oneclick-v*-*.tar.gz \
-  otto-enterprise-oneclick-v*-*.tar.gz.sig \
-  /安全路径/otto-enterprise-release-public.pem
-```
-
-然后校验传输完整性：
-
-```bash
-sha256sum -c otto-enterprise-oneclick-v*-*.tar.gz.sha256
-```
-
-`.sha256` 只负责发现传输损坏，不能替代 Ed25519 发布者签名。若签名、公钥或
-校验器缺少任意一项，不应把该包用于正式服务器。
-
-校验成功后再解压：
-
-```bash
-tar -xzf otto-enterprise-oneclick-v*-*.tar.gz
-cd otto-enterprise-oneclick-v*-*
-```
+正式包必须同时带有 `.sig`。必须完整执行前文的“随机 root-only 目录 → 三文件快照 →
+使用独立 root-controlled 校验器和 Ed25519 公钥重验 → 从同一快照解压”流程。`.sha256`
+只负责发现传输损坏，不能替代 Ed25519 发布者签名。若签名、公钥、校验器或 root-only
+快照缺少任意一项，不应把该包用于正式服务器。不得从上传账号可写的解压目录运行
+`install.sh`、`upgrade.sh` 或任何包内工具。
 
 ## 三、填写配置
 
 ```bash
-cp config/enterprise.env.example ./enterprise.env
-nano ./enterprise.env
-chmod 600 ./enterprise.env
+CONFIG_SNAPSHOT="$BOOTSTRAP_DIR/enterprise.env"
+sudo -- /usr/bin/install -o root -g root -m 0600 -- \
+  "$PACKAGE_DIR/config/enterprise.env.example" "$CONFIG_SNAPSHOT"
+sudoedit "$CONFIG_SNAPSHOT"
+[ "$(sudo -- /usr/bin/stat -c '%u:%g:%a' -- "$CONFIG_SNAPSHOT")" = '0:0:600' ] \
+  || { printf 'unsafe config snapshot\n' >&2; exit 1; }
 ```
 
 必须修改：
@@ -145,8 +479,8 @@ chmod 600 ./enterprise.env
 先做不写盘预检：
 
 ```bash
-./install.sh \
-  --config ./enterprise.env \
+sudo -- "$PACKAGE_DIR/install.sh" \
+  --config "$CONFIG_SNAPSHOT" \
   --migration /root/otto-enterprise-final.tar.gz \
   --dry-run
 ```
@@ -156,8 +490,8 @@ dry-run 会校验包内每个文件、release manifest、迁移归档、SQLite `
 正式安装：
 
 ```bash
-sudo ./install.sh \
-  --config ./enterprise.env \
+sudo -- "$PACKAGE_DIR/install.sh" \
+  --config "$CONFIG_SNAPSHOT" \
   --migration /root/otto-enterprise-final.tar.gz
 ```
 
@@ -172,7 +506,9 @@ sudo ./install.sh \
 7. 安装专用 `otto-enterprise` 用户、只读 release 和 0600 运行配置；
 8. 启动 systemd 服务；
 9. 可选安装/验证/重载 Caddy；
-10. 验证公网 HTTPS、精确版本、短信状态和三个 404 屏蔽路径。
+10. 验证公网 HTTPS、精确版本、短信状态，以及
+    `/enterprise/local-agent`、`/enterprise/local-agent/pair`、
+    `/enterprise/sdk/otto-discovery.js` 三个路径均返回 404。
 
 ## 五、验收
 
@@ -193,14 +529,28 @@ curl --fail --show-error \
 
 上面的公网验收只适用于 `managed` 模式。`external` 模式必须在外置代理配置完成后手动执行同等 health 与三个 404 检查。
 
-必须看到：
+公网响应必须看到：
 
 - `status: ok`
+- `service: otto-enterprise`
 - `apiVersion: 4`
-- `schemaVersion` 必须与本次 release manifest 的 `database.schemaTo` 一致
-- `db: connected`
-- `sms.configured: true`
-- `capabilities` 同时包含 `personal_enterprise_upgrade`、`direct_messages`、`atoa`、`position_invites`、`park_service_push`、`park_repair_v1`、`data_protection_v1`、`encrypted_attachment_storage_v1`、`encrypted_message_storage_v1`、`signed_telemetry_transport_v1`
+- `version` 必须与本次发布版本一致
+- `appVersion` 必须与本次发布版本一致
+- `capabilities` 同时包含 `password_auth`、`sms_registration`、
+  `personal_enterprise_upgrade`、`organization_invites`、`usage_summary`、
+  `admin_console`、`direct_messages`、`atoa`、`position_invites`、
+  `park_service_push`、`park_repair_v1`、`data_protection_v1`、
+  `encrypted_attachment_storage_v1`、`encrypted_message_storage_v1`、
+  `signed_telemetry_transport_v1`、`data_governance_v1`、
+  `privacy_self_service`
+
+公网响应不得包含 build、schema、数据库、许可证、短信、备份、存储或运行时私有状态。
+schema、数据库就绪、SQLCipher、许可证强制执行和备份状态只能由服务器本地的
+`verify.sh` 使用管理员令牌检查；不得把管理员令牌发送到公网跳转目标。认证后的
+`/enterprise/deployment/status` 还必须返回
+`runtime.version=<本次发布版本>` 和
+`runtime.buildCommit=<签名 manifest 中的完整 buildCommit>`，两项都要求精确匹配，不能
+用公网 `version` 或包文件名的 12 位前缀代替完整 build identity。
 
 浏览器验收：
 
@@ -252,8 +602,8 @@ sudo ls -ld /var/tmp/otto-enterprise-deploy-*
 
 服务默认每 24 小时创建一份在线一致性快照，保留 30 天且至少保留 3 份。备份包含
 SQLite、加密附件对象、账号同步密钥、附件密钥和消息字段密钥，外层再使用 AES-256-GCM 加密；
-`/enterprise/health` 的 `dataProtection` 会显示最近成功时间、文件 SHA-256、失败原因、
-磁盘余量和异地副本状态。
+带管理员令牌的 `/enterprise/deployment/status` 中 `dataProtection` 会显示最近成功时间、
+文件 SHA-256、失败原因、磁盘余量和异地副本状态；这些信息不会出现在公网 health。
 
 手动备份：
 
@@ -357,7 +707,9 @@ sudo journalctl -u caddy -n 100 --no-pager
 
 ### 邀请码能打开，但收不到验证码
 
-查看 health 中 `sms.configured`。若为 `false`，说明短信四项没有进入 `/etc/otto-enterprise/enterprise.env`。不要用 `OTTO_ALLOW_SMS_DISABLED=1` 绕过正式迁移验收。
+检查 `/etc/otto-enterprise/enterprise.env` 中短信四项，再在服务器本地运行
+`sudo /opt/otto-enterprise/deploy/verify.sh`。公网 health 不暴露短信配置。不要用
+`OTTO_ALLOW_SMS_DISABLED=1` 绕过正式迁移验收。
 
 ### 客户端仍没有组织树
 

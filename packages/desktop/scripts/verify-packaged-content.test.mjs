@@ -5,6 +5,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { finished } from 'node:stream/promises';
 import asar from '@electron/asar';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -35,7 +36,8 @@ async function createArchive(files) {
     }),
   );
   const archive = path.join(root, 'app.asar');
-  await asar.createPackage(input, archive);
+  const archiveWriteStream = await asar.createPackage(input, archive);
+  await finished(archiveWriteStream);
   return archive;
 }
 

@@ -376,8 +376,46 @@ describe('desktop packaging contract', () => {
     expect(script).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'");
     expect(workflow).toContain('unsigned_mac_transition:');
     expect(workflow).toContain(
-      "OTTO_ALLOW_UNSIGNED_MAC: ${{ inputs.unsigned_mac_transition && '1' || '0' }}",
+      "OTTO_ALLOW_UNSIGNED_MAC: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}",
     );
+    expect(workflow).toContain('Validate release mode boundary');
+    expect(workflow).toContain(
+      'Unsigned transition builds require workflow_dispatch, unsigned_mac_transition=true, release_channel=transition, draft=true, and prerelease=true.',
+    );
+    expect(workflow).toContain(
+      'Prerelease artifacts must remain draft-only and cannot deploy or update existing users.',
+    );
+    expect(workflow).toMatch(
+      /sqlcipher-native:\s+[\s\S]*?needs: validate-source\s+[\s\S]*?uses: \.\/\.github\/workflows\/sqlcipher-native\.yml/,
+    );
+    expect(workflow).toMatch(/otto-native:\s+[\s\S]*?needs: validate-source/);
+    expect(workflow).toContain(
+      "if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}",
+    );
+    const signedMacStep = workflow.match(
+      /- name: Verify signed macOS disk images[\s\S]*?(?=\n\s+- name: Build enterprise server package)/,
+    )?.[0];
+    expect(signedMacStep).toContain(
+      "if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}",
+    );
+    const windowsRuntimeJob = workflow.match(
+      /\n  verify-windows-signature:[\s\S]*?(?=\n  create-release-drafts:)/,
+    )?.[0];
+    expect(windowsRuntimeJob).toContain(
+      'name: Verify Windows installer and packaged runtime',
+    );
+    expect(windowsRuntimeJob).not.toMatch(/timeout-minutes: 15\s+if:/);
+    expect(windowsRuntimeJob).toContain(
+      "DESKTOP_TEST_BUILD: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}",
+    );
+    expect(windowsRuntimeJob).toContain(
+      "if ($env:DESKTOP_TEST_BUILD -ne '1') {",
+    );
+    expect(windowsRuntimeJob).toContain(
+      "$verificationArguments += '--require-native-authenticode'",
+    );
+    expect(windowsRuntimeJob).toContain('probe-packaged-sqlcipher.mjs');
+    expect(windowsRuntimeJob).toContain("'--probe-native'");
     expect(workflow).toContain(
       'Build unsigned Windows and macOS transition test artifacts',
     );
@@ -416,13 +454,8 @@ describe('desktop packaging contract', () => {
     expect(script).toContain("'codesign',");
   });
 
-  it('publishes releases only after the update mirror and enterprise deploy pass', async () => {
-    const [
-      workflow,
-      deliveryScript,
-      publishMirrorScript,
-      rollbackMirrorScript,
-    ] = await Promise.all([
+  it('publishes verified releases before committing the old-user update mirror', async () => {
+    const [workflow, deliveryScript] = await Promise.all([
       readFile(
         path.join(repoRoot, '.github', 'workflows', 'release.yml'),
         'utf8',
@@ -431,21 +464,10 @@ describe('desktop packaging contract', () => {
         path.join(packageRoot, 'scripts', 'make-delivery-zip.mjs'),
         'utf8',
       ),
-      readFile(
-        path.join(repoRoot, '.github', 'scripts', 'publish-update-mirror.sh'),
-        'utf8',
-      ),
-      readFile(
-        path.join(repoRoot, '.github', 'scripts', 'rollback-update-mirror.sh'),
-        'utf8',
-      ),
     ]);
     expect(workflow).toContain('deploy-update-mirror:');
     expect(workflow).toContain('name: Deploy Desktop Update Mirror');
-    expect(workflow).toContain('draft: true');
-    expect(workflow).toContain(
-      "needs.deploy-update-mirror.result == 'success'",
-    );
+    expect(workflow).toContain('--draft');
     expect(workflow).toContain("needs.deploy-enterprise.result == 'success'");
     expect(workflow).toContain(
       'node packages/desktop/scripts/verify-update-manifest.mjs "$DESKTOP_RELEASE" "$VERSION"',
@@ -460,76 +482,366 @@ describe('desktop packaging contract', () => {
     ).toBe(2);
     expect(workflow).not.toContain("['macArm64', 'macX64', 'winX64']");
     expect(workflow).not.toContain("const crypto = require('node:crypto');");
-    expect(workflow).toContain('PAYLOAD_MANIFEST_SHA256');
     expect(workflow).toContain('CHECKSUMS="$DESKTOP_RELEASE/SHA256SUMS"');
+    expect(workflow).toContain(
+      'MIRROR_CHECKSUMS="$DESKTOP_RELEASE/UPDATE-MIRROR-SHA256SUMS"',
+    );
+    expect(workflow).toContain('copy_one "UPDATE-MIRROR-SHA256SUMS"');
+    expect(workflow).toContain('copy_one "UPDATE-MIRROR-SHA256SUMS.sig"');
+    expect(workflow).toContain(
+      'node scripts/release-payload-signature.mjs verify',
+    );
+    expect(workflow).toContain(
+      'node scripts/update-mirror-manifest.mjs verify',
+    );
+    expect(workflow).toContain('mirror-upload/UPDATE-MIRROR-SHA256SUMS.sig');
     expect(workflow).toContain('Attest desktop release candidate provenance');
-    expect(workflow).toContain('Attest enterprise release candidate provenance');
+    expect(workflow).toContain(
+      'Attest enterprise release candidate provenance',
+    );
+    expect(workflow).toContain('Attest signed release manifests');
     expect(workflow).toContain('gh attestation verify "$artifact"');
-    expect(publishMirrorScript).toContain('sha256sum -c -- SHA256SUMS');
-    expect(publishMirrorScript).toContain('latest_next=');
-    expect(publishMirrorScript).toContain('previous-latest.json');
-    expect(publishMirrorScript).toContain('previous-latest.absent');
     expect(workflow).toContain('rollback-update-mirror:');
     expect(workflow).toContain('name: Roll back Desktop Update Mirror');
-    expect(rollbackMirrorScript).toContain(
-      'mirror transaction did not reach the manifest backup; no public manifest was changed',
-    );
     expect(workflow).toContain('Windows no-proxy download');
     expect(workflow).toContain(
-      'git merge-base --is-ancestor "$INTERNAL_COMMIT" "$SOURCE_COMMIT"',
+      'if [ "$SOURCE_COMMIT" != "$INTERNAL_COMMIT" ]; then',
     );
-    expect(workflow).toContain('refs/heads/release/*');
+    expect(workflow).toContain(
+      'Release source must exactly equal the latest origin/internal commit.',
+    );
+    expect(workflow).toContain('INPUT_VERSION: ${{ inputs.version }}');
+    expect(workflow).not.toContain('INPUT_VERSION="${{ inputs.version }}"');
+    const windowsVerificationJobStart = workflow.indexOf(
+      '  verify-windows-signature:',
+    );
+    const prepareCreationJobStart = workflow.indexOf(
+      '  prepare-release-creation-intent:',
+    );
+    const createDraftsJobStart = workflow.indexOf('  create-release-drafts:');
+    const cleanupDraftsJobStart = workflow.indexOf(
+      '  cleanup-partial-release-drafts:',
+    );
     expect(workflow.indexOf('name: Upload workflow artifacts')).toBeLessThan(
-      workflow.indexOf('name: Create draft GitHub release'),
+      windowsVerificationJobStart,
     );
-    expect(workflow).toContain("if: github.repository == 'NSIETeam/otto-new'");
+    expect(windowsVerificationJobStart).toBeLessThan(prepareCreationJobStart);
+    expect(prepareCreationJobStart).toBeLessThan(createDraftsJobStart);
+    expect(workflow).toContain(
+      'Release workflow may only run in NSIETeam/otto-new',
+    );
+    expect(workflow).toContain(
+      'git diff --quiet "$INTERNAL_COMMIT" "$SOURCE_COMMIT" -- .github/workflows',
+    );
+    expect(workflow).toContain(
+      'Release workflow changes must land on the default internal branch before creating a release.',
+    );
     expect(workflow).toContain('RELEASES_REPO: NSIETeam/otto-new');
     expect(workflow).toContain(
       'LEGACY_RELEASES_REPO: Felix201209/otto-releases',
     );
-    expect(workflow).toContain('token: ${{ github.token }}');
     expect(workflow).toContain(
-      'token: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}',
+      'name: Create canonical and compatibility drafts with GitHub CLI',
     );
+    expect(workflow).not.toContain('softprops/action-gh-release@');
+    expect(workflow).toContain('gh release create "$TAG" release-assets/*');
     expect(workflow).toContain(
-      'name: Create legacy compatibility draft release',
+      'source_commit: ${{ needs.validate-source.outputs.source_commit }}',
     );
-    expect(workflow).toContain('name: Publish legacy compatibility release');
-    expect(workflow).toContain('name: Publish canonical release');
-    expect(workflow).toContain(
-      'source_commit: ${{ steps.source.outputs.commit }}',
-    );
-    expect(workflow).toContain(
-      'target_commitish: ${{ steps.source.outputs.commit }}',
-    );
+    expect(workflow).toContain('--target "$SOURCE_COMMIT"');
     expect(workflow).toContain(
       'SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"',
     );
     expect(workflow).toContain(
-      'canonical release tag does not resolve to the locked RC commit',
+      'Canonical draft tag does not resolve to the locked source commit.',
     );
 
+    const validateSourceJobStart = workflow.indexOf('  validate-source:');
+    const sqlcipherJobStart = workflow.indexOf('  sqlcipher-native:');
+    const buildJobStart = workflow.indexOf('  build:');
     const enterpriseJobStart = workflow.indexOf('  deploy-enterprise:');
     const mirrorJobStart = workflow.indexOf('  deploy-update-mirror:');
     const publishJobStart = workflow.indexOf('  publish-release:');
-    const rollbackJobStart = workflow.indexOf('  rollback-update-mirror:');
+    const rollbackMirrorJobStart = workflow.indexOf(
+      '  rollback-update-mirror:',
+    );
+    const rollbackReleaseJobStart = workflow.indexOf(
+      '  rollback-release-publication:',
+    );
+    const validateSourceJob = workflow.slice(
+      validateSourceJobStart,
+      sqlcipherJobStart,
+    );
+    const buildJob = workflow.slice(buildJobStart, windowsVerificationJobStart);
     const enterpriseJob = workflow.slice(enterpriseJobStart, mirrorJobStart);
     const mirrorJob = workflow.slice(mirrorJobStart, publishJobStart);
-    const publishJob = workflow.slice(publishJobStart, rollbackJobStart);
+    const publishJob = workflow.slice(publishJobStart, rollbackMirrorJobStart);
+    const rollbackMirrorJob = workflow.slice(
+      rollbackMirrorJobStart,
+      rollbackReleaseJobStart,
+    );
+    const rollbackReleaseJob = workflow.slice(rollbackReleaseJobStart);
+    expect(validateSourceJob).toContain('permissions:\n      contents: read');
+    expect(validateSourceJob).toContain('INPUT_VERSION: ${{ inputs.version }}');
+    expect(validateSourceJob).toContain(
+      '[[ "$VERSION" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]]',
+    );
+    expect(validateSourceJob).toContain(
+      '[ "$SOURCE_COMMIT" != "$INTERNAL_COMMIT" ]',
+    );
+    expect(buildJob).toContain('contents: read');
+    expect(buildJob).toContain('artifact-metadata: write');
+    expect(buildJob).not.toContain('GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}');
     expect(enterpriseJob).toContain('      - verify-windows-signature');
+    expect(enterpriseJob).toContain('      - create-release-drafts');
+    expect(enterpriseJob).toContain(
+      'uses: ./.github/workflows/deploy-server.yml',
+    );
+    expect(enterpriseJob).toContain(
+      'version: ${{ needs.build.outputs.version }}',
+    );
+    expect(enterpriseJob).toContain(
+      'package_identity: ${{ needs.build.outputs.package_identity }}',
+    );
+    expect(enterpriseJob).toContain('use_workflow_artifact: true');
+    expect(enterpriseJob).not.toContain('secrets: inherit');
+    expect(enterpriseJob).not.toContain('    secrets:');
+    expect(buildJob).toContain('    environment: production-approval');
+    expect(buildJob).toContain('cd "$(dirname -- "$ENTERPRISE_SHA")"');
+    expect(buildJob).toContain(
+      'sha256sum -c -- "$(basename -- "$ENTERPRISE_SHA")"',
+    );
+    expect(buildJob).not.toContain('sha256sum -c "$ENTERPRISE_SHA"');
+    expect(mirrorJob).toContain('    environment: production-automation');
     expect(mirrorJob).toContain('      - deploy-enterprise');
+    expect(mirrorJob).toContain('      - publish-release');
+    expect(mirrorJob).toContain('timeout-minutes: 90');
+    expect(mirrorJob).toContain(
+      'publish-mirror "$MIRROR_TRANSACTION_ID" \\\n            "${{ needs.build.outputs.version }}" \\\n            "${{ needs.build.outputs.package_identity }}" \\\n            "${{ needs.build.outputs.source_commit }}"',
+    );
     expect(
-      publishJob.indexOf('name: Publish legacy compatibility release'),
-    ).toBeLessThan(publishJob.indexOf('name: Publish canonical release'));
+      mirrorJob.indexOf('verify_public_release "$RELEASES_REPO"'),
+    ).toBeLessThan(
+      mirrorJob.indexOf('publish-mirror "$MIRROR_TRANSACTION_ID"'),
+    );
+    expect(publishJob).toContain('      - create-release-drafts');
+    expect(publishJob).toContain('      - deploy-enterprise');
+    expect(publishJob).not.toContain('      - deploy-update-mirror');
+    expect(publishJob).toContain('timeout-minutes: 30');
+    const prepareCreationJob = workflow.slice(
+      prepareCreationJobStart,
+      createDraftsJobStart,
+    );
+    const createDraftsJob = workflow.slice(
+      createDraftsJobStart,
+      cleanupDraftsJobStart,
+    );
+    const cleanupDraftsJob = workflow.slice(
+      cleanupDraftsJobStart,
+      enterpriseJobStart,
+    );
+    expect(createDraftsJob).toContain('      - verify-windows-signature');
+    expect(createDraftsJob).toContain('sha256sum -c SHA256SUMS');
+    expect(createDraftsJob).toContain(
+      'gh attestation verify "$artifact" --repo "$GITHUB_REPOSITORY"',
+    );
+    expect(createDraftsJob).toContain('EXPECTED_ASSET_COUNT=8');
+    expect(createDraftsJob).toContain('EXPECTED_ASSET_COUNT=14');
+    expect(createDraftsJob).toContain('copy_one SHA256SUMS.sig');
+    expect(createDraftsJob).toContain('copy_one UPDATE-MIRROR-SHA256SUMS');
+    expect(createDraftsJob).toContain('copy_one UPDATE-MIRROR-SHA256SUMS.sig');
+    expect(createDraftsJob).toContain(
+      'gh release create "$TAG" release-assets/*',
+    );
+    expect(workflow).toContain(
+      'group: otto-production-${{ github.repository }}',
+    );
+    expect(createDraftsJob).toContain(
+      'name: Reject existing release or tag state',
+    );
+    expect(prepareCreationJob).toContain(
+      'name: Capture exact release creation intent and pre-public latest',
+    );
+    expect(prepareCreationJob).toContain(
+      'node scripts/release-draft-creation-recovery.mjs \\',
+    );
+    expect(prepareCreationJob).toContain('capture \\');
+    expect(prepareCreationJob).toContain(
+      'name: Upload immutable release creation intent before first mutation',
+    );
+    expect(prepareCreationJob).toContain(
+      'name: otto-release-creation-intent-${{ needs.build.outputs.tag }}',
+    );
+    expect(createDraftsJob).toContain('- prepare-release-creation-intent');
+    expect(createDraftsJob).toContain(
+      'name: Download immutable release creation intent',
+    );
+    expect(createDraftsJob).toContain('verify-before-create \\');
+    expect(createDraftsJob).toContain('git/matching-refs/tags/${TAG}');
+    expect(createDraftsJob).toContain('Refusing to mutate an existing release');
+    expect(createDraftsJob).toContain(
+      'name: Verify immutable draft state before deployment',
+    );
+    expect(createDraftsJob).toContain('.target_commitish == $target');
+    expect(createDraftsJob).toContain('and .name == $name');
+    expect(createDraftsJob).toContain(
+      'cmp -- "$NOTES_FILE" "$actual_body_file"',
+    );
+    expect(createDraftsJob).toContain(
+      'all(.assets[]; .state == "uploaded" and .size > 0)',
+    );
+    expect(createDraftsJob).toContain('$(stat -c \'%s\' "$artifact")');
+    expect(createDraftsJob).toContain('(.digest // "")] | @tsv');
+    expect(createDraftsJob).toContain(
+      'verify_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT"',
+    );
+    expect(createDraftsJob).toContain(
+      'verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main',
+    );
+    expect(createDraftsJob.indexOf('verify-before-create \\')).toBeLessThan(
+      createDraftsJob.indexOf(
+        'name: Create canonical and compatibility drafts with GitHub CLI',
+      ),
+    );
+    expect(cleanupDraftsJob).toContain('always()');
+    expect(cleanupDraftsJob).toContain(
+      "needs.create-release-drafts.result == 'failure'",
+    );
+    expect(cleanupDraftsJob).toContain(
+      "needs.create-release-drafts.result == 'cancelled'",
+    );
+    expect(cleanupDraftsJob).toContain('            cleanup \\');
+    expect(
+      createDraftsJob.indexOf(
+        'name: Create canonical and compatibility drafts with GitHub CLI',
+      ),
+    ).toBeLessThan(
+      createDraftsJob.indexOf(
+        'name: Verify immutable draft state before deployment',
+      ),
+    );
+    expect(publishJob).toContain(
+      'name: Reverify, publish, and reverify both release endpoints',
+    );
+    expect(publishJob).toContain(
+      'name: Download immutable release creation intent',
+    );
+    expect(publishJob).toContain('verify-pre-public-latest');
+    expect(publishJob).toContain(
+      'PRE_PUBLIC_LATEST_SHA256: ${{ needs.create-release-drafts.outputs.pre_public_latest_sha256 }}',
+    );
+    expect(publishJob.indexOf('verify-pre-public-latest')).toBeLessThan(
+      publishJob.indexOf('GH_TOKEN="$CANONICAL_TOKEN" gh release edit "$TAG"'),
+    );
+    expect(
+      publishJob.indexOf('GH_TOKEN="$CANONICAL_TOKEN" gh release edit "$TAG"'),
+    ).toBeLessThan(
+      publishJob.indexOf('GH_TOKEN="$LEGACY_TOKEN" gh release edit "$TAG"'),
+    );
+    expect(publishJob).toContain('gh attestation verify "$artifact"');
+    expect(publishJob).toContain('(.digest // "")] | @tsv');
+    expect(publishJob).toContain('Release asset changed before publication');
+    expect(publishJob).toContain('and .name == $name');
+    expect(publishJob).toContain('cmp -- "$NOTES_FILE" "$actual_body_file"');
+    expect(publishJob).toContain(
+      'verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main true',
+    );
+    expect(publishJob).toContain(
+      'verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main false',
+    );
+    expect(publishJob).toContain(
+      'verify_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT" true',
+    );
+    expect(publishJob).toContain(
+      'verify_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT" false',
+    );
+    expect(publishJob).toContain('Canonical tag changed before publication');
+    expect(publishJob).toContain(
+      'Canonical release tag changed during publication',
+    );
+    expect(publishJob).toContain(
+      'test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d \' \')" = 14',
+    );
+    expect(rollbackMirrorJob).toContain(
+      '/usr/local/sbin/otto-enterprise-ci-deploy',
+    );
+    expect(rollbackMirrorJob).toContain(
+      'rollback-mirror "$MIRROR_TRANSACTION_ID"',
+    );
+    expect(rollbackMirrorJob).toContain('&& github.run_attempt == 1');
+    expect(rollbackMirrorJob).toContain('timeout-minutes: 45');
+    expect(rollbackMirrorJob).toContain(
+      "grep -E '^restored_manifest_sha256=([0-9a-f]{64}|absent)$'",
+    );
+    expect(rollbackMirrorJob).toContain(
+      'for rollback_attempt in 1 2 3 4 5 6; do',
+    );
+    expect(rollbackMirrorJob).toContain('retrying the idempotent transaction.');
+    expect(rollbackMirrorJob).toContain(
+      'Public update mirror did not converge to the exact restored manifest; keeping Releases public.',
+    );
+    expect(rollbackMirrorJob).toContain('if HTTP_STATUS="$(curl --noproxy');
+    expect(rollbackReleaseJob).toContain(
+      'name: Restore previous latest pointers without retracting Releases',
+    );
+    expect(rollbackReleaseJob).toContain('&& github.run_attempt == 1');
+    expect(rollbackReleaseJob).toContain('timeout-minutes: 40');
+    expect(rollbackReleaseJob).toContain(
+      'name: Reconfirm mutable release settings before compensation',
+    );
+    expect(rollbackReleaseJob).toContain(
+      'secrets.OTTO_CANONICAL_ADMIN_READ_TOKEN',
+    );
+    expect(rollbackReleaseJob).toContain(
+      'secrets.OTTO_LEGACY_ADMIN_READ_TOKEN',
+    );
+    expect(
+      rollbackReleaseJob.indexOf(
+        'name: Reconfirm mutable release settings before compensation',
+      ),
+    ).toBeLessThan(
+      rollbackReleaseJob.indexOf(
+        'name: Transactionally restore exact previous latest pointers',
+      ),
+    );
+    expect(rollbackReleaseJob).toContain(
+      'name: Download immutable release creation intent',
+    );
+    expect(rollbackReleaseJob).toContain(
+      'node scripts/release-visibility-compensation.mjs \\',
+    );
+    expect(rollbackReleaseJob).toContain('            compensate \\');
+    expect(rollbackReleaseJob).toContain(
+      '--pre-public-latest-snapshot release-state/pre-public-latest.json',
+    );
+    expect(rollbackReleaseJob).toContain(
+      '--pre-public-latest-sha256 "${{ needs.create-release-drafts.outputs.pre_public_latest_sha256 }}"',
+    );
+    expect(rollbackReleaseJob).toContain('      - deploy-update-mirror');
+    expect(rollbackReleaseJob).toContain(
+      "needs.publish-release.result == 'success'",
+    );
+    expect(rollbackReleaseJob).toContain(
+      "needs.deploy-update-mirror.result == 'failure'",
+    );
+    expect(rollbackReleaseJob).toContain(
+      "needs.deploy-update-mirror.result == 'cancelled'",
+    );
+    expect(rollbackReleaseJob).toContain(
+      "needs.deploy-update-mirror.result == 'skipped'",
+    );
+    expect(rollbackReleaseJob).not.toContain('return_to_draft');
+    expect(rollbackReleaseJob).not.toContain('--draft=true');
+    expect(
+      workflow.match(/if \[ "\$GITHUB_RUN_ATTEMPT" != '1' \]; then/g)?.length,
+    ).toBe(4);
     expect(workflow).not.toContain(
       'secrets.OTTO_RELEASES_TOKEN || secrets.GITHUB_TOKEN',
     );
     expect(workflow).toContain(
       'Require desktop signing and notarization custody',
     );
-    expect(workflow).toContain(
-      'Verify Windows Authenticode and packaged runtime',
-    );
+    expect(workflow).toContain('Verify Windows installer and packaged runtime');
     expect(workflow).toContain(
       "needs.verify-windows-signature.result == 'success'",
     );
@@ -540,64 +852,81 @@ describe('desktop packaging contract', () => {
       'node scripts/verify-enterprise-package-signature.mjs',
     );
     expect(workflow).toContain(
-      'deliverables/otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz.sig',
+      'deliverables/otto-enterprise-oneclick-v${{ needs.validate-source.outputs.version }}-*.tar.gz.sig',
     );
     expect(workflow).toContain('probe-packaged-sqlcipher.mjs');
   });
 
-  it('keeps both production workflows on the protected sudo and backup contract', async () => {
-    const [releaseWorkflow, deployWorkflow, publishScript, rollbackScript] =
-      await Promise.all([
-        readFile(
-          path.join(repoRoot, '.github', 'workflows', 'release.yml'),
-          'utf8',
-        ),
-        readFile(
-          path.join(repoRoot, '.github', 'workflows', 'deploy-server.yml'),
-          'utf8',
-        ),
-        readFile(
-          path.join(repoRoot, '.github', 'scripts', 'publish-update-mirror.sh'),
-          'utf8',
-        ),
-        readFile(
-          path.join(
-            repoRoot,
-            '.github',
-            'scripts',
-            'rollback-update-mirror.sh',
-          ),
-          'utf8',
-        ),
-      ]);
+  it('routes production deployment through fixed root-owned gateways', async () => {
+    const [releaseWorkflow, deployWorkflow] = await Promise.all([
+      readFile(
+        path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+        'utf8',
+      ),
+      readFile(
+        path.join(repoRoot, '.github', 'workflows', 'deploy-server.yml'),
+        'utf8',
+      ),
+    ]);
+
+    expect(releaseWorkflow).toContain(
+      'group: otto-production-${{ github.repository }}',
+    );
+    expect(deployWorkflow).toContain(
+      "format('otto-production-{0}', github.repository)",
+    );
+    expect(deployWorkflow).toContain('workflow_call:');
+    expect(deployWorkflow).toContain('    environment: production-automation');
+    expect(deployWorkflow).toContain('use_workflow_artifact:');
+    expect(releaseWorkflow).toContain(
+      'uses: ./.github/workflows/deploy-server.yml',
+    );
+    expect(releaseWorkflow).toContain(
+      'version: ${{ needs.build.outputs.version }}',
+    );
+    expect(releaseWorkflow).toContain(
+      'package_identity: ${{ needs.build.outputs.package_identity }}',
+    );
+    expect(releaseWorkflow).toContain(
+      'source_commit: ${{ needs.build.outputs.source_commit }}',
+    );
+    expect(releaseWorkflow).toContain('use_workflow_artifact: true');
+    expect(deployWorkflow).toContain(
+      'if: ${{ inputs.use_workflow_artifact == true }}',
+    );
 
     for (const workflow of [releaseWorkflow, deployWorkflow]) {
-      expect(workflow).toContain(
-        'DEPLOY_SUDO_PASSWORD: ${{ secrets.DEPLOY_SUDO_PASSWORD }}',
-      );
-      expect(workflow).toContain('printf \'%s\\n\' "$DEPLOY_SUDO_PASSWORD" |');
+      expect(workflow).not.toContain('DEPLOY_SUDO_PASSWORD');
+      expect(workflow).not.toContain('sudo -S');
+      expect(workflow).not.toContain('sudo -k -S');
+      expect(workflow).not.toContain('deployment-action.txt');
+      expect(workflow).not.toContain('DEPLOY_ENTRYPOINT');
+      expect(workflow).not.toContain('backup-now.sh');
+      expect(workflow).not.toContain('install.sh');
+      expect(workflow).not.toContain('upgrade.sh');
       expect(workflow).not.toContain(
-        'printf \'%s\\n\' "${{ secrets.DEPLOY_SUDO_PASSWORD }}" |',
+        '.github/scripts/publish-update-mirror.sh',
       );
+      expect(workflow).not.toContain(
+        '.github/scripts/rollback-update-mirror.sh',
+      );
+      expect(workflow).not.toContain("/bin/bash '$REMOTE_DIR");
+      expect(workflow).not.toContain("/bin/bash '$REMOTE_SCRIPT");
     }
 
-    const actionIndex = releaseWorkflow.indexOf('> deployment-action.txt');
-    const backupIndex = releaseWorkflow.indexOf('backup-now.sh');
-    const deployIndex = releaseWorkflow.indexOf('${DEPLOY_ENTRYPOINT}');
-    const mirrorIndex = releaseWorkflow.indexOf(
-      "/bin/bash '$REMOTE_DIR/publish-update-mirror.sh'",
+    expect(deployWorkflow).toContain(
+      '/usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy',
     );
-    const rollbackIndex = releaseWorkflow.indexOf("/bin/bash '$REMOTE_SCRIPT'");
-    expect(actionIndex).toBeGreaterThan(-1);
-    expect(backupIndex).toBeGreaterThan(actionIndex);
-    expect(deployIndex).toBeGreaterThan(backupIndex);
-    expect(mirrorIndex).toBeGreaterThan(deployIndex);
-    expect(rollbackIndex).toBeGreaterThan(mirrorIndex);
-    expect(releaseWorkflow.match(/sudo -k -S -p ''/g)).toHaveLength(4);
-    expect(releaseWorkflow).not.toContain('sudo -S ');
-    expect(publishScript).toContain('payload manifest digest mismatch');
-    expect(publishScript).toContain('previous-latest.absent');
-    expect(rollbackScript).toContain('rollback script digest mismatch');
+    expect(deployWorkflow).toContain('deploy "$DEPLOY_TRANSACTION_ID"');
+    expect(releaseWorkflow).toContain(
+      '/usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy',
+    );
+    expect(releaseWorkflow).toContain(
+      'publish-mirror "$MIRROR_TRANSACTION_ID" \\\n            "${{ needs.build.outputs.version }}" \\\n            "${{ needs.build.outputs.package_identity }}" \\\n            "${{ needs.build.outputs.source_commit }}"',
+    );
+    expect(releaseWorkflow).toContain(
+      'rollback-mirror "$MIRROR_TRANSACTION_ID"',
+    );
   });
 
   it('uses the shared update manifest verifier in the local release gate', async () => {

@@ -673,7 +673,8 @@ describe('可信反向代理客户端地址解析', () => {
 describe('受保护 vs 公开路由边界', () => {
   it('公开路由 /enterprise/health 无 token 也可达 200', async () => {
     process.env.OTTO_APP_VERSION = '1.8.4-test';
-    process.env.OTTO_BUILD_COMMIT = 'abc123def456';
+    const expectedBuildCommit = 'abc123def4567890abc123def4567890abc123de';
+    process.env.OTTO_BUILD_COMMIT = expectedBuildCommit;
     const { base } = await startIsolated(ADMIN_TOKEN);
     const res = await fetch(`${base}/enterprise/health`);
     expect(res.status).toBe(200);
@@ -685,6 +686,14 @@ describe('受保护 vs 公开路由边界', () => {
       version: '1.8.4-test',
       appVersion: '1.8.4-test',
     });
+    expect(Object.keys(body).sort()).toEqual([
+      'apiVersion',
+      'appVersion',
+      'capabilities',
+      'service',
+      'status',
+      'version',
+    ]);
     for (const privateField of [
       'dataGovernance',
       'dataProtection',
@@ -697,48 +706,63 @@ describe('受保护 vs 公开路由边界', () => {
       'db',
       'startedAt',
       'uptime',
+      'readiness',
     ]) {
       expect(body).not.toHaveProperty(privateField);
     }
-    expect(body.capabilities).toEqual(expect.arrayContaining([
-      'password_auth',
-      'sms_login',
-      'sms_registration',
-      'personal_registration',
-      'personal_enterprise_upgrade',
-      'organization_invites',
-      'usage_summary',
-      'admin_console',
-      'account_deletion',
-      'data_governance_v1',
-      'signed_update_policy_v1',
-      'privacy_self_service',
-      'multi_organization',
-      'direct_messages',
-      'atoa',
-      'position_invites',
-      'park_service_push',
-      'park_repair_v1',
-      'park_services_v2',
-      'organization_structure_v1',
-      'organization_feature_switches_v1',
-      'enterprise_skill_market_v1',
-      'park_membership_v1',
-      'park_specialist_routing_v1',
-      'unread_message_notifications_v1',
-      'account_presence_v1',
-      'park_tenants_v1',
-      'park_service_statistics_v1',
-      'account_data_sync_v1',
-      'private_deployment_v1',
-      'license_enforcement_v1',
-      'encrypted_telemetry_queue_v1',
-      'signed_telemetry_transport_v1',
-      'diagnostic_bundle_v1',
-      'data_protection_v1',
-      'encrypted_attachment_storage_v1',
-      'encrypted_message_storage_v1',
-    ]));
+    expect(body.capabilities).toEqual(
+      expect.arrayContaining([
+        'password_auth',
+        'sms_login',
+        'sms_registration',
+        'personal_registration',
+        'personal_enterprise_upgrade',
+        'organization_invites',
+        'usage_summary',
+        'admin_console',
+        'account_deletion',
+        'data_governance_v1',
+        'signed_update_policy_v1',
+        'privacy_self_service',
+        'multi_organization',
+        'direct_messages',
+        'atoa',
+        'position_invites',
+        'park_service_push',
+        'park_repair_v1',
+        'park_services_v2',
+        'organization_structure_v1',
+        'organization_feature_switches_v1',
+        'enterprise_skill_market_v1',
+        'park_membership_v1',
+        'park_specialist_routing_v1',
+        'unread_message_notifications_v1',
+        'account_presence_v1',
+        'park_tenants_v1',
+        'park_service_statistics_v1',
+        'account_data_sync_v1',
+        'private_deployment_v1',
+        'license_enforcement_v1',
+        'encrypted_telemetry_queue_v1',
+        'signed_telemetry_transport_v1',
+        'diagnostic_bundle_v1',
+        'data_protection_v1',
+        'encrypted_attachment_storage_v1',
+        'encrypted_message_storage_v1',
+      ]),
+    );
+
+    const privateStatus = await fetch(
+      `${base}/enterprise/deployment/status`,
+      { headers: { 'x-otto-admin-token': ADMIN_TOKEN } },
+    );
+    expect(privateStatus.status).toBe(200);
+    await expect(privateStatus.json()).resolves.toMatchObject({
+      runtime: {
+        version: '1.8.4-test',
+        buildCommit: expectedBuildCommit,
+      },
+    });
   }, 15_000);
 
   it('private deployment license enforcement keeps only maintenance routes open', async () => {
@@ -940,7 +964,8 @@ describe('受保护 vs 公开路由边界', () => {
       body: JSON.stringify({
         serviceId: 'it',
         title: 'Internal IT request',
-        description: 'This enterprise workflow must not require the park module.',
+        description:
+          'This enterprise workflow must not require the park module.',
       }),
     });
     expect(internalTicket.status).toBe(201);
@@ -1063,10 +1088,9 @@ describe('受保护 vs 公开路由边界', () => {
     });
 
     db.updateOrganizationFeatures('org_default', { direct_messages: true });
-    const baselineMessages = await fetch(
-      `${base}/enterprise/messages/unread`,
-      { headers: memberHeaders },
-    );
+    const baselineMessages = await fetch(`${base}/enterprise/messages/unread`, {
+      headers: memberHeaders,
+    });
     expect(baselineMessages.status).toBe(200);
 
     const crossOrganizationView = await fetch(
@@ -1274,11 +1298,16 @@ describe('受保护 vs 公开路由边界', () => {
       if (target.endsWith('/hold_servere2e123456/capture')) {
         return Response.json({ replayed: false }, { status: 200 });
       }
-      return Response.json({ error: 'unexpected test endpoint' }, { status: 503 });
+      return Response.json(
+        { error: 'unexpected test endpoint' },
+        { status: 503 },
+      );
     }) as unknown as typeof fetch;
     const { base } = await startIsolated(ADMIN_TOKEN, null, { billingFetch });
     const headers = { 'x-otto-admin-token': ADMIN_TOKEN };
-    const status = await fetch(`${base}/enterprise/deployment/status`, { headers });
+    const status = await fetch(`${base}/enterprise/deployment/status`, {
+      headers,
+    });
     const deployment = await status.json();
     const now = Date.now();
     const payload = {
@@ -1294,7 +1323,8 @@ describe('受保护 vs 公开路由边界', () => {
       offline: false,
       telemetryAllowed: false,
       billingEnforcement: 'enforce',
-      leaseEndpoint: 'https://control.example/v1/licenses/lic_billing_e2e/lease',
+      leaseEndpoint:
+        'https://control.example/v1/licenses/lic_billing_e2e/lease',
       leaseToken: 'billing-e2e-lease-token-at-least-32-characters',
       billingEndpoint: 'https://control.example/v1/billing/usage/consume',
       billingHoldEndpoint: 'https://control.example/v1/billing/holds',
@@ -1303,7 +1333,10 @@ describe('受保护 vs 公开路由边界', () => {
     const imported = await fetch(`${base}/enterprise/deployment/license`, {
       method: 'POST',
       headers: { ...headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ license: payload, signature: signLicensePayload(payload) }),
+      body: JSON.stringify({
+        license: payload,
+        signature: signLicensePayload(payload),
+      }),
     });
     expect(imported.status).toBe(200);
 
@@ -1327,25 +1360,29 @@ describe('受保护 vs 公开路由边界', () => {
       department: 'Operations',
     });
     const token = db.createAuthSession(member.id).token;
-    const request = (idempotencyKey?: string) => fetch(`${base}/enterprise/knowledge`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-        ...(idempotencyKey ? { 'x-otto-idempotency-key': idempotencyKey } : {}),
-      },
-      body: JSON.stringify({
-        sourceId: 'billing-e2e-source',
-        sourceType: 'auto_capture',
-        sourceSessionId: 'billing-e2e-session',
-        sourceFingerprint: 'billing-e2e-fingerprint',
-        category: 'solution',
-        content: 'Run the commercial admission check before mutating knowledge.',
-        confidence: 0.9,
-        department: 'Operations',
-        contributor: 'Billing E2E Member',
-      }),
-    });
+    const request = (idempotencyKey?: string) =>
+      fetch(`${base}/enterprise/knowledge`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          ...(idempotencyKey
+            ? { 'x-otto-idempotency-key': idempotencyKey }
+            : {}),
+        },
+        body: JSON.stringify({
+          sourceId: 'billing-e2e-source',
+          sourceType: 'auto_capture',
+          sourceSessionId: 'billing-e2e-session',
+          sourceFingerprint: 'billing-e2e-fingerprint',
+          category: 'solution',
+          content:
+            'Run the commercial admission check before mutating knowledge.',
+          confidence: 0.9,
+          department: 'Operations',
+          contributor: 'Billing E2E Member',
+        }),
+      });
 
     const missingKey = await request();
     expect(missingKey.status).toBe(400);
@@ -1372,10 +1409,16 @@ describe('受保护 vs 公开路由边界', () => {
       retention: { evidenceCount: 1 },
     });
     await vi.waitFor(() => {
-      expect(billingCalls.filter((url) => url.endsWith('/capture'))).toHaveLength(1);
+      expect(
+        billingCalls.filter((url) => url.endsWith('/capture')),
+      ).toHaveLength(1);
     });
-    expect(db.getKnowledge(undefined, undefined, 'org_default')).toHaveLength(0);
-    expect(billingCalls.filter((url) => url.endsWith('/v1/billing/holds'))).toHaveLength(2);
+    expect(db.getKnowledge(undefined, undefined, 'org_default')).toHaveLength(
+      0,
+    );
+    expect(
+      billingCalls.filter((url) => url.endsWith('/v1/billing/holds')),
+    ).toHaveLength(2);
 
     const replay = await request('knowledge:e2e:2');
     expect(replay.status).toBe(409);
@@ -1384,9 +1427,15 @@ describe('受保护 vs 公开路由边界', () => {
       module: 'enterprise_knowledge',
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(billingCalls.filter((url) => url.endsWith('/v1/billing/holds'))).toHaveLength(2);
-    expect(billingCalls.filter((url) => url.endsWith('/capture'))).toHaveLength(1);
-    expect(db.getKnowledge(undefined, undefined, 'org_default')).toHaveLength(0);
+    expect(
+      billingCalls.filter((url) => url.endsWith('/v1/billing/holds')),
+    ).toHaveLength(2);
+    expect(billingCalls.filter((url) => url.endsWith('/capture'))).toHaveLength(
+      1,
+    );
+    expect(db.getKnowledge(undefined, undefined, 'org_default')).toHaveLength(
+      0,
+    );
   }, 60_000);
 
   it('admin publishes modular updates without exposing deployment details in public health', async () => {
@@ -1474,7 +1523,7 @@ describe('受保护 vs 公开路由边界', () => {
 
     const health = await fetch(`${base}/enterprise/health`);
     expect(health.status).toBe(200);
-    const body = await health.json() as { capabilities: string[] };
+    const body = (await health.json()) as { capabilities: string[] };
     expect(body.capabilities).toContain('modular_update_push_v1');
     expect(body).not.toHaveProperty('deployment');
   });
@@ -2972,9 +3021,7 @@ describe('预设账号登录、管理与标签工单投递 API', () => {
       await fetch(`${base}/enterprise/health`)
     ).json()) as { capabilities: string[] };
     expect(health.capabilities).toContain('e2ee_mls_transport_v1');
-    expect(health.capabilities).toContain(
-      'e2ee_mls_resource_governance_v1',
-    );
+    expect(health.capabilities).toContain('e2ee_mls_resource_governance_v1');
     expect(health.capabilities).toContain(
       'e2ee_mls_transport_session_reset_v1',
     );
@@ -4169,18 +4216,19 @@ describe('预设账号登录、管理与标签工单投递 API', () => {
       phone: '13600136000',
       feishuOpenId: 'ou_engineer',
     });
-    const processDueSms = async () => db.processTicketNotificationTasks({
-      smsSender: { channel: 'sms', send: smsSend },
-      feishuSender: null,
-      resolveRecipientChannel: (accountId: string) => {
-        const account = db.getAccount(accountId);
-        return {
-          phone: account?.phone ?? null,
-          feishuOpenId: account?.feishuOpenId ?? null,
-        };
-      },
-      now: () => new Date(Date.now() + 10 * 60_000),
-    });
+    const processDueSms = async () =>
+      db.processTicketNotificationTasks({
+        smsSender: { channel: 'sms', send: smsSend },
+        feishuSender: null,
+        resolveRecipientChannel: (accountId: string) => {
+          const account = db.getAccount(accountId);
+          return {
+            phone: account?.phone ?? null,
+            feishuOpenId: account?.feishuOpenId ?? null,
+          };
+        },
+        now: () => new Date(Date.now() + 10 * 60_000),
+      });
     const login = async (
       identifier: string,
       password: string,
@@ -4372,18 +4420,19 @@ describe('预设账号登录、管理与标签工单投递 API', () => {
       name: '园区运营企业',
       slug: 'receipt-park',
     });
-    const processDueSms = async () => db.processTicketNotificationTasks({
-      smsSender: { channel: 'sms', send: smsSend },
-      feishuSender: null,
-      resolveRecipientChannel: (accountId: string) => {
-        const account = db.getAccount(accountId);
-        return {
-          phone: account?.phone ?? null,
-          feishuOpenId: account?.feishuOpenId ?? null,
-        };
-      },
-      now: () => new Date(Date.now() + 10 * 60_000),
-    });
+    const processDueSms = async () =>
+      db.processTicketNotificationTasks({
+        smsSender: { channel: 'sms', send: smsSend },
+        feishuSender: null,
+        resolveRecipientChannel: (accountId: string) => {
+          const account = db.getAccount(accountId);
+          return {
+            phone: account?.phone ?? null,
+            feishuOpenId: account?.feishuOpenId ?? null,
+          };
+        },
+        now: () => new Date(Date.now() + 10 * 60_000),
+      });
     const parkAdmin = db.createAccount({
       organizationId: parkOrganization.id,
       username: 'receipt.park.admin',
@@ -6323,20 +6372,23 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       retention: { promoted: false, reason: 'incubating', evidenceCount: 1 },
     });
 
-    const corroboratedHighImpactCapture = await fetch(`${base}/enterprise/knowledge`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${alphaToken}`,
-        'content-type': 'application/json',
+    const corroboratedHighImpactCapture = await fetch(
+      `${base}/enterprise/knowledge`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${alphaToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...highImpactBody,
+          sourceId: 'kb_auto_incident_2',
+          sourceSessionId: 'alpha-incident-session-2',
+          sourceFingerprint: 'production-health-incident-repeat',
+          observedAt: '2026-08-21T08:00:00.000Z',
+        }),
       },
-      body: JSON.stringify({
-        ...highImpactBody,
-        sourceId: 'kb_auto_incident_2',
-        sourceSessionId: 'alpha-incident-session-2',
-        sourceFingerprint: 'production-health-incident-repeat',
-        observedAt: '2026-08-21T08:00:00.000Z',
-      }),
-    });
+    );
     expect(corroboratedHighImpactCapture.status).toBe(200);
     expect(await corroboratedHighImpactCapture.json()).toMatchObject({
       status: 'observed',
@@ -6350,21 +6402,25 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       },
     });
 
-    const independentlyRecheckedCapture = await fetch(`${base}/enterprise/knowledge`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${alphaToken}`,
-        'content-type': 'application/json',
+    const independentlyRecheckedCapture = await fetch(
+      `${base}/enterprise/knowledge`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${alphaToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...highImpactBody,
+          sourceId: 'kb_auto_incident_3',
+          sourceSessionId: 'alpha-incident-session-3',
+          sourceFingerprint: 'production-health-incident-third-check',
+          content:
+            '生产事故复查确认：缺少健康检查是根因，健康端点校验测试通过。',
+          observedAt: '2026-08-22T08:00:00.000Z',
+        }),
       },
-      body: JSON.stringify({
-        ...highImpactBody,
-        sourceId: 'kb_auto_incident_3',
-        sourceSessionId: 'alpha-incident-session-3',
-        sourceFingerprint: 'production-health-incident-third-check',
-        content: '生产事故复查确认：缺少健康检查是根因，健康端点校验测试通过。',
-        observedAt: '2026-08-22T08:00:00.000Z',
-      }),
-    });
+    );
     expect(independentlyRecheckedCapture.status).toBe(200);
     const highImpactPayload = (await independentlyRecheckedCapture.json()) as {
       knowledgeId: number;
@@ -6393,7 +6449,7 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
       { headers: { authorization: `Bearer ${alphaAdminToken}` } },
     );
     expect(adminEvidence.status).toBe(200);
-    const adminEvidencePayload = await adminEvidence.json() as {
+    const adminEvidencePayload = (await adminEvidence.json()) as {
       evidence: Array<Record<string, unknown>>;
     };
     expect(adminEvidencePayload.evidence).toHaveLength(3);
@@ -6418,7 +6474,9 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
     expect(crossTenantEvidence.status).toBe(404);
     const captured = db
       .getKnowledgeForAdministration('', '研发部', alpha.id, 'pending_review')
-      .filter((item: { content: string }) => item.content.includes('## 长期结论'));
+      .filter((item: { content: string }) =>
+        item.content.includes('## 长期结论'),
+      );
     expect(captured).toHaveLength(1);
     expect(captured[0]).toMatchObject({
       department: '研发部',

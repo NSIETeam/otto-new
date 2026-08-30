@@ -1,18 +1,51 @@
 name: Deploy Enterprise Server
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       version:
-        description: 'Version to deploy, for example 1.9.3 or v1.9.3.'
+        description: 'Exact semver version to deploy.'
         required: true
         type: string
       package_identity:
         description: 'Exact signed package identity: release-content-source-input.'
         required: true
         type: string
+      source_commit:
+        description: 'Exact release source commit; required for workflow artifacts.'
+        required: true
+        type: string
       dry_run:
-        description: 'Run remote dry-run only.'
+        description: 'Run the root-owned gateway in dry-run mode.'
+        required: false
+        type: boolean
+        default: false
+      release_repository:
+        description: 'Repository containing release assets when workflow artifacts are not used.'
+        required: false
+        type: string
+        default: NSIETeam/otto-new
+      use_workflow_artifact:
+        description: 'Download the immutable artifact from the current release workflow run.'
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deploy, for example 1.9.14 or v1.9.14.'
+        required: true
+        type: string
+      package_identity:
+        description: 'Exact signed package identity: release-content-source-input.'
+        required: true
+        type: string
+      source_commit:
+        description: 'Exact source commit recorded by the signed package manifest.'
+        required: true
+        type: string
+      dry_run:
+        description: 'Run the root-owned gateway in dry-run mode.'
         required: false
         type: boolean
         default: false
@@ -24,196 +57,568 @@ on:
           - NSIETeam/otto-new
           - Felix201209/otto-releases
         default: NSIETeam/otto-new
-
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-enterprise
+  group: ${{ inputs.use_workflow_artifact && format('otto-release-deploy-{0}', github.run_id) || format('otto-production-{0}', github.repository) }}
+  queue: max
   cancel-in-progress: false
 
 env:
-  RELEASES_REPO: ${{ inputs.release_repository || 'NSIETeam/otto-new' }}
-  DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-  DEPLOY_CONFIG_PATH: ${{ secrets.DEPLOY_CONFIG_PATH || '/etc/otto-enterprise/enterprise.env' }}
+  NODE_VERSION: '22.23.1'
 
 jobs:
-  deploy:
-    name: Sync and Upgrade Server
+  manual-production-approval:
+    name: Approve Standalone Production Deployment
+    if: ${{ inputs.use_workflow_artifact != true }}
     runs-on: ubuntu-latest
+    environment: production-approval
     timeout-minutes: 30
+    permissions: {}
+    steps:
+      - name: Confirm the protected manual deployment boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
+          echo 'Standalone enterprise deployment received production approval.'
+
+  validate-deployment-principals:
+    name: Validate isolated deployment principals
+    needs: manual-production-approval
+    if: >-
+      ${{
+        always()
+        && !cancelled()
+        && (
+          inputs.use_workflow_artifact == true
+          || needs.manual-production-approval.result == 'success'
+        )
+      }}
+    runs-on: ubuntu-latest
+    environment: production-automation
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Prove distinct keys and server-side account isolation
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ROLLBACK_DEPLOY_USER: ${{ secrets.ROLLBACK_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          ROLLBACK_DEPLOY_SSH_KEY: ${{ secrets.ROLLBACK_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+          [[ "$DEPLOY_HOST" != *'..'* ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [[ "$ROLLBACK_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [ "$DEPLOY_USER" != "$ROLLBACK_DEPLOY_USER" ]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          [ "$DEPLOY_PORT" -ge 1 ] && [ "$DEPLOY_PORT" -le 65535 ]
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$ROLLBACK_DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          PRINCIPAL_AUDIT_DIR="$(mktemp -d)"
+          chmod 0700 "$PRINCIPAL_AUDIT_DIR"
+          trap 'rm -rf -- "$PRINCIPAL_AUDIT_DIR"' EXIT
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$PRINCIPAL_AUDIT_DIR/deploy"
+          printf '%s\n' "$ROLLBACK_DEPLOY_SSH_KEY" > "$PRINCIPAL_AUDIT_DIR/rollback"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$PRINCIPAL_AUDIT_DIR/known_hosts"
+          DEPLOY_KEY_FINGERPRINT="$(ssh-keygen -y -P '' -f "$PRINCIPAL_AUDIT_DIR/deploy" | \
+            ssh-keygen -lf - -E sha256 | awk '{print $2}')"
+          ROLLBACK_KEY_FINGERPRINT="$(ssh-keygen -y -P '' -f "$PRINCIPAL_AUDIT_DIR/rollback" | \
+            ssh-keygen -lf - -E sha256 | awk '{print $2}')"
+          [[ "$DEPLOY_KEY_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
+          [[ "$ROLLBACK_KEY_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
+          [ "$DEPLOY_KEY_FINGERPRINT" != "$ROLLBACK_KEY_FINGERPRINT" ]
+          SSH_OPTIONS=(
+            -p "$DEPLOY_PORT"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+            -o "UserKnownHostsFile=$PRINCIPAL_AUDIT_DIR/known_hosts"
+          )
+          preflight_principal() {
+            local key="$1"
+            local user="$2"
+            local output
+            output="$(ssh "${SSH_OPTIONS[@]}" -i "$key" "${user}@${DEPLOY_HOST}" -- \
+              /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy preflight)"
+            [[ "$output" =~ ^protocol=otto-enterprise-ci-deploy-v4\ gateway=[0-9a-f]{64}\ publish=[0-9a-f]{64}\ rollback=[0-9a-f]{64}\ key=[0-9a-f]{16}\ config=/etc/otto-enterprise/enterprise.env\ deploy_user=${DEPLOY_USER}\ rollback_user=${ROLLBACK_DEPLOY_USER}$ ]]
+          }
+          reject_cross_login() {
+            local key="$1"
+            local user="$2"
+            local stderr_file
+            local status
+            local cross_attempt
+            local -a stderr_lines
+            stderr_file="$(mktemp "$PRINCIPAL_AUDIT_DIR/cross-login.XXXXXX")"
+            chmod 0600 "$stderr_file"
+            for cross_attempt in 1 2 3; do
+              : > "$stderr_file"
+              status=0
+              set +e
+              ssh "${SSH_OPTIONS[@]}" -i "$key" \
+                -o PreferredAuthentications=publickey \
+                -o PasswordAuthentication=no \
+                -o KbdInteractiveAuthentication=no \
+                "${user}@${DEPLOY_HOST}" -- /usr/bin/true \
+                2>"$stderr_file"
+              status="$?"
+              set -e
+              mapfile -t stderr_lines < <(
+                sed -e 's/\r$//' -e '/^[[:space:]]*$/d' "$stderr_file"
+              )
+              if [ "$status" -ne 255 ] || [ "${#stderr_lines[@]}" -ne 1 ]; then
+                echo "Cross-login probe was not an unambiguous public-key rejection; attempt=${cross_attempt} status=${status} stderr_lines=${#stderr_lines[@]}." >&2
+                return 1
+              fi
+              if [[ ! "${stderr_lines[0]}" =~ ^[^[:space:]]+:\ Permission\ denied\ \(publickey\)\.$ ]]; then
+                echo "Cross-login probe returned an ambiguous SSH failure on attempt ${cross_attempt}." >&2
+                return 1
+              fi
+              if [ "$cross_attempt" -lt 3 ]; then
+                sleep 1
+              fi
+            done
+            rm -f -- "$stderr_file"
+          }
+          preflight_principal "$PRINCIPAL_AUDIT_DIR/deploy" "$DEPLOY_USER"
+          preflight_principal "$PRINCIPAL_AUDIT_DIR/rollback" "$ROLLBACK_DEPLOY_USER"
+          reject_cross_login "$PRINCIPAL_AUDIT_DIR/deploy" "$ROLLBACK_DEPLOY_USER"
+          reject_cross_login "$PRINCIPAL_AUDIT_DIR/rollback" "$DEPLOY_USER"
+
+  deploy:
+    name: Verify and Deploy Through Root Gateway
+    needs:
+      - manual-production-approval
+      - validate-deployment-principals
+    if: >-
+      ${{
+        always()
+        && !cancelled()
+        && needs.validate-deployment-principals.result == 'success'
+        && (
+          inputs.use_workflow_artifact == true
+          || needs.manual-production-approval.result == 'success'
+        )
+      }}
+    runs-on: ubuntu-latest
+    environment: production-automation
+    # The signed backup step may legally spend up to 30 minutes on one backup;
+    # leave room for the production lock, canary, switch, reconciliation and edge checks.
+    timeout-minutes: 90
+    permissions:
+      contents: read
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Resolve version
-        id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-          TAG="${{ inputs.version }}"
-          TAG="${TAG#v}"
-          PACKAGE_ID='${{ inputs.package_identity }}'
-          [[ "$PACKAGE_ID" =~ ^[0-9a-f]{12}-[0-9a-f]{12}$ ]]
-          echo "version=$TAG" >> "$GITHUB_OUTPUT"
-          echo "tag=v$TAG" >> "$GITHUB_OUTPUT"
-          echo "package_id=$PACKAGE_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Validate deployment secrets
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${{ secrets.DEPLOY_HOST }}"
-          test -n "${{ secrets.DEPLOY_USER }}"
-          test -n "${{ secrets.DEPLOY_SSH_KEY }}"
-          test -n "${{ secrets.DEPLOY_KNOWN_HOSTS }}"
-          test -n "${{ secrets.DEPLOY_SUDO_PASSWORD }}"
-          test -n "${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}"
-
-      - name: Download enterprise release asset
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p release-download
-          gh release download "${{ steps.version.outputs.tag }}" \
-            --repo "${RELEASES_REPO}" \
-            --pattern "otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-${{ steps.version.outputs.package_id }}.tar.gz" \
-            --pattern "otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-${{ steps.version.outputs.package_id }}.tar.gz.sha256" \
-            --pattern "otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-${{ steps.version.outputs.package_id }}.tar.gz.sig" \
-            --dir release-download
-          cd release-download
-          sha256sum -c ./*.sha256
-          ARCHIVE="$(find . -type f -name 'otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-*.tar.gz' -print -quit)"
-          SIGNATURE="${ARCHIVE}.sig"
-          test -n "$ARCHIVE"
-          test -f "$SIGNATURE"
-          OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY="${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}" \
-            node ../scripts/verify-enterprise-package-signature.mjs "$ARCHIVE" "$SIGNATURE"
-          ls -lh
-
-      - name: Configure SSH
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-
-      - name: Upload enterprise package
-        shell: bash
-        run: |
-          set -euo pipefail
-          REMOTE_DIR="/var/tmp/otto-enterprise-github/${{ steps.version.outputs.tag }}-${GITHUB_RUN_ID}"
-          echo "REMOTE_DIR=$REMOTE_DIR" >> "$GITHUB_ENV"
-          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "mkdir -p '$REMOTE_DIR'"
-          scp -i ~/.ssh/id_deploy -P "${DEPLOY_PORT}" release-download/* \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:$REMOTE_DIR/"
-
-      - name: Install or upgrade on server
-        shell: bash
-        env:
-          DRY_RUN_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
-          DEPLOY_SUDO_PASSWORD: ${{ secrets.DEPLOY_SUDO_PASSWORD }}
-        run: |
-          set -euo pipefail
-          DRY_RUN_FLAG=""
-          if [ "$DRY_RUN_INPUT" = "true" ]; then
-            DRY_RUN_FLAG="--dry-run"
-          fi
-          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "set -euo pipefail
-             cd '$REMOTE_DIR'
-             sha256sum -c ./*.sha256
-             ARCHIVE='otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-${{ steps.version.outputs.package_id }}.tar.gz'
-             test -f \"\$ARCHIVE\"
-             rm -rf unpack
-             mkdir unpack
-             tar -xzf \"\$ARCHIVE\" -C unpack
-             PKG_DIR=\$(find unpack -mindepth 1 -maxdepth 1 -type d | head -n 1)
-             test -n \"\$PKG_DIR\"
-             if [ -L /opt/otto-enterprise/current ]; then
-               printf upgrade
-             else
-               printf install
-             fi" > deployment-action.txt
-          DEPLOY_ACTION="$(cat deployment-action.txt)"
-          case "$DEPLOY_ACTION" in
-            install|upgrade) ;;
-            *) echo "unexpected deployment action: $DEPLOY_ACTION" >&2; exit 4 ;;
-          esac
-          if [ "$DRY_RUN_INPUT" != "true" ] && [ "$DEPLOY_ACTION" = "upgrade" ]; then
-            printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
-            ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-              "set -euo pipefail
-               cd '$REMOTE_DIR'
-               PKG_DIR=\$(find unpack -mindepth 1 -maxdepth 1 -type d | head -n 1)
-               test -n \"\$PKG_DIR\"
-               sudo -k -S -p '' \"\$PKG_DIR/backup-now.sh\" '${DEPLOY_CONFIG_PATH}'"
-          fi
-          printf '%s\n' "$DEPLOY_SUDO_PASSWORD" | \
-          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "set -euo pipefail
-             cd '$REMOTE_DIR'
-             PKG_DIR=\$(find unpack -mindepth 1 -maxdepth 1 -type d | head -n 1)
-             test -n \"\$PKG_DIR\"
-             if [ '$DEPLOY_ACTION' = upgrade ]; then
-               sudo -k -S -p '' \"\$PKG_DIR/upgrade.sh\" --config '${DEPLOY_CONFIG_PATH}' $DRY_RUN_FLAG
-             else
-               sudo -k -S -p '' \"\$PKG_DIR/install.sh\" --config '${DEPLOY_CONFIG_PATH}' $DRY_RUN_FLAG
-             fi"
-
-      - name: Verify production version and public contracts
+      - name: Reject replayed production workflow attempts
         if: ${{ inputs.dry_run == false }}
         shell: bash
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/id_deploy -p "${DEPLOY_PORT}" \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "set -euo pipefail
-             CURRENT=\$(readlink -f /opt/otto-enterprise/current)
-             case \"\$CURRENT\" in
-               /opt/otto-enterprise/releases/${{ steps.version.outputs.version }}-*) ;;
-               *) echo \"unexpected current release: \$CURRENT\" >&2; exit 5 ;;
-             esac
-             curl --fail --silent --show-error --retry 5 \
-               http://127.0.0.1:7778/enterprise/health > /tmp/otto-health-${GITHUB_RUN_ID}.json
-             curl --fail --silent --show-error --retry 5 \
-               http://127.0.0.1:7778/enterprise/legal > /tmp/otto-legal-${GITHUB_RUN_ID}.json
-             /opt/otto-enterprise/runtime/current/bin/node -e '
-               const fs = require(\"node:fs\");
-               const health = JSON.parse(fs.readFileSync(process.argv[1], \"utf8\"));
-               const legal = JSON.parse(fs.readFileSync(process.argv[2], \"utf8\"));
-               if (health.status !== \"ok\" || health.version !== \"${{ steps.version.outputs.version }}\") {
-                 throw new Error(\"health identity mismatch\");
-               }
-               const documents = Array.isArray(legal) ? legal : legal.documents;
-               if (!Array.isArray(documents) || documents.length < 2) {
-                 throw new Error(\"legal documents missing\");
-               }
-               for (const document of documents) {
-                 const documentHash =
-                   typeof document.hash === \"string\"
-                     ? document.hash
-                     : document.sha256;
-                 if (!/^[0-9a-f]{64}$/.test(documentHash || \"\")) {
-                   throw new Error(\"legal document hash invalid\");
-                 }
-               }
-               console.log(JSON.stringify({
-                 status: health.status,
-                 version: health.version,
-                 apiVersion: health.apiVersion,
-                 legalDocuments: documents.map(({ id, version }) => ({ id, version })),
-               }));
-             ' /tmp/otto-health-${GITHUB_RUN_ID}.json /tmp/otto-legal-${GITHUB_RUN_ID}.json"
+          if [ "$GITHUB_RUN_ATTEMPT" != '1' ]; then
+            echo 'Production deployment jobs cannot be replayed with Re-run jobs; start a new audited workflow run.' >&2
+            exit 1
+          fi
+
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup locked Node.js runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify locked Node.js runtime
+        shell: bash
+        run: test "$(node --version)" = "v${NODE_VERSION}"
+
+      - name: Resolve and validate deployment identity
+        id: version
+        shell: bash
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+          PACKAGE_ID_INPUT: ${{ inputs.package_identity }}
+          SOURCE_COMMIT_INPUT: ${{ inputs.source_commit }}
+          RELEASE_REPOSITORY_INPUT: ${{ inputs.release_repository }}
+          USE_WORKFLOW_ARTIFACT_INPUT: ${{ inputs.use_workflow_artifact && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          VERSION="${VERSION_INPUT#v}"
+          PACKAGE_ID="$PACKAGE_ID_INPUT"
+          RELEASE_REPOSITORY="$RELEASE_REPOSITORY_INPUT"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$PACKAGE_ID" =~ ^[0-9a-f]{12}-[0-9a-f]{12}$ ]]
+          [[ "$SOURCE_COMMIT_INPUT" =~ ^[0-9a-f]{40}$ ]]
+          case "$RELEASE_REPOSITORY" in
+            NSIETeam/otto-new|Felix201209/otto-releases) ;;
+            *) echo "unsupported release repository: $RELEASE_REPOSITORY" >&2; exit 2 ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "package_id=$PACKAGE_ID" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$SOURCE_COMMIT_INPUT" >> "$GITHUB_OUTPUT"
+          echo "release_repository=$RELEASE_REPOSITORY" >> "$GITHUB_OUTPUT"
+
+      - name: Revalidate exact latest internal source before deployment
+        if: ${{ inputs.use_workflow_artifact == true }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCKED_SOURCE_COMMIT: ${{ steps.version.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'NSIETeam/otto-new'
+          CURRENT_INTERNAL_COMMIT="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/heads/internal" \
+            --jq '.object.sha')"
+          if [ "$CURRENT_INTERNAL_COMMIT" != "$LOCKED_SOURCE_COMMIT" ]; then
+            echo "origin/internal changed after the release candidate was built; refusing deployment." >&2
+            echo "locked=$LOCKED_SOURCE_COMMIT current=$CURRENT_INTERNAL_COMMIT" >&2
+            exit 1
+          fi
+
+      - name: Validate scoped deployment connection secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ROLLBACK_DEPLOY_USER: ${{ secrets.ROLLBACK_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          ROLLBACK_DEPLOY_SSH_KEY: ${{ secrets.ROLLBACK_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
+          ENTERPRISE_PUBLIC_URL: ${{ secrets.OTTO_ENTERPRISE_PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
+          [[ "$DEPLOY_HOST" != *'..'* ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [[ "$ROLLBACK_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [ "$DEPLOY_USER" != "$ROLLBACK_DEPLOY_USER" ]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
+          [ "$DEPLOY_PORT" -ge 1 ] && [ "$DEPLOY_PORT" -le 65535 ]
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$ROLLBACK_DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          KEY_AUDIT_DIR="$(mktemp -d)"
+          chmod 0700 "$KEY_AUDIT_DIR"
+          trap 'rm -rf -- "$KEY_AUDIT_DIR"' EXIT
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_AUDIT_DIR/deploy"
+          printf '%s\n' "$ROLLBACK_DEPLOY_SSH_KEY" > "$KEY_AUDIT_DIR/rollback"
+          DEPLOY_KEY_FINGERPRINT="$(ssh-keygen -y -P '' -f "$KEY_AUDIT_DIR/deploy" | \
+            ssh-keygen -lf - -E sha256 | awk '{print $2}')"
+          ROLLBACK_KEY_FINGERPRINT="$(ssh-keygen -y -P '' -f "$KEY_AUDIT_DIR/rollback" | \
+            ssh-keygen -lf - -E sha256 | awk '{print $2}')"
+          [[ "$DEPLOY_KEY_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
+          [[ "$ROLLBACK_KEY_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
+          [ "$DEPLOY_KEY_FINGERPRINT" != "$ROLLBACK_KEY_FINGERPRINT" ]
+          test -n "$SIGNING_PUBLIC_KEY"
+          test -n "$ENTERPRISE_PUBLIC_URL"
+          ENTERPRISE_PUBLIC_URL="$ENTERPRISE_PUBLIC_URL" node --input-type=module -e '
+            const url = new URL(process.env.ENTERPRISE_PUBLIC_URL);
+            if (url.protocol !== "https:" || url.username || url.password ||
+                (url.pathname !== "/" && url.pathname !== "") || url.search || url.hash) {
+              throw new Error("OTTO_ENTERPRISE_PUBLIC_URL must be an HTTPS origin without credentials, path, query, or fragment");
+            }
+          '
+
+      - name: Download immutable workflow artifact
+        if: ${{ inputs.use_workflow_artifact == true }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: otto-release-v${{ steps.version.outputs.version }}
+          path: release-download
+
+      - name: Download exact release assets
+        if: ${{ inputs.use_workflow_artifact != true }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir release-download
+          ARCHIVE="otto-enterprise-oneclick-v${{ steps.version.outputs.version }}-${{ steps.version.outputs.package_id }}.tar.gz"
+          gh release download "${{ steps.version.outputs.tag }}" \
+            --repo "${{ steps.version.outputs.release_repository }}" \
+            --pattern "$ARCHIVE" \
+            --pattern "${ARCHIVE}.sha256" \
+            --pattern "${ARCHIVE}.sig" \
+            --dir release-download
+
+      - name: Verify exact signed enterprise package
+        id: package
+        shell: bash
+        env:
+          OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          PACKAGE_ID="${{ steps.version.outputs.package_id }}"
+          ARCHIVE_NAME="otto-enterprise-oneclick-v${VERSION}-${PACKAGE_ID}.tar.gz"
+          mapfile -d '' archives < <(find release-download -type f -name "$ARCHIVE_NAME" -print0)
+          mapfile -d '' checksums < <(find release-download -type f -name "${ARCHIVE_NAME}.sha256" -print0)
+          mapfile -d '' signatures < <(find release-download -type f -name "${ARCHIVE_NAME}.sig" -print0)
+          [ "${#archives[@]}" -eq 1 ]
+          [ "${#checksums[@]}" -eq 1 ]
+          [ "${#signatures[@]}" -eq 1 ]
+          mkdir enterprise-upload
+          cp -- "${archives[0]}" "${checksums[0]}" "${signatures[0]}" enterprise-upload/
+          (
+            cd enterprise-upload
+            sha256sum -c -- "${ARCHIVE_NAME}.sha256"
+          )
+          node scripts/verify-enterprise-package-signature.mjs \
+            "enterprise-upload/$ARCHIVE_NAME" \
+            "enterprise-upload/${ARCHIVE_NAME}.sig"
+          echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Configure hardened SSH identity
+        id: ssh
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 0600 ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+
+      - name: Require the preinstalled root deployment gateway
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ROLLBACK_DEPLOY_USER: ${{ secrets.ROLLBACK_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          EXPECTED_KEY_ID="$(printf '%s\n' "$OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY" | \
+            openssl pkey -pubin -outform DER | sha256sum | awk '{print substr($1,1,16)}')"
+          EXPECTED_PREFLIGHT="protocol=otto-enterprise-ci-deploy-v4 gateway=$(sha256sum deployment/enterprise-oneclick/ci-deploy-gateway.sh | awk '{print $1}') publish=$(sha256sum deployment/enterprise-oneclick/ci/publish-update-mirror.sh | awk '{print $1}') rollback=$(sha256sum deployment/enterprise-oneclick/ci/rollback-update-mirror.sh | awk '{print $1}') key=${EXPECTED_KEY_ID} config=/etc/otto-enterprise/enterprise.env deploy_user=${DEPLOY_USER} rollback_user=${ROLLBACK_DEPLOY_USER}"
+          ACTUAL_PREFLIGHT="$(ssh -i ~/.ssh/id_deploy -p "$DEPLOY_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+            /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+            preflight)"
+          if [ "$ACTUAL_PREFLIGHT" != "$EXPECTED_PREFLIGHT" ]; then
+            echo 'Installed root gateway, helpers, or signing trust anchor do not match the locked release source.' >&2
+            printf 'expected: %s\nactual:   %s\n' "$EXPECTED_PREFLIGHT" "$ACTUAL_PREFLIGHT" >&2
+            exit 1
+          fi
+
+      - name: Upload exact package transaction
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+        run: |
+          set -euo pipefail
+          DEPLOY_TRANSACTION_ID="${{ steps.version.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "$DEPLOY_TRANSACTION_ID" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-[0-9]+$ ]]
+          SSH_OPTIONS=(
+            -i ~/.ssh/id_deploy
+            -p "$DEPLOY_PORT"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+          )
+          ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+            /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+            prepare-upload enterprise "$DEPLOY_TRANSACTION_ID"
+          PACKAGE_ID="${{ steps.version.outputs.package_id }}"
+          upload_file() {
+            local role="$1"
+            local file="$2"
+            local size
+            local digest
+            local expected_receipt
+            local actual_receipt
+            size="$(stat -c '%s' -- "$file")"
+            digest="$(sha256sum -- "$file" | awk '{print $1}')"
+            expected_receipt="uploaded kind=enterprise transaction=${DEPLOY_TRANSACTION_ID} role=${role} size=${size} sha256=${digest}"
+            actual_receipt="$(ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+              /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+              upload-file enterprise "$DEPLOY_TRANSACTION_ID" "$role" "$size" "$digest" \
+              < "$file")"
+            [ "$actual_receipt" = "$expected_receipt" ]
+          }
+          ARCHIVE_PATH="enterprise-upload/${{ steps.package.outputs.archive_name }}"
+          upload_file "archive-${PACKAGE_ID}" "$ARCHIVE_PATH"
+          upload_file "checksum-${PACKAGE_ID}" "${ARCHIVE_PATH}.sha256"
+          upload_file "signature-${PACKAGE_ID}" "${ARCHIVE_PATH}.sig"
+
+      - name: Deploy through the root-owned signed-package gateway
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ '${{ inputs.use_workflow_artifact }}' = 'true' ]; then
+            CURRENT_INTERNAL_COMMIT="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/ref/heads/internal" \
+              --jq '.object.sha')"
+            if [ "$CURRENT_INTERNAL_COMMIT" != '${{ steps.version.outputs.source_commit }}' ]; then
+              echo "origin/internal changed immediately before deployment; refusing the old candidate." >&2
+              exit 1
+            fi
+          fi
+          DEPLOY_TRANSACTION_ID="${{ steps.version.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SSH_OPTIONS=(
+            -i ~/.ssh/id_deploy
+            -p "$DEPLOY_PORT"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+            -o IdentitiesOnly=yes
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+          )
+          DEPLOY_STATUS=0
+          ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+              /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+              deploy "$DEPLOY_TRANSACTION_ID" \
+              "${{ steps.package.outputs.archive_name }}" \
+              "${{ steps.version.outputs.version }}" \
+              "${{ steps.version.outputs.package_id }}" \
+              "${{ steps.version.outputs.source_commit }}" \
+              "$DRY_RUN_INPUT" \
+            || DEPLOY_STATUS=$?
+          if [ "$DEPLOY_STATUS" -ne 0 ]; then
+            if [ "$DRY_RUN_INPUT" = 'true' ]; then
+              exit "$DEPLOY_STATUS"
+            fi
+            echo "Deployment transport returned ${DEPLOY_STATUS}; reconciling the exact signed server identity." >&2
+            ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+              /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+              verify-deployment \
+              "${{ steps.version.outputs.version }}" \
+              "${{ steps.version.outputs.package_id }}" \
+              "${{ steps.version.outputs.source_commit }}"
+          fi
+
+      - name: Verify public enterprise identity
+        if: ${{ inputs.dry_run == false }}
+        shell: bash
+        env:
+          ENTERPRISE_PUBLIC_URL: ${{ secrets.OTTO_ENTERPRISE_PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+          PUBLIC_ORIGIN="$(ENTERPRISE_PUBLIC_URL="$ENTERPRISE_PUBLIC_URL" node --input-type=module -e '
+            const url = new URL(process.env.ENTERPRISE_PUBLIC_URL);
+            if (url.protocol !== "https:" || url.username || url.password ||
+                (url.pathname !== "/" && url.pathname !== "") || url.search || url.hash) process.exit(2);
+            process.stdout.write(url.origin);
+          ')"
+          HEALTH_RESPONSE="$(mktemp)"
+          LEGAL_RESPONSE="$(mktemp)"
+          trap 'rm -f -- "$HEALTH_RESPONSE" "$LEGAL_RESPONSE"' EXIT
+          curl --noproxy '*' --proto '=https' --tlsv1.2 \
+            --fail-with-body --silent --show-error --max-redirs 0 \
+            --connect-timeout 15 --max-time 120 --retry 5 --retry-all-errors \
+            "${PUBLIC_ORIGIN}/enterprise/health?release_run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --output "$HEALTH_RESPONSE"
+          jq -e --arg version "${{ steps.version.outputs.version }}" \
+            '(keys | sort) == ["apiVersion","appVersion","capabilities","service","status","version"]
+              and .status == "ok"
+              and .service == "otto-enterprise"
+              and .version == $version
+              and .appVersion == $version
+              and .apiVersion == 4
+              and (.capabilities | type == "array")
+              and (([
+                "password_auth",
+                "sms_registration",
+                "personal_enterprise_upgrade",
+                "organization_invites",
+                "usage_summary",
+                "admin_console",
+                "direct_messages",
+                "atoa",
+                "position_invites",
+                "park_service_push",
+                "park_repair_v1",
+                "data_protection_v1",
+                "encrypted_attachment_storage_v1",
+                "encrypted_message_storage_v1",
+                "signed_telemetry_transport_v1",
+                "data_governance_v1",
+                "privacy_self_service"
+              ] - .capabilities) | length == 0)' \
+            "$HEALTH_RESPONSE" >/dev/null
+          curl --noproxy '*' --proto '=https' --tlsv1.2 \
+            --fail-with-body --silent --show-error --max-redirs 0 \
+            --connect-timeout 15 --max-time 120 --retry 5 --retry-all-errors \
+            "${PUBLIC_ORIGIN}/enterprise/legal?release_run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --output "$LEGAL_RESPONSE"
+          jq -e '
+            def legal_documents:
+              if type == "array" then . else .documents end;
+            (legal_documents | type == "array" and length >= 2)
+              and all(legal_documents[];
+                (.id | type == "string" and length > 0)
+                and (.version | type == "string" and length > 0)
+                and (((.hash // .sha256) // "") | test("^[0-9a-f]{64}$")))' \
+            "$LEGAL_RESPONSE" >/dev/null
+          for blocked_path in \
+            /enterprise/local-agent \
+            /enterprise/local-agent/pair \
+            /enterprise/sdk/otto-discovery.js; do
+            BLOCKED_STATUS="$(curl --noproxy '*' --proto '=https' --tlsv1.2 \
+              --silent --show-error --max-redirs 0 \
+              --connect-timeout 15 --max-time 120 --retry 5 --retry-all-errors \
+              --output /dev/null --write-out '%{http_code}' \
+              "${PUBLIC_ORIGIN}${blocked_path}?release_run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
+            if [ "$BLOCKED_STATUS" != '404' ]; then
+              echo "Incomplete public route was not hidden: ${blocked_path} -> HTTP ${BLOCKED_STATUS}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Remove server upload transaction
+        if: ${{ always() && steps.ssh.outcome == 'success' }}
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+        run: |
+          set -euo pipefail
+          DEPLOY_TRANSACTION_ID="${{ steps.version.outputs.tag }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh -i ~/.ssh/id_deploy -p "$DEPLOY_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
+            /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
+            cleanup-upload enterprise "$DEPLOY_TRANSACTION_ID"
+
+      - name: Remove runner SSH material
+        if: always()
+        shell: bash
+        run: rm -f -- ~/.ssh/id_deploy ~/.ssh/known_hosts

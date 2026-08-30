@@ -97,7 +97,7 @@ export function validateExceptionPolicy(policy, now = new Date()) {
   );
   assert(policy.release === '1.9.14', 'policy release must remain 1.9.14');
   assert(
-    policy.reviewedAt === '2026-08-29',
+    policy.reviewedAt === '2026-08-30',
     'policy review date changed without gate review',
   );
   assert(
@@ -434,8 +434,8 @@ function advisoryId(via) {
 }
 
 export function validateAuditReport(report, exception) {
-  assert(report?.auditReportVersion === 2, 'npm audit report version changed');
   assert(!report.error, 'npm audit endpoint returned an error');
+  assert(report?.auditReportVersion === 2, 'npm audit report version changed');
   assertExact(
     report.metadata?.vulnerabilities,
     { info: 0, low: 0, moderate: 0, high: 2, critical: 0, total: 2 },
@@ -538,16 +538,12 @@ function runNpmAudit(root) {
   const npmArguments = npmCli
     ? [npmCli, 'audit', '--json', '--registry=https://registry.npmjs.org/']
     : ['audit', '--json', '--registry=https://registry.npmjs.org/'];
-  const result = spawnSync(
-    npmExecutable,
-    npmArguments,
-    {
-      cwd: root,
-      encoding: 'utf8',
-      maxBuffer: 20 * 1024 * 1024,
-      shell: false,
-    },
-  );
+  const result = spawnSync(npmExecutable, npmArguments, {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 20 * 1024 * 1024,
+    shell: false,
+  });
   assert(!result.error, `npm audit failed to start: ${result.error}`);
   assert(
     result.status === 0 || result.status === 1,

@@ -1020,12 +1020,20 @@ describe('OrganizationTree', () => {
     const onMessageRead = vi.fn();
     const scrollIntoView = vi.fn();
     const intervals: Array<{ callback: () => void; delay: number }> = [];
-    vi.spyOn(window, 'setInterval').mockImplementation((handler, delay) => {
+    const originalSetInterval = window.setInterval.bind(window);
+    vi.spyOn(window, 'setInterval').mockImplementation((handler, delay, ...args): ReturnType<typeof window.setInterval> => {
+      const delayMs = Number(delay);
+      if (delayMs !== 2_000) {
+        // Testing Library's waitFor also uses setInterval. Keep those timers live so
+        // assertions are retried even when React effects are delayed under coverage load.
+        return originalSetInterval(handler, delay, ...args) as unknown as ReturnType<typeof window.setInterval>;
+      }
       intervals.push({
         callback: handler as () => void,
-        delay: Number(delay),
+        delay: delayMs,
       });
-      return intervals.length as unknown as ReturnType<typeof window.setInterval>;
+      // The component clears this handle on unmount; use a non-colliding synthetic id.
+      return 2_147_483_647 as unknown as ReturnType<typeof window.setInterval>;
     });
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,

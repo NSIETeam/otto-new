@@ -514,11 +514,7 @@ export class FeatureFlagManager {
     path.join(releaseRoot, 'run.mjs'),
   );
   chmodSync(path.join(releaseRoot, 'run.mjs'), 0o755);
-  const releaseSqlCipherRoot = path.join(
-    releaseRoot,
-    'native',
-    'sqlcipher',
-  );
+  const releaseSqlCipherRoot = path.join(releaseRoot, 'native', 'sqlcipher');
   mkdirSync(releaseSqlCipherRoot, { recursive: true });
   for (const target of REQUIRED_SQLCIPHER_NODE_TARGETS) {
     cpSync(
@@ -641,6 +637,10 @@ export class FeatureFlagManager {
   const executableFiles = [
     'install.sh',
     'upgrade.sh',
+    'ci-deploy-gateway.sh',
+    'install-ci-deploy-gateway.sh',
+    'ci/publish-update-mirror.sh',
+    'ci/rollback-update-mirror.sh',
     'export-migration.sh',
     'verify.sh',
     'backup-now.sh',

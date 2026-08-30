@@ -1245,6 +1245,7 @@ async function main() {
   checkArtifacts(BUILD_ASSET_NAMES);
   await makeLatestJson(sourceState.sourceCommit);
   const localAssets = await inspectLocalAssets();
+  await readAndVerifyBuildProvenance(localAssets, sourceState.sourceCommit);
   readAndValidateLocalManifest(localAssets, sourceState.sourceCommit);
   readAndValidateMirrorManifest(localAssets, sourceState.sourceCommit);
   log(

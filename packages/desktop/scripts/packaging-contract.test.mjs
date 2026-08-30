@@ -449,6 +449,25 @@ describe('desktop packaging contract', () => {
     expect(script).toMatch(/'--publish',\s*'never'/);
   });
 
+  it('enforces build provenance before accepting local release manifests', async () => {
+    const script = await readFile(
+      path.join(packageRoot, 'scripts', 'make-delivery-zip.mjs'),
+      'utf8',
+    );
+    const inspectIndex = script.indexOf(
+      'const localAssets = await inspectLocalAssets();',
+    );
+    const provenanceIndex = script.indexOf(
+      'await readAndVerifyBuildProvenance(',
+    );
+    const manifestIndex = script.indexOf(
+      'readAndValidateLocalManifest(localAssets, sourceState.sourceCommit);',
+    );
+    expect(inspectIndex).toBeGreaterThan(-1);
+    expect(provenanceIndex).toBeGreaterThan(inspectIndex);
+    expect(manifestIndex).toBeGreaterThan(provenanceIndex);
+  });
+
   it('rejects local direct publication before inspecting or uploading artifacts', async () => {
     const scriptPath = path.join(
       packageRoot,

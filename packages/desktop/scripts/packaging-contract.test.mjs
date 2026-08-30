@@ -249,6 +249,7 @@ describe('desktop packaging contract', () => {
       expect(files).toContain(exclusion);
     }
     expect(files).not.toContain('!**/node_modules/better-sqlite3/lib/**');
+    expect(files).not.toContain('!**/node_modules/qrcode-terminal/**');
     expect(afterPack.SQLCIPHER_RESOURCE_FILES).toContain('better_sqlite3.node');
     expect(files).not.toContain(
       '!**/node_modules/pdf-parse/lib/pdf.js/v1.10.100/build/pdf.js',
@@ -280,6 +281,11 @@ describe('desktop packaging contract', () => {
     expect(verifier).toContain('app.asar exceeds size budget');
     expect(runtimeVerifier).toContain('verifyPackagedContent(archivePath)');
     expect(runtimeVerifier).toContain('verifyPackagedOttoNative({');
+    expect(runtimeVerifier).toContain("'node_modules/otto-server/dist/bin.js'");
+    expect(runtimeVerifier).toContain(
+      "'node_modules/qrcode-terminal/lib/main.js'",
+    );
+    expect(runtimeVerifier).toContain('probePackagedServerBin(archivePath)');
   });
 
   it('builds, authenticates, and probes one Otto native runtime per packaged architecture', async () => {
@@ -357,7 +363,7 @@ describe('desktop packaging contract', () => {
       },
     ]);
     expect(packageJson.scripts['dist:win']).toContain(
-      'node scripts/verify-packaged-runtime.mjs release/win-unpacked/resources/app.asar --platform win32 --arch x64',
+      'node scripts/verify-packaged-runtime.mjs release/win-unpacked/resources/app.asar --platform win32 --arch x64 --probe-server-bin',
     );
     expect(packageJson.scripts['dist:win']).toContain('--publish never');
   });

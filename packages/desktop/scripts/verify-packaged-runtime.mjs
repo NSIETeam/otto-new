@@ -2,8 +2,16 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from 'node:fs';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +38,55 @@ function requireAsarEntry(entries, archiveEntry) {
   const normalized = `/${archiveEntry.replaceAll('\\', '/')}`;
   if (!entries.has(normalized)) {
     throw new Error(`packaged runtime is missing ${archiveEntry}`);
+  }
+}
+
+export function probePackagedServerBin(archivePath) {
+  const probeRoot = mkdtempSync(path.join(tmpdir(), 'otto-server-bin-probe-'));
+  const extractedRoot = path.join(probeRoot, 'app');
+  try {
+    asar.extractAll(archivePath, extractedRoot);
+    const serverBin = path.join(
+      extractedRoot,
+      'node_modules',
+      'otto-server',
+      'dist',
+      'bin.js',
+    );
+    const result = spawnSync(process.execPath, [serverBin, 'status'], {
+      cwd: extractedRoot,
+      encoding: 'utf8',
+      timeout: 60_000,
+      windowsHide: true,
+      env: {
+        ...process.env,
+        HOME: probeRoot,
+        USERPROFILE: probeRoot,
+        NODE_ENV: 'test',
+        OTTO_DATABASE_ENCRYPTION: 'disabled',
+      },
+    });
+    if (result.error) {
+      throw result.error;
+    }
+    const stdout = String(result.stdout ?? '');
+    const stderr = String(result.stderr ?? '');
+    if (
+      result.status !== 1 ||
+      !stdout.includes('未发现运行中的 server') ||
+      /ERR_MODULE_NOT_FOUND|Cannot find (?:package|module)/i.test(stderr)
+    ) {
+      throw new Error(
+        `packaged otto-server bin probe failed: status=${String(result.status)} signal=${String(result.signal)} stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`,
+      );
+    }
+  } finally {
+    rmSync(probeRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
   }
 }
 
@@ -70,8 +127,13 @@ export function verifyPackagedRuntime(
     'dist/main/index.js',
     'dist/preload/index.js',
     'dist/renderer/index.html',
+    'node_modules/otto-server/dist/bin.js',
+    'node_modules/otto-server/dist/src/bin.js',
+    'node_modules/otto-server/dist/src/channelCli.js',
     'node_modules/otto-server/dist/index.js',
     'node_modules/otto-server/package.json',
+    'node_modules/qrcode-terminal/package.json',
+    'node_modules/qrcode-terminal/lib/main.js',
     'node_modules/otto-core/package.json',
     'node_modules/xlsx/package.json',
     'node_modules/@modelcontextprotocol/sdk/package.json',
@@ -96,6 +158,13 @@ export function verifyPackagedRuntime(
     archivePath,
     'node_modules/@modelcontextprotocol/sdk/package.json',
   );
+  const packagedQrcode = readAsarJson(
+    archivePath,
+    'node_modules/qrcode-terminal/package.json',
+  );
+  const installedQrcode = readJson(
+    path.join(repoRoot, 'node_modules/qrcode-terminal/package.json'),
+  );
 
   const expected = {
     desktop: desktopPackage.version,
@@ -103,6 +172,7 @@ export function verifyPackagedRuntime(
     core: corePackage.version,
     xlsx: expectedSheetJsVersion(corePackage.dependencies.xlsx),
     mcp: corePackage.dependencies['@modelcontextprotocol/sdk'],
+    qrcode: installedQrcode.version,
   };
   const actual = {
     desktop: packagedDesktop.version,
@@ -110,6 +180,7 @@ export function verifyPackagedRuntime(
     core: packagedCore.version,
     xlsx: packagedXlsx.version,
     mcp: packagedMcp.version,
+    qrcode: packagedQrcode.version,
   };
 
   for (const key of Object.keys(expected)) {
@@ -118,6 +189,12 @@ export function verifyPackagedRuntime(
         `packaged ${key} version mismatch: expected ${expected[key]}, got ${actual[key]}`,
       );
     }
+  }
+  if (
+    packagedQrcode.name !== 'qrcode-terminal' ||
+    packagedQrcode.main !== './lib/main'
+  ) {
+    throw new Error('packaged qrcode-terminal entrypoint verification failed');
   }
 
   const nativeRuntime = verifyPackagedOttoNative({
@@ -282,7 +359,7 @@ function main() {
   const archiveArgument = process.argv[2];
   if (!archiveArgument) {
     throw new Error(
-      'usage: verify-packaged-runtime.mjs <app.asar> [--platform win32|darwin] [--arch x64|arm64]',
+      'usage: verify-packaged-runtime.mjs <app.asar> [--platform win32|darwin] [--arch x64|arm64] [--probe-server-bin]',
     );
   }
   const platformIndex = process.argv.indexOf('--platform');
@@ -305,6 +382,9 @@ function main() {
     process.argv.includes('--require-native-authenticode'),
     process.argv.includes('--require-native-code-signature'),
   );
+  if (process.argv.includes('--probe-server-bin')) {
+    probePackagedServerBin(archivePath);
+  }
   console.log(`[packaged-runtime] verified ${JSON.stringify(versions)}`);
 }
 

@@ -837,7 +837,8 @@ jobs:
             '--platform', 'win32',
             '--arch', 'x64',
             '--expected-build-commit', '${{ needs.build.outputs.source_commit }}',
-            '--probe-native'
+            '--probe-native',
+            '--probe-server-bin'
           )
           if ($env:DESKTOP_TEST_BUILD -ne '1') {
             $verificationArguments += '--require-native-authenticode'

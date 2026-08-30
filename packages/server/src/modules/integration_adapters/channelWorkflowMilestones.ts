@@ -38,6 +38,7 @@ export interface ChannelWorkflowMilestoneSender {
 
 export interface ChannelWorkflowMilestoneOptions {
   filePath?: string;
+  maxTrackedRuns?: number;
 }
 
 const NOTIFIABLE = new Set(['running', 'paused', 'succeeded', 'failed', 'cancelled', 'unknown_outcome']);
@@ -90,7 +91,9 @@ function deliveryKey(run: ControllableWorkflowRun): string {
  */
 export class ChannelWorkflowMilestoneNotifierV1 {
   private readonly filePath: string;
+  private readonly maxTrackedRuns: number;
   private cursors: Record<string, MilestoneCursor>;
+  private freshJournal = false;
 
   constructor(
     private readonly workflows: WorkflowControlBackend,
@@ -98,21 +101,40 @@ export class ChannelWorkflowMilestoneNotifierV1 {
     options: ChannelWorkflowMilestoneOptions = {},
   ) {
     this.filePath = options.filePath ?? defaultPath();
+    this.maxTrackedRuns = options.maxTrackedRuns ?? 10_000;
+    if (!Number.isSafeInteger(this.maxTrackedRuns) || this.maxTrackedRuns < 1 || this.maxTrackedRuns > 100_000) {
+      throw new Error('channel workflow milestone maxTrackedRuns is invalid');
+    }
     this.cursors = this.load();
+    this.pruneLoadedCursors();
   }
 
   async inputVersion(): Promise<string | undefined> {
-    const versions = (await this.workflows.list())
-      .filter((run) => ownerOf(run))
+    const versions = this.tracked(await this.workflows.list())
       .map((run) => `${run.id}:${run.status}:${run.updatedAt}`)
       .sort();
     return versions.length ? versions.join('|') : undefined;
   }
 
   async flush(): Promise<void> {
-    const runs = (await this.workflows.list())
-      .filter((run) => ownerOf(run))
+    const runs = this.tracked(await this.workflows.list())
       .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+    const trackedIds = new Set(runs.map((run) => run.id));
+    if (this.freshJournal) {
+      this.cursors = Object.fromEntries(runs.map((run) => [
+        run.id, { state: run.status, updatedAt: run.updatedAt },
+      ]));
+      this.freshJournal = false;
+      this.persist();
+      return;
+    }
+    let pruned = false;
+    for (const runId of Object.keys(this.cursors)) {
+      if (trackedIds.has(runId)) continue;
+      delete this.cursors[runId];
+      pruned = true;
+    }
+    if (pruned) this.persist();
     for (const run of runs) {
       const previous = this.cursors[run.id];
       if (previous?.state === run.status && previous.updatedAt === run.updatedAt) continue;
@@ -131,12 +153,29 @@ export class ChannelWorkflowMilestoneNotifierV1 {
     }
   }
 
+  private tracked(runs: ControllableWorkflowRun[]): ControllableWorkflowRun[] {
+    return runs
+      .filter((run) => ownerOf(run))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
+      .slice(0, this.maxTrackedRuns);
+  }
+
+  private pruneLoadedCursors(): void {
+    const entries = Object.entries(this.cursors);
+    if (entries.length <= this.maxTrackedRuns) return;
+    this.cursors = Object.fromEntries(entries
+      .sort(([, a], [, b]) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, this.maxTrackedRuns));
+    this.persist();
+  }
+
   private load(): Record<string, MilestoneCursor> {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf8')) as MilestoneFileV1;
       if (parsed.version !== 1 || !parsed.cursors || typeof parsed.cursors !== 'object') {
         throw new Error('unsupported milestone journal');
       }
+      if (Object.keys(parsed.cursors).length > 100_000) throw new Error('milestone journal is too large');
       for (const [runId, cursor] of Object.entries(parsed.cursors)) {
         if (!runId || !cursor || typeof cursor.state !== 'string' || typeof cursor.updatedAt !== 'string') {
           throw new Error('invalid milestone cursor');
@@ -144,7 +183,10 @@ export class ChannelWorkflowMilestoneNotifierV1 {
       }
       return structuredClone(parsed.cursors);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        this.freshJournal = true;
+        return {};
+      }
       throw new Error(`channel workflow milestone journal is invalid: ${error instanceof Error ? error.message : String(error)}`);
     }
   }

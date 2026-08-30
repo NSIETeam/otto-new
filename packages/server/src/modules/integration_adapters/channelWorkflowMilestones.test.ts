@@ -1,6 +1,6 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,9 +10,9 @@ import type { ControllableWorkflowRun, WorkflowControlBackend } from './workflow
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
 
-function run(status: string, updatedAt: string): ControllableWorkflowRun {
+function run(status: string, updatedAt: string, id = 'wf-00000000-0000-0000-0000-000000000001'): ControllableWorkflowRun {
   return {
-    id: 'wf-00000000-0000-0000-0000-000000000001',
+    id,
     definitionId: 'sales-inspection', status, updatedAt,
     steps: [{ stepId: 'execute', status, input: { origin: {
       provider: 'lark', installationId: 'install-1', tenantId: 'tenant-1',
@@ -57,9 +57,11 @@ describe('ChannelWorkflowMilestoneNotifierV1', () => {
   });
 
   it('does not advance its cursor when delivery fails and retries the identical write', async () => {
-    const h = harness(run('failed', '2026-08-30T00:02:00.000Z'));
-    h.sender.send.mockRejectedValueOnce(new Error('offline'));
+    const h = harness(run('waiting_approval', '2026-08-30T00:01:00.000Z'));
     const notifier = new ChannelWorkflowMilestoneNotifierV1(h.backend, h.sender, { filePath: h.filePath });
+    await notifier.flush();
+    h.set(run('failed', '2026-08-30T00:02:00.000Z'));
+    h.sender.send.mockRejectedValueOnce(new Error('offline'));
 
     await expect(notifier.flush()).rejects.toThrow('offline');
     await notifier.flush();
@@ -76,5 +78,28 @@ describe('ChannelWorkflowMilestoneNotifierV1', () => {
     expect(await notifier.inputVersion()).toBeUndefined();
     await notifier.flush();
     expect(h.sender.send).not.toHaveBeenCalled();
+  });
+
+  it('bounds long-lived tracking to the most recently updated workflows', async () => {
+    const runs = [
+      run('succeeded', '2026-08-30T00:01:00.000Z', 'wf-old'),
+      run('failed', '2026-08-30T00:02:00.000Z', 'wf-middle'),
+      run('cancelled', '2026-08-30T00:03:00.000Z', 'wf-new'),
+    ];
+    const backend = { list: vi.fn(async () => runs) } as unknown as WorkflowControlBackend;
+    const sender = { send: vi.fn(async () => undefined) };
+    const root = mkdtempSync(path.join(os.tmpdir(), 'otto-channel-milestones-'));
+    roots.push(root);
+    const notifier = new ChannelWorkflowMilestoneNotifierV1(backend, sender, {
+      filePath: path.join(root, 'journal.json'), maxTrackedRuns: 2,
+    });
+
+    expect((await notifier.inputVersion())?.split('|')).toHaveLength(2);
+    await notifier.flush();
+    expect(sender.send).not.toHaveBeenCalled();
+    const persisted = JSON.parse(readFileSync(path.join(root, 'journal.json'), 'utf8')) as {
+      cursors: Record<string, unknown>;
+    };
+    expect(Object.keys(persisted.cursors).sort()).toEqual(['wf-middle', 'wf-new']);
   });
 });

@@ -343,10 +343,10 @@ means no source-level substitute is accepted.
 | Chat command authorization, deduplication and visible reply before ACK | `channelTaskControl.ts`, `brokerChannelTaskBridge.ts`, focused tests | Automated |
 | Natural-language request becomes durable approval-gated work | `workflowTaskControlPort.ts`, `durableWorkflowChannelBackend.test.ts` | Automated |
 | Non-overlapping workflow worker skips unchanged persisted revisions | `recurringTaskRegistry.ts`, `server.residentTasks.test.ts` | Automated |
-| ACP delegate session handle is persisted before work; every background turn links to a durable external Workflow step; restart becomes `interrupted`/`unknown_outcome`, never silent replay | `delegateWorkflowJournal.ts`, `acpAgentClient.ts`, `backgroundTaskManager.ts`, delegate status and restart tests | Automated; BackgroundTaskManager remains a compatibility UI mirror |
+| ACP delegate session handle is persisted before work; every background turn links to a durable external Workflow step; restart becomes `interrupted`/`unknown_outcome`, never silent replay | `externalTaskWorkflowJournal.ts`, `acpAgentClient.ts`, `backgroundTaskManager.ts`, delegate status and restart tests | Automated; BackgroundTaskManager remains a compatibility UI mirror |
 | Starting a local external coding agent requires explicit approval and declares its affected working directory | `delegate-agent.ts`, focused confirmation tests | Automated |
 | Background delegate owns a registered stop function; parent-turn cancellation cannot kill it, while explicit cancellation and clear-all stop the ACP turn exactly once | `backgroundTaskManager.ts`, `delegate-agent.ts`, focused lifecycle tests | Automated |
-| Active Ctrl+B/auto-background shell path registers a process-group stop function and uses the shared cancelled terminal state | `shell.ts`, `backgroundTaskManager.ts`, focused shell stop tests | Automated; durable Workflow link pending |
+| Active Ctrl+B/auto-background shell path registers a process-group stop function, persists a durable external Workflow step, and uses truthful success/failure/cancelled terminal states | `shell.ts`, `externalTaskWorkflowJournal.ts`, `backgroundTaskManager.ts`, focused journal/shell tests | Automated |
 | Real managed Feishu/Lark installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | Real managed WeCom installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | macOS Accessibility RPA control and recovery | Signed local build and isolated macOS account | Pending smoke |
@@ -415,5 +415,10 @@ means no source-level substitute is accepted.
   the PID-only `BackgroundTaskManager.killTask()` branch. They duplicated the
   live Ctrl+B/auto-background spawn path and terminated a different process
   scope on Unix. The live path now registers its existing process-group abort
-  function and uses the shared `cancelled` transition; durable shell Workflow
-  journaling remains the next migration step.
+  function and uses the shared `cancelled` transition.
+- Generalized and renamed the delegate-only journal to
+  `externalTaskWorkflowJournal`. The active shell background path now waits
+  until its Workflow record is persisted before reporting success, persists
+  its compatibility record after linkage, and settles nonzero exits as
+  `failed` instead of the previous false `completed`. A journal write failure
+  stops the spawned process and is returned visibly.

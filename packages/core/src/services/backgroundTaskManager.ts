@@ -117,9 +117,9 @@ export class BackgroundTaskManager extends EventEmitter {
     this.loadFromDisk();
   }
 
-  /** Whether a task should be persisted (ACP delegate sessions only). */
+  /** Persist ACP delegates and any compatibility record linked to Workflow. */
   private isPersistable(task: BackgroundTask): boolean {
-    return task.kind === 'claude-code' || task.kind === 'codex';
+    return task.kind === 'claude-code' || task.kind === 'codex' || Boolean(task.workflowRunId);
   }
 
   /**

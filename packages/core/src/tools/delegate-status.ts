@@ -10,9 +10,9 @@ import { type Config } from '../config/config.js';
 import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
 import { extractCompactSummary, isAcpDelegateTask } from './delegate-agent.js';
 import {
-  FileDelegateWorkflowJournalV1,
-  type DelegateWorkflowJournalV1,
-} from '../services/delegateWorkflowJournal.js';
+  FileExternalTaskWorkflowJournalV1,
+  type ExternalTaskWorkflowJournalV1,
+} from '../services/externalTaskWorkflowJournal.js';
 
 /** Parameters for {@link CheckDelegateStatusTool}. */
 export interface CheckDelegateStatusParams {
@@ -37,7 +37,7 @@ export class CheckDelegateStatusTool extends BaseTool<
 
   constructor(
     _config: Config,
-    private readonly workflowJournal: DelegateWorkflowJournalV1 = new FileDelegateWorkflowJournalV1(),
+    private readonly workflowJournal: ExternalTaskWorkflowJournalV1 = new FileExternalTaskWorkflowJournalV1(),
   ) {
     super(
       CheckDelegateStatusTool.Name,

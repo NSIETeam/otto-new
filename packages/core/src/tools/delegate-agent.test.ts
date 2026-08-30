@@ -14,7 +14,7 @@ import type { Config } from '../config/config.js';
 import * as acpClient from '../acp-client/acpAgentClient.js';
 import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
 import type { RunTaskOptions } from '../acp-client/acpAgentClient.js';
-import type { DelegateWorkflowJournalV1 } from '../services/delegateWorkflowJournal.js';
+import type { ExternalTaskWorkflowJournalV1 } from '../services/externalTaskWorkflowJournal.js';
 
 vi.mock('../acp-client/acpAgentClient.js', () => ({
   runDelegatedTask: vi.fn(),
@@ -22,8 +22,9 @@ vi.mock('../acp-client/acpAgentClient.js', () => ({
 
 const runDelegatedTask = vi.mocked(acpClient.runDelegatedTask);
 
-const workflowJournal: DelegateWorkflowJournalV1 = {
+const workflowJournal: ExternalTaskWorkflowJournalV1 = {
   start: vi.fn(async ({ taskId }) => `wf-${taskId}`),
+  startShell: vi.fn(async ({ taskId }) => `wf-shell-${taskId}`),
   settle: vi.fn(async () => undefined),
   recover: vi.fn(async () => null),
 };

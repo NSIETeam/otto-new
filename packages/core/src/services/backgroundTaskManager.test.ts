@@ -98,6 +98,20 @@ describe('BackgroundTaskManager persistence', () => {
     expect(files).toHaveLength(0);
   });
 
+  it('persists a shell compatibility record once it is linked to Workflow', () => {
+    const mgr = new BackgroundTaskManager({ storageDir: dir });
+    const task = mgr.createTask('long-running-server', '/proj', 'shell');
+    mgr.attachWorkflowRun(task.id, 'wf-01234567-89ab-cdef-0123-456789abcdef');
+
+    const reloaded = new BackgroundTaskManager({ storageDir: dir });
+    expect(reloaded.getTask(task.id)).toMatchObject({
+      kind: 'shell',
+      status: 'interrupted',
+      workflowRunId: 'wf-01234567-89ab-cdef-0123-456789abcdef',
+      restoredFromDisk: true,
+    });
+  });
+
   it('removes the on-disk record when a task is cleared', () => {
     const mgr = new BackgroundTaskManager({ storageDir: dir });
     const task = mgr.createTask('[Codex] x', '/proj', 'codex');

@@ -8,10 +8,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CheckDelegateStatusTool } from './delegate-status.js';
 import type { Config } from '../config/config.js';
 import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
-import type { DelegateWorkflowJournalV1 } from '../services/delegateWorkflowJournal.js';
+import type { ExternalTaskWorkflowJournalV1 } from '../services/externalTaskWorkflowJournal.js';
 
-const workflowJournal: DelegateWorkflowJournalV1 = {
+const workflowJournal: ExternalTaskWorkflowJournalV1 = {
   start: async ({ taskId }) => `wf-${taskId}`,
+  startShell: async ({ taskId }) => `wf-shell-${taskId}`,
   settle: async () => undefined,
   recover: vi.fn(async () => ({ status: 'unknown_outcome' } as never)),
 };

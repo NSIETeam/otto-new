@@ -26,9 +26,9 @@ import {
   type BackgroundTask,
 } from '../services/backgroundTaskManager.js';
 import {
-  FileDelegateWorkflowJournalV1,
-  type DelegateWorkflowJournalV1,
-} from '../services/delegateWorkflowJournal.js';
+  FileExternalTaskWorkflowJournalV1,
+  type ExternalTaskWorkflowJournalV1,
+} from '../services/externalTaskWorkflowJournal.js';
 
 /** Default external agent when the caller doesn't pick one. */
 const DEFAULT_AGENT: ExternalAgentType = 'claude-code';
@@ -97,7 +97,7 @@ export class DelegateToAgentTool extends BaseTool<
 
   constructor(
     private readonly config: Config,
-    private readonly workflowJournal: DelegateWorkflowJournalV1 = new FileDelegateWorkflowJournalV1(),
+    private readonly workflowJournal: ExternalTaskWorkflowJournalV1 = new FileExternalTaskWorkflowJournalV1(),
   ) {
     super(
       DelegateToAgentTool.Name,

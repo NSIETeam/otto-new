@@ -5,7 +5,11 @@
  */
 
 import { expect, describe, it, vi, beforeEach } from 'vitest';
-import { ShellTool, isServerOrPersistentCommand } from './shell.js';
+import {
+  ShellTool,
+  backgroundShellOutcome,
+  isServerOrPersistentCommand,
+} from './shell.js';
 import { Config } from '../config/config.js';
 import * as summarizer from '../utils/summarizer.js';
 import { OttoClient } from '../core/client.js';
@@ -220,6 +224,15 @@ describe('ShellTool - Background Task Actions', () => {
     // stop_background_task needs backgroundTaskId
     expect(shellTool.validateToolParams({ command: '', action: 'stop_background_task' })).not.toBeNull();
     expect(shellTool.validateToolParams({ command: '', action: 'stop_background_task', backgroundTaskId: '123' })).toBeNull();
+  });
+
+  it('classifies background shell terminal outcomes without reporting nonzero as completed', () => {
+    expect(backgroundShellOutcome(0, null)).toEqual({ status: 'succeeded' });
+    expect(backgroundShellOutcome(2, null)).toEqual({
+      status: 'failed',
+      error: 'Background command exited with code 2',
+    });
+    expect(backgroundShellOutcome(null, 'SIGTERM')).toEqual({ status: 'cancelled' });
   });
 
   it('bypasses confirmation for background task listings/stop', async () => {

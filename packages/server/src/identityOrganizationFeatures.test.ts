@@ -61,6 +61,7 @@ describe('identity_organization feature configuration kernel', () => {
 
     try {
       expect(features.getConfiguredOrganizationFeatures('org-a')).toEqual({
+        model_gateway: true,
         enterprise_tree: true,
         park_service: true,
         feishu_auto_reply: true,
@@ -169,6 +170,7 @@ describe('authorization organization feature access policy', () => {
     try {
       expect(access.getOrganizationFeatureState('org-a')).toEqual({
         configured: {
+          model_gateway: true,
           enterprise_tree: true,
           park_service: false,
           feishu_auto_reply: true,
@@ -178,6 +180,7 @@ describe('authorization organization feature access policy', () => {
           skill_market: true,
         },
         entitled: {
+          model_gateway: false,
           enterprise_tree: true,
           park_service: false,
           feishu_auto_reply: false,
@@ -187,6 +190,7 @@ describe('authorization organization feature access policy', () => {
           skill_market: false,
         },
         effective: {
+          model_gateway: false,
           enterprise_tree: true,
           park_service: false,
           feishu_auto_reply: false,
@@ -197,6 +201,7 @@ describe('authorization organization feature access policy', () => {
         },
       });
       expect(access.getOrganizationFeatures('org-a')).toEqual({
+        model_gateway: false,
         enterprise_tree: true,
         park_service: false,
         feishu_auto_reply: false,

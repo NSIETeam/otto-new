@@ -23,6 +23,7 @@ describe('desktop visual style contract', () => {
     expect(css).toMatch(/@media \(prefers-color-scheme: dark\)\s*\{\s*\.otto-auth-shell\s*\{/su);
     expect(css).toContain('.otto-auth-panel {\n    background: var(--otto-bg);');
     expect(css).toContain('background: color-mix(in srgb, var(--otto-surface) 94%, transparent);');
+    expect(css.match(/^\.otto-right-panel\s*\{/gmu)).toHaveLength(1);
   });
 
   it('does not leave fixed pale status surfaces in desktop subpages', async () => {
@@ -100,6 +101,17 @@ describe('desktop visual style contract', () => {
     );
 
     for (const source of sources) expect(source).not.toContain('<svg');
+  });
+
+  it('keeps shared SVG icons theme-derived instead of embedding fixed paint', async () => {
+    const icons = await readFile(
+      path.join(packageRoot, 'src', 'renderer', 'components', 'icons.tsx'),
+      'utf8',
+    );
+
+    expect(icons).not.toMatch(/(?:fill|stroke)=["']#[0-9a-f]{3,8}["']/iu);
+    expect(icons).toContain("fill: 'none'");
+    expect(icons).toContain("stroke: 'currentColor'");
   });
 
   it('keeps both browser previews on the desktop React instance for visual audits', async () => {

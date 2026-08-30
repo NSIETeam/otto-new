@@ -407,7 +407,12 @@ export function IconFeishuPetal({ size = 14, className }: IconProps): React.JSX.
       <circle cx="12" cy="17.6" r="4.1" />
       <circle cx="6.4" cy="12" r="4.1" />
       {/* 中心留白点，制造花蕊层次 */}
-      <circle cx="12" cy="12" r="2.5" fill="#fff" />
+      <circle
+        cx="12"
+        cy="12"
+        r="2.5"
+        fill="var(--otto-icon-cutout, var(--otto-surface))"
+      />
     </svg>
   );
 }

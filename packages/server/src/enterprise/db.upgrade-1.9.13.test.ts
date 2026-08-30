@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Database } from '../sqlite-compat.js';
@@ -32,8 +33,10 @@ interface UpgradeFixtureMetadata {
   syntheticDataOnly: boolean;
 }
 
-const FIXTURE_DIRECTORY = path.resolve(
-  'packages/server/src/enterprise/fixtures/v1.9.13-schema23',
+const FIXTURE_DIRECTORY = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'fixtures',
+  'v1.9.13-schema23',
 );
 const FIXTURE_DATABASE = path.join(FIXTURE_DIRECTORY, 'data.db');
 const FIXTURE_METADATA = JSON.parse(

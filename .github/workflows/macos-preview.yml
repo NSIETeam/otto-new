@@ -180,7 +180,7 @@ jobs:
             fi
             cp "$source" "$target"
           done
-          shasum -a 256 preview-output/*.dmg > preview-output/SHA256SUMS.txt
+          (cd preview-output && shasum -a 256 *.dmg > SHA256SUMS.txt)
           SIGNING_MODE="$SIGNING_MODE" TARGET_DMG_BYTES="$TARGET_DMG_BYTES" MAX_DMG_BYTES="$MAX_DMG_BYTES" node -e 'const fs=require("node:fs");fs.writeFileSync("preview-output/provenance.json",JSON.stringify({sourceRepository:process.env.GITHUB_REPOSITORY,sourceCommit:process.env.GITHUB_SHA,workflowRunId:process.env.GITHUB_RUN_ID,internalVersion:require("./package.json").version,signingStatus:process.env.SIGNING_MODE,sizeBudget:{targetBytes:Number(process.env.TARGET_DMG_BYTES),hardCeilingBytes:Number(process.env.MAX_DMG_BYTES)},builtAt:new Date().toISOString()},null,2)+"\n")'
 
       - name: Upload macOS preview

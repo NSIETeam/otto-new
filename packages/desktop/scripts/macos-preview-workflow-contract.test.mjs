@@ -34,7 +34,8 @@ describe('macOS preview workflow contract', () => {
     expect(workflow).toContain('signingStatus:process.env.SIGNING_MODE');
     expect(workflow).toContain('hdiutil verify');
     expect(workflow).toContain('spctl --assess');
-    expect(workflow).toContain('SHA256SUMS.txt');
+    expect(workflow).toContain('(cd preview-output && shasum -a 256 *.dmg > SHA256SUMS.txt)');
+    expect(workflow).not.toContain('shasum -a 256 preview-output/*.dmg');
     expect(workflow).toContain('sourceCommit:process.env.GITHUB_SHA');
   });
 

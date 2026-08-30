@@ -24,4 +24,17 @@ describe('desktop visual asset inventory', () => {
       classification: 'functional-qr',
     }));
   });
+
+  it('automatically covers every production Hub subpage', async () => {
+    const inventory = await buildVisualAssetInventory();
+    const coveredFiles = inventory.generatedFrom.map(({ file }) => file);
+
+    expect(coveredFiles).toContain('src/renderer/components/hub/PersonalTokenUsagePanel.tsx');
+    expect(coveredFiles).toContain('src/renderer/components/hub/PrivacyDataPanel.tsx');
+    expect(coveredFiles.some((file) => file.endsWith('.test.tsx'))).toBe(false);
+    expect(inventory.assets).toContainEqual(expect.objectContaining({
+      file: 'src/renderer/components/hub/PrivacyDataPanel.tsx',
+      classification: 'functional-qr',
+    }));
+  });
 });

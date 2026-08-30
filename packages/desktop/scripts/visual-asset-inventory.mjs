@@ -2,26 +2,37 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const SURFACES = [
+const FIXED_SURFACES = [
   { file: 'src/renderer/components/RightPanel.tsx', context: 'right-rail' },
   { file: 'src/renderer/components/ModuleWorkspace.tsx', context: 'right-rail' },
   { file: 'src/renderer/components/ModuleMarketplaceDialog.tsx', context: 'module-launcher' },
   { file: 'src/renderer/components/WorkspaceDialogs.tsx', context: 'expert-card' },
   { file: 'src/renderer/components/CustomAgentIconPicker.tsx', context: 'icon-editor' },
   { file: 'src/renderer/components/FeishuStatusBadge.tsx', context: 'connection-card' },
-  { file: 'src/renderer/components/hub/ChannelPairingCard.tsx', context: 'connection-card' },
 ];
 
 const FUNCTIONAL_INLINE_SVG = new Map([
   ['src/renderer/components/hub/ChannelPairingCard.tsx', 'functional-qr'],
+  ['src/renderer/components/hub/PrivacyDataPanel.tsx', 'functional-qr'],
 ]);
+
+async function discoverSurfaces() {
+  const hubDirectory = path.join(packageRoot, 'src', 'renderer', 'components', 'hub');
+  const hubSurfaces = (await readdir(hubDirectory, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.tsx') && !entry.name.includes('.test.'))
+    .map((entry) => ({
+      file: `src/renderer/components/hub/${entry.name}`,
+      context: entry.name === 'ChannelPairingCard.tsx' ? 'connection-card' : 'module-subpage',
+    }));
+  return [...FIXED_SURFACES, ...hubSurfaces];
+}
 
 function classify(component, file) {
   if (component === 'ModuleIcon' || /^Icon[A-Z]/u.test(component)) {
@@ -35,7 +46,8 @@ function classify(component, file) {
 
 export async function buildVisualAssetInventory() {
   const assets = [];
-  for (const surface of SURFACES) {
+  const surfaces = await discoverSurfaces();
+  for (const surface of surfaces) {
     const source = await readFile(path.join(packageRoot, surface.file), 'utf8');
     const lines = source.split('\n');
     for (const [index, line] of lines.entries()) {
@@ -54,7 +66,7 @@ export async function buildVisualAssetInventory() {
   }
   return {
     schemaVersion: 1,
-    generatedFrom: SURFACES.map(({ file, context }) => ({ file, context })),
+    generatedFrom: surfaces.map(({ file, context }) => ({ file, context })),
     assets,
   };
 }

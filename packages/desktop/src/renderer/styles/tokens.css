@@ -281,6 +281,48 @@ button {
   --otto-hairline: rgba(255, 255, 255, 0.1);
 }
 
+/* macOS “Increase contrast” and equivalent browser settings must strengthen
+ * the same shared palette instead of creating a second component theme. */
+@media (prefers-contrast: more) {
+  :root {
+    --otto-text-secondary: var(--otto-text);
+    --otto-text-tertiary: var(--otto-text-secondary);
+    --otto-border: color-mix(in srgb, var(--otto-text) 55%, transparent);
+    --otto-border-strong: var(--otto-text);
+    --otto-hairline: color-mix(in srgb, var(--otto-text) 65%, transparent);
+    --otto-shadow-focus: 0 0 0 3px var(--otto-text);
+  }
+
+  .otto-right-panel {
+    border-left: 1px solid var(--otto-border-strong);
+  }
+}
+
+/* Windows forced-colour mode also appears in Electron. System colours keep
+ * module cards, controls and SVG currentColor legible without per-page hacks. */
+@media (forced-colors: active) {
+  :root {
+    --otto-bg: Canvas;
+    --otto-sidebar-bg: Canvas;
+    --otto-surface: Canvas;
+    --otto-surface-raised: Canvas;
+    --otto-text: CanvasText;
+    --otto-text-secondary: CanvasText;
+    --otto-text-tertiary: GrayText;
+    --otto-border: ButtonBorder;
+    --otto-border-strong: CanvasText;
+    --otto-accent: Highlight;
+    --otto-accent-hover: Highlight;
+    --otto-accent-soft: Canvas;
+    --otto-accent-contrast: HighlightText;
+    --otto-shadow-focus: 0 0 0 3px Highlight;
+  }
+
+  .otto-right-panel {
+    border-left: 1px solid var(--otto-border-strong);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.001ms !important;

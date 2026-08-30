@@ -329,9 +329,9 @@ means no source-level substitute is accepted.
 
 | Requirement | Evidence | State |
 | --- | --- | --- |
-| Tracked right-rail assets are classified and compact surfaces reject unregistered SVG/raster drift | `visual-asset-inventory.mjs`, inventory contract test, `visual-style-contract.test.mjs` | Automated |
+| Right-rail, launcher, connection-card and every production Hub subpage asset are auto-discovered and classified; compact surfaces reject unregistered SVG/raster drift | `visual-asset-inventory.mjs`, inventory contract test, `visual-style-contract.test.mjs` | Automated; 19 surfaces currently covered |
 | Shared theme-aware module, customer-module, navigation and channel-status icons | `ModuleIcon.tsx`, `icons.tsx`, catalog and focused component tests | Automated |
-| Renderer theme source is resolved onto the document root, reacts immediately to settings and OS changes, and rejects stale startup reads | `themeSync.ts`, `themeSync.test.ts`, `visual-style-contract.test.mjs` | Automated; full screenshot matrix pending while macOS is locked |
+| Renderer theme source is resolved onto the document root, reacts immediately to settings and OS changes, rejects stale startup reads, and strengthens the shared palette for increased-contrast and forced-colour modes | `themeSync.ts`, `themeSync.test.ts`, `tokens.css`, `visual-style-contract.test.mjs` | Automated; full native screenshot matrix pending while macOS is locked |
 | Production feature code has no raw interval; process watchdogs are named, observable, cost-free and stoppable | `nonOverlappingPoll.ts`, `processWatchdog.ts`, focused page/watchdog tests, production source scan | Automated |
 | Shared QR connector and device-bound installation | `channelConnector.ts`, `managedChannelConnector.ts`, focused connector tests | Automated |
 | Pairing QR survives nonce-redacted polling; transient status failures recover without overlapping requests | `ChannelPairingCard.tsx`, focused fake-timer UI tests | Automated |
@@ -389,6 +389,10 @@ means no source-level substitute is accepted.
 - Removed private inline close, delete and overflow SVGs from App, Sidebar and
   conversation overlays. New common navigation/overlay icons must enter through
   the shared registry; functional QR SVG remains separately classified.
+- Removed three competing `.otto-right-panel` definitions and retained one
+  authoritative theme-aware layout block. The shared icon registry rejects
+  fixed SVG paint, and the asset inventory now discovers production Hub
+  subpages automatically instead of relying on a short manual file list.
 - Replaced renderer feature `setInterval` calls with either non-overlapping
   async polling or deadline-based one-shot timers. Core protocol watchdogs and
   Server generated admin pages now use named process watchdogs or non-overlap

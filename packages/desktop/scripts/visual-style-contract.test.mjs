@@ -114,6 +114,17 @@ describe('desktop visual style contract', () => {
     expect(icons).toContain("stroke: 'currentColor'");
   });
 
+  it('honors the operating-system increased-contrast palette in the right rail', async () => {
+    const tokens = await readFile(
+      path.join(packageRoot, 'src', 'renderer', 'styles', 'tokens.css'),
+      'utf8',
+    );
+
+    expect(tokens).toMatch(/@media \(prefers-contrast: more\)\s*\{[^}]*:root\s*\{[^}]*--otto-border: color-mix\(in srgb, var\(--otto-text\) 55%, transparent\);/su);
+    expect(tokens).toMatch(/@media \(forced-colors: active\)\s*\{[^}]*:root\s*\{[^}]*--otto-bg: Canvas;/su);
+    expect(tokens).toMatch(/\.otto-right-panel\s*\{[^}]*border-left: 1px solid var\(--otto-border-strong\);/su);
+  });
+
   it('keeps both browser previews on the desktop React instance for visual audits', async () => {
     const configs = await Promise.all(
       ['webpack.preview.cjs', 'webpack.live.cjs'].map((file) =>

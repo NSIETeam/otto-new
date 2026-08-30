@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RpaRun, RpaWorkflowV1 } from './contracts.js';
 import { RpaRunner } from './runner.js';
-import type { RpaRunStore } from './ports.js';
+import type { RpaDriver, RpaRunStore } from './ports.js';
 
 function memoryStore(): RpaRunStore {
   const runs = new Map<string, RpaRun>();
@@ -51,6 +51,21 @@ const workflow: RpaWorkflowV1 = {
 };
 
 describe('RpaRunner', () => {
+  it('rejects workflows large enough to create unbounded resident work', () => {
+    expect(() => new RpaRunner([{
+      id: 'too-large',
+      version: 1,
+      steps: Array.from({ length: 101 }, (_, index) => ({
+        id: `step-${index}`,
+        action: 'checkpoint' as const,
+        args: {},
+        sideEffect: 'none' as const,
+      })),
+    }], memoryStore(), {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute: vi.fn() }, { put: vi.fn() })).toThrow('between 1 and 100 steps');
+  });
+
   it('does not invoke the driver when policy denies an action', async () => {
     const execute = vi.fn();
     const runner = new RpaRunner([workflow], memoryStore(), {
@@ -104,5 +119,130 @@ describe('RpaRunner', () => {
     expect(approved?.receipts[0]).toMatchObject({ approvalId: 'approval-1' });
     expect(completed).toMatchObject({ state: 'pending', receipts: [{ state: 'succeeded' }] });
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists pause during an active step and resumes only after the step boundary', async () => {
+    const store = memoryStore();
+    let finish!: (value: { output: { downloaded: boolean } }) => void;
+    const execute = vi.fn(() => new Promise<{ output: { downloaded: boolean } }>((resolve) => {
+      finish = resolve;
+    }));
+    const runner = new RpaRunner([workflow], store, {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute }, { put: vi.fn() });
+    const run = await runner.start(workflow.id);
+
+    const running = runner.runNext(run.id);
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    const requested = await runner.pause(run.id);
+    finish({ output: { downloaded: true } });
+    const paused = await running;
+    const resumed = await runner.resume(run.id);
+    const completed = await runner.runNext(run.id);
+
+    expect(requested).toMatchObject({ state: 'running', pauseRequestedAt: expect.any(String) });
+    expect(paused).toMatchObject({ state: 'paused', receipts: [{ state: 'succeeded' }] });
+    expect(resumed).toMatchObject({ state: 'pending' });
+    expect(completed).toMatchObject({ state: 'succeeded' });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it('persists cancellation during an active step and never starts another step', async () => {
+    const store = memoryStore();
+    let finish!: (value: { output: { downloaded: boolean } }) => void;
+    const execute = vi.fn(() => new Promise<{ output: { downloaded: boolean } }>((resolve) => {
+      finish = resolve;
+    }));
+    const runner = new RpaRunner([workflow], store, {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute }, { put: vi.fn() });
+    const run = await runner.start(workflow.id);
+
+    const running = runner.runNext(run.id);
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    const requested = await runner.cancel(run.id);
+    finish({ output: { downloaded: true } });
+    const cancelled = await running;
+    const afterCancel = await runner.runNext(run.id);
+
+    expect(requested).toMatchObject({ state: 'running', cancelRequestedAt: expect.any(String) });
+    expect(cancelled).toMatchObject({ state: 'cancelled', receipts: [{ state: 'succeeded' }] });
+    expect(afterCancel).toMatchObject({ state: 'cancelled' });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it('marks an aborted external action unknown and never replays it', async () => {
+    const store = memoryStore();
+    let observedSignal: AbortSignal | undefined;
+    const execute = vi.fn((input: Parameters<RpaDriver['execute']>[0]) => {
+      observedSignal = input.signal;
+      return new Promise<{ output: { downloaded: boolean } }>(() => {});
+    });
+    const runner = new RpaRunner([workflow], store, {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute }, { put: vi.fn() });
+    const run = await runner.start(workflow.id);
+    const controller = new AbortController();
+
+    const running = runner.runNext(run.id, controller.signal);
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    expect(observedSignal).toBe(controller.signal);
+    controller.abort();
+    const interrupted = await running;
+    const afterAbort = await runner.runNext(run.id);
+
+    expect(interrupted).toMatchObject({
+      state: 'unknown_outcome',
+      receipts: [{ state: 'unknown_outcome', error: expect.stringContaining('reconciliation') }],
+    });
+    expect(afterAbort).toMatchObject({ state: 'unknown_outcome' });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it('does not claim or execute a step when already cancelled before run_next', async () => {
+    const execute = vi.fn();
+    const runner = new RpaRunner([workflow], memoryStore(), {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute }, { put: vi.fn() });
+    const run = await runner.start(workflow.id);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(runner.runNext(run.id, controller.signal)).resolves.toMatchObject({
+      state: 'pending',
+      receipts: [{ state: 'pending', attempt: 0 }],
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('fails a step whose persisted output exceeds the bounded run record', async () => {
+    const runner = new RpaRunner([workflow], memoryStore(), {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, {
+      execute: vi.fn().mockResolvedValue({ output: { text: 'x'.repeat(70 * 1024) } }),
+    }, { put: vi.fn() });
+    const run = await runner.start(workflow.id);
+
+    await expect(runner.runNext(run.id)).resolves.toMatchObject({
+      state: 'failed',
+      receipts: [{ state: 'failed', error: expect.stringContaining('65536 bytes') }],
+    });
+  });
+
+  it('rejects artifact floods before writing any artifact', async () => {
+    const put = vi.fn();
+    const artifacts = Array.from({ length: 11 }, () => ({
+      mediaType: 'image/png', bytes: new Uint8Array([1]), redactedSummary: 'shot',
+    }));
+    const runner = new RpaRunner([workflow], memoryStore(), {
+      authorize: vi.fn().mockResolvedValue({ decision: 'allow' }),
+    }, { execute: vi.fn().mockResolvedValue({ artifacts }) }, { put });
+    const run = await runner.start(workflow.id);
+
+    await expect(runner.runNext(run.id)).resolves.toMatchObject({
+      state: 'failed',
+      receipts: [{ state: 'failed', error: expect.stringContaining('more than 10 artifacts') }],
+    });
+    expect(put).not.toHaveBeenCalled();
   });
 });

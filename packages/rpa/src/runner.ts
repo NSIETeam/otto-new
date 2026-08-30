@@ -16,6 +16,25 @@ function receiptFor(run: RpaRun, stepId: string): RpaStepReceipt | undefined {
   return run.receipts.find((receipt) => receipt.stepId === stepId);
 }
 
+const MAX_STEP_OUTPUT_BYTES = 64 * 1024;
+const MAX_STEP_ARTIFACTS = 10;
+
+function boundedOutput(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  const encoded = JSON.stringify(value);
+  if (Buffer.byteLength(encoded, 'utf8') > MAX_STEP_OUTPUT_BYTES) {
+    throw new Error(`RPA step output exceeds ${MAX_STEP_OUTPUT_BYTES} bytes.`);
+  }
+  return clone(value);
+}
+
+class RpaExecutionInterruptedError extends Error {
+  constructor() {
+    super('RPA step was interrupted.');
+    this.name = 'RpaExecutionInterruptedError';
+  }
+}
+
 /** Durable, policy-gated RPA runner. It intentionally has no shell or raw coordinate action. */
 export class RpaRunner {
   private readonly workflows = new Map<string, RpaWorkflowV1>();
@@ -38,12 +57,13 @@ export class RpaRunner {
     return this.store.create(workflow);
   }
 
-  async runNext(runId: string): Promise<RpaRun | null> {
+  async runNext(runId: string, signal?: AbortSignal): Promise<RpaRun | null> {
     const run = await this.store.get(runId);
     if (!run || ['awaiting_approval', 'paused', 'unknown_outcome', 'failed', 'cancelled', 'succeeded'].includes(run.state)) {
       return run;
     }
     const workflow = this.workflowForRun(run);
+    if (signal?.aborted) return run;
     const step = workflow.steps.find((candidate) => receiptFor(run, candidate.id)?.state === 'pending');
     if (!step) return this.finish(run);
 
@@ -65,26 +85,67 @@ export class RpaRunner {
     const claimed = await this.store.save(run, run.revision);
 
     try {
-      const outcome = await this.driver.execute({
+      const execution = this.driver.execute({
         run: clone(claimed),
         step,
         idempotencyKey: receiptFor(claimed, step.id)!.idempotencyKey,
+        signal,
       });
+      let abortListener: (() => void) | undefined;
+      const interrupted = signal
+        ? new Promise<never>((_resolve, reject) => {
+            abortListener = () => reject(new RpaExecutionInterruptedError());
+            if (signal.aborted) abortListener();
+            else signal.addEventListener('abort', abortListener, { once: true });
+          })
+        : undefined;
+      let outcome;
+      try {
+        outcome = interrupted ? await Promise.race([execution, interrupted]) : await execution;
+      } finally {
+        if (signal && abortListener) signal.removeEventListener('abort', abortListener);
+      }
       const saved = await this.store.get(runId);
       if (!saved) return null;
       const completed = receiptFor(saved, step.id)!;
+      const output = boundedOutput(outcome.output);
       completed.artifactIds = [];
-      for (const artifact of outcome.artifacts ?? []) {
+      const artifacts = outcome.artifacts ?? [];
+      if (artifacts.length > MAX_STEP_ARTIFACTS) {
+        throw new Error(`RPA step produced more than ${MAX_STEP_ARTIFACTS} artifacts.`);
+      }
+      for (const artifact of artifacts) {
         completed.artifactIds.push((await this.artifacts.put(artifact)).id);
       }
-      completed.output = outcome.output === undefined ? undefined : clone(outcome.output);
+      completed.output = output;
       completed.state = 'succeeded';
       saved.currentStepId = null;
-      saved.state = 'pending';
+      if (saved.cancelRequestedAt) {
+        saved.state = 'cancelled';
+      } else if (saved.pauseRequestedAt) {
+        saved.state = 'paused';
+        saved.pauseRequestedAt = undefined;
+      } else {
+        saved.state = 'pending';
+      }
       return this.store.save(saved, saved.revision);
     } catch (error) {
       const saved = await this.store.get(runId);
       if (!saved) return null;
+      if (error instanceof RpaExecutionInterruptedError) {
+        const interrupted = receiptFor(saved, step.id)!;
+        if (step.sideEffect === 'external') {
+          interrupted.state = 'unknown_outcome';
+          interrupted.error = 'RPA execution was cancelled after an external action began; reconciliation or human takeover is required.';
+          saved.state = 'unknown_outcome';
+        } else {
+          interrupted.state = 'pending';
+          interrupted.error = undefined;
+          saved.currentStepId = null;
+          saved.state = 'pending';
+        }
+        return this.store.save(saved, saved.revision);
+      }
       return this.fail(saved, step, error instanceof Error ? error.message : String(error));
     }
   }
@@ -139,6 +200,48 @@ export class RpaRunner {
     return this.store.save(run, run.revision);
   }
 
+  async pause(runId: string): Promise<RpaRun | null> {
+    const run = await this.store.get(runId);
+    if (!run) return null;
+    if (run.state === 'paused') return run;
+    if (run.state === 'running') {
+      run.pauseRequestedAt = new Date().toISOString();
+      return this.store.save(run, run.revision);
+    }
+    if (run.state !== 'pending' && run.state !== 'awaiting_approval') {
+      throw new Error(`RPA run cannot be paused from ${run.state}.`);
+    }
+    run.state = 'paused';
+    return this.store.save(run, run.revision);
+  }
+
+  async resume(runId: string): Promise<RpaRun | null> {
+    const run = await this.store.get(runId);
+    if (!run) return null;
+    if (run.state !== 'paused') throw new Error(`RPA run cannot be resumed from ${run.state}.`);
+    run.pauseRequestedAt = undefined;
+    run.state = run.approvalId ? 'awaiting_approval' : 'pending';
+    return this.store.save(run, run.revision);
+  }
+
+  async cancel(runId: string): Promise<RpaRun | null> {
+    const run = await this.store.get(runId);
+    if (!run) return null;
+    if (run.state === 'cancelled') return run;
+    if (run.state === 'running') {
+      run.cancelRequestedAt = new Date().toISOString();
+      run.pauseRequestedAt = undefined;
+      return this.store.save(run, run.revision);
+    }
+    if (run.state === 'succeeded' || run.state === 'failed' || run.state === 'unknown_outcome') {
+      throw new Error(`RPA run cannot be cancelled from ${run.state}.`);
+    }
+    run.state = 'cancelled';
+    run.cancelRequestedAt = new Date().toISOString();
+    run.pauseRequestedAt = undefined;
+    return this.store.save(run, run.revision);
+  }
+
   private async finish(run: RpaRun): Promise<RpaRun> {
     run.state = 'succeeded';
     run.currentStepId = null;
@@ -174,6 +277,9 @@ const FORBIDDEN_DESKTOP_ARGUMENTS = new Set([
 ]);
 
 function validateWorkflow(workflow: RpaWorkflowV1): void {
+  if (workflow.steps.length === 0 || workflow.steps.length > 100) {
+    throw new Error('RPA workflows must contain between 1 and 100 steps.');
+  }
   const ids = new Set<string>();
   for (const step of workflow.steps) {
     if (!step.id.trim() || ids.has(step.id)) throw new Error('RPA step ids must be unique and non-empty.');

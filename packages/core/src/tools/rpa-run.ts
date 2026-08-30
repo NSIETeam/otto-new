@@ -27,7 +27,7 @@ const ACTIONS = [
   'desktop.screenshot',
   'checkpoint',
 ] as const;
-const OPERATIONS = ['start', 'run_next', 'recover', 'approve', 'take_over', 'status'] as const;
+const OPERATIONS = ['start', 'run_next', 'recover', 'approve', 'take_over', 'status', 'pause', 'resume', 'cancel'] as const;
 type RpaAction = (typeof ACTIONS)[number];
 type RpaOperation = (typeof OPERATIONS)[number];
 
@@ -70,15 +70,20 @@ interface RpaRunSummarySource {
   currentStepId: string | null;
   approvalId?: string;
   takeoverNote?: string;
+  pauseRequestedAt?: string;
+  cancelRequestedAt?: string;
   receipts: RpaReceipt[];
 }
 
 interface RpaRunnerPort {
   start(workflowId: string, version?: number): Promise<RpaRunSummarySource>;
-  runNext(runId: string): Promise<RpaRunSummarySource | null>;
+  runNext(runId: string, signal?: AbortSignal): Promise<RpaRunSummarySource | null>;
   recover(runId: string): Promise<RpaRunSummarySource | null>;
   approve(runId: string, approvalId: string): Promise<RpaRunSummarySource | null>;
   takeOver(runId: string, note: string): Promise<RpaRunSummarySource | null>;
+  pause(runId: string): Promise<RpaRunSummarySource | null>;
+  resume(runId: string): Promise<RpaRunSummarySource | null>;
+  cancel(runId: string): Promise<RpaRunSummarySource | null>;
 }
 
 interface RpaRuntimeModule {
@@ -127,6 +132,8 @@ function summarize(run: RpaRunSummarySource | null): Record<string, unknown> {
     currentStepId: run.currentStepId,
     approvalId: run.approvalId,
     takeoverNote: run.takeoverNote,
+    pauseRequestedAt: run.pauseRequestedAt,
+    cancelRequestedAt: run.cancelRequestedAt,
     receipts: run.receipts.map((receipt) => ({
       stepId: receipt.stepId,
       attempt: receipt.attempt,
@@ -210,7 +217,7 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
     };
   }
 
-  async execute(params: RpaRunToolParams, _signal: AbortSignal): Promise<ToolResult> {
+  async execute(params: RpaRunToolParams, signal: AbortSignal): Promise<ToolResult> {
     const error = this.validateToolParams(params);
     if (error) return { llmContent: error, returnDisplay: error };
     try {
@@ -221,7 +228,7 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
           run = await runner.start(params.workflow!.id, params.workflow!.version);
           break;
         case 'run_next':
-          run = await runner.runNext(params.run_id!);
+          run = await runner.runNext(params.run_id!, signal);
           break;
         case 'recover':
           run = await runner.recover(params.run_id!);
@@ -234,6 +241,15 @@ export class RpaRunTool extends BaseTool<RpaRunToolParams, ToolResult> {
           break;
         case 'status':
           run = await this.status(params.run_id!);
+          break;
+        case 'pause':
+          run = await runner.pause(params.run_id!);
+          break;
+        case 'resume':
+          run = await runner.resume(params.run_id!);
+          break;
+        case 'cancel':
+          run = await runner.cancel(params.run_id!);
           break;
         default:
           throw new Error(`Unsupported RPA operation: ${params.action}`);

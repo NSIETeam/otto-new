@@ -347,6 +347,8 @@ means no source-level substitute is accepted.
 | Starting a local external coding agent requires explicit approval and declares its affected working directory | `delegate-agent.ts`, focused confirmation tests | Automated |
 | Background delegate owns a registered stop function; parent-turn cancellation cannot kill it, while explicit cancellation and clear-all stop the ACP turn exactly once | `backgroundTaskManager.ts`, `delegate-agent.ts`, focused lifecycle tests | Automated |
 | Active Ctrl+B/auto-background shell path registers a process-group stop function, persists a durable external Workflow step, and uses truthful success/failure/cancelled terminal states | `shell.ts`, `externalTaskWorkflowJournal.ts`, `backgroundTaskManager.ts`, focused journal/shell tests | Automated |
+| Durable RPA supports persisted pause/resume/cancel, propagates abort signals, and converts interrupted external actions to non-replayable `unknown_outcome` | `rpa/src/runner.ts`, `core/src/tools/rpa-run.ts`, focused runner/tool tests | Automated |
+| RPA resource bounds limit workflows to 100 steps, step output to 64 KiB, artifacts to 10 per step and 10 MiB each with atomic writes | `runner.ts`, `file-artifact-store.ts`, focused overflow tests | Automated |
 | Real managed Feishu/Lark installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | Real managed WeCom installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | macOS Accessibility RPA control and recovery | Signed local build and isolated macOS account | Pending smoke |
@@ -422,3 +424,9 @@ means no source-level substitute is accepted.
   its compatibility record after linkage, and settles nonzero exits as
   `failed` instead of the previous false `completed`. A journal write failure
   stops the spawned process and is returned visibly.
+- RPA `paused` and `cancelled` are now real persisted transitions exposed by
+  Core, including pause/cancel requests made while a step is active. An
+  already-aborted run does not claim a step; abort after an external action is
+  claimed records `unknown_outcome` and cannot replay. Workflow size, output,
+  artifact count and artifact bytes are bounded, and artifact files use an
+  atomic temporary-file switch with failed temporary writes removed.

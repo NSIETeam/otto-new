@@ -18,7 +18,7 @@ export interface RpaPolicyPort {
 }
 
 export interface RpaDriver {
-  execute(input: { run: RpaRun; step: RpaStepDefinition; idempotencyKey: string }): Promise<{
+  execute(input: { run: RpaRun; step: RpaStepDefinition; idempotencyKey: string; signal?: AbortSignal }): Promise<{
     output?: unknown;
     artifacts?: ReadonlyArray<{ mediaType: string; bytes: Uint8Array; redactedSummary: string }>;
   }>;

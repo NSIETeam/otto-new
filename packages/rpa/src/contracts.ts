@@ -78,6 +78,8 @@ export interface RpaRun {
   currentStepId: string | null;
   approvalId?: string;
   takeoverNote?: string;
+  pauseRequestedAt?: string;
+  cancelRequestedAt?: string;
   createdAt: string;
   updatedAt: string;
   receipts: RpaStepReceipt[];

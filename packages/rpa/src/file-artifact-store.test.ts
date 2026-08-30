@@ -28,4 +28,17 @@ describe('FileRpaArtifactStore', () => {
     expect(artifact.sha256).toHaveLength(64);
     expect(await readdir(root)).toEqual([`${artifact.id}.png`]);
   });
+
+  it('rejects an oversized artifact before creating a partial file', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-rpa-artifact-'));
+    roots.push(root);
+    const store = new FileRpaArtifactStore(root, 2);
+
+    await expect(store.put({
+      mediaType: 'image/png',
+      bytes: new Uint8Array([1, 2, 3]),
+      redactedSummary: 'oversized screenshot',
+    })).rejects.toThrow('exceeds 2 bytes');
+    await expect(readdir(root)).resolves.toEqual([]);
+  });
 });

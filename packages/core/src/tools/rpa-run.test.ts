@@ -58,6 +58,8 @@ describe('RpaRunTool', () => {
 
   it('requires confirmation for every state-changing operation', async () => {
     expect(await tool.shouldConfirmExecute({ action: 'start', workflow }, new AbortController().signal)).not.toBe(false);
+    expect(await tool.shouldConfirmExecute({ action: 'pause', run_id: 'run-1' }, new AbortController().signal)).not.toBe(false);
+    expect(await tool.shouldConfirmExecute({ action: 'cancel', run_id: 'run-1' }, new AbortController().signal)).not.toBe(false);
     expect(await tool.shouldConfirmExecute({ action: 'status', run_id: 'run-1' }, new AbortController().signal)).toBe(false);
   });
 

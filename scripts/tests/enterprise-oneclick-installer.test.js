@@ -270,9 +270,10 @@ export function closeEnterpriseDatabase() {
         `import fs from 'node:fs';
 export const ENTERPRISE_TASK_DRAIN_TIMEOUT_MS = 30_000;
 export function startEnterpriseServer() {
-  fs.appendFileSync(process.env.EVENT_FILE, 'started\\n');
+  const keepAlive = setInterval(() => {}, 60_000);
   const server = {
     close(callback) {
+      clearInterval(keepAlive);
       fs.appendFileSync(process.env.EVENT_FILE, 'close-start\\n');
       setTimeout(() => {
         fs.appendFileSync(process.env.EVENT_FILE, 'close-callback\\n');
@@ -286,6 +287,9 @@ export function startEnterpriseServer() {
     once() { return server; },
     address() { return { address: '127.0.0.1', port: 17777 }; },
   };
+  setImmediate(() => {
+    fs.appendFileSync(process.env.EVENT_FILE, 'started\\n');
+  });
   return server;
 }
 `,

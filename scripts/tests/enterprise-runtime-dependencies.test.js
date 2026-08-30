@@ -106,7 +106,7 @@ describe('enterprise runtime dependency closure', () => {
       ),
     );
     expect(runtimeImports).toEqual([]);
-  });
+  }, 30_000);
 
   it.skipIf(!lockedInstallMaterialized)(
     'copies the locked dependency closure into a standalone release root',

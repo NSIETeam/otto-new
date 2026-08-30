@@ -151,6 +151,19 @@ describe('desktop packaging contract', () => {
     expect(packageJson.build.files).not.toContain('!**/node_modules/**/src/**');
   });
 
+  it('keeps one CommonJS OpenTelemetry runtime instead of packaging alternate builds', async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+    );
+    expect(packageJson.build.files).toEqual(expect.arrayContaining([
+      '!**/node_modules/@opentelemetry/**/build/esm/**',
+      '!**/node_modules/@opentelemetry/**/build/esnext/**',
+    ]));
+    expect(packageJson.build.files).not.toContain(
+      '!**/node_modules/@opentelemetry/**/build/src/**',
+    );
+  });
+
   it('uses the current dependency collector and verifies the packaged Windows runtime', async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(packageRoot, 'package.json'), 'utf8'),

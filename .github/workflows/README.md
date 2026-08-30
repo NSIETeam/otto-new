@@ -57,6 +57,19 @@ Otto 的发布链路分成三段：先检查异常，再构建双仓 GitHub Rele
 - `NSIETeam/otto-new` 是正式 Release；`Felix201209/otto-releases` 同步同一份资产，作为 V1.9.13 及更早客户端的兼容入口。
 - Release 默认创建为 draft；只有企业部署、Windows 验签和更新镜像全部通过后，工作流才依次公开兼容 Release 与正式 Release。
 
+## macOS Preview Build
+
+文件：`.github/workflows/macos-preview.yml`
+
+这是不进入正式更新渠道的手动测试构建。它只接受远端 `internal` 的
+精确最新提交，仍执行仓库质量门禁、SQLCipher 来源验证、Developer ID
+签名、公证和 Gatekeeper 校验。下载文件固定为
+`Otto-macOS-Preview-arm64.dmg` 与 `Otto-macOS-Preview-x64.dmg`，文件名不带
+产品版本；`provenance.json` 仍保存内部版本、来源提交和工作流运行编号。
+
+产物仅作为保留 14 天的 Actions artifact，不创建 tag、GitHub Release、
+`latest.json`，也不触碰正式或兼容下载仓库及更新镜像。
+
 ## Deploy Server
 
 文件：`.github/workflows/deploy-server.yml`

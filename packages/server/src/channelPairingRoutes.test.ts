@@ -323,9 +323,13 @@ describe('channel pairing REST routes', () => {
   it('uses a composed managed platform and stops it with the server lifecycle', async () => {
     const connector = fakeConnector();
     const stopAll = vi.fn(async () => undefined);
+    const milestoneInputVersion = vi.fn(async () => 'milestone-revision-1');
+    const flushMilestones = vi.fn(async () => undefined);
     const platform = {
       connectors: { feishu: connector },
       stopAll,
+      milestoneInputVersion,
+      flushMilestones,
     } as unknown as ManagedChannelPlatformV1;
     const recoverInterrupted = vi.fn(async () => []);
     const supervisor = {
@@ -349,5 +353,6 @@ describe('channel pairing REST routes', () => {
     server = undefined;
     expect(stopAll).toHaveBeenCalledOnce();
     expect(recoverInterrupted).toHaveBeenCalledOnce();
+    expect(milestoneInputVersion).toHaveBeenCalled();
   });
 });

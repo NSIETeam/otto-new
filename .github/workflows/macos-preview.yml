@@ -1,0 +1,148 @@
+name: macOS Preview Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: macos-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22.23.1'
+  ELECTRON_VERSION: '43.2.0'
+  SQLCIPHER_SOURCE_REVISION: e2a6040f2ae5cfff2b3e08eb3320007d93cdf3fc
+
+jobs:
+  sqlcipher-native:
+    name: Build verified SQLCipher native matrix
+    uses: ./.github/workflows/sqlcipher-native.yml
+
+  preview:
+    name: Audit and package macOS preview
+    runs-on: macos-latest
+    timeout-minutes: 90
+    needs: sqlcipher-native
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require exact internal source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin internal
+          test "$GITHUB_SHA" = "$(git rev-parse origin/internal)" || {
+            echo "Preview builds must run from the latest internal commit." >&2
+            exit 1
+          }
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          PYTHON: python3.11
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download verified SQLCipher native matrix
+        uses: actions/download-artifact@v7
+        with:
+          name: sqlcipher-native-matrix
+          path: native/sqlcipher
+
+      - name: Verify SQLCipher provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-sqlcipher-native-assets.mjs \
+            --expected-build-commit "$GITHUB_SHA" \
+            --expected-source-revision "$SQLCIPHER_SOURCE_REVISION" \
+            --expected-runtime-version "$ELECTRON_VERSION" \
+            --require-matrix-manifest
+          while IFS= read -r -d '' binding; do
+            gh attestation verify "$binding" --repo "$GITHUB_REPOSITORY"
+          done < <(find native/sqlcipher -type f -name better_sqlite3.node -print0)
+
+      - name: Repository and quality audit
+        run: |
+          npm run doctor
+          git diff --check
+          npm run validate:integration-baseline
+          npm run validate:boundaries
+          npm run lint:ci
+          npm run build
+          npm run typecheck
+          npm run test:ci
+
+      - name: Require macOS signing and notarization custody
+        shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$MAC_CSC_LINK"
+          test -n "$MAC_CSC_KEY_PASSWORD"
+          test -n "$APPLE_ID"
+          test -n "$APPLE_APP_SPECIFIC_PASSWORD"
+          test -n "$APPLE_TEAM_ID"
+
+      - name: Build signed macOS preview images
+        working-directory: packages/desktop
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          npx electron-builder --mac dmg --arm64 --x64 --publish never
+
+      - name: Verify and stage versionless preview artifacts
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          mkdir -p preview-output
+          for arch in arm64 x64; do
+            source="packages/desktop/release/Otto-${VERSION}-${arch}.dmg"
+            target="preview-output/Otto-macOS-Preview-${arch}.dmg"
+            test -f "$source"
+            codesign --verify --verbose=2 "$source"
+            spctl --assess --type open --context context:primary-signature --verbose=4 "$source"
+            cp "$source" "$target"
+          done
+          shasum -a 256 preview-output/*.dmg > preview-output/SHA256SUMS.txt
+          node -e 'const fs=require("node:fs");fs.writeFileSync("preview-output/provenance.json",JSON.stringify({sourceRepository:process.env.GITHUB_REPOSITORY,sourceCommit:process.env.GITHUB_SHA,workflowRunId:process.env.GITHUB_RUN_ID,internalVersion:require("./package.json").version,builtAt:new Date().toISOString()},null,2)+"\n")'
+
+      - name: Upload macOS preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: Otto-macOS-Preview
+          path: preview-output/*
+          if-no-files-found: error
+          retention-days: 14
+

@@ -314,6 +314,11 @@ No release is complete without:
 - a real Feishu/Lark and WeCom installation smoke test in isolated tenants;
 - a real macOS accessibility-driven RPA smoke test in an isolated account.
 
+The internal test-distribution path is `.github/workflows/macos-preview.yml`.
+It accepts only the exact latest `internal` commit and publishes signed,
+notarized, versionless-named macOS artifacts with checksum and commit
+provenance. It never creates a tag, Release, update manifest, or mirror update.
+
 ## Completion checklist
 
 Each explicit item in this document must map to a source file, automated test,

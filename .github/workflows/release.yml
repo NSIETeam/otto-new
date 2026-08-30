@@ -513,6 +513,7 @@ jobs:
       - name: Enforce packaged content and installer size budget
         run: npm run release:gate --workspace=packages/desktop
         env:
+          OTTO_UPDATE_ASSET_BASE_URL: https://github.com/${{ env.RELEASES_REPO }}/releases/download/v${{ needs.validate-source.outputs.version }}
           OTTO_DESKTOP_BASELINE_INSTALLER_BYTES: '128032671'
           OTTO_DESKTOP_MAX_INSTALLER_GROWTH_MB: '8'
           OTTO_DESKTOP_MAX_INSTALLER_MB: '140'
@@ -578,7 +579,9 @@ jobs:
           test -f "$DESKTOP_RELEASE/Otto-Setup-${VERSION}-win-x64.exe"
           test -f "$DESKTOP_RELEASE/latest.json"
           test -f "$DESKTOP_RELEASE/latest.mirror.json"
-          node packages/desktop/scripts/verify-update-manifest.mjs "$DESKTOP_RELEASE" "$VERSION"
+          OTTO_UPDATE_ASSET_BASE_URL="https://github.com/${RELEASES_REPO}/releases/download/v${VERSION}" \
+            node packages/desktop/scripts/verify-update-manifest.mjs \
+              "$DESKTOP_RELEASE" "$VERSION"
           DESKTOP_FILES=(
             "$DESKTOP_RELEASE/Otto-${VERSION}-arm64.dmg"
             "$DESKTOP_RELEASE/Otto-${VERSION}-arm64.dmg.blockmap"
@@ -646,8 +649,9 @@ jobs:
             done
             cp -- "$DESKTOP_RELEASE/latest.mirror.json" \
               "$MIRROR_PAYLOAD_DIR/latest.json"
-            node packages/desktop/scripts/verify-update-manifest.mjs \
-              "$MIRROR_PAYLOAD_DIR" "$VERSION"
+            OTTO_UPDATE_ASSET_BASE_URL="$UPDATE_MIRROR_ASSET_BASE_URL" \
+              node packages/desktop/scripts/verify-update-manifest.mjs \
+                "$MIRROR_PAYLOAD_DIR" "$VERSION"
             node scripts/update-mirror-manifest.mjs create \
               "$MIRROR_PAYLOAD_DIR" "$MIRROR_CHECKSUMS" \
               "$VERSION" "$PACKAGE_ID" "$SOURCE_COMMIT"

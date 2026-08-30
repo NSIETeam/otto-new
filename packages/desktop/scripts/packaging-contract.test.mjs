@@ -668,8 +668,8 @@ describe('desktop packaging contract', () => {
     expect(workflow).toContain('name: Deploy Desktop Update Mirror');
     expect(workflow).toContain('--draft');
     expect(workflow).toContain("needs.deploy-enterprise.result == 'success'");
-    expect(workflow).toContain(
-      'node packages/desktop/scripts/verify-update-manifest.mjs "$DESKTOP_RELEASE" "$VERSION"',
+    expect(workflow).toMatch(
+      /node packages\/desktop\/scripts\/verify-update-manifest\.mjs \\\s*\n\s+"\$DESKTOP_RELEASE" "\$VERSION"/,
     );
     expect(workflow).toContain(
       'node packages/desktop/scripts/verify-update-manifest.mjs "mirror-upload" "$VERSION"',
@@ -1242,6 +1242,27 @@ describe('desktop packaging contract', () => {
     expect(gate).toContain('resolveWindowsInstallerBudget()');
     expect(workflow).toContain(
       'name: Enforce packaged content and installer size budget',
+    );
+    const releaseGateStep = workflow.slice(
+      workflow.indexOf(
+        '      - name: Enforce packaged content and installer size budget',
+      ),
+      workflow.indexOf('      - name: Verify signed macOS disk images'),
+    );
+    expect(releaseGateStep).toContain(
+      'OTTO_UPDATE_ASSET_BASE_URL: https://github.com/${{ env.RELEASES_REPO }}/releases/download/v${{ needs.validate-source.outputs.version }}',
+    );
+    const verifyArtifactsStep = workflow.slice(
+      workflow.indexOf('      - name: Verify release artifacts'),
+      workflow.indexOf(
+        '      - name: Attest desktop release candidate provenance',
+      ),
+    );
+    expect(verifyArtifactsStep).toContain(
+      'OTTO_UPDATE_ASSET_BASE_URL="https://github.com/${RELEASES_REPO}/releases/download/v${VERSION}" \\',
+    );
+    expect(verifyArtifactsStep).toContain(
+      'OTTO_UPDATE_ASSET_BASE_URL="$UPDATE_MIRROR_ASSET_BASE_URL" \\',
     );
     expect(workflow).toContain(
       "OTTO_DESKTOP_BASELINE_INSTALLER_BYTES: '128032671'",

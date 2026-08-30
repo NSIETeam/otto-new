@@ -415,6 +415,9 @@ means no source-level substitute is accepted.
   requested run cancellation and then completed the active step as succeeded.
   Workflow now accepts an explicit worker cancellation acknowledgement, marks
   the active step cancelled and writes a truthful `step_cancelled` trace.
+- Removed the module market's final private fixed-colour rule. Overlay scrims
+  now have explicit light/dark tokens, and the visual contract rejects fixed
+  paint across every `.otto-module-*` rule.
 - Replaced renderer feature `setInterval` calls with either non-overlapping
   async polling or deadline-based one-shot timers. Core protocol watchdogs and
   Server generated admin pages now use named process watchdogs or non-overlap

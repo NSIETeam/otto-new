@@ -64,6 +64,7 @@ describe('desktop visual style contract', () => {
     expect(css).toMatch(/\.otto-module-tile\s*\{[^}]*color: var\(--otto-text\);/su);
     expect(css).not.toContain('var(--surface, #fff)');
     expect(css).not.toContain('var(--surface-subtle, #f5f7fa)');
+    expect([...css.matchAll(/\.otto-module[^{}]*\{[^}]*#[0-9a-f]{3,8}[^}]*\}/giu)]).toEqual([]);
   });
 
   it('keeps park service subpages on the neutral right-rail palette', async () => {

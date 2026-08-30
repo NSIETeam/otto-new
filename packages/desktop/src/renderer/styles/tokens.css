@@ -93,6 +93,7 @@
   --otto-shadow-focus: 0 0 0 3px rgba(232, 137, 58, 0.2);
   /* 顶栏滚动分隔 hairline */
   --otto-hairline: rgba(28, 25, 23, 0.08);
+  --otto-overlay-scrim: rgba(16, 19, 25, 0.42);
 
   /* —— 字体 —— */
   --otto-font:
@@ -189,6 +190,7 @@
     --otto-shadow-focus: 0 0 0 3px rgba(163, 162, 157, 0.32);
     /* 顶栏滚动分隔 hairline：暗底用浅色低透明 */
     --otto-hairline: rgba(255, 255, 255, 0.1);
+    --otto-overlay-scrim: rgba(0, 0, 0, 0.58);
   }
 }
 
@@ -272,6 +274,7 @@ button {
   --otto-shadow: 0 4px 16px rgba(28, 25, 23, 0.08);
   --otto-shadow-pop: 0 8px 28px rgba(28, 25, 23, 0.13), 0 2px 6px rgba(28, 25, 23, 0.06);
   --otto-hairline: rgba(28, 25, 23, 0.08);
+  --otto-overlay-scrim: rgba(16, 19, 25, 0.42);
 }
 
 :root[data-otto-theme='dark'] {
@@ -306,6 +309,7 @@ button {
   --otto-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
   --otto-shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
   --otto-hairline: rgba(255, 255, 255, 0.1);
+  --otto-overlay-scrim: rgba(0, 0, 0, 0.58);
 }
 
 /* macOS “Increase contrast” and equivalent browser settings must strengthen

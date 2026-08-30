@@ -766,7 +766,7 @@
   display: grid;
   place-items: center;
   padding: 28px;
-  background: color-mix(in srgb, #101319 42%, transparent);
+  background: var(--otto-overlay-scrim);
 }
 
 .otto-module-marketplace {

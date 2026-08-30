@@ -66,6 +66,8 @@ export interface BackgroundTask {
   // ── Structured delegate-session state (ACP tasks only) ───────────────
   /** Native session id of the external agent — the resume handle. */
   sessionId?: string;
+  /** Authoritative durable Workflow run for this compatibility UI record. */
+  workflowRunId?: string;
   /** Title of the tool call currently in flight. */
   currentTool?: string;
   /** Number of tool calls started so far. */
@@ -160,6 +162,14 @@ export class BackgroundTaskManager extends EventEmitter {
     task.lastActivityAt = progress.lastActivityAt;
     this.persist(task);
     this.emit('task-progress', { type: 'task-progress', task });
+    return task;
+  }
+
+  attachWorkflowRun(taskId: string, workflowRunId: string): BackgroundTask | undefined {
+    const task = this.tasks.get(taskId);
+    if (!task) return undefined;
+    task.workflowRunId = workflowRunId;
+    this.persist(task);
     return task;
   }
 
@@ -430,8 +440,8 @@ export class BackgroundTaskManager extends EventEmitter {
 
   /**
    * Load persisted delegate tasks on startup. Any task left `running` from a
-   * previous process is normalized to `failed` with an interruption note,
-   * since its child process did not survive the restart.
+   * previous process is normalized to `interrupted` with an explicit recovery
+   * note. Its child process did not survive and is never restarted implicitly.
    */
   private loadFromDisk(): void {
     if (!this.storageDir) return;

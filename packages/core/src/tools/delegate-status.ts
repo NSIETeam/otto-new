@@ -9,6 +9,10 @@ import { BaseTool, Icon, type ToolResult } from './tools.js';
 import { type Config } from '../config/config.js';
 import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
 import { extractCompactSummary, isAcpDelegateTask } from './delegate-agent.js';
+import {
+  FileDelegateWorkflowJournalV1,
+  type DelegateWorkflowJournalV1,
+} from '../services/delegateWorkflowJournal.js';
 
 /** Parameters for {@link CheckDelegateStatusTool}. */
 export interface CheckDelegateStatusParams {
@@ -31,7 +35,10 @@ export class CheckDelegateStatusTool extends BaseTool<
 > {
   static readonly Name: string = 'check_delegate_status';
 
-  constructor(_config: Config) {
+  constructor(
+    _config: Config,
+    private readonly workflowJournal: DelegateWorkflowJournalV1 = new FileDelegateWorkflowJournalV1(),
+  ) {
     super(
       CheckDelegateStatusTool.Name,
       'CheckDelegateStatus',
@@ -106,6 +113,9 @@ export class CheckDelegateStatusTool extends BaseTool<
 
     const duration = Math.round((Date.now() - task.startTime) / 1000);
     const isFinished = task.status !== 'running';
+    const recoveredWorkflow = task.status === 'interrupted' && task.workflowRunId
+      ? await this.workflowJournal.recover(task.workflowRunId).catch(() => null)
+      : null;
 
     let progressText = '';
     if (isFinished) {
@@ -142,6 +152,8 @@ export class CheckDelegateStatusTool extends BaseTool<
         answer: isFinished ? task.answer : undefined,
         error: task.error,
         sessionId: task.sessionId,
+        workflowRunId: task.workflowRunId,
+        workflowStatus: recoveredWorkflow?.status,
       }),
       returnDisplay:
         `${icon} Claude Code Task ${task.id} — ${task.status} (${duration}s)\n\n${progressText || '(no output yet)'}`,

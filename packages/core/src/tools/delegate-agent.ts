@@ -25,6 +25,10 @@ import {
   getBackgroundTaskManager,
   type BackgroundTask,
 } from '../services/backgroundTaskManager.js';
+import {
+  FileDelegateWorkflowJournalV1,
+  type DelegateWorkflowJournalV1,
+} from '../services/delegateWorkflowJournal.js';
 
 /** Default external agent when the caller doesn't pick one. */
 const DEFAULT_AGENT: ExternalAgentType = 'claude-code';
@@ -91,7 +95,10 @@ export class DelegateToAgentTool extends BaseTool<
 > {
   static readonly Name: string = 'delegate_to_agent';
 
-  constructor(private readonly config: Config) {
+  constructor(
+    private readonly config: Config,
+    private readonly workflowJournal: DelegateWorkflowJournalV1 = new FileDelegateWorkflowJournalV1(),
+  ) {
     super(
       DelegateToAgentTool.Name,
       'DelegateToAgent',
@@ -274,9 +281,29 @@ export class DelegateToAgentTool extends BaseTool<
       agent,
     );
 
+    let workflowRunId: string;
+    try {
+      workflowRunId = await this.workflowJournal.start({
+        taskId: bgTask.id,
+        agent,
+        cwd,
+        resumedSessionId: params.resumeSessionId,
+      });
+      taskManager.attachWorkflowRun(bgTask.id, workflowRunId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      taskManager.failTask(bgTask.id, `Durable workflow start failed: ${message}`);
+      return {
+        status: 'failed',
+        llmContent: JSON.stringify({ status: 'failed', error: message }),
+        returnDisplay: `无法创建持久化任务：${message}`,
+        summary: 'Durable workflow start failed',
+      };
+    }
+
     // Fire-and-forget: run the ACP session in the background and update
     // the BackgroundTaskManager on completion.
-    this.runAsync(params, agent, cwd, bgTask.id, signal, updateOutput).catch(() => {
+    this.runAsync(params, agent, cwd, bgTask.id, workflowRunId, signal, updateOutput).catch(() => {
       // Should never happen — errors are handled inside runAsync.
     });
 
@@ -396,6 +423,7 @@ export class DelegateToAgentTool extends BaseTool<
     agent: ExternalAgentType,
     cwd: string,
     taskId: string,
+    workflowRunId: string,
     signal: AbortSignal,
     updateOutput?: (output: string) => void,
   ): Promise<void> {
@@ -431,14 +459,27 @@ export class DelegateToAgentTool extends BaseTool<
       }
 
       if (result.status === 'success') {
+        await this.workflowJournal.settle(workflowRunId, {
+          status: 'succeeded', sessionId: result.sessionId,
+        });
         taskManager.completeTask(taskId, { exitCode: 0 });
       } else if (result.status === 'cancelled') {
+        await this.workflowJournal.settle(workflowRunId, {
+          status: 'cancelled', sessionId: result.sessionId,
+        });
         taskManager.cancelTask(taskId);
       } else {
+        await this.workflowJournal.settle(workflowRunId, {
+          status: 'failed',
+          error: result.error || `${result.label} ${result.status}`,
+          sessionId: result.sessionId,
+        });
         taskManager.failTask(taskId, result.error || `${result.label} ${result.status}`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      await this.workflowJournal.settle(workflowRunId, { status: 'failed', error: msg })
+        .catch(() => undefined);
       taskManager.failTask(taskId, msg);
     }
   }

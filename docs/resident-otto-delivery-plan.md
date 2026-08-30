@@ -343,7 +343,7 @@ means no source-level substitute is accepted.
 | Chat command authorization, deduplication and visible reply before ACK | `channelTaskControl.ts`, `brokerChannelTaskBridge.ts`, focused tests | Automated |
 | Natural-language request becomes durable approval-gated work | `workflowTaskControlPort.ts`, `durableWorkflowChannelBackend.test.ts` | Automated |
 | Non-overlapping workflow worker skips unchanged persisted revisions | `recurringTaskRegistry.ts`, `server.residentTasks.test.ts` | Automated |
-| ACP delegate session handle is persisted before work and restart becomes visible `interrupted`, never silent replay | `acpAgentClient.ts`, `backgroundTaskManager.ts`, delegate status and restart tests | Automated migration guard; Workflow is not yet the sole task store |
+| ACP delegate session handle is persisted before work; every background turn links to a durable external Workflow step; restart becomes `interrupted`/`unknown_outcome`, never silent replay | `delegateWorkflowJournal.ts`, `acpAgentClient.ts`, `backgroundTaskManager.ts`, delegate status and restart tests | Automated; BackgroundTaskManager remains a compatibility UI mirror |
 | Starting a local external coding agent requires explicit approval and declares its affected working directory | `delegate-agent.ts`, focused confirmation tests | Automated |
 | Real managed Feishu/Lark installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | Real managed WeCom installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
@@ -396,3 +396,11 @@ means no source-level substitute is accepted.
   explicit outer confirmation before its internally auto-approved ACP session
   can read, modify or execute within that project. This closes the previous
   path where a model or remote channel could start a writing agent silently.
+- Background ACP delegate turns now create and claim an approved external
+  Workflow step before the agent process starts. The compatibility task record
+  stores `workflowRunId`; success, failure and cancellation settle that run.
+  Restart recovery converts a still-running external step to
+  `unknown_outcome`, while the saved ACP session handle remains available for
+  an explicit resume. If the Workflow journal cannot be written, the agent is
+  not launched. `BackgroundTaskManager` is still retained for existing UI and
+  notification consumers and is not claimed as fully removed yet.

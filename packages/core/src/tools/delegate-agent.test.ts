@@ -14,6 +14,7 @@ import type { Config } from '../config/config.js';
 import * as acpClient from '../acp-client/acpAgentClient.js';
 import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
 import type { RunTaskOptions } from '../acp-client/acpAgentClient.js';
+import type { DelegateWorkflowJournalV1 } from '../services/delegateWorkflowJournal.js';
 
 vi.mock('../acp-client/acpAgentClient.js', () => ({
   runDelegatedTask: vi.fn(),
@@ -21,16 +22,24 @@ vi.mock('../acp-client/acpAgentClient.js', () => ({
 
 const runDelegatedTask = vi.mocked(acpClient.runDelegatedTask);
 
+const workflowJournal: DelegateWorkflowJournalV1 = {
+  start: vi.fn(async ({ taskId }) => `wf-${taskId}`),
+  settle: vi.fn(async () => undefined),
+  recover: vi.fn(async () => null),
+};
+
 function makeTool(targetDir = '/proj') {
   const config = {
     getTargetDir: () => targetDir,
   } as unknown as Config;
-  return new DelegateToAgentTool(config);
+  return new DelegateToAgentTool(config, workflowJournal);
 }
 
 describe('DelegateToAgentTool', () => {
   beforeEach(() => {
     runDelegatedTask.mockReset();
+    vi.mocked(workflowJournal.start).mockClear();
+    vi.mocked(workflowJournal.settle).mockClear();
     // Clear the singleton between tests so tasks don't accumulate.
     const mgr = getBackgroundTaskManager();
     mgr.clearAllTasks();
@@ -85,6 +94,10 @@ describe('DelegateToAgentTool', () => {
     expect(res.returnDisplay).toContain('Claude Code');
     expect(res.llmContent).toContain('"status":"running"');
     expect(res.llmContent).toContain('"taskId"');
+    expect(workflowJournal.start).toHaveBeenCalledWith(expect.objectContaining({
+      agent: 'claude-code',
+      cwd: '/my/project',
+    }));
   });
 
   it('defaults cwd to the project target dir', async () => {
@@ -153,6 +166,11 @@ describe('DelegateToAgentTool', () => {
     const bgTask = getBackgroundTaskManager().getTask(taskId)!;
     expect(bgTask.answer).toBe('Done: added tests');
     expect(bgTask.kind).toBe('claude-code');
+    expect(bgTask.workflowRunId).toBe(`wf-${taskId}`);
+    expect(workflowJournal.settle).toHaveBeenCalledWith(`wf-${taskId}`, {
+      status: 'succeeded',
+      sessionId: undefined,
+    });
   });
 
   it('fails the background task when runDelegatedTask fails', async () => {
@@ -177,6 +195,20 @@ describe('DelegateToAgentTool', () => {
 
     const bgTask = getBackgroundTaskManager().getTask(taskId)!;
     expect(bgTask.error).toContain('Could not launch Claude Code');
+    expect(workflowJournal.settle).toHaveBeenCalledWith(`wf-${taskId}`, {
+      status: 'failed',
+      error: 'Could not launch Claude Code. Make sure it is installed.',
+      sessionId: undefined,
+    });
+  });
+
+  it('does not launch an agent when the durable workflow cannot start', async () => {
+    vi.mocked(workflowJournal.start).mockRejectedValueOnce(new Error('disk full'));
+    const tool = makeTool();
+    const res = await tool.execute({ task: 'do x' }, new AbortController().signal);
+    expect(res.status).toBe('failed');
+    expect(res.returnDisplay).toContain('disk full');
+    expect(runDelegatedTask).not.toHaveBeenCalled();
   });
 
   it('rejects an unknown agent value', async () => {
@@ -373,6 +405,10 @@ describe('DelegateToAgentTool', () => {
     await vi.waitFor(() => {
       const task = getBackgroundTaskManager().getTask(taskId);
       expect(task?.status).toBe('cancelled');
+    });
+    expect(workflowJournal.settle).toHaveBeenCalledWith(`wf-${taskId}`, {
+      status: 'cancelled',
+      sessionId: undefined,
     });
   });
 

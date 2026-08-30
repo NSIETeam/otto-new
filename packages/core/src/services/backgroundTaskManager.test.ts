@@ -58,6 +58,7 @@ describe('BackgroundTaskManager persistence', () => {
   it('persists ACP delegate tasks and reloads them in a new manager', () => {
     const mgr = new BackgroundTaskManager({ storageDir: dir });
     const task = mgr.createTask('[Codex] build feature', '/proj', 'codex');
+    mgr.attachWorkflowRun(task.id, 'wf-01234567-89ab-cdef-0123-456789abcdef');
     task.sessionId = 'sess-123';
     mgr.updateProgress(task.id, progress({ toolCallCount: 2 }));
     mgr.completeTask(task.id, { exitCode: 0 });
@@ -68,6 +69,7 @@ describe('BackgroundTaskManager persistence', () => {
     expect(got).toBeDefined();
     expect(got!.kind).toBe('codex');
     expect(got!.sessionId).toBe('sess-123');
+    expect(got!.workflowRunId).toBe('wf-01234567-89ab-cdef-0123-456789abcdef');
     expect(got!.status).toBe('completed');
     expect(got!.restoredFromDisk).toBe(true);
   });

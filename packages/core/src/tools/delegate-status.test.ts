@@ -4,21 +4,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CheckDelegateStatusTool } from './delegate-status.js';
 import type { Config } from '../config/config.js';
 import { getBackgroundTaskManager } from '../services/backgroundTaskManager.js';
+import type { DelegateWorkflowJournalV1 } from '../services/delegateWorkflowJournal.js';
+
+const workflowJournal: DelegateWorkflowJournalV1 = {
+  start: async ({ taskId }) => `wf-${taskId}`,
+  settle: async () => undefined,
+  recover: vi.fn(async () => ({ status: 'unknown_outcome' } as never)),
+};
 
 function makeTool(targetDir = '/proj') {
   const config = {
     getTargetDir: () => targetDir,
   } as unknown as Config;
-  return new CheckDelegateStatusTool(config);
+  return new CheckDelegateStatusTool(config, workflowJournal);
 }
 
 describe('CheckDelegateStatusTool', () => {
   beforeEach(() => {
     getBackgroundTaskManager().clearAllTasks();
+    vi.mocked(workflowJournal.recover).mockClear();
   });
 
   it('returns not_found for a non-existent task', async () => {
@@ -101,6 +109,7 @@ describe('CheckDelegateStatusTool', () => {
     const bgTask = mgr.createTask('[Codex] long task', '/proj', 'codex');
     bgTask.status = 'interrupted';
     bgTask.sessionId = 'session-resume-1';
+    bgTask.workflowRunId = 'wf-01234567-89ab-cdef-0123-456789abcdef';
     bgTask.error = '中断：系统不会自动重放。';
 
     const tool = makeTool();
@@ -108,6 +117,8 @@ describe('CheckDelegateStatusTool', () => {
     expect(res.status).toBe('interrupted');
     expect(res.returnDisplay).toContain('⚠️');
     expect(res.llmContent).toContain('session-resume-1');
+    expect(res.llmContent).toContain('unknown_outcome');
+    expect(workflowJournal.recover).toHaveBeenCalledWith(bgTask.workflowRunId);
     expect(res.returnDisplay).toContain('不会自动重放');
   });
 

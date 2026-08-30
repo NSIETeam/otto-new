@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ChannelTaskMessageContext } from './channelTaskControl.js';
 import {
+  channelApprovalPayloadHash,
   WorkflowTaskControlPort,
   type ControllableWorkflowRun,
   type WorkflowControlBackend,
@@ -32,17 +33,23 @@ const run: ControllableWorkflowRun = {
     stepId: 'send',
     status: 'waiting_approval',
     approvalId: 'approval-1',
-    input: {
-      approvalExpiresAtMs: Number.MAX_SAFE_INTEGER,
-      origin: {
+    input: (() => {
+      const origin = {
         provider: context.provider,
         installationId: context.installationId,
         tenantId: context.tenantId,
         providerUserId: context.providerUserId,
         userId: context.userId,
         deviceId: context.deviceId,
-      },
-    },
+      };
+      return {
+      approvalExpiresAtMs: Number.MAX_SAFE_INTEGER,
+      request: '执行每日巡检',
+      origin,
+      approvalPayloadHash: channelApprovalPayloadHash({
+        request: '执行每日巡检', approvalExpiresAtMs: Number.MAX_SAFE_INTEGER, origin,
+      }),
+    }; })(),
   }],
 };
 
@@ -77,6 +84,19 @@ describe('WorkflowTaskControlPort', () => {
     expect(control.approve).toHaveBeenCalledWith(run.id, 'send', 'approval-1');
     await port.deny('approval-1', 'idem-2', context);
     expect(control.cancel).toHaveBeenCalledWith(run.id);
+  });
+
+  it('rejects approval when the persisted request changed after confirmation was issued', async () => {
+    const control = backend();
+    vi.mocked(control.list).mockResolvedValue([{
+      ...run,
+      steps: [{ ...run.steps[0]!, input: { ...run.steps[0]!.input, request: '被替换的请求' } }],
+    }]);
+    const port = new WorkflowTaskControlPort(control, { create: vi.fn() });
+
+    await expect(port.approve('approval-1', 'idem-tampered', context))
+      .rejects.toThrow('workflow approval payload has changed');
+    expect(control.approve).not.toHaveBeenCalled();
   });
 
   it('keeps natural language in an approval-required proposal backend', async () => {

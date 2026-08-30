@@ -2,6 +2,7 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
+import { createHash } from 'node:crypto';
 import type {
   ChannelTaskControlPort,
   ChannelTaskMessageContext,
@@ -13,6 +14,18 @@ import {
 } from 'otto-workflow';
 
 const CHANNEL_APPROVAL_TTL_MS = 10 * 60_000;
+
+export function channelApprovalPayloadHash(input: {
+  request: unknown;
+  approvalExpiresAtMs: unknown;
+  origin: unknown;
+}): string {
+  return createHash('sha256').update(JSON.stringify({
+    request: input.request,
+    approvalExpiresAtMs: input.approvalExpiresAtMs,
+    origin: input.origin,
+  }), 'utf8').digest('hex');
+}
 
 export interface ControllableWorkflowRun {
   id: string;
@@ -94,6 +107,17 @@ export class DurableChannelTaskProposalBackendV1 implements ChannelTaskProposalB
     idempotencyKey: string;
     context: ChannelTaskMessageContext;
   }): Promise<{ proposalId: string; preview: string; requiresApproval: true }> {
+    const approvalExpiresAtMs = this.now() + CHANNEL_APPROVAL_TTL_MS;
+    const origin = {
+      provider: input.context.provider,
+      installationId: input.context.installationId,
+      tenantId: input.context.tenantId,
+      providerUserId: input.context.providerUserId,
+      userId: input.context.userId,
+      deviceId: input.context.deviceId,
+      messageId: input.context.messageId,
+      receivedAtMs: input.context.receivedAtMs,
+    };
     const run = await this.runtime.start({
       id: 'channel-task-proposal-v1',
       version: 1,
@@ -104,18 +128,14 @@ export class DurableChannelTaskProposalBackendV1 implements ChannelTaskProposalB
         requiresApproval: true,
         input: {
           request: input.request,
-          approvalExpiresAtMs: this.now() + CHANNEL_APPROVAL_TTL_MS,
+          approvalExpiresAtMs,
+          approvalPayloadHash: channelApprovalPayloadHash({
+            request: input.request,
+            approvalExpiresAtMs,
+            origin,
+          }),
           idempotencyKey: input.idempotencyKey,
-          origin: {
-            provider: input.context.provider,
-            installationId: input.context.installationId,
-            tenantId: input.context.tenantId,
-            providerUserId: input.context.providerUserId,
-            userId: input.context.userId,
-            deviceId: input.context.deviceId,
-            messageId: input.context.messageId,
-            receivedAtMs: input.context.receivedAtMs,
-          },
+          origin,
         },
       }],
     });
@@ -205,6 +225,14 @@ export class WorkflowTaskControlPort implements ChannelTaskControlPort {
     const expiresAtMs = match.step.input.approvalExpiresAtMs;
     if (typeof expiresAtMs !== 'number' || !Number.isFinite(expiresAtMs) || this.now() > expiresAtMs) {
       throw new Error('workflow approval has expired');
+    }
+    const expectedHash = channelApprovalPayloadHash({
+      request: match.step.input.request,
+      approvalExpiresAtMs: expiresAtMs,
+      origin: match.step.input.origin,
+    });
+    if (match.step.input.approvalPayloadHash !== expectedHash) {
+      throw new Error('workflow approval payload has changed');
     }
     return this.mutate(
       () => this.backend.approve(match.run.id, match.step.stepId, approvalId),

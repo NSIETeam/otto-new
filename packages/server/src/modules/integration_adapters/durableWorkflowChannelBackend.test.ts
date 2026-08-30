@@ -60,6 +60,7 @@ describe('durable channel workflow adapters', () => {
         input: expect.objectContaining({
           request: '巡检销售后台并汇报异常',
           approvalExpiresAtMs: 610_000,
+          approvalPayloadHash: expect.stringMatching(/^[a-f0-9]{64}$/),
           origin: expect.objectContaining({ tenantId: 'tenant-1', providerUserId: 'provider-user-1', userId: 'otto-user-1', deviceId: 'device-1' }),
         }),
       })],

@@ -13,6 +13,8 @@ describe('macOS preview workflow contract', () => {
     expect(workflow).toContain('Otto-macOS-Preview-${arch}.dmg');
     expect(workflow).toContain('name: Otto-macOS-Preview');
     expect(workflow).toContain('retention-days: 14');
+    expect(workflow).toContain('MAX_DMG_BYTES=$((120 * 1024 * 1024))');
+    expect(workflow).toContain('if [ "$size" -gt "$MAX_DMG_BYTES" ]');
     expect(workflow).not.toContain('softprops/action-gh-release');
     expect(workflow).not.toContain('gh release');
     expect(workflow).not.toContain('latest.json');

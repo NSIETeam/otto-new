@@ -66,6 +66,7 @@ Otto 的发布链路分成三段：先检查异常，再构建双仓 GitHub Rele
 签名、公证和 Gatekeeper 校验。下载文件固定为
 `Otto-macOS-Preview-arm64.dmg` 与 `Otto-macOS-Preview-x64.dmg`，文件名不带
 产品版本；`provenance.json` 仍保存内部版本、来源提交和工作流运行编号。
+任一 DMG 超过 120 MiB 时工作流直接失败，不上传超限测试包。
 
 产物仅作为保留 14 天的 Actions artifact，不创建 tag、GitHub Release、
 `latest.json`，也不触碰正式或兼容下载仓库及更新镜像。

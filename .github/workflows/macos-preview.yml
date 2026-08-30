@@ -126,11 +126,17 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
+          MAX_DMG_BYTES=$((120 * 1024 * 1024))
           mkdir -p preview-output
           for arch in arm64 x64; do
             source="packages/desktop/release/Otto-${VERSION}-${arch}.dmg"
             target="preview-output/Otto-macOS-Preview-${arch}.dmg"
             test -f "$source"
+            size="$(stat -f '%z' "$source")"
+            if [ "$size" -gt "$MAX_DMG_BYTES" ]; then
+              echo "$source is ${size} bytes; preview DMGs must not exceed 120 MiB." >&2
+              exit 1
+            fi
             codesign --verify --verbose=2 "$source"
             spctl --assess --type open --context context:primary-signature --verbose=4 "$source"
             cp "$source" "$target"
@@ -145,4 +151,3 @@ jobs:
           path: preview-output/*
           if-no-files-found: error
           retention-days: 14
-

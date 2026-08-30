@@ -633,6 +633,16 @@ jobs:
           # but it is intentionally excluded from SHA256SUMS and the exact
           # public GitHub Release asset set.
           FILES+=("$DESKTOP_RELEASE/latest.mirror.json")
+          MIRROR_PAYLOAD_DIR="$RUNNER_TEMP/otto-v${VERSION}-mirror-payload"
+          install -d -m 0700 "$MIRROR_PAYLOAD_DIR"
+          for artifact in "${DESKTOP_FILES[@]:0:6}"; do
+            cp -- "$artifact" "$MIRROR_PAYLOAD_DIR/"
+          done
+          cp -- "$DESKTOP_RELEASE/latest.mirror.json" \
+            "$MIRROR_PAYLOAD_DIR/latest.json"
+          OTTO_UPDATE_ASSET_BASE_URL="$UPDATE_MIRROR_ASSET_BASE_URL" \
+            node packages/desktop/scripts/verify-update-manifest.mjs \
+              "$MIRROR_PAYLOAD_DIR" "$VERSION"
           if [ "$DESKTOP_TEST_BUILD" != "1" ]; then
             CHECKSUM_SIGNATURE="${CHECKSUMS}.sig"
             node scripts/release-payload-signature.mjs sign \
@@ -642,16 +652,6 @@ jobs:
             FILES+=("$CHECKSUM_SIGNATURE")
 
             MIRROR_CHECKSUMS="$DESKTOP_RELEASE/UPDATE-MIRROR-SHA256SUMS"
-            MIRROR_PAYLOAD_DIR="$RUNNER_TEMP/otto-v${VERSION}-mirror-payload"
-            install -d -m 0700 "$MIRROR_PAYLOAD_DIR"
-            for artifact in "${DESKTOP_FILES[@]:0:6}"; do
-              cp -- "$artifact" "$MIRROR_PAYLOAD_DIR/"
-            done
-            cp -- "$DESKTOP_RELEASE/latest.mirror.json" \
-              "$MIRROR_PAYLOAD_DIR/latest.json"
-            OTTO_UPDATE_ASSET_BASE_URL="$UPDATE_MIRROR_ASSET_BASE_URL" \
-              node packages/desktop/scripts/verify-update-manifest.mjs \
-                "$MIRROR_PAYLOAD_DIR" "$VERSION"
             node scripts/update-mirror-manifest.mjs create \
               "$MIRROR_PAYLOAD_DIR" "$MIRROR_CHECKSUMS" \
               "$VERSION" "$PACKAGE_ID" "$SOURCE_COMMIT"
@@ -849,10 +849,38 @@ jobs:
             Write-Host "Otto native signer: $($nativeSignature.SignerCertificate.Subject)"
           }
           $env:ELECTRON_RUN_AS_NODE = '1'
-          & $electron packages/desktop/scripts/probe-packaged-sqlcipher.mjs `
-            --binding $binding
-          if ($LASTEXITCODE -ne 0) {
-            throw "Packaged SQLCipher runtime probe failed: $LASTEXITCODE"
+
+          function Invoke-NativeProcess {
+            param(
+              [Parameter(Mandatory = $true)] [string] $FilePath,
+              [Parameter(Mandatory = $true)] [string[]] $ArgumentList
+            )
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $FilePath
+            $startInfo.UseShellExecute = $false
+            foreach ($argument in $ArgumentList) {
+              [void]$startInfo.ArgumentList.Add($argument)
+            }
+            $child = [System.Diagnostics.Process]::Start($startInfo)
+            if ($null -eq $child) {
+              throw "Failed to start native process: $FilePath"
+            }
+            try {
+              $child.WaitForExit()
+              return $child.ExitCode
+            } finally {
+              $child.Dispose()
+            }
+          }
+
+          $sqlCipherProbeArguments = @(
+            'packages/desktop/scripts/probe-packaged-sqlcipher.mjs',
+            '--binding', $binding
+          )
+          $sqlCipherProbeExitCode = Invoke-NativeProcess `
+            -FilePath $electron -ArgumentList $sqlCipherProbeArguments
+          if ($sqlCipherProbeExitCode -ne 0) {
+            throw "Packaged SQLCipher runtime probe failed: $sqlCipherProbeExitCode"
           }
 
           $archive = Join-Path $installRoot 'resources\app.asar'
@@ -868,9 +896,10 @@ jobs:
           if ($env:DESKTOP_TEST_BUILD -ne '1') {
             $verificationArguments += '--require-native-authenticode'
           }
-          & $electron @verificationArguments
-          if ($LASTEXITCODE -ne 0) {
-            throw "Packaged desktop runtime verification failed: $LASTEXITCODE"
+          $runtimeVerificationExitCode = Invoke-NativeProcess `
+            -FilePath $electron -ArgumentList $verificationArguments
+          if ($runtimeVerificationExitCode -ne 0) {
+            throw "Packaged desktop runtime verification failed: $runtimeVerificationExitCode"
           }
 
   prepare-release-creation-intent:
@@ -1059,7 +1088,7 @@ jobs:
       - name: Require mutable release settings for latest-pointer compensation
         shell: bash
         env:
-          CANONICAL_ADMIN_TOKEN: ${{ secrets.OTTO_CANONICAL_ADMIN_READ_TOKEN }}
+          CANONICAL_ADMIN_TOKEN: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) && secrets.OTTO_CANONICAL_ADMIN_READ_TOKEN || '' }}
           LEGACY_ADMIN_TOKEN: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) && secrets.OTTO_LEGACY_ADMIN_READ_TOKEN || '' }}
         run: |
           set -euo pipefail
@@ -1094,8 +1123,10 @@ jobs:
             case "$status" in
               404) ;;
               200)
-                echo "Immutable releases are enabled for ${repository}; exact latest-pointer compensation is impossible." >&2
-                exit 1
+                if ! jq -e '.enabled == false and .enforced_by_owner == false' "$RESPONSE_FILE" >/dev/null; then
+                  echo "Immutable releases are enabled or owner-enforced for ${repository}; exact latest-pointer compensation is impossible." >&2
+                  exit 1
+                fi
                 ;;
               *)
                 echo "Could not prove immutable releases are disabled for ${repository}; HTTP ${status}." >&2
@@ -1103,10 +1134,10 @@ jobs:
                 ;;
             esac
           }
-          require_mutable_releases "$RELEASES_REPO" "$CANONICAL_ADMIN_TOKEN"
           node scripts/verify-anonymous-github-release-assets.mjs \
             --repo-public "$RELEASES_REPO"
           if [ "$DESKTOP_TEST_BUILD" != '1' ]; then
+            require_mutable_releases "$RELEASES_REPO" "$CANONICAL_ADMIN_TOKEN"
             require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
             node scripts/verify-anonymous-github-release-assets.mjs \
               --repo-public "$LEGACY_RELEASES_REPO"
@@ -2058,8 +2089,10 @@ jobs:
             case "$status" in
               404) ;;
               200)
-                echo "Immutable releases are enabled for ${repository}; exact latest-pointer compensation is impossible." >&2
-                exit 1
+                if ! jq -e '.enabled == false and .enforced_by_owner == false' "$RESPONSE_FILE" >/dev/null; then
+                  echo "Immutable releases are enabled or owner-enforced for ${repository}; exact latest-pointer compensation is impossible." >&2
+                  exit 1
+                fi
                 ;;
               *)
                 echo "Could not prove immutable releases are disabled for ${repository}; HTTP ${status}." >&2
@@ -2356,10 +2389,19 @@ jobs:
               --header 'X-GitHub-Api-Version: 2026-03-10' \
               --output "$RESPONSE_FILE" --write-out '%{http_code}' \
               "https://api.github.com/repos/${repository}/immutable-releases")"
-            [ "$status" = 404 ] || {
-              echo "Cannot prove mutable Releases for ${repository}; HTTP ${status}." >&2
-              exit 1
-            }
+            case "$status" in
+              404) ;;
+              200)
+                if ! jq -e '.enabled == false and .enforced_by_owner == false' "$RESPONSE_FILE" >/dev/null; then
+                  echo "Immutable releases are enabled or owner-enforced for ${repository}; refusing publication." >&2
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "Cannot prove mutable Releases for ${repository}; HTTP ${status}." >&2
+                exit 1
+                ;;
+            esac
           }
           require_mutable_releases "$RELEASES_REPO" "$CANONICAL_ADMIN_TOKEN"
           require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
@@ -2907,8 +2949,10 @@ jobs:
             case "$status" in
               404) ;;
               200)
-                echo "Immutable releases are enabled for ${repository}; refusing a partial compensation. Both Releases remain public." >&2
-                exit 1
+                if ! jq -e '.enabled == false and .enforced_by_owner == false' "$RESPONSE_FILE" >/dev/null; then
+                  echo "Immutable releases are enabled or owner-enforced for ${repository}; refusing a partial compensation. Both Releases remain public." >&2
+                  exit 1
+                fi
                 ;;
               *)
                 echo "Could not prove immutable releases are disabled for ${repository}; HTTP ${status}. Both Releases remain public." >&2

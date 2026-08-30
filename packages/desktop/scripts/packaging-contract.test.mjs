@@ -563,6 +563,22 @@ describe('desktop packaging contract', () => {
     );
     expect(windowsRuntimeJob).toContain('probe-packaged-sqlcipher.mjs');
     expect(windowsRuntimeJob).toContain("'--probe-native'");
+    expect(windowsRuntimeJob).toContain(
+      '[System.Diagnostics.ProcessStartInfo]::new()',
+    );
+    expect(windowsRuntimeJob).toContain('$startInfo.UseShellExecute = $false');
+    expect(windowsRuntimeJob).toContain(
+      '[void]$startInfo.ArgumentList.Add($argument)',
+    );
+    expect(windowsRuntimeJob).toContain('$child.WaitForExit()');
+    expect(windowsRuntimeJob).toContain(
+      '$sqlCipherProbeExitCode = Invoke-NativeProcess',
+    );
+    expect(windowsRuntimeJob).toContain(
+      '$runtimeVerificationExitCode = Invoke-NativeProcess',
+    );
+    expect(windowsRuntimeJob).not.toContain('& $electron');
+    expect(windowsRuntimeJob).not.toContain('$LASTEXITCODE');
     expect(workflow).toContain(
       'Build unsigned Windows and macOS transition test artifacts',
     );
@@ -1133,6 +1149,45 @@ describe('desktop packaging contract', () => {
     expect(workflow).toContain('probe-packaged-sqlcipher.mjs');
   });
 
+  it('requires an explicit mutable GitHub release setting before every mutation path', async () => {
+    const workflow = await readFile(
+      path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+      'utf8',
+    );
+    expect(workflow.match(/\/immutable-releases/g)?.length).toBe(4);
+    expect(
+      workflow.match(
+        /jq -e '\.enabled == false and \.enforced_by_owner == false' "\$RESPONSE_FILE"/g,
+      )?.length,
+    ).toBe(4);
+    expect(workflow.match(/404\) ;;/g)?.length).toBe(4);
+    expect(workflow).not.toContain('[ "$status" = 404 ]');
+    const draftSettingsStep = workflow.slice(
+      workflow.indexOf(
+        '      - name: Require mutable release settings for latest-pointer compensation',
+      ),
+      workflow.indexOf(
+        '      - name: Download verified release workflow artifact',
+      ),
+    );
+    expect(draftSettingsStep).toContain(
+      "CANONICAL_ADMIN_TOKEN: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) && secrets.OTTO_CANONICAL_ADMIN_READ_TOKEN || '' }}",
+    );
+    const productionOnlyIndex = draftSettingsStep.indexOf(
+      `if [ "$DESKTOP_TEST_BUILD" != '1' ]; then`,
+    );
+    expect(
+      draftSettingsStep.indexOf(
+        'require_mutable_releases "$RELEASES_REPO" "$CANONICAL_ADMIN_TOKEN"',
+      ),
+    ).toBeGreaterThan(productionOnlyIndex);
+    expect(
+      draftSettingsStep.indexOf(
+        'require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"',
+      ),
+    ).toBeGreaterThan(productionOnlyIndex);
+  });
+
   it('routes production deployment through fixed root-owned gateways', async () => {
     const [releaseWorkflow, deployWorkflow] = await Promise.all([
       readFile(
@@ -1264,6 +1319,17 @@ describe('desktop packaging contract', () => {
     expect(verifyArtifactsStep).toContain(
       'OTTO_UPDATE_ASSET_BASE_URL="$UPDATE_MIRROR_ASSET_BASE_URL" \\',
     );
+    const mirrorAttachmentIndex = verifyArtifactsStep.indexOf(
+      'FILES+=("$DESKTOP_RELEASE/latest.mirror.json")',
+    );
+    const mirrorVerifierIndex = verifyArtifactsStep.indexOf(
+      'OTTO_UPDATE_ASSET_BASE_URL="$UPDATE_MIRROR_ASSET_BASE_URL" \\',
+    );
+    const signedChecksumsIndex = verifyArtifactsStep.indexOf(
+      'CHECKSUM_SIGNATURE="${CHECKSUMS}.sig"',
+    );
+    expect(mirrorVerifierIndex).toBeGreaterThan(mirrorAttachmentIndex);
+    expect(mirrorVerifierIndex).toBeLessThan(signedChecksumsIndex);
     expect(workflow).toContain(
       "OTTO_DESKTOP_BASELINE_INSTALLER_BYTES: '128032671'",
     );

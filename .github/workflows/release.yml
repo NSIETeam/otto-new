@@ -342,6 +342,15 @@ jobs:
           path: artifacts/security/e2ee-adversarial-report.json
           if-no-files-found: error
 
+      - name: Repository anomaly checks
+        run: |
+          npm run doctor
+          npm run code-map:check
+          git diff --check
+          npm run validate:integration-baseline
+          npm run validate:boundaries
+          npm run size:source:check
+
       - name: Download verified SQLCipher native matrix
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -457,15 +466,6 @@ jobs:
           test -n "$APPLE_TEAM_ID"
           test -n "$ENTERPRISE_SIGNING_PRIVATE_KEY"
           test -n "$ENTERPRISE_SIGNING_PUBLIC_KEY"
-
-      - name: Repository anomaly checks
-        run: |
-          npm run doctor
-          npm run code-map:check
-          git diff --check
-          npm run validate:integration-baseline
-          npm run validate:boundaries
-          npm run size:source:check
 
       - name: Release quality gates
         run: |

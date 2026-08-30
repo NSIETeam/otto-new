@@ -829,6 +829,28 @@ describe('desktop packaging contract', () => {
     expect(buildJob.indexOf('run: npm ci')).toBeLessThan(
       buildJob.indexOf('Verify installed ripgrep postinstall result'),
     );
+    const repositoryAnomalyChecksIndex = buildJob.indexOf(
+      'name: Repository anomaly checks',
+    );
+    expect(repositoryAnomalyChecksIndex).toBeGreaterThan(-1);
+    expect(
+      buildJob.indexOf('name: Preserve E2EE adversarial evidence'),
+    ).toBeLessThan(repositoryAnomalyChecksIndex);
+    for (const nativeArtifactDownloadStep of [
+      'name: Download verified SQLCipher native matrix',
+      'name: Download verified enterprise Node.js SQLCipher native matrix',
+      'name: Download verified Otto native win32-x64 runtime',
+      'name: Download verified Otto native darwin-x64 runtime',
+      'name: Download verified Otto native darwin-arm64 runtime',
+    ]) {
+      const nativeArtifactDownloadIndex = buildJob.indexOf(
+        nativeArtifactDownloadStep,
+      );
+      expect(nativeArtifactDownloadIndex).toBeGreaterThan(-1);
+      expect(repositoryAnomalyChecksIndex).toBeLessThan(
+        nativeArtifactDownloadIndex,
+      );
+    }
     expect(enterpriseJob).toContain('      - verify-windows-signature');
     expect(enterpriseJob).toContain('      - create-release-drafts');
     expect(enterpriseJob).toContain(

@@ -363,10 +363,14 @@ means no source-level substitute is accepted.
 | Real managed Feishu/Lark installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | Real managed WeCom installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | macOS Accessibility RPA control and recovery | Signed local build and isolated macOS account | Pending smoke |
-| 24/72 hour zero-paid-call idle proof | `idle-safety-simulation.test.ts`: real registry clock, seven intercepted external origins and eight failure classes | Automated virtual-clock proof; release-candidate wall-clock artifact pending |
+| 24/72 hour zero-paid-call idle proof | `idle-safety-simulation.test.ts`: real registry virtual clock and seven fail-closed external-origin tripwires | Automated virtual-clock proof; release-candidate wall-clock artifact pending |
+| Wall-clock idle evidence runner requires an external report path and exact 24/72-hour duration, records commit/host/observed time, rejects paid registration, and labels short runs as tool self-tests rather than release evidence | `scripts/run-idle-soak.mjs` | Harness automated; 24/72-hour release-candidate reports pending |
 
 ### Cleanup decisions
 
+- Removed the idle simulation's hard-coded failure verdicts. Virtual idle
+  proves zero scheduled calls only; offline, HTTP failure, crash, missing-key,
+  disk-full and reconnect claims require their own injected-failure evidence.
 - Removed the public `ChannelConnectorV1.approveAdmin()` method. Provider admin
   approval is accepted only as a Broker state transition; a local REST, CLI or
   Desktop caller cannot manufacture it.

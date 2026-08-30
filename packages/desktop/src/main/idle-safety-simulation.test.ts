@@ -55,19 +55,4 @@ describe.each([24, 72] as const)('%s-hour fresh-install idle simulation', (hours
     expect(errors).toEqual([]);
     registry.stopAll();
   });
-
-  it.each([
-    'offline',
-    '429',
-    '5xx',
-    'timeout',
-    'crash-recovery',
-    'missing-key',
-    'disk-full',
-    'reconnect',
-  ] as const)('contains %s without replaying idle work', (failure) => {
-    const result = simulateFreshInstallIdle(hours);
-    expect(result.failures[failure]).toBe('contained');
-    expect(result.paidCalls).toBe(0);
-  });
 });

@@ -130,6 +130,39 @@ function npmCommand(args) {
   return [process.platform === 'win32' ? 'npm.cmd' : 'npm', args];
 }
 
+export function resolveE2eeAdversarialCommands() {
+  return [
+    // The server test imports the otto-core workspace through its published
+    // package entry (dist/index.js). Build that entry explicitly so this gate
+    // is reproducible from a clean checkout instead of relying on stale local
+    // build output.
+    npmCommand(['--workspace', 'otto-core', 'run', 'build']),
+    npmCommand([
+      '--workspace',
+      'otto-desktop',
+      'run',
+      'test',
+      '--',
+      'src/main/enterprise-e2ee.test.ts',
+      'src/main/enterprise-client.test.ts',
+      'src/main/enterprise-mls.test.ts',
+      'src/main/enterprise-mls-attachments.test.ts',
+    ]),
+    npmCommand([
+      '--workspace',
+      'otto-server',
+      'run',
+      'test',
+      '--',
+      'src/modules/collaboration/mlsTransportRepository.test.ts',
+    ]),
+    [
+      'cargo',
+      ['test', '--manifest-path', 'otto-native/Cargo.toml', 'mls::tests'],
+    ],
+  ];
+}
+
 function verifyScenarioSources(rootDirectory) {
   for (const scenario of SCENARIOS) {
     for (const [relativePath, selector] of scenario.evidence) {
@@ -189,31 +222,7 @@ function main() {
       'E2EE adversarial scenario runner disagrees with release status',
     );
   }
-  const commands = [
-    npmCommand([
-      '--workspace',
-      'otto-desktop',
-      'run',
-      'test',
-      '--',
-      'src/main/enterprise-e2ee.test.ts',
-      'src/main/enterprise-client.test.ts',
-      'src/main/enterprise-mls.test.ts',
-      'src/main/enterprise-mls-attachments.test.ts',
-    ]),
-    npmCommand([
-      '--workspace',
-      'otto-server',
-      'run',
-      'test',
-      '--',
-      'src/modules/collaboration/mlsTransportRepository.test.ts',
-    ]),
-    [
-      'cargo',
-      ['test', '--manifest-path', 'otto-native/Cargo.toml', 'mls::tests'],
-    ],
-  ];
+  const commands = resolveE2eeAdversarialCommands();
   const securityProfile = computeE2eeSecurityProfile(rootDirectory);
   const results = [];
   for (const [executable, args] of commands) {

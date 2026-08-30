@@ -119,9 +119,10 @@ async function createEnterpriseSession(
 }
 
 // The first isolated import compiles the large enterprise graph under Vitest
-// coverage. Production uses prebuilt JavaScript, but CI needs a wider startup
-// budget on slower Windows runners.
-describe('Park endpoints', { timeout: 30_000 }, () => {
+// coverage. Production uses prebuilt JavaScript, so this suite inherits the
+// centrally bounded 60-second startup budget from vitest.config.ts instead of
+// reintroducing Vitest's older 30-second per-suite cap.
+describe('Park endpoints', () => {
   it('POST /enterprise/park creates a park (admin only)', async () => {
     const { base } = await startIsolated(ADMIN_TOKEN);
     const adminHeaders = { 'x-otto-admin-token': ADMIN_TOKEN };

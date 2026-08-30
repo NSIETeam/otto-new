@@ -27,7 +27,8 @@
  *     由 WS 协议帧承载（双向同步视图 Issue #6 用 session_upsert / message_start）。
  *   - `isolatedSessions: Map<chatId, {config, geminiClient}>` → 提升为 store 的
  *     getOrCreateFeishuSession（store 本就是唯一会话源，天然就是隔离会话表）。
- *   - 工具确认 / slash 命令分发（CommandService 等强 CLI 耦合）→ 暂不迁，留 TODO。
+ *   - 旧 CLI slash 命令不迁移。兼容接入明确拒绝控制命令；远程控制只走托管渠道的
+ *     身份、设备、策略、审批和 durable Workflow 链路。
  */
 
 import { createHash } from 'node:crypto';
@@ -559,10 +560,16 @@ export class FeishuAdapter {
       return null;
     }
 
-    // TODO(Issue #3 增强): 生命周期 / /bind / /restart / slash 命令拦截。
-    //   cli feishuCommand 在这里拦截 `/feishu start|stop`、`/bind`、`/restart`、
-    //   slash 命令。server 版暂不迁这些强 CLI 耦合命令（它们依赖 CommandService /
-    //   进程自重启），先让普通对话走通。命中这些前缀时当前按普通消息透传给 core。
+    if (text.startsWith('/')) {
+      if (this.gateway) {
+        await this.gateway.sendMarkdown(
+          msg.chatId,
+          '此 Bot 使用旧兼容接入，不执行远程控制命令。请在 Otto「渠道连接」中完成扫码托管连接后，再使用经过身份、设备和审批校验的控制命令。',
+          msg.messageId,
+        ).catch(() => undefined);
+      }
+      return null;
+    }
 
     const eventId = this.feishuEventId(msg);
     const alreadyAccepted = this.inboundQueue.get(eventId);

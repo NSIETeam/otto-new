@@ -406,6 +406,10 @@ means no source-level substitute is accepted.
   errors, meeting availability/booking/selection, form errors, success notices
   and history markers now derive from the same status and data tokens as Hub;
   a whole-prefix contract prevents new `.otto-park-*` colour forks.
+- Removed the legacy Feishu adapter's unfinished slash-command pass-through.
+  Compatibility bots now reject `/...` control text before session creation or
+  runtime/model contact and direct users to managed QR pairing; remote control
+  has one authoritative identity/device/policy/approval/workflow path.
 - Replaced renderer feature `setInterval` calls with either non-overlapping
   async polling or deadline-based one-shot timers. Core protocol watchdogs and
   Server generated admin pages now use named process watchdogs or non-overlap

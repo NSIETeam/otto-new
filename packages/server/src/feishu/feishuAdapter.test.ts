@@ -241,6 +241,34 @@ describe('FeishuAdapter 双向链路', () => {
     ]);
   });
 
+  it('旧兼容接入拒绝斜杠控制命令，不把它们当自然语言交给 runtime', async () => {
+    const fake = makeFakeGateway(log);
+    let runtimeCalls = 0;
+    const adapter = new FeishuAdapter({
+      store,
+      broadcast: (sessionId, frame) => store.publish(sessionId, frame),
+      credentials: CREDS,
+      gatewayFactory: () => fake.gw,
+      ensureRuntime: async () => {
+        runtimeCalls += 1;
+        return undefined;
+      },
+    });
+    await adapter.start();
+
+    await fake.fireMessage(makeMsg({ text: '/restart', messageId: 'om_command' }));
+    await flush();
+
+    expect(runtimeCalls).toBe(0);
+    expect(store.listSessions()).toHaveLength(0);
+    expect(log.markdowns).toEqual([
+      expect.objectContaining({
+        text: expect.stringContaining('扫码托管连接'),
+        replyTo: 'om_command',
+      }),
+    ]);
+  });
+
   it('接了 runtime → runtime.run 被调用，其流式帧回推飞书', async () => {
     const { adapter, fake } = newAdapter({ fire: () => makeFakeGateway(log) });
     await adapter.start();

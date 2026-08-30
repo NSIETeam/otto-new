@@ -442,4 +442,35 @@ describe('ManagedChannelConnectorV1', () => {
     expect(outboundLedger.unknown).toHaveBeenCalledOnce();
     },
   );
+
+  it('does not contact the provider when the local protection key is missing and safely retries after recovery', async () => {
+    const { connector, runtime, vault, outboundLedger } = setup();
+    const installation = {
+      installationId: 'channel_lark_0123456789abcdef01234567',
+      provider: 'lark' as const,
+      tenantId: 'tenant-1', tenantName: 'Acme', botName: 'Otto',
+      grantedScopes: ['im:message'], connectedAtMs: 100,
+    };
+    await vault.commit(installation, 'credential');
+    vi.mocked(vault.loadCredential).mockRejectedValueOnce(
+      Object.assign(new Error('protection key is unavailable'), { code: 'KEY_NOT_FOUND' }),
+    );
+    await expect(connector.start(installation.installationId)).rejects.toMatchObject({ code: 'KEY_NOT_FOUND' });
+    expect(runtime.start).not.toHaveBeenCalled();
+
+    vi.mocked(vault.loadCredential)
+      .mockRejectedValueOnce(Object.assign(new Error('protection key is unavailable'), { code: 'KEY_NOT_FOUND' }))
+      .mockResolvedValueOnce('credential');
+    const input = {
+      target: 'chat-1', text: 'recovered', idempotencyKey: 'msg:key-recovery-0123456789',
+    };
+    await expect(connector.send(installation.installationId, input)).rejects.toMatchObject({ code: 'KEY_NOT_FOUND' });
+    expect(runtime.send).not.toHaveBeenCalled();
+    expect(outboundLedger.fail).toHaveBeenCalledOnce();
+
+    await expect(connector.send(installation.installationId, input)).resolves.toMatchObject({
+      providerMessageId: 'provider-message-1',
+    });
+    expect(runtime.send).toHaveBeenCalledOnce();
+  });
 });

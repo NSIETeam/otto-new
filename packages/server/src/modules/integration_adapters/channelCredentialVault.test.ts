@@ -82,4 +82,18 @@ describe('JsonChannelCredentialVaultV1', () => {
     await expect(vault.commit(installation, 'secret')).rejects.toThrow('unsafe output');
     expect(fs.existsSync(path.join(root, 'unsafe.json'))).toBe(false);
   });
+
+  it('fails closed on a missing protection key without deleting the installation record', async () => {
+    const { root, vault, protector, installation } = fixture();
+    await vault.commit(installation, 'secret');
+    vi.mocked(protector.unprotect).mockRejectedValueOnce(
+      Object.assign(new Error('protection key is unavailable'), { code: 'KEY_NOT_FOUND' }),
+    );
+
+    await expect(vault.loadCredential({
+      installationId: installation.installationId, provider: 'feishu', tenantId: 'tenant-1',
+    })).rejects.toMatchObject({ code: 'KEY_NOT_FOUND' });
+    expect(vault.listInstallations()).toEqual([installation]);
+    expect(fs.readFileSync(path.join(root, 'channels.json'), 'utf8')).not.toContain('secret');
+  });
 });

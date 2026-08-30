@@ -338,6 +338,7 @@ means no source-level substitute is accepted.
 | Desktop and `otto feishu|lark|wecom login` render scannable QR codes without printing the nonce-bearing URL; broker-directed polling is bounded to 1-30 seconds | `ChannelPairingCard.tsx`, `channelCli.ts`, `httpChannelPairingBroker.ts`, focused tests | Automated; real provider smoke pending |
 | Abandoned provider credentials and device proof keys are erased at the five-minute deadline without an idle network call | `managedChannelConnector.ts`, `channel-pairing-key-store.ts`, focused expiry tests | Automated |
 | Protected credential custody and idempotent outbound writes | `channelCredentialVault.ts`, `channelOutboundLedger.ts`, focused persistence tests | Automated |
+| Missing channel protection keys fail before runtime/provider contact, preserve the protected installation, record outbound failure, and allow the same idempotent request after key recovery | Vault and managed connector focused tests | Automated |
 | Provider 429, 5xx, timeout and interrupted prepared writes become persisted `unknown_outcome` and cannot auto-replay | `channelOutboundLedger.ts`, `managedChannelConnector.ts`, `brokerChannelRuntime.test.ts`, focused recovery tests | Automated |
 | Channel revoke is fail-closed locally and uses a stable provider idempotency key | `managedChannelConnector.ts`, `brokerChannelRuntime.ts`, Server and Desktop focused revoke tests | Automated; provider-side completion may remain unknown |
 | Broker outbound runtime, tenant checking, timeout and reconnect | `brokerChannelRuntime.ts`, `brokerChannelRuntime.test.ts` | Automated |
@@ -358,6 +359,7 @@ means no source-level substitute is accepted.
 | Durable RPA supports persisted pause/resume/cancel, propagates abort signals, and converts interrupted external actions to non-replayable `unknown_outcome` | `rpa/src/runner.ts`, `core/src/tools/rpa-run.ts`, focused runner/tool tests | Automated |
 | RPA resource bounds limit workflows to 100 steps, step output to 64 KiB, artifacts to 10 per step and 10 MiB each with atomic writes | `runner.ts`, `file-artifact-store.ts`, focused overflow tests | Automated |
 | RPA evidence storage is globally bounded to 512 MiB and 10,000 files with incrementally cached accounting; concurrent writes are serialized, and quota/disk failure retains earlier evidence references on the visible failed receipt instead of deleting or orphaning them | `file-artifact-store.ts`, `runner.ts`, focused quota tests | Automated |
+| An injected filesystem `ENOSPC` leaves no partial RPA artifact, does not consume cached quota, and the same store accepts a later write after disk recovery | `file-artifact-store.test.ts` | Automated |
 | Real managed Feishu/Lark installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | Real managed WeCom installation and message round trip | Isolated provider tenant and production Broker | Pending smoke |
 | macOS Accessibility RPA control and recovery | Signed local build and isolated macOS account | Pending smoke |

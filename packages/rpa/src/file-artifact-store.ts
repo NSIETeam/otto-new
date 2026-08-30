@@ -16,11 +16,16 @@ function extensionFor(mediaType: string): string {
 export interface FileRpaArtifactStoreLimits {
   maxTotalBytes?: number;
   maxArtifacts?: number;
+  /** Testable system-I/O seams; production uses node:fs/promises. */
+  writeFile?: typeof writeFile;
+  rename?: typeof rename;
 }
 
 export class FileRpaArtifactStore implements RpaArtifactStore {
   private readonly maxTotalBytes: number;
   private readonly maxArtifacts: number;
+  private readonly writeFileImpl: typeof writeFile;
+  private readonly renameImpl: typeof rename;
   private writeTail: Promise<void> = Promise.resolve();
   private usage?: { artifacts: number; bytes: number };
 
@@ -34,6 +39,8 @@ export class FileRpaArtifactStore implements RpaArtifactStore {
     }
     this.maxTotalBytes = limits.maxTotalBytes ?? 512 * 1024 * 1024;
     this.maxArtifacts = limits.maxArtifacts ?? 10_000;
+    this.writeFileImpl = limits.writeFile ?? writeFile;
+    this.renameImpl = limits.rename ?? rename;
     if (!Number.isSafeInteger(this.maxTotalBytes) || this.maxTotalBytes < this.maxArtifactBytes) {
       throw new Error('RPA artifact store byte limit is invalid.');
     }
@@ -74,8 +81,8 @@ export class FileRpaArtifactStore implements RpaArtifactStore {
     const target = path.join(this.rootDir, `${id}.${extensionFor(input.mediaType)}`);
     const temporary = `${target}.${process.pid}.tmp`;
     try {
-      await writeFile(temporary, input.bytes, { mode: 0o600 });
-      await rename(temporary, target);
+      await this.writeFileImpl(temporary, input.bytes, { mode: 0o600 });
+      await this.renameImpl(temporary, target);
       usage.artifacts += 1;
       usage.bytes += input.bytes.byteLength;
     } catch (error) {

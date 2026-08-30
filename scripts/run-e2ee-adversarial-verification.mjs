@@ -133,9 +133,12 @@ function npmCommand(args) {
 export function resolveE2eeAdversarialCommands() {
   return [
     // The server test imports the otto-core workspace through its published
-    // package entry (dist/index.js). Build that entry explicitly so this gate
-    // is reproducible from a clean checkout instead of relying on stale local
-    // build output.
+    // package entry (dist/index.js), and core has published workspace entries
+    // for workflow and RPA. Build the complete dependency chain explicitly so
+    // this gate is reproducible from a clean checkout instead of relying on
+    // stale local build output.
+    npmCommand(['--workspace', 'otto-workflow', 'run', 'build']),
+    npmCommand(['--workspace', 'otto-rpa', 'run', 'build']),
     npmCommand(['--workspace', 'otto-core', 'run', 'build']),
     npmCommand([
       '--workspace',

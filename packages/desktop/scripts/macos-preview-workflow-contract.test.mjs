@@ -34,4 +34,17 @@ describe('macOS preview workflow contract', () => {
     expect(workflow).toContain('SHA256SUMS.txt');
     expect(workflow).toContain('sourceCommit:process.env.GITHUB_SHA');
   });
+
+  it('builds the desktop entrypoint before electron-builder packages it', async () => {
+    const workflow = await readFile(workflowPath, 'utf8');
+    const buildIndex = workflow.indexOf('name: Build desktop application');
+    const signedPackageIndex = workflow.indexOf('name: Build signed macOS preview images');
+    const unsignedPackageIndex = workflow.indexOf('name: Build unsigned macOS preview images');
+
+    expect(buildIndex).toBeGreaterThan(-1);
+    expect(workflow.slice(buildIndex, signedPackageIndex)).toContain('working-directory: packages/desktop');
+    expect(workflow.slice(buildIndex, signedPackageIndex)).toContain('run: npm run build');
+    expect(signedPackageIndex).toBeGreaterThan(buildIndex);
+    expect(unsignedPackageIndex).toBeGreaterThan(buildIndex);
+  });
 });

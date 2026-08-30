@@ -93,6 +93,10 @@ jobs:
           npm run typecheck
           npm run test:ci
 
+      - name: Build desktop application
+        working-directory: packages/desktop
+        run: npm run build
+
       - name: Resolve preview signing mode
         id: signing
         shell: bash

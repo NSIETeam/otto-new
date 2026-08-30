@@ -69,6 +69,7 @@ import {
 import { WorkspaceDirectoryStore } from './workspace-directory-store.js';
 import { MainWindowPresentationController } from './main-window-presentation.js';
 import { askWindowCloseChoice } from './window-close-policy.js';
+import { trayMenuInputVersion } from './tray-menu-state.js';
 import {
   createChannelInstallationDeviceKeys,
   createChannelInstallationProof,
@@ -2164,7 +2165,11 @@ function createTray(): void {
     missedRunPolicy: 'skip',
     estimatedCostUsdPerRun: 0,
     getInputVersion: () => tray && !tray.isDestroyed()
-      ? `bucket:${Math.floor(Date.now() / 2_000)}`
+      ? trayMenuInputVersion({
+          status: tracer.getSummary(),
+          restarting: trayRestarting,
+          contacts: enterpriseTrayContacts,
+        })
       : undefined,
     run: () => updateMenu(),
   });

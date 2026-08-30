@@ -75,6 +75,7 @@ describe('desktop visual style contract', () => {
     expect(css).toMatch(/\.otto-park-dialog\s*\{[^}]*--otto-accent: var\(--otto-text\);[^}]*--otto-accent-hover: var\(--otto-text\);[^}]*--otto-accent-soft: color-mix\(in srgb, var\(--otto-text\) 10%, transparent\);/su);
     expect(css).toMatch(/\.otto-park-demo__primary\s*\{[^}]*color: var\(--otto-bg\);/su);
     expect(css).not.toMatch(/\.otto-park-(?:demo|toast|survey)[^{]*\{[^}]*(?:#22a06b|#168557)/su);
+    expect([...css.matchAll(/\.otto-park[^{}]*\{[^}]*#[0-9a-f]{3,8}[^}]*\}/giu)]).toEqual([]);
   });
 
   it('keeps built-in workspace modules on the shared line-icon family', async () => {

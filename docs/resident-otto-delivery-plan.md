@@ -402,6 +402,10 @@ means no source-level substitute is accepted.
   light/dark overrides. The visual contract now scans every production Hub
   TSX file and every Hub CSS rule; only the two classified QR renderers may
   keep fixed black-on-white paint for scanner reliability.
+- Removed all remaining fixed paint from park-service CSS rules. Statistics
+  errors, meeting availability/booking/selection, form errors, success notices
+  and history markers now derive from the same status and data tokens as Hub;
+  a whole-prefix contract prevents new `.otto-park-*` colour forks.
 - Replaced renderer feature `setInterval` calls with either non-overlapping
   async polling or deadline-based one-shot timers. Core protocol watchdogs and
   Server generated admin pages now use named process watchdogs or non-overlap

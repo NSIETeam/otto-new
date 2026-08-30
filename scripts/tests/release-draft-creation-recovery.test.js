@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -156,6 +157,52 @@ function cleanupAdapter(states, calls = []) {
 }
 
 describe('release draft creation recovery', () => {
+  it('accepts the complete 12-pair unsigned transition capture CLI contract', () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.resolve('scripts/release-draft-creation-recovery.mjs'),
+        'capture',
+        '--tag',
+        TAG,
+        '--canonical-repo',
+        REPOSITORIES.canonical,
+        '--legacy-repo',
+        REPOSITORIES.legacy,
+        '--canonical-commit',
+        SOURCE_COMMIT,
+        '--package-identity',
+        '',
+        '--run-id',
+        '123456',
+        '--artifact-dir',
+        'release-download',
+        '--asset-profile',
+        'unsigned-transition',
+        '--expected-prerelease',
+        'true',
+        '--canonical-tag-preexisting',
+        'false',
+        '--intent-file',
+        'release-state/creation-intent.json',
+        '--pre-public-latest-file',
+        'release-state/pre-public-latest.json',
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, GITHUB_RUN_ATTEMPT: '2' },
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'release creation intent may only be captured on attempt 1',
+    );
+    expect(result.stderr).not.toContain(
+      'draft recovery capture arguments are invalid',
+    );
+  });
+
   it('captures a SHA-bindable 14-asset intent before mutation', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'otto-draft-intent-'));
     try {

@@ -1024,7 +1024,7 @@ async function main() {
       !['production', 'unsigned-transition'].includes(assetProfile) ||
       !['true', 'false'].includes(prerelease ?? '') ||
       !['true', 'false'].includes(canonicalTagPreexisting ?? '') ||
-      pairs.size !== 13
+      pairs.size !== 12
     ) {
       throw new Error('draft recovery capture arguments are invalid');
     }

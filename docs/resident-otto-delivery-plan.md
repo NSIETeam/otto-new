@@ -315,9 +315,13 @@ No release is complete without:
 - a real macOS accessibility-driven RPA smoke test in an isolated account.
 
 The internal test-distribution path is `.github/workflows/macos-preview.yml`.
-It accepts only the exact latest `internal` commit and publishes signed,
-notarized, versionless-named macOS artifacts with checksum and commit
-provenance. It never creates a tag, Release, update manifest, or mirror update.
+It accepts only the exact latest `internal` commit and publishes
+versionless-named macOS artifacts with checksum, source-commit provenance, and
+an explicit signing status. When the complete Apple credential set is
+available the artifacts must be signed and notarized; otherwise the workflow
+may produce only clearly named `Unsigned` Preview artifacts and must never
+represent them as production-ready. It never creates a tag, Release, update
+manifest, or mirror update.
 
 ## Completion checklist
 

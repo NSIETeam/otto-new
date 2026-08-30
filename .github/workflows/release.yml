@@ -206,6 +206,7 @@ jobs:
       - name: Repository anomaly checks
         run: |
           npm run doctor
+          npm run code-map:check
           git diff --check
           npm run validate:integration-baseline
           npm run validate:boundaries

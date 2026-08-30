@@ -76,6 +76,7 @@ jobs:
       - name: 🩺 Cheap anomaly checks
         run: |
           npm run doctor
+          npm run code-map:check
           git diff --check
           git fetch --no-tags origin \
             '+refs/heads/internal:refs/remotes/origin/internal'

@@ -85,6 +85,7 @@ jobs:
       - name: Repository and quality audit
         run: |
           npm run doctor
+          npm run code-map:check
           git diff --check
           npm run validate:integration-baseline
           npm run validate:boundaries

@@ -123,6 +123,10 @@ jobs:
         working-directory: packages/desktop
         run: npm run build
 
+      - name: Prepare reviewed macOS ripgrep runtimes
+        working-directory: packages/desktop
+        run: npm run prepare:ripgrep:mac
+
       - name: Resolve preview signing mode
         id: signing
         shell: bash

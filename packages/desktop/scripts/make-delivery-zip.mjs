@@ -40,7 +40,10 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WINDOWS_RIPGREP_INTEGRITY } from './ripgrep-integrity.mjs';
+import {
+  MACOS_RIPGREP_INTEGRITY,
+  WINDOWS_RIPGREP_INTEGRITY,
+} from './ripgrep-integrity.mjs';
 import {
   DEFAULT_UPDATE_ASSET_BASE_URL,
   resolveUpdateAssetBaseUrl,
@@ -57,6 +60,7 @@ const BUILD_PROVENANCE_PATH = path.join(
 const WINDOWS_RIPGREP_DIR = path.join(DESKTOP_DIR, 'vendor', 'win', 'ripgrep');
 const WINDOWS_RIPGREP_PATH = path.join(WINDOWS_RIPGREP_DIR, 'rg.exe');
 const WINDOWS_RIPGREP_VERSION_PATH = path.join(WINDOWS_RIPGREP_DIR, '.version');
+const MACOS_RIPGREP_DIR = path.join(DESKTOP_DIR, 'vendor', 'mac', 'ripgrep');
 const PKG = JSON.parse(
   readFileSync(path.join(DESKTOP_DIR, 'package.json'), 'utf-8'),
 );
@@ -326,8 +330,36 @@ function verifySignedMacApplication(unpackedOutput, arch) {
   log('BUILD', `Developer ID 与公证票据验证通过: ${unpackedOutput}/Otto.app`);
 }
 
+function verifyMacPackagedRuntime(unpackedOutput, arch) {
+  const appPath = path.join(RELEASE_DIR, unpackedOutput, 'Otto.app');
+  const archivePath = path.join(appPath, 'Contents', 'Resources', 'app.asar');
+  execFileSync(
+    'codesign',
+    ['--verify', '--deep', '--strict', '--verbose=2', appPath],
+    { stdio: 'inherit' },
+  );
+  execFileSync(
+    process.execPath,
+    [
+      path.join(__dirname, 'verify-packaged-runtime.mjs'),
+      archivePath,
+      '--platform',
+      'darwin',
+      '--arch',
+      arch,
+      '--require-native-code-signature',
+    ],
+    { cwd: DESKTOP_DIR, stdio: 'inherit' },
+  );
+  log('VERIFY', `Mac ${arch} 应用封装、运行时与 ripgrep 架构校验通过`);
+}
+
 async function writeBuildProvenance(sourceCommit) {
-  const windowsRipgrep = await inspectWindowsRipgrep();
+  const [windowsRipgrep, macArm64Ripgrep, macX64Ripgrep] = await Promise.all([
+    inspectWindowsRipgrep(),
+    inspectMacRipgrep('arm64'),
+    inspectMacRipgrep('x64'),
+  ]);
   const assets = await Promise.all(
     checkArtifacts(BUILD_ASSET_NAMES).map(async (asset) => ({
       name: asset.name,
@@ -342,6 +374,10 @@ async function writeBuildProvenance(sourceCommit) {
     builtAt: git(['show', '-s', '--format=%cI', sourceCommit]),
     inputs: {
       windowsRipgrep,
+      macRipgrep: {
+        arm64: macArm64Ripgrep,
+        x64: macX64Ripgrep,
+      },
     },
     assets: Object.fromEntries(
       assets.map((asset) => [
@@ -394,6 +430,36 @@ async function inspectWindowsRipgrep() {
   };
 }
 
+async function inspectMacRipgrep(arch) {
+  const directory = path.join(MACOS_RIPGREP_DIR, arch);
+  const executablePath = path.join(directory, 'rg');
+  const versionPath = path.join(directory, '.version');
+  if (!existsSync(executablePath) || !existsSync(versionPath)) {
+    throw new Error(`缺少已核验的 macOS ${arch} rg 或版本戳，禁止生成构建溯源`);
+  }
+  const metadata = lstatSync(executablePath);
+  if (metadata.isSymbolicLink() || !metadata.isFile()) {
+    throw new Error(`macOS ${arch} rg 必须是普通文件`);
+  }
+  const version = readFileSync(versionPath, 'utf8').trim();
+  const integrity = MACOS_RIPGREP_INTEGRITY[version]?.[arch];
+  if (!integrity) {
+    throw new Error(`macOS ${arch} rg 版本 ${version} 没有可信摘要`);
+  }
+  const executableSha256 = await sha256(executablePath);
+  if (executableSha256 !== integrity.executableSha256) {
+    throw new Error(
+      `macOS ${arch} rg SHA256 不匹配；期望 ${integrity.executableSha256}，实际 ${executableSha256}`,
+    );
+  }
+  return {
+    version,
+    target: integrity.target,
+    sourceArchiveSha256: integrity.archiveSha256,
+    executableSha256,
+  };
+}
+
 async function build(sourceCommit) {
   log('BUILD', '开始编译服务端与桌面端...');
 
@@ -414,6 +480,16 @@ async function build(sourceCommit) {
   });
   log('BUILD', 'TypeScript + Webpack 编译完成');
 
+  execFileSync(
+    process.execPath,
+    [path.join(__dirname, 'fetch-mac-ripgrep.mjs')],
+    {
+      cwd: DESKTOP_DIR,
+      stdio: 'inherit',
+    },
+  );
+  log('BUILD', 'Mac arm64 + x64 ripgrep 固定摘要与架构核验完成');
+
   // mac: arm64 + x64
   log('BUILD', '构建 Mac arm64...');
   runBuildStep(
@@ -429,9 +505,12 @@ async function build(sourceCommit) {
     ],
     'mac-arm64',
     MAC_BUILD_ENV,
-    ALLOW_UNSIGNED_MAC
-      ? undefined
-      : () => verifySignedMacApplication('mac-arm64', 'arm64'),
+    () => {
+      verifyMacPackagedRuntime('mac-arm64', 'arm64');
+      if (!ALLOW_UNSIGNED_MAC) {
+        verifySignedMacApplication('mac-arm64', 'arm64');
+      }
+    },
   );
   smokeNativeMacArtifact('arm64');
 
@@ -449,9 +528,10 @@ async function build(sourceCommit) {
     ],
     'mac',
     MAC_BUILD_ENV,
-    ALLOW_UNSIGNED_MAC
-      ? undefined
-      : () => verifySignedMacApplication('mac', 'x64'),
+    () => {
+      verifyMacPackagedRuntime('mac', 'x64');
+      if (!ALLOW_UNSIGNED_MAC) verifySignedMacApplication('mac', 'x64');
+    },
   );
   smokeNativeMacArtifact('x64');
 
@@ -698,6 +778,19 @@ async function readAndVerifyBuildProvenance(localAssets, sourceCommit) {
     JSON.stringify(currentRipgrep)
   ) {
     throw new Error('构建溯源中的 Windows rg.exe 与当前可信构建输入不一致');
+  }
+  const [currentMacArm64Ripgrep, currentMacX64Ripgrep] = await Promise.all([
+    inspectMacRipgrep('arm64'),
+    inspectMacRipgrep('x64'),
+  ]);
+  if (
+    JSON.stringify(provenance.inputs?.macRipgrep) !==
+    JSON.stringify({
+      arm64: currentMacArm64Ripgrep,
+      x64: currentMacX64Ripgrep,
+    })
+  ) {
+    throw new Error('构建溯源中的 macOS rg 与当前可信构建输入不一致');
   }
   return provenance;
 }

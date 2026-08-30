@@ -146,7 +146,7 @@ describe('desktop packaging contract', () => {
     expect(packageJson.build.mac.extraResources).toEqual([
       { from: 'build/icon.png', to: 'app-icon.png' },
       {
-        from: '../../node_modules/@vscode/ripgrep/bin/rg',
+        from: 'vendor/mac/ripgrep/${arch}/rg',
         to: 'ripgrep/rg',
       },
     ]);
@@ -161,6 +161,40 @@ describe('desktop packaging contract', () => {
       'THIRD_PARTY_NOTICES.md',
     ]);
     expect(afterPack.OTTO_NATIVE_RESOURCE_FILES).toEqual(['manifest.json']);
+  });
+
+  it('prepares reviewed target-native ripgrep inputs for every Mac packaging entry', async () => {
+    const [packageJson, previewWorkflow] = await Promise.all([
+      readFile(path.join(packageRoot, 'package.json'), 'utf8').then(JSON.parse),
+      readFile(
+        path.join(repoRoot, '.github', 'workflows', 'macos-preview.yml'),
+        'utf8',
+      ),
+    ]);
+    expect(packageJson.scripts['prepare:ripgrep:mac']).toBe(
+      'node scripts/fetch-mac-ripgrep.mjs',
+    );
+    for (const scriptName of [
+      'dist',
+      'dist:dmg',
+      'dist:dmg:x64',
+      'dist:all',
+      'dist:green',
+    ]) {
+      expect(packageJson.scripts[scriptName]).toContain(
+        'npm run prepare:ripgrep:mac',
+      );
+    }
+    expect(packageJson.scripts['dist:all']).toContain(
+      'node scripts/fetch-win-ripgrep.mjs',
+    );
+    const prepareIndex = previewWorkflow.indexOf(
+      'run: npm run prepare:ripgrep:mac',
+    );
+    expect(prepareIndex).toBeGreaterThan(-1);
+    expect(prepareIndex).toBeLessThan(
+      previewWorkflow.indexOf('npx electron-builder --mac'),
+    );
   });
 
   it('never packages local Rust build outputs with the desktop runtime', async () => {
@@ -536,14 +570,66 @@ describe('desktop packaging contract', () => {
   });
 
   it('verifies the final signed Mac native runtime after app signing', async () => {
-    const script = await readFile(
-      path.join(packageRoot, 'scripts', 'make-delivery-zip.mjs'),
-      'utf8',
-    );
+    const [script, afterPackSource, runtimeVerifier, workflow, fetcher] =
+      await Promise.all([
+        readFile(
+          path.join(packageRoot, 'scripts', 'make-delivery-zip.mjs'),
+          'utf8',
+        ),
+        readFile(path.join(packageRoot, 'scripts', 'after-pack.cjs'), 'utf8'),
+        readFile(
+          path.join(packageRoot, 'scripts', 'verify-packaged-runtime.mjs'),
+          'utf8',
+        ),
+        readFile(
+          path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+          'utf8',
+        ),
+        readFile(
+          path.join(packageRoot, 'scripts', 'fetch-mac-ripgrep.mjs'),
+          'utf8',
+        ),
+      ]);
     expect(script).toContain(
       "verifySignedMacApplication('mac-arm64', 'arm64')",
     );
     expect(script).toContain("verifySignedMacApplication('mac', 'x64')");
+    expect(script).toContain("path.join(__dirname, 'fetch-mac-ripgrep.mjs')");
+    expect(script).toContain("verifyMacPackagedRuntime('mac-arm64', 'arm64')");
+    expect(script).toContain("verifyMacPackagedRuntime('mac', 'x64')");
+    expect(afterPackSource).toContain('verifyPackagedRipgrep(context)');
+    expect(afterPackSource).toContain("'--require-source-digest'");
+    expect(afterPackSource).toContain(
+      'fileSha256(sourcePath) !== fileSha256(destinationPath)',
+    );
+    expect(runtimeVerifier).toContain('verifyRipgrepExecutable(');
+    expect(runtimeVerifier).toContain('packaged: true');
+    expect(runtimeVerifier).toContain(
+      "verifyMacCodeSignature(sqlCipherBinding, 'packaged SQLCipher runtime')",
+    );
+    expect(runtimeVerifier).toContain(
+      "verifyMacCodeSignature(ripgrepPath, 'packaged ripgrep')",
+    );
+    expect(runtimeVerifier).toContain(
+      "assertMachOArchitecture(sqlCipherBytes, arch, 'packaged SQLCipher runtime')",
+    );
+    expect(runtimeVerifier).toContain(
+      'manifest.sha256 !== sourceManifest.sha256',
+    );
+    expect(fetcher).toContain('integrity.archiveSha256');
+    expect(fetcher).toContain('requireSourceDigest: true');
+    expect(fetcher).toContain('AbortSignal.timeout(downloadTimeoutMs)');
+    expect(fetcher).toContain('readBoundedResponseBody(response)');
+    expect(script).toContain("inspectMacRipgrep('arm64')");
+    expect(script).toContain("inspectMacRipgrep('x64')");
+    expect(script).toContain('provenance.inputs?.macRipgrep');
+    expect(workflow).toContain(
+      'node packages/desktop/scripts/verify-packaged-runtime.mjs',
+    );
+    expect(workflow).toContain('--require-native-code-signature');
+    expect(workflow).toContain(
+      'codesign --verify --strict --verbose=2 "$sqlcipher_runtime"',
+    );
     expect(script).toContain("'--require-code-signature'");
     expect(script).toContain("'codesign',");
   });

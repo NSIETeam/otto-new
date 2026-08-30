@@ -18,9 +18,10 @@
     "runtime:verify:mac": "node scripts/verify-document-runtime.mjs --target darwin-arm64 --target darwin-x64",
     "runtime:verify:win": "node scripts/verify-document-runtime.mjs --target win32-x64",
     "visual:inventory": "node scripts/visual-asset-inventory.mjs",
-    "dist": "npm run build && electron-builder --mac --dir",
-    "dist:dmg": "npm run build && electron-builder --mac dmg --arm64",
-    "dist:dmg:x64": "npm run build && electron-builder --mac dmg --x64",
+    "prepare:ripgrep:mac": "node scripts/fetch-mac-ripgrep.mjs",
+    "dist": "npm run prepare:ripgrep:mac && npm run build && electron-builder --mac --dir",
+    "dist:dmg": "npm run prepare:ripgrep:mac && npm run build && electron-builder --mac dmg --arm64",
+    "dist:dmg:x64": "npm run prepare:ripgrep:mac && npm run build && electron-builder --mac dmg --x64",
     "dist:win": "node scripts/fetch-win-ripgrep.mjs && npm run build && electron-builder --win --x64 --publish never && node scripts/verify-packaged-runtime.mjs release/win-unpacked/resources/app.asar --platform win32 --arch x64 --probe-server-bin",
     "dist:portable:win": "npm run dist:win && node scripts/portable-usb.mjs",
     "package": "node scripts/make-delivery-zip.mjs",
@@ -30,10 +31,10 @@
     "pretypecheck": "npm run build:native",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
-    "dist:all": "npm run build && electron-builder --mac dmg --arm64 --x64 && electron-builder --win --x64",
+    "dist:all": "npm run prepare:ripgrep:mac && node scripts/fetch-win-ripgrep.mjs && npm run build && electron-builder --mac dmg --arm64 --x64 && electron-builder --win --x64",
     "release": "node scripts/make-delivery-zip.mjs --build",
     "release:gate": "node scripts/release-recovery-gate.mjs",
-    "dist:green": "npm run build && electron-builder --mac --dir \"--config.productName=Otto Green\" --config.appId=ai.otto.green.desktop --config.protocols[0].schemes[0]=otto-green --config.mac.artifactName=OttoGreen-${version}-${arch}.${ext} \"--config.nsis.shortcutName=Otto Green\" --config.extraMetadata.name=otto-green-desktop",
+    "dist:green": "npm run prepare:ripgrep:mac && npm run build && electron-builder --mac --dir \"--config.productName=Otto Green\" --config.appId=ai.otto.green.desktop --config.protocols[0].schemes[0]=otto-green --config.mac.artifactName=OttoGreen-${version}-${arch}.${ext} \"--config.nsis.shortcutName=Otto Green\" --config.extraMetadata.name=otto-green-desktop",
     "dist:green:win": "node scripts/fetch-win-ripgrep.mjs && npm run build && electron-builder --win --x64 --publish never \"--config.productName=Otto Green\" --config.appId=ai.otto.green.desktop --config.protocols[0].schemes[0]=otto-green --config.win.artifactName=OttoGreen-Setup-${version}-win-x64.${ext} --config.nsis.artifactName=OttoGreen-Setup-${version}-win-x64.${ext} \"--config.nsis.shortcutName=Otto Green\" --config.extraMetadata.name=otto-green-desktop"
   },
   "dependencies": {
@@ -207,7 +208,7 @@
           "to": "app-icon.png"
         },
         {
-          "from": "../../node_modules/@vscode/ripgrep/bin/rg",
+          "from": "vendor/mac/ripgrep/${arch}/rg",
           "to": "ripgrep/rg"
         }
       ]

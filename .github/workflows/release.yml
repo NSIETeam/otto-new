@@ -519,8 +519,10 @@ jobs:
             hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "$dmg" >/dev/null
             app="$mount_point/Otto.app"
             native_runtime="$app/Contents/Resources/otto-native/darwin-${arch}/otto-native"
+            sqlcipher_runtime="$app/Contents/Resources/sqlcipher/better_sqlite3.node"
             codesign --verify --deep --strict --verbose=2 "$app"
             codesign --verify --strict --verbose=2 "$native_runtime"
+            codesign --verify --strict --verbose=2 "$sqlcipher_runtime"
             node packages/desktop/scripts/verify-packaged-otto-native.mjs \
               "$app/Contents/Resources/app.asar" \
               --platform darwin \
@@ -528,6 +530,12 @@ jobs:
               --expected-build-commit "${{ needs.validate-source.outputs.source_commit }}" \
               --packaged \
               --require-code-signature
+            node packages/desktop/scripts/verify-packaged-runtime.mjs \
+              "$app/Contents/Resources/app.asar" \
+              --platform darwin \
+              --arch "$arch" \
+              --expected-build-commit "${{ needs.validate-source.outputs.source_commit }}" \
+              --require-native-code-signature
             hdiutil detach "$mount_point"
             rmdir "$mount_point"
           done

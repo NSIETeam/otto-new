@@ -62,6 +62,32 @@ function verifyPackagedPayload(context) {
   );
 }
 
+function verifyPackagedRipgrep(context) {
+  const platform = context.electronPlatformName;
+  if (!['win32', 'darwin'].includes(platform)) return;
+  const arch = electronBuilderArchName(context.arch);
+  const executableName = platform === 'win32' ? 'rg.exe' : 'rg';
+  const executablePath = path.join(
+    packagedResourcesRoot(context),
+    'ripgrep',
+    executableName,
+  );
+  execFileSync(
+    process.execPath,
+    [
+      path.join(__dirname, 'ripgrep-runtime.mjs'),
+      executablePath,
+      '--platform',
+      platform,
+      '--arch',
+      arch,
+      '--require-source-digest',
+    ],
+    { stdio: 'inherit' },
+  );
+  console.log(`[after-pack] ripgrep source verified: ${platform}-${arch}`);
+}
+
 function packagedArchivePath(context) {
   return path.join(packagedResourcesRoot(context), 'app.asar');
 }
@@ -102,12 +128,18 @@ function copySqlCipherNativeAsset(context) {
   const destination = path.join(resourcesRoot, 'sqlcipher');
   mkdirSync(destination, { recursive: true });
   for (const name of SQLCIPHER_RESOURCE_FILES) {
-    copyFileSync(
-      path.join(sourceRoot, target, name),
-      path.join(destination, name),
-    );
+    const sourcePath = path.join(sourceRoot, target, name);
+    const destinationPath = path.join(destination, name);
+    copyFileSync(sourcePath, destinationPath);
+    if (fileSha256(sourcePath) !== fileSha256(destinationPath)) {
+      throw new Error(
+        `[after-pack] copied SQLCipher asset digest mismatch: ${name}`,
+      );
+    }
   }
-  console.log(`[after-pack] SQLCipher native asset copied: ${target}`);
+  console.log(
+    `[after-pack] SQLCipher native asset copied with exact source identity: ${target}`,
+  );
 }
 
 function copyOttoNativeAsset(context) {
@@ -291,6 +323,7 @@ function findNestedLibreOfficeBundles(appPath) {
 
 async function afterPack(context) {
   verifyPackagedPayload(context);
+  verifyPackagedRipgrep(context);
   copySqlCipherNativeAsset(context);
   const ottoNativeAsset = copyOttoNativeAsset(context);
   if (context.electronPlatformName === 'win32') {
@@ -376,5 +409,6 @@ module.exports.packagedArchivePath = packagedArchivePath;
 module.exports.packagedResourcesRoot = packagedResourcesRoot;
 module.exports.resolveMacSigningIdentity = resolveMacSigningIdentity;
 module.exports.verifyPackagedPayload = verifyPackagedPayload;
+module.exports.verifyPackagedRipgrep = verifyPackagedRipgrep;
 module.exports.verifyFinalPackagedOttoNativeAsset =
   verifyFinalPackagedOttoNativeAsset;

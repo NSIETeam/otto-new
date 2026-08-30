@@ -18,6 +18,10 @@ import { fileURLToPath } from 'node:url';
 import asar from '@electron/asar';
 import { verifyPackagedContent } from './verify-packaged-content.mjs';
 import { verifyPackagedOttoNative } from './verify-packaged-otto-native.mjs';
+import {
+  assertMachOArchitecture,
+  verifyRipgrepExecutable,
+} from './ripgrep-runtime.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(scriptDir, '..');
@@ -25,6 +29,20 @@ const repoRoot = path.resolve(desktopRoot, '../..');
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, 'utf8'));
+}
+
+function verifyMacCodeSignature(filePath, label) {
+  const result = spawnSync(
+    'codesign',
+    ['--verify', '--strict', '--verbose=2', filePath],
+    { encoding: 'utf8' },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      `${label} code signature verification failed: status=${String(result.status)} stdout=${JSON.stringify(result.stdout ?? '')} stderr=${JSON.stringify(result.stderr ?? '')}`,
+    );
+  }
 }
 
 function readAsarJson(archivePath, archiveEntry) {
@@ -229,6 +247,7 @@ export function verifyPackagedRuntime(
     platform,
     arch,
     expectedBuildCommit,
+    packaged: true,
     requireAuthenticodeSigned: requireNativeAuthenticode,
     requireCodeSignature: requireNativeCodeSignature,
     probe: probeNative,
@@ -280,7 +299,8 @@ export function verifyPackagedRuntime(
       throw new Error(`packaged SQLCipher resource is missing: ${required}`);
     }
   }
-  const nativeHeader = readFileSync(sqlCipherBinding).subarray(0, 4);
+  const sqlCipherBytes = readFileSync(sqlCipherBinding);
+  const nativeHeader = sqlCipherBytes.subarray(0, 4);
   const validNativeHeader =
     platform === 'win32'
       ? nativeHeader.subarray(0, 2).toString('ascii') === 'MZ'
@@ -294,10 +314,15 @@ export function verifyPackagedRuntime(
       `packaged SQLCipher resource has wrong platform format: ${sqlCipherBinding}`,
     );
   }
+  if (platform === 'darwin') {
+    assertMachOArchitecture(sqlCipherBytes, arch, 'packaged SQLCipher runtime');
+  }
   const nativeSha256 = createHash('sha256')
-    .update(readFileSync(sqlCipherBinding))
+    .update(sqlCipherBytes)
     .digest('hex');
   const manifest = readJson(sqlCipherManifest);
+  const signedMacSqlCipher =
+    platform === 'darwin' && requireNativeCodeSignature;
   if (
     manifest.format !== 3 ||
     manifest.target !== `${platform}-${arch}` ||
@@ -309,7 +334,7 @@ export function verifyPackagedRuntime(
     !/^[0-9a-f]{40}$/.test(manifest.buildCommit ?? '') ||
     !/^[0-9a-f]{40}$/.test(manifest.sourceRevision ?? '') ||
     manifest.source !== 'https://github.com/sqlcipher/sqlcipher' ||
-    manifest.sha256 !== nativeSha256 ||
+    (!signedMacSqlCipher && manifest.sha256 !== nativeSha256) ||
     manifest.cipherSelfTest !== true ||
     manifest.plainSqliteRejected !== true ||
     manifest.sbom?.path !== 'sbom.cdx.json' ||
@@ -321,6 +346,32 @@ export function verifyPackagedRuntime(
     throw new Error(
       `packaged SQLCipher build commit mismatch: expected ${expectedBuildCommit}, got ${manifest.buildCommit}`,
     );
+  }
+  if (signedMacSqlCipher) {
+    const sourceDirectory = path.join(
+      repoRoot,
+      'native',
+      'sqlcipher',
+      `${platform}-${arch}`,
+    );
+    const sourceBinding = path.join(sourceDirectory, 'better_sqlite3.node');
+    const sourceManifestPath = path.join(sourceDirectory, 'manifest.json');
+    if (!existsSync(sourceBinding) || !existsSync(sourceManifestPath)) {
+      throw new Error(
+        `reviewed SQLCipher source identity is missing: ${sourceDirectory}`,
+      );
+    }
+    const sourceSha256 = createHash('sha256')
+      .update(readFileSync(sourceBinding))
+      .digest('hex');
+    const sourceManifest = readJson(sourceManifestPath);
+    if (
+      sourceManifest.sha256 !== sourceSha256 ||
+      manifest.sha256 !== sourceManifest.sha256
+    ) {
+      throw new Error('packaged SQLCipher source identity verification failed');
+    }
+    verifyMacCodeSignature(sqlCipherBinding, 'packaged SQLCipher runtime');
   }
   const expectedSourceRevision = process.env.SQLCIPHER_SOURCE_REVISION;
   if (
@@ -362,20 +413,15 @@ export function verifyPackagedRuntime(
     throw new Error('packaged SQLCipher SBOM identity verification failed');
   }
 
-  if (platform === 'win32') {
+  if (platform === 'win32' || platform === 'darwin') {
     const ripgrepPath = path.join(
       path.dirname(archivePath),
       'ripgrep',
-      'rg.exe',
+      platform === 'win32' ? 'rg.exe' : 'rg',
     );
-    if (!existsSync(ripgrepPath)) {
-      throw new Error(`packaged ripgrep is missing: ${ripgrepPath}`);
-    }
-    const magic = readFileSync(ripgrepPath).subarray(0, 2).toString('ascii');
-    if (magic !== 'MZ') {
-      throw new Error(
-        `packaged ripgrep is not a Windows executable: ${ripgrepPath}`,
-      );
+    verifyRipgrepExecutable(ripgrepPath, { platform, arch });
+    if (platform === 'darwin' && requireNativeCodeSignature) {
+      verifyMacCodeSignature(ripgrepPath, 'packaged ripgrep');
     }
   }
 

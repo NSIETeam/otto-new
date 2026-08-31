@@ -88,6 +88,7 @@ import {
   parseChannelIdentityMutationIpc,
 } from './channel-identity-ipc.js';
 import { cancelDurableWorkflowsForQuit } from './durable-workflow-quit.js';
+import { migrateDesktopRenderCachesForUpgrade } from './render-cache-migration.js';
 
 function ignoreBrokenPipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
@@ -6066,6 +6067,16 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  const renderCacheMigration = migrateDesktopRenderCachesForUpgrade({
+    userDataPath: app.getPath('userData'),
+    platform: process.platform,
+  });
+  if (!renderCacheMigration.completed) {
+    console.warn(
+      '[otto-desktop] renderer cache migration will retry on next launch:',
+      renderCacheMigration.failed.join(', '),
+    );
+  }
   let quitCleanupStarted = false;
   let quitCleanupFinished = false;
   app.on('second-instance', (_event, commandLine) => {

@@ -143,6 +143,36 @@ describe('identity_organization feature configuration kernel', () => {
 });
 
 describe('authorization organization feature access policy', () => {
+  it('calculates entitlements for the requested organization', () => {
+    const database = createDatabase();
+    insertOrganization(database, 'org-a');
+    insertOrganization(database, 'org-b');
+    const configuration = createOrganizationFeatureFacade(
+      createStore(database),
+    );
+    const licenseChecks = vi.fn(
+      (feature: OrganizationFeatureKey, organizationId: string) =>
+        feature === 'enterprise_tree' && organizationId === 'org-a',
+    );
+    const access = createOrganizationFeatureAccessFacade({
+      configuration,
+      isLicenseUsable: licenseChecks,
+    });
+
+    try {
+      expect(
+        access.getOrganizationFeatureState('org-a').effective.enterprise_tree,
+      ).toBe(true);
+      expect(
+        access.getOrganizationFeatureState('org-b').effective.enterprise_tree,
+      ).toBe(false);
+      expect(licenseChecks).toHaveBeenCalledWith('enterprise_tree', 'org-a');
+      expect(licenseChecks).toHaveBeenCalledWith('enterprise_tree', 'org-b');
+    } finally {
+      database.close();
+    }
+  });
+
   it('combines configured values with license capabilities fail-closed', () => {
     const database = createDatabase();
     insertOrganization(database, 'org-a');

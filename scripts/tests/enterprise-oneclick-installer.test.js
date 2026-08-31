@@ -37,6 +37,7 @@ const VERIFY_RELEASE = path.resolve(
   'deployment/enterprise-oneclick/tools/verify-release.mjs',
 );
 const UPGRADE_SH = path.resolve('deployment/enterprise-oneclick/upgrade.sh');
+const VERIFY_SH = path.resolve('deployment/enterprise-oneclick/verify.sh');
 const ENV_EXAMPLE = path.resolve(
   'deployment/enterprise-oneclick/config/enterprise.env.example',
 );
@@ -1201,6 +1202,17 @@ describe('enterprise one-click runtime configuration contract', () => {
     expect(migrationCheck).toContain(
       'migration row-count reconciliation failed',
     );
+  });
+
+  it('verifies encrypted live databases through the SQLCipher runtime', () => {
+    const verify = readFileSync(VERIFY_SH, 'utf8');
+
+    expect(verify).toContain('DATABASE_HEADER=');
+    expect(verify).toContain('53514c69746520666f726d6174203300');
+    expect(verify).toContain('tools/db-tool.mjs" inspect');
+    expect(verify).toContain('tools/migrate-check.mjs"');
+    expect(verify).toContain('OTTO_DATABASE_ENCRYPTION_KEY_FILE');
+    expect(verify).toContain('OTTO_SQLCIPHER_NATIVE_BINDING');
   });
 
   it('upgrades plaintext and encrypted databases without overwriting custody', () => {

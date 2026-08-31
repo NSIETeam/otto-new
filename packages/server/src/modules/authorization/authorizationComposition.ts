@@ -15,7 +15,10 @@ export interface AuthorizationCompositionOptions {
     detail: string,
     organizationId: string,
   ): void;
-  isLicenseUsable(feature: OrganizationFeatureKey): boolean;
+  isLicenseUsable(
+    feature: OrganizationFeatureKey,
+    organizationId: string,
+  ): boolean;
 }
 
 /** Combines configured switches and licensed capabilities fail-closed. */

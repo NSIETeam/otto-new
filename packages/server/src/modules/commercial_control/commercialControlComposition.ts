@@ -57,6 +57,7 @@ export interface CommercialControlCompositionOptions {
   creditTokenRate(): string | undefined;
   licenseEnforcementEnabled(): boolean;
   licenseVerificationPublicKeys(): readonly string[];
+  deploymentGrantedFeatures?(): readonly OrganizationFeatureKey[];
   telemetryEndpoint(): string | null;
   telemetryIngestSecret(): string;
   telemetryRetentionDays?(): number;
@@ -90,6 +91,7 @@ export function createCommercialControlComposition(
     defaultOrganizationId: options.defaultOrganizationId,
     licenseEnforcementEnabled: options.licenseEnforcementEnabled,
     licenseVerificationPublicKeys: options.licenseVerificationPublicKeys,
+    deploymentGrantedFeatures: options.deploymentGrantedFeatures ?? (() => []),
     telemetryEndpoint: () =>
       options.telemetryEndpoint() ??
       getPrivateDeploymentRuntimeConfiguration(settings)?.telemetryEndpoint ??

@@ -16,7 +16,9 @@ import {
   verifyEd25519Envelope,
 } from './signedEnvelope.js';
 
-function setup() {
+function setup(options: {
+  deploymentGrantedFeatures?: readonly import('../../productModules.js').OrganizationFeatureKey[];
+} = {}) {
   const pair = generateKeyPairSync('ed25519');
   const privateKey = pair.privateKey
     .export({ format: 'pem', type: 'pkcs8' })
@@ -49,6 +51,8 @@ function setup() {
     creditTokenRate: () => undefined,
     licenseEnforcementEnabled: () => true,
     licenseVerificationPublicKeys: () => [publicKey],
+    deploymentGrantedFeatures: () =>
+      options.deploymentGrantedFeatures ?? [],
     telemetryEndpoint: () => 'https://telemetry.otto.example/v1/events',
     telemetryIngestSecret: () =>
       'test-ingest-secret-at-least-32-characters',
@@ -61,6 +65,78 @@ function setup() {
 }
 
 describe('private deployment license repository', () => {
+  it('applies explicit deployment grants to every organization while preserving the signed License anchor', () => {
+    const { database, control, privateKey } = setup({
+      deploymentGrantedFeatures: [
+        'enterprise_tree',
+        'park_service',
+        'feishu_auto_reply',
+        'direct_messages',
+        'atoa',
+        'knowledge',
+        'skill_market',
+      ],
+    });
+    try {
+      const now = Date.now();
+      const payload = {
+        id: 'lic-deployment-grant-anchor',
+        deploymentId: control.getDeploymentId(),
+        organizationId: 'org-licensed',
+        machineFingerprint: control.getMachineFingerprint(),
+        customerName: 'Deployment grant anchor',
+        plan: 'enterprise',
+        expiresAtMs: now + 90 * 24 * 60 * 60 * 1000,
+        seatLimit: 20,
+        modules: ['enterprise_tree'],
+        offline: true,
+        telemetryAllowed: false,
+        issuedAtMs: now,
+      };
+      control.importDeploymentLicense({
+        license: payload,
+        signature: signEd25519Envelope(payload, privateKey),
+      });
+
+      expect(
+        control.isLicenseUsableForOrganizationFeature(
+          'skill_market',
+          'org-another-enterprise',
+        ),
+      ).toBe(true);
+      expect(
+        control.isLicenseUsableForOrganizationFeature(
+          'enterprise_tree',
+          'org-another-enterprise',
+        ),
+      ).toBe(true);
+      expect(
+        control.isLicenseUsableForOrganizationFeature(
+          'model_gateway',
+          'org-another-enterprise',
+        ),
+      ).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('does not activate deployment grants without a usable signed License', () => {
+    const { database, control } = setup({
+      deploymentGrantedFeatures: ['skill_market'],
+    });
+    try {
+      expect(
+        control.isLicenseUsableForOrganizationFeature(
+          'skill_market',
+          'org-another-enterprise',
+        ),
+      ).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
   it('treats an expired signed License as restricted at the execution layer', () => {
     const { database, control, privateKey } = setup();
     try {

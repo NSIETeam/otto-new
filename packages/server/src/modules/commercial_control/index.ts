@@ -26,3 +26,4 @@ export * from './privateDeploymentConfigurationRepository.js';
 export * from './signedEnvelope.js';
 export * from './updatePolicyClient.js';
 export * from './commercialControlComposition.js';
+export * from './deploymentFeatureGrants.js';

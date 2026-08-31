@@ -10,6 +10,7 @@ import {
   captureReleaseCreationIntent,
   cleanupPartialDraftCreation,
   parseReleaseCreationIntent,
+  selectExactReleaseByTagPages,
   verifyReleaseCreationIntent,
 } from '../release-draft-creation-recovery.mjs';
 
@@ -78,7 +79,7 @@ function intentFixture({ canonicalTagPreexisting = false } = {}) {
       bodySha256: digest(BODY),
       prerelease: false,
       assetProfile: 'production',
-      targets: { canonical: SOURCE_COMMIT, legacy: 'main' },
+      targets: { canonical: SOURCE_COMMIT, legacy: LEGACY_COMMIT },
       tagCommits: {
         canonical: SOURCE_COMMIT,
         legacy: LEGACY_COMMIT,
@@ -157,6 +158,25 @@ function cleanupAdapter(states, calls = []) {
 }
 
 describe('release draft creation recovery', () => {
+  it('selects one untagged draft from paginated release listings', () => {
+    const draft = {
+      id: 101,
+      tag_name: TAG,
+      draft: true,
+      target_commitish: SOURCE_COMMIT,
+    };
+    expect(
+      selectExactReleaseByTagPages(
+        [[{ id: 90, tag_name: 'v1.9.13' }], [draft]],
+        TAG,
+      ),
+    ).toEqual(draft);
+    expect(selectExactReleaseByTagPages([[]], TAG)).toBeNull();
+    expect(() =>
+      selectExactReleaseByTagPages([[draft], [{ ...draft, id: 102 }]], TAG),
+    ).toThrow('ambiguous');
+  });
+
   it('accepts the complete 12-pair unsigned transition capture CLI contract', () => {
     const result = spawnSync(
       process.execPath,
@@ -258,6 +278,7 @@ describe('release draft creation recovery', () => {
 
       expect(intent.expected.assets).toHaveLength(14);
       expect(intent.legacyMainCommit).toBe(LEGACY_COMMIT);
+      expect(intent.expected.targets.legacy).toBe(LEGACY_COMMIT);
       expect(intent.preexisting).toEqual({
         canonical: { tag: true, release: false },
         legacy: { tag: false, release: false },
@@ -448,6 +469,33 @@ describe('release draft creation recovery', () => {
     expect(calls).toEqual([`release:legacy:102`, `tag:legacy:${TAG}`]);
     expect(states.canonical.tagCommit).toBeNull();
     expect(states.legacy.tagCommit).toBeNull();
+  });
+
+  it('removes exact drafts before GitHub has created either tag ref', async () => {
+    const intent = intentFixture();
+    const states = {
+      canonical: {
+        tagCommit: null,
+        release: rawRelease(intent, 'canonical'),
+        latest: intent.prePublicLatest.latest.canonical,
+      },
+      legacy: {
+        tagCommit: null,
+        release: rawRelease(intent, 'legacy'),
+        latest: intent.prePublicLatest.latest.legacy,
+      },
+    };
+    const calls = [];
+
+    await cleanupPartialDraftCreation({
+      adapter: cleanupAdapter(states, calls),
+      endpoints: endpoints(),
+      intent,
+    });
+
+    expect(calls).toEqual(['release:canonical:101', 'release:legacy:102']);
+    expect(states.canonical.release).toBeNull();
+    expect(states.legacy.release).toBeNull();
   });
 
   it('removes partial drafts but preserves a formal push source tag', async () => {

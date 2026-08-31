@@ -767,8 +767,9 @@ describe('desktop packaging contract', () => {
     expect(workflow).toContain(
       'SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"',
     );
+    expect(workflow).toContain('assert_draft_tag_state()');
     expect(workflow).toContain(
-      'Canonical draft tag does not resolve to the locked source commit.',
+      'assert_draft_tag_state "$RELEASES_REPO" "$CANONICAL_TOKEN"',
     );
 
     const validateSourceJobStart = workflow.indexOf('  validate-source:');
@@ -979,8 +980,23 @@ describe('desktop packaging contract', () => {
       'verify_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT"',
     );
     expect(createDraftsJob).toContain(
-      'verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main',
+      'verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" \\',
     );
+    expect(createDraftsJob).toContain('--target "$LOCKED_LEGACY_COMMIT"');
+    expect(createDraftsJob).toContain(
+      '"repos/${repository}/releases?per_page=100"',
+    );
+    expect(createDraftsJob).toContain('gh api --paginate --slurp');
+    expect(createDraftsJob).toContain(
+      '"repos/${repository}/releases/${release_id}"',
+    );
+    expect(createDraftsJob).not.toContain(
+      '"repos/${repository}/releases/tags/${TAG}"',
+    );
+    expect(createDraftsJob).not.toContain(
+      'Canonical draft tag does not resolve',
+    );
+    expect(createDraftsJob).not.toContain('Legacy draft tag does not resolve');
     expect(createDraftsJob.indexOf('verify-before-create \\')).toBeLessThan(
       createDraftsJob.indexOf(
         'name: Create canonical and compatibility drafts with GitHub CLI',
@@ -1026,19 +1042,23 @@ describe('desktop packaging contract', () => {
     expect(publishJob).toContain('Release asset changed before publication');
     expect(publishJob).toContain('and .name == $name');
     expect(publishJob).toContain('cmp -- "$NOTES_FILE" "$actual_body_file"');
-    expect(publishJob).toContain(
-      'verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main true',
-    );
-    expect(publishJob).toContain(
-      'verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main false',
-    );
+    expect(publishJob).toContain('"$LOCKED_LEGACY_COMMIT" true');
+    expect(publishJob).toContain('"$LOCKED_LEGACY_COMMIT" false');
     expect(publishJob).toContain(
       'verify_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT" true',
     );
     expect(publishJob).toContain(
       'verify_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT" false',
     );
-    expect(publishJob).toContain('Canonical tag changed before publication');
+    expect(canonicalJob).toContain('assert_canonical_prepublication_tag_state');
+    expect(legacyJob).toContain('assert_legacy_prepublication_tag_absent');
+    expect(publishJob).toContain('gh api --paginate --slurp');
+    expect(publishJob).toContain(
+      '"repos/${repository}/releases/${release_id}"',
+    );
+    expect(publishJob).not.toContain(
+      '"repos/${repository}/releases/tags/${TAG}"',
+    );
     expect(publishJob).toContain(
       'Canonical release tag changed during publication',
     );
@@ -1096,6 +1116,13 @@ describe('desktop packaging contract', () => {
     expect(rollbackReleaseJob).toContain('            compensate \\');
     expect(rollbackReleaseJob).toContain(
       '--pre-public-latest-snapshot release-state/pre-public-latest.json',
+    );
+    expect(rollbackReleaseJob).toContain(
+      '--legacy-target "$LOCKED_LEGACY_COMMIT"',
+    );
+    expect(rollbackReleaseJob).not.toContain('--legacy-target main');
+    expect(rollbackReleaseJob).toContain(
+      'CREATION_INTENT_SHA256: ${{ needs.create-release-drafts.outputs.creation_intent_sha256 }}',
     );
     expect(rollbackReleaseJob).toContain(
       '--pre-public-latest-sha256 "${{ needs.create-release-drafts.outputs.pre_public_latest_sha256 }}"',

@@ -49,6 +49,30 @@ function normalizeLatestPointer(pointer, label) {
   return { id: pointer.id, tagName: pointer.tagName };
 }
 
+export function selectExactReleaseByTagPages(pages, tag) {
+  if (
+    !/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(tag ?? '') ||
+    !Array.isArray(pages) ||
+    pages.some((page) => !Array.isArray(page))
+  ) {
+    throw new Error('GitHub release list response is invalid');
+  }
+  const releases = pages.flat();
+  if (
+    releases.some(
+      (release) =>
+        !release || typeof release !== 'object' || Array.isArray(release),
+    )
+  ) {
+    throw new Error('GitHub release list response is invalid');
+  }
+  const matches = releases.filter((release) => release.tag_name === tag);
+  if (matches.length > 1) {
+    throw new Error('exact GitHub release tag is ambiguous');
+  }
+  return matches[0] ?? null;
+}
+
 async function collectRegularFiles(directory, files = []) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const target = path.join(directory, entry.name);
@@ -279,7 +303,7 @@ function validateCreationIntent(intent, expected) {
       intent.expected.packageIdentity === null;
   const legacyBindingIsValid = production
     ? /^[0-9a-f]{40}$/.test(intent.legacyMainCommit ?? '') &&
-      intent.expected.targets.legacy === 'main' &&
+      intent.expected.targets.legacy === intent.legacyMainCommit &&
       intent.expected.tagCommits.legacy === intent.legacyMainCommit
     : intent.legacyMainCommit === null &&
       intent.expected.targets.legacy === null &&
@@ -474,7 +498,7 @@ export async function captureReleaseCreationIntent({
       assetProfile: expected.assetProfile,
       targets: {
         canonical: expected.canonicalCommit,
-        legacy: createLegacy ? 'main' : null,
+        legacy: createLegacy ? first.legacy.mainCommit : null,
       },
       tagCommits: {
         canonical: expected.canonicalCommit,
@@ -661,7 +685,6 @@ function assertCleanupState(states, intent, { final = false } = {}) {
     if (state.release === null) continue;
     const release = state.release;
     if (
-      state.tagCommit === null ||
       !Number.isSafeInteger(release.id) ||
       release.id <= 0 ||
       release.tagName !== intent.tag ||
@@ -876,13 +899,32 @@ export function createGitHubDraftRecoveryAdapter({ tokens }) {
       ).trim();
     },
     async getRelease(endpoint, tag) {
-      const response = await runGhMaybeNotFound(tokenFor(endpoint), [
+      const token = tokenFor(endpoint);
+      const response = await runGh(token, [
         'api',
         '--method',
         'GET',
-        `repos/${endpoint.repository}/releases/tags/${encodeURIComponent(tag)}`,
+        '--paginate',
+        '--slurp',
+        `repos/${endpoint.repository}/releases?per_page=100`,
       ]);
-      return response === null ? null : JSON.parse(response);
+      const listed = selectExactReleaseByTagPages(JSON.parse(response), tag);
+      if (listed === null) return null;
+      if (!Number.isSafeInteger(listed.id) || listed.id <= 0) {
+        throw new Error('exact GitHub release id is invalid');
+      }
+      const exactResponse = await runGhMaybeNotFound(token, [
+        'api',
+        '--method',
+        'GET',
+        `repos/${endpoint.repository}/releases/${listed.id}`,
+      ]);
+      if (exactResponse === null) return null;
+      const exact = JSON.parse(exactResponse);
+      if (exact?.id !== listed.id || exact?.tag_name !== tag) {
+        throw new Error('exact GitHub release identity changed');
+      }
+      return exact;
     },
     async getLatest(endpoint) {
       const response = await runGhMaybeNotFound(tokenFor(endpoint), [

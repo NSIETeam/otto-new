@@ -853,7 +853,7 @@ function parsePairs(argv) {
   return options;
 }
 
-function parseCompensationCli(argv) {
+export function parseCompensationCli(argv) {
   const options = parsePairs(argv);
   const result = {
     tag: options.get('--tag'),
@@ -876,7 +876,7 @@ function parseCompensationCli(argv) {
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(result.legacyRepository ?? '') ||
     !/^[0-9a-f]{40}$/.test(result.canonicalCommit ?? '') ||
     result.canonicalTarget !== result.canonicalCommit ||
-    result.legacyTarget !== 'main' ||
+    !/^[0-9a-f]{40}$/.test(result.legacyTarget ?? '') ||
     !result.artifactDirectory ||
     !/^[0-9a-f]{12}-[0-9a-f]{12}$/.test(result.packageIdentity ?? '') ||
     !['true', 'false'].includes(result.prerelease ?? '') ||

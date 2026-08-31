@@ -8,6 +8,7 @@ import {
   buildExpectedPublication,
   compensateReleaseVisibility,
   normalizeReleaseState,
+  parseCompensationCli,
   parsePrePublicationLatestSnapshot,
   ReleaseVisibilityCompensationError,
   verifyPrePublicationLatest,
@@ -15,6 +16,7 @@ import {
 
 const TAG = 'v1.9.14';
 const SOURCE_COMMIT = 'a'.repeat(40);
+const LEGACY_COMMIT = 'd'.repeat(40);
 const PACKAGE_IDENTITY = '1'.repeat(12) + '-' + '2'.repeat(12);
 
 function rawRelease({
@@ -79,7 +81,7 @@ function fixtureStates(visibility = {}) {
       release: rawRelease({
         id: 22,
         repository: 'Felix201209/otto-releases',
-        target: 'main',
+        target: LEGACY_COMMIT,
         ...visibility.legacy,
       }),
       latestRelease: latestFor('legacy', visibility.legacy),
@@ -95,7 +97,7 @@ function expected(states = fixtureStates()) {
   return {
     tag: TAG,
     canonicalTarget: SOURCE_COMMIT,
-    legacyTarget: 'main',
+    legacyTarget: LEGACY_COMMIT,
     canonicalTagCommit: SOURCE_COMMIT,
     releaseName: 'Otto v1.9.14',
     bodySha256: states.canonical.identity.bodySha256,
@@ -183,6 +185,40 @@ function applyVisibility(states, endpoint, visibility) {
 }
 
 describe('release visibility compensation', () => {
+  it('requires an exact legacy commit SHA in compensation CLI bindings', () => {
+    const argv = [
+      '--tag',
+      TAG,
+      '--canonical-repo',
+      'NSIETeam/otto-new',
+      '--legacy-repo',
+      'Felix201209/otto-releases',
+      '--canonical-commit',
+      SOURCE_COMMIT,
+      '--canonical-target',
+      SOURCE_COMMIT,
+      '--legacy-target',
+      LEGACY_COMMIT,
+      '--artifact-dir',
+      'release-download',
+      '--package-identity',
+      PACKAGE_IDENTITY,
+      '--expected-prerelease',
+      'false',
+      '--pre-public-latest-snapshot',
+      'release-state/pre-public-latest.json',
+      '--pre-public-latest-sha256',
+      'f'.repeat(64),
+    ];
+
+    expect(parseCompensationCli(argv).legacyTarget).toBe(LEGACY_COMMIT);
+    expect(() =>
+      parseCompensationCli(
+        argv.map((value) => (value === LEGACY_COMMIT ? 'main' : value)),
+      ),
+    ).toThrow('arguments are invalid');
+  });
+
   it('derives the exact 14-asset publication identity from the immutable artifact', async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), 'otto-release-compensation-'),

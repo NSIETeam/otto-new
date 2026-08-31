@@ -1332,12 +1332,17 @@ jobs:
             --notes-file "$NOTES_FILE" \
             "${PRERELEASE_ARGS[@]}"
           if [ "$DESKTOP_TEST_BUILD" != "1" ]; then
+            LOCKED_LEGACY_COMMIT="$(jq -er \
+              '.legacyMainCommit | select(test("^[0-9a-f]{40}$"))' \
+              release-state/creation-intent.json)"
+            test "$(jq -er '.expected.targets.legacy' \
+              release-state/creation-intent.json)" = "$LOCKED_LEGACY_COMMIT"
             # The legacy public repository intentionally contains assets only;
-            # bind its compatibility tag to its own main branch while the body
-            # records the immutable canonical source commit.
+            # lock the draft target to the exact pre-mutation legacy main commit
+            # while the body records the immutable canonical source commit.
             GH_TOKEN="$LEGACY_TOKEN" gh release create "$TAG" release-assets/* \
               --repo "$LEGACY_RELEASES_REPO" \
-              --target main \
+              --target "$LOCKED_LEGACY_COMMIT" \
               --title "Otto v${VERSION}" \
               --draft \
               --notes-file "$NOTES_FILE" \
@@ -1361,14 +1366,28 @@ jobs:
             local repository="$1"
             local token="$2"
             local expected_target="$3"
+            local release_id
             local release_json
             local actual_body_file
-            release_json="$(GH_TOKEN="$token" gh api "repos/${repository}/releases/tags/${TAG}")"
+            release_id="$(
+              GH_TOKEN="$token" gh api --paginate --slurp \
+                "repos/${repository}/releases?per_page=100" | \
+                jq -ce --arg tag "$TAG" \
+                  '[.[][] | select(.tag_name == $tag)]
+                   | select(length == 1) | .[0].id
+                   | select(type == "number" and . > 0)'
+            )"
+            release_json="$(GH_TOKEN="$token" gh api \
+              "repos/${repository}/releases/${release_id}")"
             printf '%s' "$release_json" | jq -e \
+              --argjson id "$release_id" \
+              --arg tag "$TAG" \
               --arg target "$expected_target" \
               --arg name "$EXPECTED_NAME" \
               --argjson prerelease "$EXPECTED_PRERELEASE" \
-              '.draft == true
+              '.id == $id
+               and .tag_name == $tag
+               and .draft == true
                and .prerelease == $prerelease
                and .name == $name
                and .target_commitish == $target
@@ -1406,33 +1425,52 @@ jobs:
               fi
             done
           }
+          assert_draft_tag_state() {
+            local repository="$1"
+            local token="$2"
+            local expected_preexisting="$3"
+            local expected_commit="$4"
+            local exact_ref_count
+            local refs_json
+            refs_json="$(GH_TOKEN="$token" gh api \
+              "repos/${repository}/git/matching-refs/tags/${TAG}")"
+            exact_ref_count="$(printf '%s' "$refs_json" | jq -er \
+              --arg ref "refs/tags/${TAG}" \
+              '[.[] | select(.ref == $ref)] | length')"
+            if [ "$expected_preexisting" = true ]; then
+              [ "$exact_ref_count" -eq 1 ]
+              test "$(GH_TOKEN="$token" gh api \
+                "repos/${repository}/commits/${TAG}" --jq '.sha')" = \
+                "$expected_commit"
+            else
+              [ "$exact_ref_count" -eq 0 ]
+            fi
+          }
           verify_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT"
-          CANONICAL_TAG_COMMIT="$(GH_TOKEN="$CANONICAL_TOKEN" gh api \
-            "repos/${RELEASES_REPO}/commits/${TAG}" --jq '.sha')"
-          if [ "$CANONICAL_TAG_COMMIT" != "$SOURCE_COMMIT" ]; then
-            echo "Canonical draft tag does not resolve to the locked source commit." >&2
-            exit 1
-          fi
+          CANONICAL_TAG_PREEXISTING="$(jq -er \
+            'if .preexisting.canonical.tag == true then "true"
+             elif .preexisting.canonical.tag == false then "false"
+             else empty end' release-state/creation-intent.json)"
+          assert_draft_tag_state "$RELEASES_REPO" "$CANONICAL_TOKEN" \
+            "$CANONICAL_TAG_PREEXISTING" "$SOURCE_COMMIT"
           if [ "$DESKTOP_TEST_BUILD" = "1" ]; then
-            CANONICAL_BODY="$(GH_TOKEN="$CANONICAL_TOKEN" gh api \
-              "repos/${RELEASES_REPO}/releases/tags/${TAG}" --jq '.body // ""')"
-            printf '%s' "$CANONICAL_BODY" | grep -F \
-              'This draft/prerelease contains unsigned Windows and macOS test artifacts.' >/dev/null
-            printf '%s' "$CANONICAL_BODY" | grep -F \
-              'It is not a production release and is not offered through automatic update.' >/dev/null
-            printf '%s' "$CANONICAL_BODY" | grep -F \
-              'The production update mirror and enterprise server remain on the previously published stable version.' >/dev/null
+            grep -F \
+              'This draft/prerelease contains unsigned Windows and macOS test artifacts.' \
+              "$NOTES_FILE" >/dev/null
+            grep -F \
+              'It is not a production release and is not offered through automatic update.' \
+              "$NOTES_FILE" >/dev/null
+            grep -F \
+              'The production update mirror and enterprise server remain on the previously published stable version.' \
+              "$NOTES_FILE" >/dev/null
           else
-            verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main
             LOCKED_LEGACY_COMMIT="$(jq -er \
               '.legacyMainCommit | select(test("^[0-9a-f]{40}$"))' \
               release-state/creation-intent.json)"
-            LEGACY_TAG_COMMIT="$(GH_TOKEN="$LEGACY_TOKEN" gh api \
-              "repos/${LEGACY_RELEASES_REPO}/commits/${TAG}" --jq '.sha')"
-            if [ "$LEGACY_TAG_COMMIT" != "$LOCKED_LEGACY_COMMIT" ]; then
-              echo "Legacy draft tag does not resolve to the commit locked before draft creation." >&2
-              exit 1
-            fi
+            verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" \
+              "$LOCKED_LEGACY_COMMIT"
+            assert_draft_tag_state "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" \
+              false "$LOCKED_LEGACY_COMMIT"
           fi
 
   cleanup-partial-release-drafts:
@@ -2126,6 +2164,7 @@ jobs:
           LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
           OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
           EXPECTED_PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease && 'true' || 'false' }}
+          CREATION_INTENT_SHA256: ${{ needs.create-release-drafts.outputs.creation_intent_sha256 }}
           PRE_PUBLIC_LATEST_SHA256: ${{ needs.create-release-drafts.outputs.pre_public_latest_sha256 }}
         run: |
           set -euo pipefail
@@ -2133,6 +2172,13 @@ jobs:
           SOURCE_COMMIT="${{ needs.build.outputs.source_commit }}"
           PACKAGE_ID="${{ needs.build.outputs.package_identity }}"
           TAG="${{ needs.build.outputs.tag }}"
+          [[ "$CREATION_INTENT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(sha256sum release-state/creation-intent.json | awk '{print $1}')" = \
+            "$CREATION_INTENT_SHA256"
+          test "$(jq -er '.expected.assetProfile' \
+            release-state/creation-intent.json)" = production
+          test "$(jq -er '.expected.targets.canonical' \
+            release-state/creation-intent.json)" = "$SOURCE_COMMIT"
           mkdir release-assets
           copy_one() {
             local pattern="$1"
@@ -2220,17 +2266,31 @@ jobs:
             local token="$2"
             local expected_target="$3"
             local expected_draft="$4"
+            local release_id
             local release_json
             local actual_body_file
             local expected_release_id
             local latest_json
-            release_json="$(GH_TOKEN="$token" gh api "repos/${repository}/releases/tags/${TAG}")"
+            release_id="$(
+              GH_TOKEN="$token" gh api --paginate --slurp \
+                "repos/${repository}/releases?per_page=100" | \
+                jq -ce --arg tag "$TAG" \
+                  '[.[][] | select(.tag_name == $tag)]
+                   | select(length == 1) | .[0].id
+                   | select(type == "number" and . > 0)'
+            )"
+            release_json="$(GH_TOKEN="$token" gh api \
+              "repos/${repository}/releases/${release_id}")"
             printf '%s' "$release_json" | jq -e \
+              --argjson id "$release_id" \
+              --arg tag "$TAG" \
               --arg target "$expected_target" \
               --arg name "$EXPECTED_NAME" \
               --argjson draft "$expected_draft" \
               --argjson prerelease "$EXPECTED_PRERELEASE" \
-              '.draft == $draft
+              '.id == $id
+               and .tag_name == $tag
+               and .draft == $draft
                and .prerelease == $prerelease
                and .name == $name
                and .target_commitish == $target
@@ -2272,6 +2332,28 @@ jobs:
               exit 1
             fi
           }
+          assert_canonical_prepublication_tag_state() {
+            local expected_preexisting
+            local exact_ref_count
+            local refs_json
+            expected_preexisting="$(jq -er \
+              'if .preexisting.canonical.tag == true then "true"
+               elif .preexisting.canonical.tag == false then "false"
+               else empty end' release-state/creation-intent.json)"
+            refs_json="$(GH_TOKEN="$CANONICAL_TOKEN" gh api \
+              "repos/${RELEASES_REPO}/git/matching-refs/tags/${TAG}")"
+            exact_ref_count="$(printf '%s' "$refs_json" | jq -er \
+              --arg ref "refs/tags/${TAG}" \
+              '[.[] | select(.ref == $ref)] | length')"
+            if [ "$expected_preexisting" = true ]; then
+              [ "$exact_ref_count" -eq 1 ]
+              test "$(GH_TOKEN="$CANONICAL_TOKEN" gh api \
+                "repos/${RELEASES_REPO}/commits/${TAG}" --jq '.sha')" = \
+                "$SOURCE_COMMIT"
+            else
+              [ "$exact_ref_count" -eq 0 ]
+            fi
+          }
           EXTRA_ARGS=(--draft=false)
           if [ "$EXPECTED_PRERELEASE" = "true" ]; then
             EXTRA_ARGS+=(--prerelease)
@@ -2292,12 +2374,7 @@ jobs:
           # canonical GitHub asset URLs, so it never exposes a mirror asset that
           # has not yet been published.
           verify_release "$RELEASES_REPO" "$CANONICAL_TOKEN" "$SOURCE_COMMIT" true
-          RESOLVED_COMMIT="$(GH_TOKEN="$CANONICAL_TOKEN" gh api \
-            "repos/${RELEASES_REPO}/commits/${TAG}" --jq '.sha')"
-          if [ "$RESOLVED_COMMIT" != "$SOURCE_COMMIT" ]; then
-            echo "Canonical tag changed before publication: tag=$RESOLVED_COMMIT source=$SOURCE_COMMIT" >&2
-            exit 1
-          fi
+          assert_canonical_prepublication_tag_state
           GH_TOKEN="$CANONICAL_TOKEN" gh release edit "$TAG" \
             --repo "$RELEASES_REPO" \
             "${EXTRA_ARGS[@]}"
@@ -2440,7 +2517,8 @@ jobs:
             '.legacyMainCommit | select(test("^[0-9a-f]{40}$"))' \
             release-state/creation-intent.json)"
           test "$(jq -er '.expected.assetProfile' release-state/creation-intent.json)" = production
-          test "$(jq -er '.expected.targets.legacy' release-state/creation-intent.json)" = main
+          test "$(jq -er '.expected.targets.legacy' release-state/creation-intent.json)" = \
+            "$LOCKED_LEGACY_COMMIT"
           test "$(jq -er '.expected.tagCommits.legacy' release-state/creation-intent.json)" = \
             "$LOCKED_LEGACY_COMMIT"
 
@@ -2513,13 +2591,24 @@ jobs:
             local token="$2"
             local expected_target="$3"
             local expected_draft="$4"
-            local release_json actual_body_file expected_release_id latest_json
-            release_json="$(GH_TOKEN="$token" gh api "repos/${repository}/releases/tags/${TAG}")"
+            local release_id release_json actual_body_file expected_release_id latest_json
+            release_id="$(
+              GH_TOKEN="$token" gh api --paginate --slurp \
+                "repos/${repository}/releases?per_page=100" | \
+                jq -ce --arg tag "$TAG" \
+                  '[.[][] | select(.tag_name == $tag)]
+                   | select(length == 1) | .[0].id
+                   | select(type == "number" and . > 0)'
+            )"
+            release_json="$(GH_TOKEN="$token" gh api \
+              "repos/${repository}/releases/${release_id}")"
             printf '%s' "$release_json" | jq -e \
+              --argjson id "$release_id" --arg tag "$TAG" \
               --arg target "$expected_target" --arg name "$EXPECTED_NAME" \
               --argjson draft "$expected_draft" \
               --argjson prerelease "$EXPECTED_PRERELEASE" \
-              '.draft == $draft and .prerelease == $prerelease
+              '.id == $id and .tag_name == $tag
+               and .draft == $draft and .prerelease == $prerelease
                and .name == $name and .target_commitish == $target
                and all(.assets[]; .state == "uploaded" and .size > 0)' >/dev/null
             actual_body_file="$(mktemp)"
@@ -2555,6 +2644,16 @@ jobs:
               exit 1
             fi
           }
+          assert_legacy_prepublication_tag_absent() {
+            local exact_ref_count
+            local refs_json
+            refs_json="$(GH_TOKEN="$LEGACY_TOKEN" gh api \
+              "repos/${LEGACY_RELEASES_REPO}/git/matching-refs/tags/${TAG}")"
+            exact_ref_count="$(printf '%s' "$refs_json" | jq -er \
+              --arg ref "refs/tags/${TAG}" \
+              '[.[] | select(.ref == $ref)] | length')"
+            [ "$exact_ref_count" -eq 0 ]
+          }
           verify_public_mirror() {
             curl --noproxy '*' --proto '=https' --tlsv1.2 \
               --fail-with-body --silent --show-error --max-redirs 0 \
@@ -2587,10 +2686,9 @@ jobs:
           test "$(GH_TOKEN="$CANONICAL_TOKEN" gh api \
             "repos/${RELEASES_REPO}/commits/${TAG}" --jq '.sha')" = "$SOURCE_COMMIT"
           verify_public_mirror
-          verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main true
-          test "$(GH_TOKEN="$LEGACY_TOKEN" gh api \
-            "repos/${LEGACY_RELEASES_REPO}/commits/${TAG}" --jq '.sha')" = \
-            "$LOCKED_LEGACY_COMMIT"
+          verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" \
+            "$LOCKED_LEGACY_COMMIT" true
+          assert_legacy_prepublication_tag_absent
 
           EXTRA_ARGS=(--draft=false)
           if [ "$EXPECTED_PRERELEASE" = true ]; then
@@ -2600,7 +2698,8 @@ jobs:
           fi
           GH_TOKEN="$LEGACY_TOKEN" gh release edit "$TAG" \
             --repo "$LEGACY_RELEASES_REPO" "${EXTRA_ARGS[@]}"
-          verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" main false
+          verify_release "$LEGACY_RELEASES_REPO" "$LEGACY_TOKEN" \
+            "$LOCKED_LEGACY_COMMIT" false
           test "$(GH_TOKEN="$LEGACY_TOKEN" gh api \
             "repos/${LEGACY_RELEASES_REPO}/commits/${TAG}" --jq '.sha')" = \
             "$LOCKED_LEGACY_COMMIT"
@@ -2996,8 +3095,17 @@ jobs:
         env:
           CANONICAL_TOKEN: ${{ github.token }}
           LEGACY_TOKEN: ${{ secrets.OTTO_LEGACY_RELEASES_TOKEN }}
+          CREATION_INTENT_SHA256: ${{ needs.create-release-drafts.outputs.creation_intent_sha256 }}
         run: |
           set -euo pipefail
+          [[ "$CREATION_INTENT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(sha256sum release-state/creation-intent.json | awk '{print $1}')" = \
+            "$CREATION_INTENT_SHA256"
+          LOCKED_LEGACY_COMMIT="$(jq -er \
+            '.legacyMainCommit | select(test("^[0-9a-f]{40}$"))' \
+            release-state/creation-intent.json)"
+          test "$(jq -er '.expected.targets.legacy' \
+            release-state/creation-intent.json)" = "$LOCKED_LEGACY_COMMIT"
           node scripts/release-visibility-compensation.mjs \
             compensate \
             --tag "${{ needs.build.outputs.tag }}" \
@@ -3005,7 +3113,7 @@ jobs:
             --legacy-repo "$LEGACY_RELEASES_REPO" \
             --canonical-commit "${{ needs.build.outputs.source_commit }}" \
             --canonical-target "${{ needs.build.outputs.source_commit }}" \
-            --legacy-target main \
+            --legacy-target "$LOCKED_LEGACY_COMMIT" \
             --artifact-dir release-download \
             --package-identity "${{ needs.build.outputs.package_identity }}" \
             --expected-prerelease "${{ github.event_name == 'workflow_dispatch' && inputs.prerelease && 'true' || 'false' }}" \

@@ -312,24 +312,6 @@
   transform: translateY(-2px);
 }
 
-.otto-brand__unread {
-  min-width: 17px;
-  height: 17px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--otto-accent);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  box-shadow: 0 0 7px color-mix(in srgb, var(--otto-accent) 65%, transparent);
-  animation: otto-unread-pulse 2s ease-in-out infinite;
-  flex: 0 0 auto;
-}
-
 .otto-iconbtn {
   margin-left: auto;
   display: inline-flex;
@@ -11185,7 +11167,7 @@ body[data-otto-surface='desktop-pet'] #root {
 }
 
 /* ── 统一未读角标 ── */
-.otto-attention-badge {
+.otto-sidebar__navitem b.otto-attention-badge {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;

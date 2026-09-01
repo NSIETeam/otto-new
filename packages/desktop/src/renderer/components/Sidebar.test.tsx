@@ -162,22 +162,23 @@ describe('Sidebar：布局（工具区已迁右侧面板）', () => {
     }
   });
 
-  it('企业合成会话未读也在 Otto 品牌区保留闪烁点', () => {
-    renderSidebar({ unreadSessions: ['enterprise:message:alice'] });
-
-    expect(screen.getByRole('status', { name: '1 条未读消息' })).toBeTruthy();
-  });
-
-  it('企业私聊未读按消息条数在 Otto 品牌区显示数字', () => {
+  it('未读数只在对应导航入口展示，不在 Otto 品牌标题旁重复展示', () => {
     renderSidebar({
-      unreadSessions: ['enterprise:message:alice', 'park:ticket:repair-1'],
+      onNavigate: vi.fn(),
       enterpriseUnreadCounts: {
         'enterprise:message:alice': 2,
-        'enterprise:message:bob': 1,
       },
     });
 
-    expect(screen.getByRole('status', { name: '4 条未读消息' }).textContent).toBe('4');
+    expect(document.querySelector('.otto-brand__unread')).toBeNull();
+    expect(screen.getByRole('status', { name: '2 条未读' }).textContent).toBe('2');
+  });
+
+  it('我的消息未读徽标使用不会被导航通用样式覆盖的红色规则', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles/app.css'), 'utf8');
+    expect(css).toMatch(
+      /\.otto-sidebar__navitem b\.otto-attention-badge\s*\{[^}]*background:\s*#ef4444;/s,
+    );
   });
 
   it('设置从主导航迁移到账户区右侧，并保留原设置入口行为', () => {

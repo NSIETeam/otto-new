@@ -213,17 +213,6 @@ export function Sidebar({
       (session) => session.sessionId === activeSessionId,
     ))?.key
     : undefined;
-  const enterpriseUnreadTotal = Object.values(enterpriseUnreadCounts)
-    .reduce((total, count) => total + count, 0);
-  const countedEnterpriseSessions = new Set(
-    Object.entries(enterpriseUnreadCounts)
-      .filter(([, count]) => count > 0)
-      .map(([sessionId]) => sessionId),
-  );
-  const unreadSessionRemainder = unreadSessions
-    ?.filter((sessionId) => !countedEnterpriseSessions.has(sessionId)).length ?? 0;
-  const unreadCount = enterpriseUnreadTotal + unreadSessionRemainder;
-
   const revealWorkspaceScrollbar = (): void => {
     setWorkspaceScrollbarActive(true);
     if (workspaceScrollbarHideTimerRef.current !== null) {
@@ -391,16 +380,6 @@ export function Sidebar({
 
       <div className="otto-sidebar__brandrow">
         <span className="otto-brand">Otto</span>
-        {unreadCount > 0 ? (
-          <span
-            className="otto-brand__unread"
-            role="status"
-            aria-label={`${unreadCount} 条未读消息`}
-            title={`${unreadCount} 条未读消息`}
-          >
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
-        ) : null}
       </div>
 
       {/* 主导航：企业管理员额外显示企业管理；设置仍位于底部账户区。 */}

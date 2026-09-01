@@ -727,7 +727,7 @@ export function ModuleWorkspace({
       <ConfirmDialog
         open={confirmState?.kind === 'delete-group'}
         title="删除功能组"
-        message="删除后，组内模块会自动移到相邻功能组，模块和专家数据不会被删除。"
+        message="删除后，组内模块会一并从当前工作台移除，不会移到其他功能组。官方模块和专家仍可从模块市场重新添加。"
         confirmText="确认删除"
         onConfirm={() => {
           if (confirmState?.kind !== 'delete-group') return;

@@ -5,11 +5,10 @@
 /**
  * 我的消息（导航一级入口）。
  *
- * 企业收件箱：展示所有企业成员的对话列表、未读状态、
- * 点击进入私聊。数据源为 enterpriseMessagesUnread / enterpriseMessagesList IPC。
- * 同时展示由当前申请人发起的七类园区服务工单，客服的受理、
- * 回复、转交和办结都作为可持久回看的办理时间线。园区公告和满意度
- * 调查是发布型内容，仍由园区服务模块展示，不伪装成一对一客服会话。
+ * 企业私信、跨服务器联系人和当前申请人发起的七类园区服务工单使用
+ * 同一份会话目录，按最后动态时间混排并共享未读筛选。客服的受理、
+ * 回复、转交和办结作为可持久回看的办理时间线。园区公告和满意度调查
+ * 是发布型内容，仍由园区服务模块展示，不伪装成一对一客服会话。
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -204,6 +203,29 @@ export interface ConversationItem {
   unreadCount: number;
   online: boolean;
 }
+
+type UnifiedInboxConversation =
+  | {
+      key: string;
+      kind: 'direct';
+      timestamp: number;
+      unreadCount: number;
+      conversation: ConversationItem;
+    }
+  | {
+      key: string;
+      kind: 'federation';
+      timestamp: number;
+      unreadCount: number;
+      contact: EnterpriseFederationContact;
+    }
+  | {
+      key: string;
+      kind: 'park';
+      timestamp: number;
+      unreadCount: number;
+      ticket: EnterpriseRepairTicket;
+    };
 
 export function InboxPage({
   enterpriseAccount,
@@ -426,39 +448,51 @@ export function InboxPage({
     });
   }, [notifications, orgMembers, enterpriseUnreadCounts, historyPeers]);
 
-  // —— 过滤 ——
-  const filtered = useMemo(() => {
-    if (filter === 'unread') return conversations.filter((c) => c.unreadCount > 0);
-    if (filter === 'handled') return conversations.filter((c) => c.unreadCount === 0);
-    return conversations;
-  }, [conversations, filter]);
+  // 企业私信、跨服务器联系人和园区工单共用一份会话目录，严格按最后动态时间混排。
+  const unifiedConversations = useMemo<UnifiedInboxConversation[]>(() => [
+    ...conversations.map((conversation): UnifiedInboxConversation => ({
+      key: `direct:${conversation.peerAccountId}`,
+      kind: 'direct',
+      timestamp: inboxTimestamp(conversation.lastMessageAt),
+      unreadCount: conversation.unreadCount,
+      conversation,
+    })),
+    ...federationContacts.map((contact): UnifiedInboxConversation => ({
+      key: `federation:${contact.id}`,
+      kind: 'federation',
+      timestamp: inboxTimestamp(contact.lastMessageAt || contact.updatedAt || contact.createdAt),
+      unreadCount: contact.unreadCount,
+      contact,
+    })),
+    ...parkTickets.map((ticket): UnifiedInboxConversation => ({
+      key: `park:${ticket.id}`,
+      kind: 'park',
+      timestamp: ticketLatestTimestamp(ticket),
+      unreadCount: isCreatorUpdateUnread(ticket) ? 1 : 0,
+      ticket,
+    })),
+  ].sort((a, b) => {
+    if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
+    if (a.unreadCount !== b.unreadCount) return b.unreadCount - a.unreadCount;
+    return a.key.localeCompare(b.key);
+  }), [conversations, federationContacts, parkTickets]);
 
-  const filteredFederationContacts = useMemo(() => {
+  const filteredConversations = useMemo(() => {
     if (filter === 'unread') {
-      return federationContacts.filter((contact) => contact.unreadCount > 0);
+      return unifiedConversations.filter((item) => item.unreadCount > 0);
     }
     if (filter === 'handled') {
-      return federationContacts.filter((contact) => contact.unreadCount === 0);
+      return unifiedConversations.filter((item) => item.unreadCount === 0);
     }
-    return federationContacts;
-  }, [federationContacts, filter]);
-
-  const filteredParkTickets = useMemo(() => {
-    if (filter === 'unread') return parkTickets.filter(isCreatorUpdateUnread);
-    if (filter === 'handled') return parkTickets.filter((ticket) => !isCreatorUpdateUnread(ticket));
-    return parkTickets;
-  }, [filter, parkTickets]);
+    return unifiedConversations;
+  }, [filter, unifiedConversations]);
 
   const totalUnread = useMemo(
-    () => conversations.reduce((sum, c) => sum + c.unreadCount, 0) +
-      federationContacts.reduce((sum, contact) => sum + contact.unreadCount, 0) +
-      parkTickets.filter(isCreatorUpdateUnread).length,
-    [conversations, federationContacts, parkTickets],
+    () => unifiedConversations.reduce((sum, item) => sum + item.unreadCount, 0),
+    [unifiedConversations],
   );
-  const totalConversationCount = conversations.length + federationContacts.length + parkTickets.length;
-  const unreadConversationCount = conversations.filter((item) => item.unreadCount > 0).length
-    + federationContacts.filter((item) => item.unreadCount > 0).length
-    + parkTickets.filter(isCreatorUpdateUnread).length;
+  const totalConversationCount = unifiedConversations.length;
+  const unreadConversationCount = unifiedConversations.filter((item) => item.unreadCount > 0).length;
   const readConversationCount = totalConversationCount - unreadConversationCount;
 
   // —— 加载选中会话的消息，并标记该 peer 已读 ——
@@ -1029,52 +1063,8 @@ export function InboxPage({
           {!canUseBaselineMessages && !canUseFederationMessages ? (
             <div className="otto-inbox-page__capability-note" role="status">
               <span>企业私聊未启用或当前服务器未授权，不会请求企业消息数据。</span>
-              {effectiveParkService ? <span>园区客服会话仍会独立加载。</span> : null}
+              {effectiveParkService ? <span>园区服务会话仍会正常加载。</span> : null}
             </div>
-          ) : null}
-          {filteredParkTickets.length > 0 ? (
-            <>
-              <div className="otto-inbox-page__section-label">园区客服</div>
-              {filteredParkTickets.map((ticket) => {
-                const serviceName = PARK_REQUEST_SERVICE_NAMES.get(ticket.serviceId)
-                  || ticket.serviceId;
-                const unread = isCreatorUpdateUnread(ticket);
-                return (
-                  <button
-                    key={ticket.id}
-                    type="button"
-                    role="listitem"
-                    aria-label={`${serviceName}客服，申请编号 ${ticketApplicationNumber(ticket)}，${unread ? '1' : '0'} 条未读`}
-                    className={`otto-inbox-page__conv${selectedParkTicketId === ticket.id ? ' is-selected' : ''}`}
-                    onClick={() => {
-                      setSelectedPeer(null);
-                      setSelectedFederationContactId(null);
-                      setSelectedParkTicketId(ticket.id);
-                      setReplyInput('');
-                    }}
-                  >
-                    <span className="otto-inbox-page__conv-avatar otto-inbox-page__conv-avatar--park" aria-hidden>
-                      园
-                    </span>
-                    <span className="otto-inbox-page__conv-body">
-                      <strong>{serviceName}客服</strong>
-                      <span className="otto-inbox-page__conv-meta">
-                        {ticketApplicationNumber(ticket)} · {ticket.status}
-                      </span>
-                      <span className="otto-inbox-page__conv-preview">{ticketPreview(ticket)}</span>
-                    </span>
-                    <span className="otto-inbox-page__conv-side">
-                      <time className="otto-inbox-page__conv-time">
-                        {formatInboxTimestamp(ticketLatestAt(ticket))}
-                      </time>
-                      {unread ? (
-                        <span className="otto-inbox-page__unread" role="status">1</span>
-                      ) : null}
-                    </span>
-                  </button>
-                );
-              })}
-            </>
           ) : null}
           {canUseFederationMessages ? <div className="otto-inbox-page__federation-actions">
             <button
@@ -1118,15 +1108,61 @@ export function InboxPage({
           {canUseFederationMessages && federationError && !selectedFederationContactId ? (
             <div className="otto-inbox-page__error" role="alert">{federationError}</div>
           ) : null}
-          {filteredFederationContacts.length > 0 ? (
-            <>
-              <div className="otto-inbox-page__section-label">跨服务器</div>
-              {filteredFederationContacts.map((contact) => (
+          {loading && totalConversationCount === 0 ? (
+            <div className="otto-inbox-page__empty">正在加载消息…</div>
+          ) : filteredConversations.length === 0 ? (
+            <div className="otto-inbox-page__empty">
+              {filter === 'unread' ? '没有未读消息' : filter === 'handled' ? '没有已读消息' : '暂无消息'}
+            </div>
+          ) : filteredConversations.map((item) => {
+            if (item.kind === 'park') {
+              const { ticket } = item;
+              const serviceName = PARK_REQUEST_SERVICE_NAMES.get(ticket.serviceId)
+                || ticket.serviceId;
+              return (
                 <button
-                  key={contact.id}
+                  key={item.key}
                   type="button"
                   role="listitem"
-                  aria-label={`${contact.displayName}，跨服务器联系人，${contact.unreadCount} 条未读`}
+                  aria-label={`${serviceName}客服，申请编号 ${ticketApplicationNumber(ticket)}，${item.unreadCount} 条未读`}
+                  className={`otto-inbox-page__conv${selectedParkTicketId === ticket.id ? ' is-selected' : ''}`}
+                  onClick={() => {
+                    setSelectedPeer(null);
+                    setSelectedFederationContactId(null);
+                    setSelectedParkTicketId(ticket.id);
+                    setReplyInput('');
+                  }}
+                >
+                  <span className="otto-inbox-page__conv-avatar otto-inbox-page__conv-avatar--park" aria-hidden>
+                    园
+                  </span>
+                  <span className="otto-inbox-page__conv-body">
+                    <strong>{serviceName}客服</strong>
+                    <span className="otto-inbox-page__conv-meta">
+                      园区服务 · {ticketApplicationNumber(ticket)} · {ticket.status}
+                    </span>
+                    <span className="otto-inbox-page__conv-preview">{ticketPreview(ticket)}</span>
+                  </span>
+                  <span className="otto-inbox-page__conv-side">
+                    <time className="otto-inbox-page__conv-time">
+                      {formatInboxTimestamp(ticketLatestAt(ticket))}
+                    </time>
+                    {item.unreadCount > 0 ? (
+                      <span className="otto-inbox-page__unread" role="status">{item.unreadCount}</span>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            }
+
+            if (item.kind === 'federation') {
+              const { contact } = item;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="listitem"
+                  aria-label={`${contact.displayName}，跨服务器联系人，${item.unreadCount} 条未读`}
                   className={`otto-inbox-page__conv${selectedFederationContactId === contact.id ? ' is-selected' : ''}`}
                   onClick={() => {
                     setSelectedPeer(null);
@@ -1146,55 +1182,60 @@ export function InboxPage({
                     </span>
                   </span>
                   <span className="otto-inbox-page__conv-side">
-                    {contact.unreadCount > 0 ? (
-                      <span className="otto-inbox-page__unread" role="status">{contact.unreadCount}</span>
+                    {contact.lastMessageAt ? (
+                      <time className="otto-inbox-page__conv-time">
+                        {formatInboxTimestamp(contact.lastMessageAt)}
+                      </time>
+                    ) : null}
+                    {item.unreadCount > 0 ? (
+                      <span className="otto-inbox-page__unread" role="status">{item.unreadCount}</span>
                     ) : null}
                   </span>
                 </button>
-              ))}
-            </>
-          ) : null}
-          {filtered.length > 0 ? <div className="otto-inbox-page__section-label">本企业</div> : null}
-          {loading && totalConversationCount === 0 ? (
-            <div className="otto-inbox-page__empty">正在加载消息…</div>
-          ) : filtered.length === 0 && filteredFederationContacts.length === 0 && filteredParkTickets.length === 0 ? (
-            <div className="otto-inbox-page__empty">
-              {filter === 'unread' ? '没有未读消息' : filter === 'handled' ? '没有已读消息' : '暂无消息'}
-            </div>
-          ) : filtered.map((conv) => (
-            <button
-              key={conv.peerAccountId}
-              type="button"
-              role="listitem"
-              aria-label={`${conv.peerName}，本企业联系人，${conv.unreadCount} 条未读`}
-              className={`otto-inbox-page__conv${selectedPeer === conv.peerAccountId ? ' is-selected' : ''}`}
-              onClick={() => {
-                setSelectedFederationContactId(null);
-                setSelectedParkTicketId(null);
-                setSelectedPeer(conv.peerAccountId);
-                setReplyInput('');
-              }}
-            >
-              <span className="otto-inbox-page__conv-avatar" aria-hidden>
-                {conv.peerName.slice(0, 1)}
-              </span>
-              <span className="otto-inbox-page__conv-body">
-                <strong>{conv.peerName}</strong>
-                <span className="otto-inbox-page__conv-meta">
-                  {conv.peerDepartment || ''}{conv.peerPositionTitle ? ` · ${conv.peerPositionTitle}` : ''}
+              );
+            }
+
+            const { conversation: conv } = item;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                role="listitem"
+                aria-label={`${conv.peerName}，本企业联系人，${item.unreadCount} 条未读`}
+                className={`otto-inbox-page__conv${selectedPeer === conv.peerAccountId ? ' is-selected' : ''}`}
+                onClick={() => {
+                  setSelectedFederationContactId(null);
+                  setSelectedParkTicketId(null);
+                  setSelectedPeer(conv.peerAccountId);
+                  setReplyInput('');
+                }}
+              >
+                <span className="otto-inbox-page__conv-avatar" aria-hidden>
+                  {conv.peerName.slice(0, 1)}
                 </span>
-                {conv.lastMessage ? (
-                  <span className="otto-inbox-page__conv-preview">{conv.lastMessage}</span>
-                ) : null}
-              </span>
-              <span className="otto-inbox-page__conv-side">
-                {conv.online ? <span className="otto-inbox-page__online" aria-label="在线" /> : null}
-                {conv.unreadCount > 0 ? (
-                  <span className="otto-inbox-page__unread" role="status">{conv.unreadCount}</span>
-                ) : null}
-              </span>
-            </button>
-          ))}
+                <span className="otto-inbox-page__conv-body">
+                  <strong>{conv.peerName}</strong>
+                  <span className="otto-inbox-page__conv-meta">
+                    {conv.peerDepartment || ''}{conv.peerPositionTitle ? ` · ${conv.peerPositionTitle}` : ''}
+                  </span>
+                  {conv.lastMessage ? (
+                    <span className="otto-inbox-page__conv-preview">{conv.lastMessage}</span>
+                  ) : null}
+                </span>
+                <span className="otto-inbox-page__conv-side">
+                  {conv.lastMessageAt ? (
+                    <time className="otto-inbox-page__conv-time">
+                      {formatInboxTimestamp(conv.lastMessageAt)}
+                    </time>
+                  ) : null}
+                  {conv.online ? <span className="otto-inbox-page__online" aria-label="在线" /> : null}
+                  {item.unreadCount > 0 ? (
+                    <span className="otto-inbox-page__unread" role="status">{item.unreadCount}</span>
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {/* 右：消息详情 */}

@@ -11874,12 +11874,6 @@ body[data-otto-surface='desktop-pet'] #root {
   opacity: 0.5;
   cursor: default;
 }
-.otto-inbox-page__section-label {
-  padding: 9px 8px 5px;
-  color: var(--otto-text-tertiary);
-  font-size: 10px;
-  font-weight: 700;
-}
 .otto-inbox-page__conv {
   width: 100%;
   display: flex;

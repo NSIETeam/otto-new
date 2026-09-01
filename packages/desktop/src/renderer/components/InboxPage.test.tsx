@@ -551,13 +551,83 @@ describe('InboxPage response hardening', () => {
       />,
     );
 
-    await screen.findByText('园区客服');
+    await screen.findByRole('listitem', { name: /装修管理客服/u });
     const conversations = screen.getAllByRole('listitem');
     expect(conversations).toHaveLength(7);
+    expect(screen.queryByText('园区客服')).toBeNull();
     expect(screen.getByRole('listitem', { name: /装修管理客服/u })).toBeTruthy();
     expect(screen.getByRole('listitem', { name: /车辆与访客客服/u })).toBeTruthy();
     expect(screen.queryByRole('listitem', { name: /公告/u })).toBeNull();
     expect(screen.queryByRole('listitem', { name: /满意度/u })).toBeNull();
     expect(screen.queryByRole('listitem', { name: /HC-STAFF/u })).toBeNull();
+  });
+
+  it('将园区工单、企业私信和跨服务器联系人按最后动态时间混排', async () => {
+    const peer = {
+      id: 'member-2',
+      username: 'member-2',
+      name: '同事二',
+      role: '成员',
+      department: '研发部',
+      positionId: null,
+      positionTitle: '工程师',
+      isAdmin: false,
+      status: 'active' as const,
+    };
+    const contact: EnterpriseFederationContact = {
+      id: 'contact-remote',
+      identity: 'deployment-b:remote-account',
+      remoteDeploymentId: 'deployment-b',
+      remotePrincipalId: 'remote-account',
+      displayName: '远程同事',
+      deploymentDisplayName: '北京私有部署',
+      createdAt: '2026-09-01T03:00:00.000Z',
+      updatedAt: '2026-09-01T03:00:00.000Z',
+      lastMessageAt: '2026-09-01T04:00:00.000Z',
+      unreadCount: 0,
+      trustState: 'verified',
+      keyFingerprint: 'b'.repeat(64),
+    };
+    const bridge = window.otto as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    bridge.enterpriseMessagesUnread.mockResolvedValue([{
+      id: 'message-1',
+      source: 'enterprise',
+      title: '同事二发来消息',
+      senderAccountId: peer.id,
+      senderName: peer.name,
+      preview: '这是最新的普通消息',
+      createdAt: '2026-09-01T06:00:00.000Z',
+    }]);
+    bridge.enterpriseOrganizationView.mockResolvedValue({ members: [peer] });
+    bridge.enterpriseFederationContacts.mockResolvedValue([contact]);
+    bridge.enterpriseTicketList.mockResolvedValue([parkTicket({
+      history: [],
+      responseAt: '2026-09-01 05:00:00',
+      updatedAt: '2026-09-01 05:00:00',
+      creatorUpdateAt: '2026-09-01 05:00:00',
+    })]);
+
+    render(
+      <InboxPage
+        enterpriseAccount={account}
+        effectiveDirectMessages
+        effectiveParkService
+        enterpriseUnreadCounts={{ 'enterprise:message:member-2': 2 }}
+        onBack={() => undefined}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(3));
+    const labels = screen.getAllByRole('listitem').map((item) => item.getAttribute('aria-label'));
+    expect(labels[0]).toContain('同事二');
+    expect(labels[1]).toContain('物业报修客服');
+    expect(labels[2]).toContain('远程同事');
+    expect(screen.queryByText('园区客服')).toBeNull();
+    expect(screen.queryByText('跨服务器')).toBeNull();
+    expect(screen.queryByText('本企业')).toBeNull();
+    expect(screen.getByText(/园区服务 · HC-20260901-0001 · 维修中/u)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('tab', { name: '未读 2' }));
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
   });
 });

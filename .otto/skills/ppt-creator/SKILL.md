@@ -2,6 +2,26 @@
 name: ppt-creator
 version: 10
 description: 直接使用 Ultimate PPT Master v6.1 作为 PPT 生成引擎。AI 手写 SVG → svg_to_pptx.py → 原生可编辑 .pptx。
+runtimeDependencies:
+  - id: git
+    kind: command
+    purpose: 首次取得用户指定的 Ultimate PPT Master 源码
+    source: https://git-scm.com/
+    installScope: system
+    installCommands:
+      win32: winget install --id Git.Git --exact
+      darwin: brew install git
+      linux: sudo apt-get install git
+  - id: python
+    kind: command
+    minimumVersion: "3.10"
+    purpose: 运行 SVG 检查、后处理和 PPTX 导出脚本
+    source: https://www.python.org/downloads/
+    installScope: system
+    installCommands:
+      win32: winget install --id Python.Python.3.12 --exact
+      darwin: brew install python@3.12
+      linux: sudo apt-get install python3 python3-pip python3-venv
 ---
 
 # 🎬 Otto PPT — Ultimate PPT Master 引擎
@@ -12,6 +32,8 @@ description: 直接使用 Ultimate PPT Master v6.1 作为 PPT 生成引擎。AI 
 
 ## 🔧 首次使用（一次性）
 
+先只读检查仓库、Python 和依赖是否已经存在。若缺少任何一项，必须先调用 `ask_user_question`，说明将从哪个官方地址下载、安装到哪里、用途和准确命令；只有用户明确同意后才能执行下面的克隆或安装。使用 PPT Skill 本身不等于授权下载依赖。
+
 ```bash
 # 克隆 PPT Master 仓库
 git clone https://github.com/kdnsna/ultimate-ppt-master-skill.git ~/.otto-ppt-master
@@ -20,7 +42,7 @@ git clone https://github.com/kdnsna/ultimate-ppt-master-skill.git ~/.otto-ppt-ma
 cd ~/.otto-ppt-master && pip install -r requirements.txt
 ```
 
-如果已克隆过，先更新：
+如果已克隆过，更新仓库同样属于联网变更；先询问用户是否更新，再执行：
 
 ```bash
 cd ~/.otto-ppt-master && git pull --ff-only

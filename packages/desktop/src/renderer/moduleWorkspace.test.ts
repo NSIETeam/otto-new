@@ -276,18 +276,16 @@ describe('module workspace layout operations', () => {
     expect(next.groups[1].moduleIds).toEqual(['agent-word']);
   });
 
-  it('protects the last group and migrates deleted group modules to the nearest group', () => {
+  it('protects the last group and removes deleted group modules from the workspace', () => {
     const oneGroup = { version: 1 as const, groups: [sampleLayout().groups[0]] };
     expect(deleteModuleGroup(oneGroup, 'park-services')).toEqual(oneGroup);
 
     const next = deleteModuleGroup(sampleLayout(), 'park-services');
     expect(next.groups.map((group) => group.id)).toEqual(['daily-office']);
-    expect(next.groups[0].moduleIds).toEqual([
-      'agent-ppt',
-      'agent-word',
+    expect(next.groups[0].moduleIds).toEqual(['agent-ppt', 'agent-word']);
+    expect(next.groups.flatMap((group) => group.moduleIds)).not.toContain(
       'park-announcement',
-      'park-satisfaction',
-    ]);
+    );
   });
 
   it('renames, updates row count, and reorders groups and modules', () => {

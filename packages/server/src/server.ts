@@ -293,6 +293,16 @@ function publicAutoSkillCandidate(
     knowledgeEvidenceCount: candidate.knowledgeEvidence?.length,
     recommendation: candidate.recommendation,
     targetSkillName: candidate.targetSkillName,
+    source: candidate.source,
+    draft: candidate.draft ? {
+      packageRelativePath: candidate.draft.packageRelativePath,
+      validationPassed: candidate.draft.validationPassed,
+      validationErrors: candidate.draft.validationErrors,
+      validationWarnings: candidate.draft.validationWarnings,
+      packageReady: candidate.draft.packageReady,
+      tests: candidate.draft.tests,
+      risk: candidate.draft.risk,
+    } : undefined,
   };
 }
 

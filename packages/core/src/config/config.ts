@@ -41,6 +41,8 @@ import { WorkflowTool } from '../tools/workflow.js';
 import { UseSkillTool } from '../tools/use-skill.js';
 import { ListSkillsTool } from '../tools/list-skills.js';
 import { GetSkillDetailsTool } from '../tools/get-skill-details.js';
+import { ValidateSkillDraftTool } from '../tools/validate-skill-draft.js';
+import { CreateSkillDraftTool } from '../tools/create-skill-draft.js';
 // Old LSP tools imports removed
 
 import { CodeSearchTool } from '../tools/codesearch.js';
@@ -1410,6 +1412,8 @@ export class Config {
     registerCoreTool(UseSkillTool, this);
     registerCoreTool(ListSkillsTool, this);
     registerCoreTool(GetSkillDetailsTool, this);
+    registerCoreTool(ValidateSkillDraftTool, this);
+    registerCoreTool(CreateSkillDraftTool, this);
 
     // Old individual LSP tools registration removed in favor of unified LspTool
 

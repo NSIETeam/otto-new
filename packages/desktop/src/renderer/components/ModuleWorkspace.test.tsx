@@ -482,6 +482,8 @@ describe('ModuleWorkspace', () => {
     expect(screen.getByRole('dialog', { name: '删除功能组' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
     expect(screen.queryByRole('heading', { name: '园区服务' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '打开 园区公告' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '打开 满意度调查' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '撤销删除' }));
     expect(screen.getByRole('heading', { name: '园区服务' })).toBeTruthy();
   });

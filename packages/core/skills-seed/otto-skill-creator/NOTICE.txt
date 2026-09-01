@@ -1,0 +1,11 @@
+Otto Skill Creator
+Copyright 2026 NSIETeam and Otto contributors.
+
+This work is based on Anthropic's "skill-creator" from
+https://github.com/anthropics/skills/tree/main/skills/skill-creator,
+Copyright 2026 Anthropic, PBC, licensed under the Apache License 2.0.
+
+The work has been substantially modified for Otto, including Otto-specific
+skill scopes, discovery and installation behavior, confirmation and audit
+boundaries, offline validation, sensitive-file checks, update rollback, and
+cross-platform instructions. Anthropic does not endorse or sponsor Otto.

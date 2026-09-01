@@ -215,8 +215,8 @@ export function computeAttentionSummary(params: {
 
 /**
  * 计算导航角标所需的精简计数：
- * - inboxUnread：我的消息（企业私信 + A2A）
- * - workUnread：我的工作（园区工单）
+ * - inboxUnread：我的消息（企业私信 + A2A + 申请人收到的客服更新）
+ * - workUnread：我的工作（工作人员待办的园区工单）
  * - globalUnread：全局未读总数
  */
 export function computeNavBadgeCounts(
@@ -224,13 +224,12 @@ export function computeNavBadgeCounts(
   parkTicketSummary?: ParkTicketUnreadSummary | null,
   unreadSessions?: string[],
 ): { inboxUnread: number; workUnread: number; globalUnread: number } {
-  const inboxUnread = Object.entries(enterpriseUnreadCounts ?? {})
+  const enterpriseInboxUnread = Object.entries(enterpriseUnreadCounts ?? {})
     .filter(([key, count]) => isEnterpriseInboxSession(key) && count > 0)
     .reduce((sum, [, count]) => sum + count, 0);
 
-  const workUnread = parkTicketSummary
-    ? parkTicketSummary.actionableCount + parkTicketSummary.creatorUpdateCount
-    : 0;
+  const inboxUnread = enterpriseInboxUnread + (parkTicketSummary?.creatorUpdateCount ?? 0);
+  const workUnread = parkTicketSummary?.actionableCount ?? 0;
 
   const enterpriseSessionIds = new Set(
     Object.keys(enterpriseUnreadCounts ?? {}),

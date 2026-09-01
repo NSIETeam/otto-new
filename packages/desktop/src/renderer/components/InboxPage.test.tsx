@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   EnterpriseAccount,
   EnterpriseFederationContact,
+  EnterpriseRepairTicket,
   EnterpriseUnreadMessageNotification,
 } from '../../preload/index.js';
 import { InboxPage } from './InboxPage.js';
@@ -29,6 +30,62 @@ const account: EnterpriseAccount = {
   createdAt: '2026-08-05T00:00:00.000Z',
   updatedAt: '2026-08-05T00:00:00.000Z',
 };
+
+function parkTicket(
+  overrides: Partial<EnterpriseRepairTicket> = {},
+): EnterpriseRepairTicket {
+  return {
+    id: 'park-ticket-1',
+    applicationNumber: 'HC-20260901-0001',
+    serviceId: 'repair',
+    title: '会议室照明故障',
+    description: '三层 301 会议室照明无法打开',
+    formData: {},
+    targetTags: [],
+    status: '维修中',
+    category: '电气',
+    location: '3F-301',
+    urgency: '普通',
+    contact: '测试成员',
+    contactPhone: null,
+    responseType: '办理进展',
+    responseText: '工程人员已到场，正在更换灯具。',
+    responseAt: '2026-09-01 04:32:00',
+    createdAt: '2026-09-01 04:00:00',
+    updatedAt: '2026-09-01 04:32:00',
+    creator: { id: account.id, name: account.name, username: account.username },
+    recipientCount: 1,
+    recipients: [{ id: 'staff-1', name: '园区客服小张' }],
+    creatorUpdateAt: '2026-09-01 04:32:00',
+    creatorUpdateReadAt: null,
+    isCreator: true,
+    isRecipient: false,
+    history: [
+      {
+        id: 'history-created',
+        action: 'created',
+        statusBefore: null,
+        statusAfter: '待派单',
+        responseType: null,
+        responseText: null,
+        createdAt: '2026-09-01 04:00:00',
+        actor: { id: account.id, name: account.name },
+      },
+      {
+        id: 'history-response',
+        action: 'respond',
+        statusBefore: '维修中',
+        statusAfter: '维修中',
+        responseType: '办理进展',
+        responseText: '工程人员已到场，正在更换灯具。',
+        createdAt: '2026-09-01 04:32:00',
+        actor: { id: 'staff-1', name: '园区客服小张' },
+      },
+    ],
+    notifications: [],
+    ...overrides,
+  };
+}
 
 beforeEach(() => {
   (window as unknown as { otto: unknown }).otto = {
@@ -65,6 +122,9 @@ beforeEach(() => {
       size: 1024,
       path: 'D:\\Downloads\\evidence.pdf',
     })),
+    enterpriseTicketList: vi.fn(async () => []),
+    enterpriseTicketRead: vi.fn(async () => parkTicket()),
+    enterpriseTicketAction: vi.fn(async () => parkTicket()),
   };
 });
 
@@ -272,6 +332,7 @@ describe('InboxPage response hardening', () => {
     expect(bridge.enterpriseOrganizationView).not.toHaveBeenCalled();
     expect(bridge.enterpriseFederationContacts).not.toHaveBeenCalled();
     expect(bridge.enterpriseFederationMessagesList).not.toHaveBeenCalled();
+    expect(bridge.enterpriseTicketList).not.toHaveBeenCalled();
   });
 
   it('keeps local baseline messaging without probing unentitled Federation', async () => {
@@ -347,5 +408,156 @@ describe('InboxPage response hardening', () => {
       target: { value: '请让对方 Otto 回答' },
     });
     expect(bridge.enterpriseFederationMessageSend).not.toHaveBeenCalled();
+  });
+
+  it('将客服办理回复作为持久会话展示，读完退出后仍然存在', async () => {
+    let persistedTicket = parkTicket();
+    const bridge = window.otto as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    bridge.enterpriseTicketList.mockImplementation(async () => [persistedTicket]);
+    bridge.enterpriseTicketRead.mockImplementation(async () => {
+      persistedTicket = {
+        ...persistedTicket,
+        creatorUpdateReadAt: persistedTicket.creatorUpdateAt,
+      };
+      return persistedTicket;
+    });
+    const onParkTicketRead = vi.fn();
+
+    const firstView = render(
+      <InboxPage
+        enterpriseAccount={account}
+        effectiveDirectMessages={false}
+        effectiveParkService
+        onParkTicketRead={onParkTicketRead}
+        onBack={() => undefined}
+      />,
+    );
+
+    const unreadConversation = await screen.findByRole('listitem', {
+      name: /物业报修客服，申请编号 HC-20260901-0001，1 条未读/u,
+    });
+    fireEvent.click(unreadConversation);
+
+    expect(await screen.findByText('工程人员已到场，正在更换灯具。')).toBeTruthy();
+    expect(screen.getByText(/客服的办理回复会自动同步/u)).toBeTruthy();
+    await waitFor(() => {
+      expect(bridge.enterpriseTicketRead).toHaveBeenCalledWith('park-ticket-1');
+      expect(onParkTicketRead).toHaveBeenCalledWith('park-ticket-1');
+      expect(screen.getByRole('listitem', {
+        name: /物业报修客服，申请编号 HC-20260901-0001，0 条未读/u,
+      })).toBeTruthy();
+    });
+
+    firstView.unmount();
+    render(
+      <InboxPage
+        enterpriseAccount={account}
+        effectiveDirectMessages={false}
+        effectiveParkService
+        onBack={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByRole('listitem', {
+      name: /物业报修客服，申请编号 HC-20260901-0001，0 条未读/u,
+    })).toBeTruthy();
+    expect(bridge.enterpriseTicketList).toHaveBeenCalledTimes(2);
+  });
+
+  it('申请进入待验收后可以在客服会话中确认办理完成', async () => {
+    const awaitingAcceptance = parkTicket({
+      status: '待验收',
+      creatorUpdateReadAt: '2026-09-01 04:32:00',
+    });
+    const completed = parkTicket({
+      ...awaitingAcceptance,
+      status: '已完成',
+      history: [
+        ...(awaitingAcceptance.history ?? []),
+        {
+          id: 'history-confirm',
+          action: 'confirm',
+          statusBefore: '待验收',
+          statusAfter: '已完成',
+          responseType: null,
+          responseText: null,
+          createdAt: '2026-09-01 04:40:00',
+          actor: { id: account.id, name: account.name },
+        },
+      ],
+    });
+    const bridge = window.otto as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    bridge.enterpriseTicketList.mockResolvedValue([awaitingAcceptance]);
+    bridge.enterpriseTicketAction.mockResolvedValue(completed);
+
+    render(
+      <InboxPage
+        enterpriseAccount={account}
+        effectiveDirectMessages={false}
+        effectiveParkService
+        onBack={() => undefined}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('listitem', { name: /物业报修客服/u }));
+    fireEvent.click(await screen.findByRole('button', { name: '确认办理完成' }));
+    await waitFor(() => {
+      expect(bridge.enterpriseTicketAction).toHaveBeenCalledWith(
+        'park-ticket-1',
+        { action: 'confirm' },
+      );
+      expect(screen.getByText('你已确认验收')).toBeTruthy();
+    });
+    expect(screen.queryByRole('button', { name: '确认办理完成' })).toBeNull();
+  });
+
+  it('只把七类可办理园区服务收进客服会话，不混入公告、问卷或工作人员待办', async () => {
+    const serviceIds = [
+      'renovation',
+      'parking',
+      'network-phone',
+      'meeting-room',
+      'electric-card',
+      'repair',
+      'vehicle-visit',
+      'announcement',
+      'satisfaction',
+    ];
+    const bridge = window.otto as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    bridge.enterpriseTicketList.mockResolvedValue([
+      ...serviceIds.map((serviceId, index) => parkTicket({
+        id: `ticket-${serviceId}`,
+        applicationNumber: `HC-${index}`,
+        serviceId,
+        creatorUpdateAt: null,
+        creatorUpdateReadAt: null,
+        history: [],
+      })),
+      parkTicket({
+        id: 'ticket-staff-only',
+        applicationNumber: 'HC-STAFF',
+        creator: { id: 'other-member', name: '其他申请人', username: 'other-member' },
+        isCreator: false,
+        isRecipient: true,
+      }),
+    ]);
+
+    render(
+      <InboxPage
+        enterpriseAccount={account}
+        effectiveDirectMessages={false}
+        effectiveParkService
+        onBack={() => undefined}
+      />,
+    );
+
+    await screen.findByText('园区客服');
+    const conversations = screen.getAllByRole('listitem');
+    expect(conversations).toHaveLength(7);
+    expect(screen.getByRole('listitem', { name: /装修管理客服/u })).toBeTruthy();
+    expect(screen.getByRole('listitem', { name: /车辆与访客客服/u })).toBeTruthy();
+    expect(screen.queryByRole('listitem', { name: /公告/u })).toBeNull();
+    expect(screen.queryByRole('listitem', { name: /满意度/u })).toBeNull();
+    expect(screen.queryByRole('listitem', { name: /HC-STAFF/u })).toBeNull();
   });
 });

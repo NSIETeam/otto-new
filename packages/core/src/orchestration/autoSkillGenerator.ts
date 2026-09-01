@@ -34,6 +34,12 @@ import {
   personalKnowledgeStrength,
   type KnowledgeEntry,
 } from '../knowledge/localKnowledgeStore.js';
+import {
+  installConfirmedSkillDraft,
+  stageSkillDraft,
+  type SkillDraftFileInput,
+  type SkillDraftSummary,
+} from './skillDraftWorkflow.js';
 
 /** 飞书通知接口（用于检测到候选时推送给用户） */
 export interface AutoSkillFeishuNotifier {
@@ -73,6 +79,12 @@ export interface SkillCandidate {
   recommendation?: 'create' | 'enhance';
   targetSkillName?: string;
   evidenceSignature?: string;
+  /** 自动发现或用户主动提出；两者统一进入相同草稿/确认链路。 */
+  source?: 'automatic' | 'proactive';
+  /** SKILL.md 之外的草稿资源；只落入隔离草稿区，生成后绝不执行。 */
+  draftFiles?: SkillDraftFileInput[];
+  /** 结构校验、静态测试、风险披露和打包结果。 */
+  draft?: SkillDraftSummary;
 }
 
 /** 模式检测参数 */
@@ -109,8 +121,21 @@ export function resolveAutoSkillSkillsDir(): string {
   return path.join(resolveAutoSkillUserDir(), 'skills');
 }
 
-function isPortableAutoSkillName(value: string): boolean {
-  return /^auto-[^/\\]{1,160}$/u.test(value);
+function isPortableSkillName(value: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{0,62}$/u.test(value);
+}
+
+function normalizeGeneratedSkillName(value: string): string {
+  const digest = createHash('sha256').update(value).digest('hex').slice(0, 8);
+  const clean = value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/gu, '-')
+    .replace(/-+/gu, '-')
+    .replace(/^-|-$/gu, '');
+  const prefixed = clean.startsWith('auto-') ? clean : `auto-${clean || `workflow-${digest}`}`;
+  if (isPortableSkillName(prefixed)) return prefixed;
+  const stem = prefixed.slice(0, 54).replace(/-+$/gu, '') || 'auto-workflow';
+  return `${stem}-${digest}`;
 }
 
 function isSafeSkillDirectoryName(value: string): boolean {
@@ -994,8 +1019,7 @@ async function callLLMForSkillCandidates(
 
   const candidates: SkillCandidate[] = [];
   for (const s of parsed.skills.slice(0, 5)) {
-    const cleanName = s.name?.replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'auto-workflow';
-    const skillName = cleanName.startsWith('auto-') ? cleanName : `auto-${cleanName}`;
+    const skillName = normalizeGeneratedSkillName(s.name || s.title || 'workflow');
     const filePath = path.join(skillsDir, skillName, 'SKILL.md');
 
     if (rejected.has(skillName)) continue;
@@ -1047,13 +1071,64 @@ async function callLLMForSkillCandidates(
  *
  * 写入后 Skills 系统会在下次加载时自动发现它。
  */
-export async function confirmAndSaveSkill(candidate: SkillCandidate): Promise<string> {
-  const skillsRoot = path.resolve(resolveAutoSkillSkillsDir());
-  const installedName = candidate.recommendation === 'enhance'
+function installedSkillName(candidate: SkillCandidate): string {
+  return candidate.recommendation === 'enhance'
     && candidate.targetSkillName
     && isSafeSkillDirectoryName(candidate.targetSkillName)
     ? candidate.targetSkillName
     : candidate.name;
+}
+
+function candidateSkillContent(candidate: SkillCandidate, targetName: string): string {
+  const normalized = candidate.skillContent.replace(
+    /^(name:\s*).+$/mu,
+    `$1${targetName}`,
+  );
+  return candidate.evidenceSignature
+    ? `${normalized.trimEnd()}\n\n<!-- otto-auto-skill-evidence:${candidate.evidenceSignature} -->\n`
+    : `${normalized.trimEnd()}\n`;
+}
+
+async function stageCandidateDraft(candidate: SkillCandidate): Promise<SkillCandidate> {
+  const targetName = installedSkillName(candidate);
+  const files: SkillDraftFileInput[] = [
+    { path: 'SKILL.md', content: candidateSkillContent(candidate, targetName) },
+    ...(candidate.draftFiles ?? []).filter((file) => portableDraftPath(file.path) !== 'SKILL.md'),
+  ];
+  const draft = await stageSkillDraft({
+    userDir: resolveAutoSkillUserDir(),
+    candidateId: candidate.id,
+    name: candidate.name,
+    targetName,
+    mode: candidate.recommendation === 'enhance' ? 'enhance' : 'create',
+    files,
+  });
+  return { ...candidate, source: candidate.source ?? 'automatic', draft };
+}
+
+function portableDraftPath(value: string): string {
+  return value.replaceAll('\\', '/').replace(/^\.\//u, '');
+}
+
+async function ensureCandidateDraft(candidate: SkillCandidate): Promise<SkillCandidate> {
+  if (candidate.draft) {
+    const relative = portableDraftPath(candidate.draft.draftRelativePath);
+    if (relative.startsWith('skill-drafts/pending/') && !relative.includes('../')) {
+      const draftSkill = path.join(
+        resolveAutoSkillUserDir(),
+        relative,
+        candidate.draft.targetName,
+        'SKILL.md',
+      );
+      if (await fileExists(draftSkill)) return candidate;
+    }
+  }
+  return stageCandidateDraft(candidate);
+}
+
+export async function confirmAndSaveSkill(candidate: SkillCandidate): Promise<string> {
+  const skillsRoot = path.resolve(resolveAutoSkillSkillsDir());
+  const installedName = installedSkillName(candidate);
   const safePath = candidate.recommendation === 'enhance'
     ? path.resolve(skillsRoot, installedName, 'SKILL.md')
     : path.resolve(candidate.filePath);
@@ -1062,35 +1137,14 @@ export async function confirmAndSaveSkill(candidate: SkillCandidate): Promise<st
     throw new Error('自动 Skill 只能写入用户级 skills 目录');
   }
 
-  const skillDir = path.dirname(safePath);
-  await fs.mkdir(skillDir, { recursive: true, mode: 0o700 });
-  if (candidate.recommendation === 'enhance' && await fileExists(safePath)) {
-    const historyDir = path.join(skillDir, 'history');
-    await fs.mkdir(historyDir, { recursive: true, mode: 0o700 });
-    await fs.copyFile(
-      safePath,
-      path.join(historyDir, `SKILL.${Date.now()}.md`),
-    );
-  }
-  const normalizedContent = candidate.skillContent.replace(
-    /^(name:\s*).+$/mu,
-    `$1${installedName}`,
-  );
-  const contentWithEvidence = candidate.evidenceSignature
-    ? `${normalizedContent.trimEnd()}\n\n<!-- otto-auto-skill-evidence:${candidate.evidenceSignature} -->\n`
-    : `${normalizedContent.trimEnd()}\n`;
-  const tempPath = `${safePath}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    await fs.writeFile(tempPath, contentWithEvidence, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    await fs.rename(tempPath, safePath);
-  } finally {
-    await fs.rm(tempPath, { force: true }).catch(() => undefined);
-  }
+  const stagedCandidate = await ensureCandidateDraft(candidate);
+  const draft = stagedCandidate.draft;
+  if (!draft) throw new Error('Skill 草稿未生成');
+  const savedPath = await installConfirmedSkillDraft(resolveAutoSkillUserDir(), draft);
+  const skillDir = path.dirname(savedPath);
+  const contentWithEvidence = await fs.readFile(savedPath, 'utf8');
 
-  console.log(`[AutoSkill] Saved: ${safePath}`);
+  console.log(`[AutoSkill] Installed from confirmed draft: ${savedPath}`);
 
   // 记工作日志（标注自动 Skill，与普通操作区分）
   try {
@@ -1102,7 +1156,7 @@ export async function confirmAndSaveSkill(candidate: SkillCandidate): Promise<st
         : `[自动Skill] 用户确认生成 Skill "${installedName}"（检测到 ${candidate.occurrenceCount} 次重复模式）`,
       category: 'other',
       success: true,
-      details: `模式：${candidate.detectedPattern} | 路径：${safePath}`,
+      details: `模式：${candidate.detectedPattern} | 路径：${savedPath}`,
     });
   } catch { /* 不影响主流程 */ }
 
@@ -1116,8 +1170,50 @@ export async function confirmAndSaveSkill(candidate: SkillCandidate): Promise<st
     // 专家孵化可选，Skill已就绪即可
   }
 
+  return savedPath;
+}
 
-  return safePath;
+export interface ProactiveSkillDraftInput {
+  name: string;
+  description: string;
+  skillContent: string;
+  triggerPatterns?: string[];
+  reason: string;
+  files?: SkillDraftFileInput[];
+}
+
+/** 用户主动提出需求时创建候选；只进入草稿区，不安装、不执行脚本。 */
+export async function stageProactiveSkillDraft(
+  input: ProactiveSkillDraftInput,
+): Promise<SkillCandidate> {
+  if (!isPortableSkillName(input.name)) throw new Error('Skill 名称不合法');
+  if (input.files?.some((file) => portableDraftPath(file.path) === 'SKILL.md')) {
+    throw new Error('附加文件不能重复提供 SKILL.md');
+  }
+  const candidate: SkillCandidate = {
+    id: `skill_draft_${createHash('sha256')
+      .update(`${input.name}:${input.skillContent}:${Date.now()}`)
+      .digest('hex').slice(0, 20)}`,
+    name: input.name,
+    description: input.description,
+    triggerPatterns: input.triggerPatterns?.filter(Boolean).slice(0, 6) ?? [],
+    detectedPattern: input.reason,
+    occurrenceCount: 1,
+    sampleEntries: [],
+    skillContent: input.skillContent,
+    reason: input.reason,
+    filePath: path.join(resolveAutoSkillSkillsDir(), input.name, 'SKILL.md'),
+    recommendation: 'create',
+    source: 'proactive',
+    draftFiles: input.files ?? [],
+  };
+  const staged = await stageCandidateDraft(candidate);
+  const pending = await listPendingSkillCandidates();
+  await savePendingSkillCandidates([
+    ...pending.filter((item) => item.name !== staged.name),
+    staged,
+  ]);
+  return staged;
 }
 
 /** 读取等待用户确认的候选。损坏/不存在时按空列表处理，不影响 Otto 启动。 */
@@ -1137,8 +1233,8 @@ export async function listPendingSkillCandidates(): Promise<SkillCandidate[]> {
 
 async function savePendingSkillCandidates(candidates: SkillCandidate[]): Promise<void> {
   for (const candidate of candidates) {
-    if (!isPortableAutoSkillName(candidate.name)) {
-      throw new Error('自动 Skill 名称不合法');
+    if (!isPortableSkillName(candidate.name)) {
+      throw new Error('Skill 候选名称不合法');
     }
   }
   await writeJsonAtomic(pendingCandidatesPath(), candidates.map(portablePendingCandidate));
@@ -1246,7 +1342,7 @@ function isSkillCandidate(value: unknown): value is SkillCandidate {
   const item = value as Partial<SkillCandidate>;
   return typeof item.id === 'string'
     && typeof item.name === 'string'
-    && isPortableAutoSkillName(item.name)
+    && isPortableSkillName(item.name)
     && typeof item.description === 'string'
     && Array.isArray(item.triggerPatterns)
     && typeof item.detectedPattern === 'string'
@@ -1274,7 +1370,17 @@ function isSkillCandidate(value: unknown): value is SkillCandidate {
       || item.recommendation === 'create'
       || item.recommendation === 'enhance')
     && (item.targetSkillName === undefined || isSafeSkillDirectoryName(item.targetSkillName))
-    && (item.evidenceSignature === undefined || typeof item.evidenceSignature === 'string');
+    && (item.evidenceSignature === undefined || typeof item.evidenceSignature === 'string')
+    && (item.source === undefined || item.source === 'automatic' || item.source === 'proactive')
+    && (item.draftFiles === undefined || (Array.isArray(item.draftFiles)
+      && item.draftFiles.every((file) => file && typeof file === 'object'
+        && typeof file.path === 'string' && typeof file.content === 'string')))
+    && (item.draft === undefined || (item.draft && typeof item.draft === 'object'
+      && typeof item.draft.draftRelativePath === 'string'
+      && typeof item.draft.targetName === 'string'
+      && typeof item.draft.contentHash === 'string'
+      && typeof item.draft.validationPassed === 'boolean'
+      && typeof item.draft.packageReady === 'boolean'));
 }
 
 function generateSkillName(steps: string[]): string {
@@ -1289,8 +1395,7 @@ function generateSkillName(steps: string[]): string {
     .slice(0, 3)
     .map((s) => s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '-'));
 
-  const name = keywords.join('-') || 'auto-workflow';
-  return `auto-${name}`;
+  return normalizeGeneratedSkillName(keywords.join('-') || firstStep);
 }
 
 function generateDescription(steps: string[], count: number): string {
@@ -1349,7 +1454,10 @@ export async function scanAndStageSkillCandidates(
   config: Config,
   getUserId: () => string,
 ): Promise<SkillCandidate[]> {
-  const candidates = await generateSkillCandidates(config);
+  const generated = await generateSkillCandidates(config);
+  const candidates = await Promise.all(generated.map((candidate) =>
+    stageCandidateDraft({ ...candidate, source: 'automatic' }),
+  ));
   await savePendingSkillCandidates(candidates);
 
   if (candidates.length === 0) return candidates;

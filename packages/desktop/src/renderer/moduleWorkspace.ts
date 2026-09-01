@@ -374,16 +374,11 @@ export function deleteModuleGroup(
   if (layout.groups.length <= 1 || deletedIndex < 0) {
     return layout;
   }
-  const deleted = layout.groups[deletedIndex];
-  const targetIndex = deletedIndex < layout.groups.length - 1 ? deletedIndex + 1 : deletedIndex - 1;
-  const targetId = layout.groups[targetIndex].id;
   return {
     ...layout,
     groups: layout.groups
       .filter((group) => group.id !== groupId)
-      .map((group) => group.id === targetId
-        ? { ...group, moduleIds: [...group.moduleIds, ...deleted.moduleIds] }
-        : cloneGroup(group)),
+      .map(cloneGroup),
   };
 }
 

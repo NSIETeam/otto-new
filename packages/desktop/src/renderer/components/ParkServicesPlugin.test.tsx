@@ -229,6 +229,39 @@ function installPublicationBridge(kind: 'announcement' | 'satisfaction') {
 }
 
 describe('ParkServicesPlugin', () => {
+  it('分开上报工作人员待办和申请人未读客服更新', async () => {
+    const bridge = installRepairBridge('worker');
+    const staffTicket = bridge.getTickets()[0]!;
+    bridge.setTickets([
+      staffTicket,
+      {
+        ...staffTicket,
+        id: 'ticket-creator-update',
+        applicationNumber: '20260720002',
+        creator: {
+          id: bridge.account.id,
+          name: bridge.account.name,
+          username: bridge.account.username,
+        },
+        isCreator: true,
+        isRecipient: false,
+        readAt: null,
+        creatorUpdateAt: '2026-07-20T01:00:00Z',
+        creatorUpdateReadAt: null,
+      },
+    ]);
+    const onUnreadCountsChange = vi.fn();
+
+    render(<ParkServicesPlugin onUnreadCountsChange={onUnreadCountsChange} />);
+
+    await waitFor(() => {
+      expect(onUnreadCountsChange).toHaveBeenCalledWith({
+        actionableCount: 1,
+        creatorUpdateCount: 1,
+      });
+    });
+  });
+
   it('已转出的原客服只保留历史，新接收人进入待办', () => {
     const ticket = {
       status: '已转交', deliveryStatus: 'transferred', isRecipient: true,

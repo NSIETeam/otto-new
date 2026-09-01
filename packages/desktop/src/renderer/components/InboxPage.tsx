@@ -7,7 +7,9 @@
  *
  * 企业收件箱：展示所有企业成员的对话列表、未读状态、
  * 点击进入私聊。数据源为 enterpriseMessagesUnread / enterpriseMessagesList IPC。
- * 同时展示园区服务通知（工单状态变更、公告、问卷）。
+ * 同时展示由当前申请人发起的七类园区服务工单，客服的受理、
+ * 回复、转交和办结都作为可持久回看的办理时间线。园区公告和满意度
+ * 调查是发布型内容，仍由园区服务模块展示，不伪装成一对一客服会话。
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -17,6 +19,8 @@ import type {
   EnterpriseDirectMessageAttachmentUpload,
   EnterpriseFederationContact,
   EnterpriseOrganizationView,
+  EnterpriseRepairTicket,
+  EnterpriseRepairTicketHistoryEntry,
   EnterpriseUnreadMessageNotification,
 } from '../../preload/index.js';
 import { isAuthenticatedEnterpriseAccount } from '../internal-test-access.js';
@@ -35,6 +39,112 @@ import {
 } from './icons.js';
 
 const INBOX_REFRESH_MS = 8_000;
+
+const PARK_REQUEST_SERVICE_NAMES = new Map<string, string>([
+  ['renovation', '装修管理'],
+  ['parking', '停车办理'],
+  ['network-phone', '网络与固话'],
+  ['meeting-room', '会议室预约'],
+  ['electric-card', '电卡服务'],
+  ['repair', '物业报修'],
+  ['vehicle-visit', '车辆与访客'],
+]);
+
+const PARK_HISTORY_ACTION_LABELS: Record<
+  EnterpriseRepairTicketHistoryEntry['action'],
+  string
+> = {
+  created: '申请已提交',
+  accept: '客服已受理',
+  respond: '客服回复',
+  transfer: '工单已转交',
+  complete: '客服已办结',
+  confirm: '你已确认验收',
+};
+
+function inboxTimestamp(value: string | null | undefined): number {
+  if (!value) return 0;
+  const isoValue = value.replace(' ', 'T');
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/iu.test(isoValue)
+    ? isoValue
+    : `${isoValue}Z`;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatInboxTimestamp(value: string | null | undefined): string {
+  const timestamp = inboxTimestamp(value);
+  if (!timestamp) return value ?? '';
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(timestamp);
+}
+
+function ticketApplicationNumber(ticket: EnterpriseRepairTicket): string {
+  return ticket.applicationNumber || ticket.id.slice(-8).toUpperCase();
+}
+
+function ticketLatestTimestamp(ticket: EnterpriseRepairTicket): number {
+  return inboxTimestamp(ticketLatestAt(ticket));
+}
+
+function ticketLatestAt(ticket: EnterpriseRepairTicket): string {
+  const history = ticket.history ?? [];
+  return history[history.length - 1]?.createdAt
+    || ticket.responseAt
+    || ticket.updatedAt
+    || ticket.createdAt;
+}
+
+function creatorUpdateTimestamp(ticket: EnterpriseRepairTicket): number {
+  if (ticket.creatorUpdateAt) return inboxTimestamp(ticket.creatorUpdateAt);
+  if (ticket.responseAt) return inboxTimestamp(ticket.responseAt);
+  const staffHistory = (ticket.history ?? []).filter(
+    (entry) => entry.action !== 'created' && entry.action !== 'confirm',
+  );
+  return inboxTimestamp(staffHistory[staffHistory.length - 1]?.createdAt);
+}
+
+function isCreatorUpdateUnread(ticket: EnterpriseRepairTicket): boolean {
+  const updateTimestamp = creatorUpdateTimestamp(ticket);
+  if (ticket.isCreator === false || !updateTimestamp) return false;
+  if (!ticket.creatorUpdateReadAt) return true;
+  return inboxTimestamp(ticket.creatorUpdateReadAt) < updateTimestamp;
+}
+
+function ticketHistoryText(
+  entry: EnterpriseRepairTicketHistoryEntry,
+  ticket: EnterpriseRepairTicket,
+): string {
+  if (entry.action === 'created') {
+    return [ticket.title, ticket.description].filter(Boolean).join('\n');
+  }
+  if (entry.action === 'accept') {
+    return entry.responseText || '园区客服已受理申请，正在安排办理。';
+  }
+  if (entry.action === 'transfer') {
+    return entry.responseText || '申请已转交给更合适的园区工作人员。';
+  }
+  if (entry.action === 'complete') {
+    return entry.responseText || '申请已办结，请核对办理结果。';
+  }
+  if (entry.action === 'confirm') {
+    return entry.responseText || '已确认本次服务的办理结果。';
+  }
+  return entry.responseText || entry.responseType || '园区客服更新了办理进展。';
+}
+
+function ticketPreview(ticket: EnterpriseRepairTicket): string {
+  const history = ticket.history ?? [];
+  const last = history[history.length - 1];
+  if (!last) return ticket.responseText || ticket.description || ticket.status;
+  const text = ticketHistoryText(last, ticket).replace(/\s+/gu, ' ').trim();
+  return `${PARK_HISTORY_ACTION_LABELS[last.action]}：${text}`;
+}
 
 type InboxFilter = 'all' | 'unread' | 'handled';
 
@@ -71,12 +181,16 @@ export interface InboxPageProps {
   baselineEnterpriseTreeAvailable?: boolean;
   /** Server-computed effective capability. Undefined is deliberately fail-closed. */
   effectiveAtoa?: boolean;
+  /** Server-computed effective park-service capability. Undefined is fail-closed. */
+  effectiveParkService?: boolean;
   enterpriseUnreadCounts?: Record<string, number>;
   onOpenDirectChat?: (peerAccountId: string) => void;
   /** 打开某会话后将该 peer 标记为已读（联动导航未读角标）。 */
   onMessageRead?: (peerAccountId: string, messageIds?: readonly string[]) => void;
   federationContactOpenRequest?: { contactId: string; requestId: number };
   onFederationMessageRead?: (contactId: string) => void;
+  /** 客服更新在服务端确认已读后，立即清理导航角标。 */
+  onParkTicketRead?: (ticketId: string) => void;
   onBack: () => void;
 }
 
@@ -97,11 +211,13 @@ export function InboxPage({
   baselineDirectMessagesAvailable,
   baselineEnterpriseTreeAvailable,
   effectiveAtoa = false,
+  effectiveParkService = false,
   enterpriseUnreadCounts = {},
   onOpenDirectChat: _onOpenDirectChat,
   onMessageRead,
   federationContactOpenRequest,
   onFederationMessageRead,
+  onParkTicketRead,
   onBack,
 }: InboxPageProps): React.JSX.Element {
   const [filter, setFilter] = useState<InboxFilter>('all');
@@ -110,6 +226,10 @@ export function InboxPage({
   const [loading, setLoading] = useState(false);
   const [selectedPeer, setSelectedPeer] = useState<string | null>(null);
   const [selectedFederationContactId, setSelectedFederationContactId] = useState<string | null>(null);
+  const [selectedParkTicketId, setSelectedParkTicketId] = useState<string | null>(null);
+  const [parkTickets, setParkTickets] = useState<EnterpriseRepairTicket[]>([]);
+  const [parkError, setParkError] = useState('');
+  const [parkActionPending, setParkActionPending] = useState(false);
   const [federationContacts, setFederationContacts] = useState<EnterpriseFederationContact[]>([]);
   const [federationSetupOpen, setFederationSetupOpen] = useState(false);
   const [federationContactCode, setFederationContactCode] = useState('');
@@ -155,6 +275,21 @@ export function InboxPage({
     }
   }, [canUseFederationMessages, hasAuth]);
 
+  // 申请人视角必须读取持久化工单列表，而不是仅读一次性未读通知。
+  const refreshParkTickets = useCallback(async (): Promise<void> => {
+    if (!hasAuth || !effectiveParkService) return;
+    try {
+      const tickets = await window.otto.enterpriseTicketList();
+      setParkTickets((Array.isArray(tickets) ? tickets : [])
+        .filter((ticket) => ticket.isCreator === true || ticket.creator.id === enterpriseAccount?.id)
+        .filter((ticket) => PARK_REQUEST_SERVICE_NAMES.has(ticket.serviceId))
+        .sort((a, b) => ticketLatestTimestamp(b) - ticketLatestTimestamp(a)));
+      setParkError('');
+    } catch {
+      // 旧服务器或未开通园区服务时不影响企业私聊。
+    }
+  }, [effectiveParkService, enterpriseAccount?.id, hasAuth]);
+
   // —— 加载组织成员 ——
   useEffect(() => {
     if (!hasAuth || !canUseBaselineMessages || !canUseOwnOrganizationDirectory) return;
@@ -167,15 +302,20 @@ export function InboxPage({
 
   // —— 定时刷新 ——
   useEffect(() => {
-    if (!hasAuth || (!canUseBaselineMessages && !canUseFederationMessages)) return;
+    if (!hasAuth) return;
     setLoading(true);
     void Promise.all([
       refreshNotifications(),
       refreshFederationContacts(),
+      refreshParkTickets(),
     ]).finally(() => setLoading(false));
     return startNonOverlappingPoll(
       async () => {
-        await Promise.all([refreshNotifications(), refreshFederationContacts()]);
+        await Promise.all([
+          refreshNotifications(),
+          refreshFederationContacts(),
+          refreshParkTickets(),
+        ]);
       },
       INBOX_REFRESH_MS,
       { runImmediately: false },
@@ -186,6 +326,7 @@ export function InboxPage({
     hasAuth,
     refreshFederationContacts,
     refreshNotifications,
+    refreshParkTickets,
   ]);
 
   useEffect(() => {
@@ -200,7 +341,6 @@ export function InboxPage({
     setFederationVerification(null);
     setFederationSetupOpen(false);
     setFederationError('');
-    setLoading(false);
     setMessagesLoading(false);
   }, [canUseBaselineMessages, canUseFederationMessages]);
 
@@ -213,6 +353,14 @@ export function InboxPage({
     setFederationSetupOpen(false);
     setFederationError('');
   }, [canUseFederationMessages]);
+
+  useEffect(() => {
+    if (effectiveParkService) return;
+    setParkTickets([]);
+    setSelectedParkTicketId(null);
+    setParkError('');
+    setParkActionPending(false);
+  }, [effectiveParkService]);
 
   // —— 构建会话列表 ——
   const conversations = useMemo<ConversationItem[]>(() => {
@@ -295,11 +443,23 @@ export function InboxPage({
     return federationContacts;
   }, [federationContacts, filter]);
 
+  const filteredParkTickets = useMemo(() => {
+    if (filter === 'unread') return parkTickets.filter(isCreatorUpdateUnread);
+    if (filter === 'handled') return parkTickets.filter((ticket) => !isCreatorUpdateUnread(ticket));
+    return parkTickets;
+  }, [filter, parkTickets]);
+
   const totalUnread = useMemo(
     () => conversations.reduce((sum, c) => sum + c.unreadCount, 0) +
-      federationContacts.reduce((sum, contact) => sum + contact.unreadCount, 0),
-    [conversations, federationContacts],
+      federationContacts.reduce((sum, contact) => sum + contact.unreadCount, 0) +
+      parkTickets.filter(isCreatorUpdateUnread).length,
+    [conversations, federationContacts, parkTickets],
   );
+  const totalConversationCount = conversations.length + federationContacts.length + parkTickets.length;
+  const unreadConversationCount = conversations.filter((item) => item.unreadCount > 0).length
+    + federationContacts.filter((item) => item.unreadCount > 0).length
+    + parkTickets.filter(isCreatorUpdateUnread).length;
+  const readConversationCount = totalConversationCount - unreadConversationCount;
 
   // —— 加载选中会话的消息，并标记该 peer 已读 ——
   useEffect(() => {
@@ -374,9 +534,35 @@ export function InboxPage({
     [federationContacts, selectedFederationContactId],
   );
 
+  const selectedParkTicket = useMemo(
+    () => parkTickets.find((ticket) => ticket.id === selectedParkTicketId) ?? null,
+    [parkTickets, selectedParkTicketId],
+  );
+
+  // 打开客服会话才回执已读；已读后工单仍保留在持久化会话列表。
+  useEffect(() => {
+    if (!selectedParkTicket || !isCreatorUpdateUnread(selectedParkTicket)) return;
+    let cancelled = false;
+    void window.otto.enterpriseTicketRead(selectedParkTicket.id)
+      .then((updated) => {
+        if (cancelled) return;
+        setParkTickets((tickets) => tickets.map(
+          (ticket) => ticket.id === updated.id ? updated : ticket,
+        ));
+        onParkTicketRead?.(updated.id);
+        setParkError('');
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setParkError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    return () => { cancelled = true; };
+  }, [onParkTicketRead, selectedParkTicket]);
+
   useEffect(() => {
     setFederationAttachments([]);
-  }, [selectedFederationContactId, selectedPeer]);
+  }, [selectedFederationContactId, selectedParkTicketId, selectedPeer]);
 
   useEffect(() => {
     const contactId = federationContactOpenRequest?.contactId;
@@ -388,6 +574,7 @@ export function InboxPage({
       return;
     }
     setSelectedPeer(null);
+    setSelectedParkTicketId(null);
     setSelectedFederationContactId(contactId);
     setReplyInput('');
   }, [canUseFederationMessages, federationContactOpenRequest, federationContacts]);
@@ -524,6 +711,7 @@ export function InboxPage({
       setFederationContactCode('');
       setFederationSetupOpen(false);
       setSelectedPeer(null);
+      setSelectedParkTicketId(null);
       setSelectedFederationContactId(contact.id);
       await refreshFederationContacts();
       setFederationError('');
@@ -565,6 +753,103 @@ export function InboxPage({
     } catch (error) {
       setFederationError(error instanceof Error ? error.message : String(error));
     }
+  };
+
+  const confirmParkTicket = async (): Promise<void> => {
+    if (!selectedParkTicket || selectedParkTicket.status !== '待验收' || parkActionPending) {
+      return;
+    }
+    setParkActionPending(true);
+    try {
+      const updated = await window.otto.enterpriseTicketAction(
+        selectedParkTicket.id,
+        { action: 'confirm' },
+      );
+      setParkTickets((tickets) => tickets.map(
+        (ticket) => ticket.id === updated.id ? updated : ticket,
+      ));
+      setParkError('');
+    } catch (error) {
+      setParkError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setParkActionPending(false);
+    }
+  };
+
+  const renderParkTimeline = (ticket: EnterpriseRepairTicket): React.JSX.Element => {
+    const fallbackHistory: EnterpriseRepairTicketHistoryEntry[] = [{
+      id: `created:${ticket.id}`,
+      action: 'created' as const,
+      statusBefore: null,
+      statusAfter: ticket.status,
+      responseType: null,
+      responseText: null,
+      createdAt: ticket.createdAt,
+      actor: ticket.creator,
+    }];
+    if (ticket.responseAt || ticket.responseText) {
+      fallbackHistory.push({
+        id: `response:${ticket.id}`,
+        action: ticket.status === '待验收' || ticket.status === '已完成'
+          ? 'complete'
+          : 'respond',
+        statusBefore: null,
+        statusAfter: ticket.status,
+        responseType: ticket.responseType,
+        responseText: ticket.responseText,
+        createdAt: ticket.responseAt || ticket.updatedAt,
+        actor: null,
+      });
+    }
+    const history = ticket.history?.length ? ticket.history : fallbackHistory;
+    return (
+      <>
+        <div className="otto-inbox-page__messages otto-inbox-page__ticket-timeline">
+          {history.map((entry) => {
+            const mine = entry.action === 'created' || entry.action === 'confirm';
+            return (
+              <div
+                key={entry.id}
+                className={`otto-inbox-page__msg${mine ? ' is-mine' : ''}`}
+              >
+                <span className="otto-inbox-page__ticket-event-label">
+                  {PARK_HISTORY_ACTION_LABELS[entry.action]}
+                  {!mine && entry.actor?.name ? ` · ${entry.actor.name}` : ''}
+                </span>
+                <span className="otto-inbox-page__msg-bubble">
+                  {entry.responseType ? (
+                    <strong className="otto-inbox-page__ticket-response-type">
+                      {entry.responseType}
+                    </strong>
+                  ) : null}
+                  <span>{ticketHistoryText(entry, ticket)}</span>
+                  {entry.statusBefore && entry.statusBefore !== entry.statusAfter ? (
+                    <small className="otto-inbox-page__ticket-status-change">
+                      {entry.statusBefore} → {entry.statusAfter}
+                    </small>
+                  ) : null}
+                </span>
+                <span className="otto-inbox-page__msg-meta">
+                  <time>{formatInboxTimestamp(entry.createdAt)}</time>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <footer className="otto-inbox-page__ticket-footer">
+          <span>客服的办理回复会自动同步到这里，会话在读取后仍会保留。</span>
+          {ticket.status === '待验收' ? (
+            <button
+              type="button"
+              disabled={parkActionPending}
+              onClick={() => { void confirmParkTicket(); }}
+            >
+              {parkActionPending ? '确认中…' : '确认办理完成'}
+            </button>
+          ) : null}
+        </footer>
+      </>
+    );
   };
 
   const renderMessages = (emptyLabel: string): React.JSX.Element => (
@@ -709,38 +994,21 @@ export function InboxPage({
     );
   }
 
-  if (!canUseBaselineMessages && !canUseFederationMessages) {
-    return (
-      <div className="otto-inbox-page" role="region" aria-label="我的消息">
-        <header className="otto-inbox-page__header">
-          <div>
-            <h1>我的消息</h1>
-            <p>企业消息能力当前不可用</p>
-          </div>
-          <button type="button" onClick={onBack}>返回对话</button>
-        </header>
-        <div className="otto-inbox-page__empty" role="status">
-          企业私聊未启用或当前服务器未授权，不会请求企业消息数据。
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="otto-inbox-page" role="region" aria-label="我的消息">
       <header className="otto-inbox-page__header">
         <div>
           <h1>我的消息</h1>
-          <p>{conversations.length + federationContacts.length} 个会话{totalUnread > 0 ? ` · ${totalUnread} 条未读` : ''}</p>
+          <p>{totalConversationCount} 个会话{totalUnread > 0 ? ` · ${totalUnread} 条未读` : ''}</p>
         </div>
         <button type="button" onClick={onBack}>返回对话</button>
       </header>
 
       <div className="otto-inbox-page__filters" role="tablist" aria-label="消息过滤">
         {([
-          ['all', `全部 ${conversations.length + federationContacts.length}`],
-          ['unread', `未读 ${conversations.filter((c) => c.unreadCount > 0).length + federationContacts.filter((c) => c.unreadCount > 0).length}`],
-          ['handled', `已处理 ${conversations.filter((c) => c.unreadCount === 0).length + federationContacts.filter((c) => c.unreadCount === 0).length}`],
+          ['all', `全部 ${totalConversationCount}`],
+          ['unread', `未读 ${unreadConversationCount}`],
+          ['handled', `已读 ${readConversationCount}`],
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -758,6 +1026,56 @@ export function InboxPage({
       <div className="otto-inbox-page__layout">
         {/* 左：会话列表 */}
         <div className="otto-inbox-page__list" role="list" aria-label="会话列表">
+          {!canUseBaselineMessages && !canUseFederationMessages ? (
+            <div className="otto-inbox-page__capability-note" role="status">
+              <span>企业私聊未启用或当前服务器未授权，不会请求企业消息数据。</span>
+              {effectiveParkService ? <span>园区客服会话仍会独立加载。</span> : null}
+            </div>
+          ) : null}
+          {filteredParkTickets.length > 0 ? (
+            <>
+              <div className="otto-inbox-page__section-label">园区客服</div>
+              {filteredParkTickets.map((ticket) => {
+                const serviceName = PARK_REQUEST_SERVICE_NAMES.get(ticket.serviceId)
+                  || ticket.serviceId;
+                const unread = isCreatorUpdateUnread(ticket);
+                return (
+                  <button
+                    key={ticket.id}
+                    type="button"
+                    role="listitem"
+                    aria-label={`${serviceName}客服，申请编号 ${ticketApplicationNumber(ticket)}，${unread ? '1' : '0'} 条未读`}
+                    className={`otto-inbox-page__conv${selectedParkTicketId === ticket.id ? ' is-selected' : ''}`}
+                    onClick={() => {
+                      setSelectedPeer(null);
+                      setSelectedFederationContactId(null);
+                      setSelectedParkTicketId(ticket.id);
+                      setReplyInput('');
+                    }}
+                  >
+                    <span className="otto-inbox-page__conv-avatar otto-inbox-page__conv-avatar--park" aria-hidden>
+                      园
+                    </span>
+                    <span className="otto-inbox-page__conv-body">
+                      <strong>{serviceName}客服</strong>
+                      <span className="otto-inbox-page__conv-meta">
+                        {ticketApplicationNumber(ticket)} · {ticket.status}
+                      </span>
+                      <span className="otto-inbox-page__conv-preview">{ticketPreview(ticket)}</span>
+                    </span>
+                    <span className="otto-inbox-page__conv-side">
+                      <time className="otto-inbox-page__conv-time">
+                        {formatInboxTimestamp(ticketLatestAt(ticket))}
+                      </time>
+                      {unread ? (
+                        <span className="otto-inbox-page__unread" role="status">1</span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </>
+          ) : null}
           {canUseFederationMessages ? <div className="otto-inbox-page__federation-actions">
             <button
               type="button"
@@ -812,6 +1130,7 @@ export function InboxPage({
                   className={`otto-inbox-page__conv${selectedFederationContactId === contact.id ? ' is-selected' : ''}`}
                   onClick={() => {
                     setSelectedPeer(null);
+                    setSelectedParkTicketId(null);
                     setSelectedFederationContactId(contact.id);
                     setReplyInput('');
                   }}
@@ -836,11 +1155,11 @@ export function InboxPage({
             </>
           ) : null}
           {filtered.length > 0 ? <div className="otto-inbox-page__section-label">本企业</div> : null}
-          {loading && conversations.length === 0 && federationContacts.length === 0 ? (
+          {loading && totalConversationCount === 0 ? (
             <div className="otto-inbox-page__empty">正在加载消息…</div>
-          ) : filtered.length === 0 && filteredFederationContacts.length === 0 ? (
+          ) : filtered.length === 0 && filteredFederationContacts.length === 0 && filteredParkTickets.length === 0 ? (
             <div className="otto-inbox-page__empty">
-              {filter === 'unread' ? '没有未读消息' : filter === 'handled' ? '没有已处理消息' : '暂无消息'}
+              {filter === 'unread' ? '没有未读消息' : filter === 'handled' ? '没有已读消息' : '暂无消息'}
             </div>
           ) : filtered.map((conv) => (
             <button
@@ -851,6 +1170,7 @@ export function InboxPage({
               className={`otto-inbox-page__conv${selectedPeer === conv.peerAccountId ? ' is-selected' : ''}`}
               onClick={() => {
                 setSelectedFederationContactId(null);
+                setSelectedParkTicketId(null);
                 setSelectedPeer(conv.peerAccountId);
                 setReplyInput('');
               }}
@@ -879,7 +1199,24 @@ export function InboxPage({
 
         {/* 右：消息详情 */}
         <div className="otto-inbox-page__detail" aria-label="消息详情">
-          {selectedFederationContactId && selectedFederationContact ? (
+          {selectedParkTicketId && selectedParkTicket ? (
+            <>
+              <header className="otto-inbox-page__detail-header">
+                <strong>
+                  {PARK_REQUEST_SERVICE_NAMES.get(selectedParkTicket.serviceId)
+                    || selectedParkTicket.serviceId}客服
+                </strong>
+                <span>申请编号 {ticketApplicationNumber(selectedParkTicket)}</span>
+                <span className="otto-inbox-page__ticket-current-status">
+                  {selectedParkTicket.status}
+                </span>
+              </header>
+              {parkError ? (
+                <div className="otto-inbox-page__error" role="alert">{parkError}</div>
+              ) : null}
+              {renderParkTimeline(selectedParkTicket)}
+            </>
+          ) : selectedFederationContactId && selectedFederationContact ? (
             <>
               <header className="otto-inbox-page__detail-header">
                 <strong>{selectedFederationContact.displayName}</strong>

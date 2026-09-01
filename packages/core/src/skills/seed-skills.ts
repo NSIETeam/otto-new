@@ -130,6 +130,19 @@ function findSeedDir(): string | null {
   return candidates.find((p) => existsSync(p)) ?? null;
 }
 
+/** 判断名称是否属于随 Otto 分发的官方内置 Skill。 */
+export function isBuiltinSkillName(name: string): boolean {
+  if (!/^[a-z0-9][a-z0-9-]*$/iu.test(name)) return false;
+  const seedDir = findSeedDir();
+  if (!seedDir) return false;
+  try {
+    return statSync(join(seedDir, name)).isDirectory()
+      && statSync(join(seedDir, name, 'SKILL.md')).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 直接读取随安装包分发的内置 Skill 正文。
  *

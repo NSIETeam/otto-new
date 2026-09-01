@@ -83,6 +83,11 @@ describe('UseSkillTool', () => {
       expect(useSkillTool.schema).toBeDefined();
       expect(useSkillTool.schema.parameters?.properties?.skillName).toBeDefined();
     });
+
+    it('requires explicit user consent before downloading missing dependencies', () => {
+      expect(useSkillTool.description).toContain('ask_user_question');
+      expect(useSkillTool.description).toContain('NEVER download or install');
+    });
   });
 
   describe('validateToolParams', () => {
@@ -188,6 +193,50 @@ describe('UseSkillTool', () => {
       expect(result.llmContent).toContain('**Available scripts**');
       expect(result.llmContent).toContain('generate.js');
       expect(result.llmContent).toContain('convert.py');
+    });
+
+    it('reports missing declared dependencies and requires a user decision', async () => {
+      const skillPath = '/mock/project/.otto/skills/dependency-skill';
+      const mockSkill = {
+        id: 'project:dependency-skill',
+        name: 'dependency-skill',
+        description: 'Dependency-aware skill',
+        pluginId: '',
+        marketplaceId: '',
+        path: skillPath,
+        skillFilePath: path.join(skillPath, 'SKILL.md'),
+        metadata: {
+          name: 'dependency-skill',
+          runtimeDependencies: [{
+            id: 'otto-package-that-does-not-exist',
+            kind: 'node-package',
+            purpose: '验证缺失依赖授权流程',
+            source: 'https://www.npmjs.com/',
+            installScope: 'project',
+            installCommand: 'npm install otto-package-that-does-not-exist',
+          }],
+        },
+        enabled: true,
+        loadLevel: SkillLoadLevel.RESOURCES,
+        scripts: [],
+      };
+
+      mockLoaderInstance = {
+        loadEnabledSkills: () => [mockSkill],
+      };
+      mockInjectorInstance = {
+        loadSkillLevel2: () => '# Dependency skill\n\nInstructions',
+      };
+
+      const result = await useSkillTool.execute({ skillName: 'dependency-skill' }, mockAbortSignal);
+
+      expect(result.llmContent).toContain('Runtime dependency preflight (read-only)');
+      expect(result.llmContent).toContain('otto-package-that-does-not-exist: missing');
+      expect(result.llmContent).toContain('<dependency_installation_requires_consent>');
+      expect(result.llmContent).toContain('ask_user_question');
+      expect(result.llmContent).toContain('官方来源：https://www.npmjs.com/');
+      expect(result.llmContent).toContain('安装范围：project');
+      expect(result.llmContent).toContain('npm install otto-package-that-does-not-exist');
     });
 
     it('should not show plugin root directory for non-marketplace skills', async () => {

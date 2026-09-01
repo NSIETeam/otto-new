@@ -30,6 +30,10 @@ import {
   SkillsPaths,
   type Skill,
 } from '../skills/index.js';
+import {
+  installationCommandForPlatform,
+  preflightSkillDependencies,
+} from '../skills/skill-dependency-preflight.js';
 
 interface UseSkillParams {
   /** The skill name to activate (e.g., "pdf" or "test-pdf") */
@@ -70,6 +74,10 @@ Important:
 - Skills with 📜 or <has_scripts>true</has_scripts> MUST use their scripts
 - Do not guess script syntax - always use_skill first to see exact commands
 - For knowledge-only skills (no scripts), follow the guidance provided
+- Check every runtime and package dependency with a read-only version/import command before executing the skill.
+- If anything is missing, NEVER download or install it automatically. Call ask_user_question first and explain the dependency, why the skill needs it, the official source, the proposed install scope, and the exact command.
+- Only install after the user explicitly chooses to proceed; the later shell/download confirmation is still required. If ask_user_question is unavailable, ask in normal text and stop until the user answers.
+- A request to use a skill is not permission to install dependencies, update repositories, or change global runtimes.
 </skills_instructions>`,
       Icon.LightBulb,
       {
@@ -229,6 +237,10 @@ If the problem persists, this may be a system bug.`,
       }
       const skillRootDir = skill.path;
       const scriptsDir = skill.scriptsPath || `${skillRootDir}/scripts`;
+      const dependencyReport = preflightSkillDependencies(
+        skill.metadata.runtimeDependencies,
+        [skillRootDir, process.cwd()],
+      );
 
       // Determine plugin root directory based on skill source
       let pluginRootDir = '';
@@ -279,6 +291,43 @@ If the problem persists, this may be a system bug.`,
           ``,
           fullContent
         ].join('\n');
+      }
+
+      if (dependencyReport.declared) {
+        const dependencyLines = dependencyReport.statuses.flatMap(({ dependency, state, detail }) => {
+          const lines = [`- ${dependency?.id || 'invalid'}: ${state} — ${detail}`];
+          if (state === 'missing' || state === 'outdated' || state === 'optional-missing') {
+            lines.push(`  - 用途：${dependency?.purpose || '未声明'}`);
+            lines.push(`  - 官方来源：${dependency?.source || '未声明'}`);
+            lines.push(`  - 安装范围：${dependency?.installScope || '未声明'}`);
+            lines.push(`  - 建议命令：${dependency ? installationCommandForPlatform(dependency) || `未提供 ${process.platform} 平台命令` : '未声明'}`);
+          }
+          return lines;
+        });
+        const invalid = dependencyReport.statuses.some(({ state }) => state === 'invalid');
+        const dependencyInstructions = [
+          '',
+          '## Runtime dependency preflight (read-only)',
+          '',
+          ...dependencyLines,
+        ];
+        if (dependencyReport.needsConsent) {
+          dependencyInstructions.push(
+            '',
+            '<dependency_installation_requires_consent>',
+            'One or more required dependencies are missing or outdated. Before running this skill, call ask_user_question and show each dependency purpose, official source, install scope, and exact install command from runtimeDependencies. Do not download, install, upgrade, clone, or modify the environment until the user explicitly agrees. A later shell confirmation is still required.',
+            '</dependency_installation_requires_consent>',
+          );
+        }
+        if (invalid) {
+          dependencyInstructions.push(
+            '',
+            '<invalid_dependency_declaration>',
+            'Do not execute this skill until its runtimeDependencies metadata is corrected and validated.',
+            '</invalid_dependency_declaration>',
+          );
+        }
+        output = `${output}\n${dependencyInstructions.join('\n')}`;
       }
 
       return {

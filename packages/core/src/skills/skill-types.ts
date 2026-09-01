@@ -225,8 +225,37 @@ export interface SkillMetadata {
   allowedTools?: string[];
   /** 依赖的其他 Skills */
   dependencies?: string[];
+  /** 需要在执行前只读预检、缺失时征得用户安装授权的运行依赖 */
+  runtimeDependencies?: SkillRuntimeDependency[];
   /** 自定义属性 */
   [key: string]: unknown;
+}
+
+export type SkillRuntimeDependencyKind =
+  | 'command'
+  | 'node-package'
+  | 'python-package';
+
+export type SkillDependencyInstallScope = 'skill' | 'project' | 'system';
+
+/**
+ * Skill 的机器可读运行依赖。
+ *
+ * Otto 不执行 Skill 提供的自定义探测脚本，只针对受支持的 kind/id 做
+ * 内置只读检查。installCommand 只用于向用户预览，不能视为安装授权。
+ */
+export interface SkillRuntimeDependency {
+  id: string;
+  kind: SkillRuntimeDependencyKind;
+  purpose: string;
+  source: string;
+  minimumVersion?: string;
+  required?: boolean;
+  installScope: SkillDependencyInstallScope;
+  /** 单一跨平台命令；如各平台不同则使用 installCommands */
+  installCommand?: string;
+  installCommands?: Partial<Record<NodeJS.Platform | 'default', string>>;
+  platforms?: NodeJS.Platform[];
 }
 
 /**

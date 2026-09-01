@@ -88,8 +88,10 @@ interface SidebarProps {
   updateBadge?: boolean;
   enterpriseAccount?: EnterpriseAccount;
   enterpriseUnreadCounts?: EnterpriseUnreadCounts;
-  /** 园区工单未读总数（待处理 + 有更新的申请）。 */
+  /** 工作人员视角需要处理的园区工单数。 */
   parkTicketUnreadCount?: number;
+  /** 申请人视角尚未阅读的园区客服进展数。 */
+  parkCreatorUpdateUnreadCount?: number;
   onSelect: (id: string) => void;
   onNewChat: () => void;
   /** 选择目录创建项目，或直接在指定项目目录中新建会话。 */
@@ -121,6 +123,7 @@ export function Sidebar({
   enterpriseAccount,
   enterpriseUnreadCounts = {},
   parkTicketUnreadCount = 0,
+  parkCreatorUpdateUnreadCount = 0,
   onSelect,
   onNewChat,
   onNewProjectChat = () => {},
@@ -388,6 +391,7 @@ export function Sidebar({
         accountManagementActive={accountManagementActive}
         enterpriseUnreadCounts={enterpriseUnreadCounts}
         parkTicketUnreadCount={parkTicketUnreadCount}
+        parkCreatorUpdateUnreadCount={parkCreatorUpdateUnreadCount}
         unreadSessions={unreadSessions}
         onNewChat={onNewChat}
         onNavigate={onNavigate}
@@ -778,6 +782,7 @@ function NavItems({
   accountManagementActive,
   enterpriseUnreadCounts,
   parkTicketUnreadCount,
+  parkCreatorUpdateUnreadCount,
   unreadSessions,
   onNewChat,
   onNavigate,
@@ -787,6 +792,7 @@ function NavItems({
   accountManagementActive: boolean;
   enterpriseUnreadCounts: EnterpriseUnreadCounts;
   parkTicketUnreadCount: number;
+  parkCreatorUpdateUnreadCount: number;
   unreadSessions?: string[];
   onNewChat: () => void;
   onNavigate?: (view: 'chat' | 'organization' | 'inbox' | 'work' | 'hub') => void;
@@ -794,7 +800,12 @@ function NavItems({
 }): React.JSX.Element {
   const { inboxUnread, workUnread } = computeNavBadgeCounts(
     enterpriseUnreadCounts,
-    { actionableCount: parkTicketUnreadCount, creatorUpdateCount: 0, latestTimestamp: '', latestPreview: '' },
+    {
+      actionableCount: parkTicketUnreadCount,
+      creatorUpdateCount: parkCreatorUpdateUnreadCount,
+      latestTimestamp: '',
+      latestPreview: '',
+    },
     unreadSessions,
   );
 

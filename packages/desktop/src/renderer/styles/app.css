@@ -11803,6 +11803,17 @@ body[data-otto-surface='desktop-pet'] #root {
   border-right: 1px solid var(--otto-border);
   padding: 8px;
 }
+.otto-inbox-page__capability-note {
+  margin-bottom: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--otto-border);
+  border-radius: 6px;
+  background: var(--otto-surface);
+  color: var(--otto-text-tertiary);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.otto-inbox-page__capability-note span { display: block; }
 .otto-inbox-page__federation-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -11901,6 +11912,11 @@ body[data-otto-surface='desktop-pet'] #root {
   border-radius: 8px;
   background: color-mix(in srgb, var(--otto-accent) 12%, var(--otto-surface));
 }
+.otto-inbox-page__conv-avatar--park {
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--otto-success, #16803a) 13%, var(--otto-surface));
+  color: var(--otto-success, #16803a);
+}
 .otto-inbox-page__conv-body {
   flex: 1;
   min-width: 0;
@@ -11929,6 +11945,11 @@ body[data-otto-surface='desktop-pet'] #root {
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
+}
+.otto-inbox-page__conv-time {
+  color: var(--otto-text-tertiary);
+  font-size: 9px;
+  white-space: nowrap;
 }
 .otto-inbox-page__online {
   width: 8px;
@@ -11994,6 +12015,14 @@ body[data-otto-surface='desktop-pet'] #root {
   margin-left: auto;
   color: var(--otto-success, #22c55e);
   font-size: 11px;
+}
+.otto-inbox-page__ticket-current-status {
+  margin-left: auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--otto-accent-soft);
+  color: var(--otto-accent) !important;
+  font-weight: 650;
 }
 .otto-inbox-page__security {
   flex: 0 0 auto;
@@ -12125,6 +12154,51 @@ body[data-otto-surface='desktop-pet'] #root {
   font-size: 9px;
 }
 .otto-inbox-page__msg-meta time { color: inherit; font-size: inherit; }
+.otto-inbox-page__ticket-timeline {
+  gap: 14px;
+}
+.otto-inbox-page__ticket-event-label {
+  color: var(--otto-text-tertiary);
+  font-size: 10px;
+  font-weight: 650;
+}
+.otto-inbox-page__msg.is-mine .otto-inbox-page__ticket-event-label {
+  text-align: right;
+}
+.otto-inbox-page__ticket-response-type {
+  font-size: 11px;
+}
+.otto-inbox-page__ticket-status-change {
+  opacity: 0.72;
+  font-size: 10px;
+}
+.otto-inbox-page__ticket-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--otto-border);
+  background: var(--otto-surface);
+  color: var(--otto-text-tertiary);
+  font-size: 11px;
+}
+.otto-inbox-page__ticket-footer button {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  background: var(--otto-accent);
+  color: #fff;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.otto-inbox-page__ticket-footer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .otto-inbox-page__reply {
   display: flex;
   gap: 8px;

@@ -43,6 +43,7 @@ export {
 } from './skills-integration.js';
 export {
   loadBuiltinSkillInstructions,
+  isBuiltinSkillName,
   seedDefaultSkills,
   shouldRefreshBuiltinSkill,
 } from './seed-skills.js';

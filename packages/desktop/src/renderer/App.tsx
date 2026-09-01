@@ -54,6 +54,7 @@ import { RightPanel } from './components/RightPanel.js';
 import {
   ParkServicesPlugin,
   PARK_STATE_EVENT,
+  type ParkTicketUnreadCounts,
   closeParkServices,
   hideParkServices,
   openParkServices,
@@ -252,6 +253,10 @@ function OttoWorkspaceApp({
   const softwareUpdate = useSoftwareUpdate();
   const product = useProductWorkspace(state.activeSessionId);
   const [enterpriseUnreadCounts, setEnterpriseUnreadCounts] = useState<EnterpriseUnreadCounts>({});
+  const [parkTicketUnreadCounts, setParkTicketUnreadCounts] = useState<ParkTicketUnreadCounts>({
+    actionableCount: 0,
+    creatorUpdateCount: 0,
+  });
   const enterpriseUnreadTrackerRef = useRef<EnterpriseUnreadNotificationTracker | null>(null);
   const centralIdentity = useMemo(
     () => resolveCentralEnterpriseIdentity(account),
@@ -312,6 +317,10 @@ function OttoWorkspaceApp({
     moduleCapabilities.organizationFeatures?.direct_messages === true;
   const effectiveAtoa = internalAdminPreview ||
     moduleCapabilities.organizationFeatures?.atoa === true;
+  const effectiveParkService = internalAdminPreview || (
+    edition === 'enterprise' &&
+    moduleCapabilities.organizationFeatures?.park_service === true
+  );
   const availableModuleIds = useMemo(
     () => moduleCapabilities.modules.filter((module) => module.availability === 'available').map((module) => module.id),
     [moduleCapabilities.modules],
@@ -579,6 +588,14 @@ function OttoWorkspaceApp({
       return next;
     });
     void window.otto.notificationMarkRead(sessionId).catch(() => undefined);
+  }, []);
+
+  const markParkCreatorUpdateRead = useCallback((ticketId: string): void => {
+    setParkTicketUnreadCounts((current) => ({
+      ...current,
+      creatorUpdateCount: Math.max(0, current.creatorUpdateCount - 1),
+    }));
+    void window.otto.notificationMarkRead(`park:ticket:${ticketId}`).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -1510,18 +1527,16 @@ function OttoWorkspaceApp({
         onDelete={actions.deleteSession}
         enterpriseAccount={account}
         enterpriseUnreadCounts={enterpriseUnreadCounts}
+        parkTicketUnreadCount={parkTicketUnreadCounts.actionableCount}
+        parkCreatorUpdateUnreadCount={parkTicketUnreadCounts.creatorUpdateCount}
         onJoinEnterprise={onJoinEnterprise}
         onLogout={onLogout}
         unreadSessions={state.unreadSessions}
       />
       <ParkServicesPlugin
         internalAdminPreview={internalAdminPreview}
-        effectiveParkService={
-          internalAdminPreview || (
-            edition === 'enterprise' &&
-            moduleCapabilities.organizationFeatures?.park_service === true
-          )
-        }
+        onUnreadCountsChange={setParkTicketUnreadCounts}
+        effectiveParkService={effectiveParkService}
       />
 
       {mainView === 'organization' ? (
@@ -1531,10 +1546,7 @@ function OttoWorkspaceApp({
             effectiveEnterpriseTree
           }
           baselineEnterpriseTreeAvailable={baselineEnterpriseTreeAvailable}
-          effectiveParkService={
-            internalAdminPreview ||
-            moduleCapabilities.organizationFeatures?.park_service === true
-          }
+          effectiveParkService={effectiveParkService}
           effectiveDirectMessages={
             effectiveDirectMessages
           }
@@ -1566,9 +1578,11 @@ function OttoWorkspaceApp({
           effectiveAtoa={
             effectiveAtoa
           }
+          effectiveParkService={effectiveParkService}
           enterpriseUnreadCounts={enterpriseUnreadCounts}
           federationContactOpenRequest={enterpriseFederationChatOpenRequest}
           onFederationMessageRead={markEnterpriseFederationMessageRead}
+          onParkTicketRead={markParkCreatorUpdateRead}
           onOpenDirectChat={(peerId) => {
             setMainView('organization');
             setEnterpriseDirectChatOpenRequest((cur) => ({

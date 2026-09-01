@@ -637,6 +637,26 @@ export interface AutoSkillCandidateInfo {
   knowledgeEvidenceCount?: number;
   recommendation?: 'create' | 'enhance';
   targetSkillName?: string;
+  source?: 'automatic' | 'proactive';
+  draft?: {
+    packageRelativePath?: string;
+    validationPassed: boolean;
+    validationErrors: string[];
+    validationWarnings: string[];
+    packageReady: boolean;
+    tests: Array<{
+      name: string;
+      status: 'passed' | 'failed' | 'needs-review';
+      detail: string;
+    }>;
+    risk: {
+      scriptFiles: string[];
+      permissions: string[];
+      fileChanges: string[];
+      securityRisks: string[];
+      executionBlocked: boolean;
+    };
+  };
 }
 export type GetPendingAutoSkillsMsg = Envelope<
   'get_pending_auto_skills',

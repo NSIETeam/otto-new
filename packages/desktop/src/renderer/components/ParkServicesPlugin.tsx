@@ -1362,12 +1362,19 @@ function ParkServiceWindow({
   </div>;
 }
 
+export interface ParkTicketUnreadCounts {
+  actionableCount: number;
+  creatorUpdateCount: number;
+}
+
 export function ParkServicesPlugin({
   internalAdminPreview = false,
   effectiveParkService,
+  onUnreadCountsChange,
 }: {
   internalAdminPreview?: boolean;
   effectiveParkService?: boolean;
+  onUnreadCountsChange?: (counts: ParkTicketUnreadCounts) => void;
 } = {}): React.JSX.Element {
   const [parkEnabled, setParkEnabled] = useState(() => (
     internalAdminPreview || (
@@ -1428,6 +1435,12 @@ export function ParkServicesPlugin({
   const ticketPollInitialized = useRef(false);
   const notifiedPublicationKeys = useRef(new Set<string>());
   const uid = useId();
+
+  useEffect(() => {
+    if (internalAdminPreview || parkEnabled !== true) {
+      onUnreadCountsChange?.({ actionableCount: 0, creatorUpdateCount: 0 });
+    }
+  }, [internalAdminPreview, onUnreadCountsChange, parkEnabled]);
   const titleId = `${uid}-title`;
 
   const openServiceWindow = useCallback((
@@ -1779,6 +1792,7 @@ export function ParkServicesPlugin({
           notifiedTicketKeys.current.clear();
           ticketPollIdentity.current = null;
           ticketPollInitialized.current = false;
+          onUnreadCountsChange?.({ actionableCount: 0, creatorUpdateCount: 0 });
           return;
         }
         const identity = `${session.account.organizationId}:${session.account.id}`;
@@ -1791,6 +1805,7 @@ export function ParkServicesPlugin({
           setOwnHistory([]);
           setBackgroundTickets([]);
           setBackgroundTicketSummaryCount(0);
+          onUnreadCountsChange?.({ actionableCount: 0, creatorUpdateCount: 0 });
           // Initial identity hydration must not close a form the user opened
           // while the first ticket poll was still in flight. Only a real
           // account or organization switch invalidates open service windows.
@@ -1807,6 +1822,10 @@ export function ParkServicesPlugin({
         setAssignedTasks(actionableTasks);
         setAssignedHistory(completedHistory);
         setOwnHistory(creatorHistory);
+        onUnreadCountsChange?.({
+          actionableCount: actionableTasks.filter((ticket) => !ticket.readAt).length,
+          creatorUpdateCount: creatorHistory.filter(isCreatorUpdateUnread).length,
+        });
         setBackgroundTickets((current) => current
           .map((ticket) => latestTickets.get(ticket.id) ?? ticket)
           .filter((ticket) => (
@@ -1908,8 +1927,12 @@ export function ParkServicesPlugin({
       }
     };
     const stopPolling = startNonOverlappingPoll(poll, 5_000);
-    return () => { cancelled = true; stopPolling(); };
-  }, [internalAdminPreview, parkEnabled]);
+    return () => {
+      cancelled = true;
+      stopPolling();
+      onUnreadCountsChange?.({ actionableCount: 0, creatorUpdateCount: 0 });
+    };
+  }, [internalAdminPreview, onUnreadCountsChange, parkEnabled]);
 
   const close = (): void => {
     setSelected(null);

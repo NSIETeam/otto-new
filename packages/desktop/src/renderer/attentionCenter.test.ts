@@ -31,4 +31,21 @@ describe('federation unread attention', () => {
       ]),
     });
   });
+
+  it('把申请人收到的客服更新计入我的消息，工作人员待办仍计入我的工作', () => {
+    expect(computeNavBadgeCounts(
+      { 'enterprise:message:local-account': 2 },
+      {
+        actionableCount: 3,
+        creatorUpdateCount: 4,
+        latestTimestamp: '2026-09-01T04:32:00.000Z',
+        latestPreview: '园区客服更新了办理进展',
+      },
+      [],
+    )).toEqual({
+      inboxUnread: 6,
+      workUnread: 3,
+      globalUnread: 9,
+    });
+  });
 });

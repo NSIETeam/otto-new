@@ -207,18 +207,50 @@ describe('WorkspaceDialogs', () => {
     expect(screen.getByDisplayValue('尚未保存的制度')).toBeTruthy();
   });
 
-  it('自动 Skill 弹窗保留确认、拒绝和分析动作', () => {
+  it('Skill 草稿弹窗保留确认安装、拒绝和分析动作', () => {
     const onRefresh = vi.fn(); const onConfirm = vi.fn(); const onReject = vi.fn();
     render(<AutoSkillDialog open candidates={[{
       id: 'candidate-1', name: '周报生成', description: '自动整理周报',
       detectedPattern: '重复周报', occurrenceCount: 3, reason: '存在稳定重复流程', recommendation: 'create',
     }]} lastAction={null} onRefresh={onRefresh} onConfirm={onConfirm} onReject={onReject} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '立即分析' }));
-    fireEvent.click(screen.getByRole('button', { name: '确认生成' }));
-    fireEvent.click(screen.getByRole('button', { name: '不再建议' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认安装' }));
+    fireEvent.click(screen.getByRole('button', { name: '拒绝草稿' }));
     expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(onConfirm).toHaveBeenCalledWith('candidate-1');
     expect(onReject).toHaveBeenCalledWith('candidate-1');
+  });
+
+  it('脚本型 Skill 安装前展示文件、权限、风险和禁执行说明', () => {
+    render(<AutoSkillDialog open candidates={[{
+      id: 'candidate-script', name: 'report-exporter', description: '导出结构化报告',
+      detectedPattern: '用户主动要求沉淀报告导出流程', occurrenceCount: 1,
+      reason: '主动需求', recommendation: 'create', source: 'proactive',
+      draft: {
+        validationPassed: true,
+        validationErrors: [],
+        validationWarnings: [],
+        packageReady: true,
+        packageRelativePath: 'skill-drafts/pending/candidate-script/report-exporter.otto-skill',
+        tests: [{ name: '脚本行为测试', status: 'needs-review', detail: '未执行脚本' }],
+        risk: {
+          scriptFiles: ['scripts/export.py'],
+          permissions: ['写入或删除本地文件'],
+          fileChanges: ['新增 skills/report-exporter/scripts/export.py'],
+          securityRisks: ['脚本可能修改用户文件'],
+          executionBlocked: true,
+        },
+      },
+    }]} lastAction={null} onRefresh={vi.fn()} onConfirm={vi.fn()} onReject={vi.fn()} onClose={vi.fn()} />);
+
+    expect(screen.getByText(/检查通过，等待确认/)).toBeTruthy();
+    expect(screen.getByText(/生成、打包和安装均不会执行/)).toBeTruthy();
+    fireEvent.click(screen.getByText('文件变更（1）'));
+    fireEvent.click(screen.getByText('权限（1）'));
+    fireEvent.click(screen.getByText('安全风险（1）'));
+    expect(screen.getByText('新增 skills/report-exporter/scripts/export.py')).toBeTruthy();
+    expect(screen.getByText('写入或删除本地文件')).toBeTruthy();
+    expect(screen.getByText('脚本可能修改用户文件')).toBeTruthy();
   });
 
   it('自定义专家草稿在关闭后清空', async () => {

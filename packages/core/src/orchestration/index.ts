@@ -97,6 +97,7 @@ export {
   resolveAutoSkillUserDir,
   resolveAutoSkillSkillsDir,
   scanAndStageSkillCandidates,
+  stageProactiveSkillDraft,
   setAutoSkillFeishuNotifier,
   startAutoSkillScanner,
   stopAutoSkillScanner,
@@ -108,7 +109,19 @@ export type {
   AutoSkillFeishuNotifier,
   AutoSkillScannerOptions,
   PatternDetectionOptions,
+  ProactiveSkillDraftInput,
 } from './autoSkillGenerator.js';
+export {
+  installConfirmedSkillDraft,
+  stageSkillDraft,
+} from './skillDraftWorkflow.js';
+export type {
+  SkillDraftFileInput,
+  SkillDraftRiskSummary,
+  SkillDraftStaticTest,
+  SkillDraftSummary,
+  StageSkillDraftOptions,
+} from './skillDraftWorkflow.js';
 
 // 自动 Skill 专家孵化
 export {

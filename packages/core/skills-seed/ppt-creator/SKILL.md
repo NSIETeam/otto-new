@@ -2,6 +2,24 @@
 name: ppt-creator
 version: 3
 description: 用自定义 HTML/CSS/SVG、真实视觉素材、浏览器逐页渲染与 Node/PptxGenJS 制作炫酷高冲击 PPTX。适用于发布会、路演、汇报、课件与任何拒绝通用模板感的演示；禁止 Python 排版。
+runtimeDependencies:
+  - id: node
+    kind: command
+    minimumVersion: "20"
+    purpose: 运行 PPT 页面渲染与组装流程
+    source: https://nodejs.org/
+    installScope: system
+    installCommands:
+      win32: winget install --id OpenJS.NodeJS.LTS --exact
+      darwin: brew install node@20
+      linux: sudo apt-get install nodejs npm
+  - id: pptxgenjs
+    kind: node-package
+    minimumVersion: "4.0.1"
+    purpose: 将逐页画面组装为标准 PPTX 文件
+    source: https://www.npmjs.com/package/pptxgenjs
+    installScope: project
+    installCommand: npm install --save-exact pptxgenjs@4.0.1
 ---
 
 # 发布会级 PPT 视觉导演
@@ -18,6 +36,12 @@ description: 用自定义 HTML/CSS/SVG、真实视觉素材、浏览器逐页渲
 - `generate_document` 仅作为快速兜底：只有用户明确优先速度，或自定义画布链路确实不可用时才使用；不得把兜底结果冒充高审美成品。
 - 不上传普通 PPT，不依赖 Otto 私有云端 PPT 服务、网页登录或在线编辑器。
 - 信息足够就直接完成；缺少会改变方向的关键信息时只问最少问题。
+
+## 依赖检查与用户授权
+
+开始制作前只读检查 `node --version`、PptxGenJS 是否可解析，以及 Playwright 或本机 Chrome/Edge/Chromium 是否可用。检查命令不得下载、安装或升级任何内容。
+
+缺少依赖时，先调用 `ask_user_question` 告诉用户：缺少什么、为什么需要、官方来源、建议安装到当前项目还是 Skill 专属环境，以及准备执行的命令。只有用户明确选择安装后，才能下载或安装；随后的命令仍需经过 Otto 确认。用户拒绝时，说明受影响的能力并提供不安装依赖的安全兜底，不得静默改用来源不明的工具。
 
 ## 先定义传播任务
 

@@ -355,7 +355,23 @@ export function AutoSkillDialog({ open, candidates, lastAction, onRefresh, onCon
   onRefresh(): void; onConfirm(id: string): void; onReject(id: string): void; onClose(): void;
 }): React.JSX.Element | null {
   if (!open) return null;
-  return <DialogFrame title="自动 Skill 候选" onClose={onClose}><div className="otto-workspace-dialog__toolbar"><p>从重复工作成果中沉淀可复用流程。</p><button type="button" onClick={onRefresh}>立即分析</button></div>{lastAction?.kind === 'confirmed' ? <p role="status">Skill 已生成{lastAction.savedPath ? `：${lastAction.savedPath}` : ''}</p> : null}<div className="otto-workspace-dialog__list">{candidates.length ? candidates.map((candidate) => <article key={candidate.id}><h3>{candidate.name}</h3><p>{candidate.description}</p><small>{candidate.detectedPattern} · {candidate.occurrenceCount} 次重复</small><footer><button type="button" onClick={() => onConfirm(candidate.id)}>{candidate.recommendation === 'enhance' ? '确认增强' : '确认生成'}</button><button type="button" onClick={() => onReject(candidate.id)}>不再建议</button></footer></article>) : <p>暂无候选。点击“立即分析”扫描最近成果。</p>}</div></DialogFrame>;
+  return <DialogFrame title="Skill 草稿与候选" onClose={onClose}><div className="otto-workspace-dialog__toolbar"><p>主动需求和重复工作都会先进入隔离草稿区，检查通过并由你确认后才安装。</p><button type="button" onClick={onRefresh}>立即分析</button></div>{lastAction?.kind === 'confirmed' ? <p role="status">Skill 已确认安装{lastAction.savedPath ? `：${lastAction.savedPath}` : ''}</p> : null}<div className="otto-workspace-dialog__list">{candidates.length ? candidates.map((candidate) => {
+    const ready = candidate.draft?.validationPassed === true && candidate.draft.packageReady === true;
+    return <article key={candidate.id} aria-label={`${candidate.name} Skill 草稿`}>
+      <h3>{candidate.name}</h3>
+      <p>{candidate.description}</p>
+      <small>{candidate.source === 'proactive' ? '主动需求' : '自动发现'} · {candidate.detectedPattern}{candidate.source === 'automatic' ? ` · ${candidate.occurrenceCount} 次重复` : ''}</small>
+      {candidate.draft ? <div className="otto-auto-skill-draft-audit">
+        <p><strong>{ready ? '检查通过，等待确认' : '检查未通过，禁止安装'}</strong>{candidate.draft.packageRelativePath ? ` · 已打包 ${candidate.draft.packageRelativePath}` : ''}</p>
+        <details><summary>文件变更（{candidate.draft.risk.fileChanges.length}）</summary><ul>{candidate.draft.risk.fileChanges.map((change) => <li key={change}>{change}</li>)}</ul></details>
+        <details><summary>权限（{candidate.draft.risk.permissions.length}）</summary>{candidate.draft.risk.permissions.length ? <ul>{candidate.draft.risk.permissions.map((permission) => <li key={permission}>{permission}</li>)}</ul> : <p>未发现额外权限。</p>}</details>
+        <details><summary>安全风险（{candidate.draft.risk.securityRisks.length}）</summary>{candidate.draft.risk.securityRisks.length ? <ul>{candidate.draft.risk.securityRisks.map((risk) => <li key={risk}>{risk}</li>)}</ul> : <p>未发现脚本或高风险行为。</p>}</details>
+        <details><summary>测试与校验（{candidate.draft.tests.length}）</summary><ul>{candidate.draft.tests.map((test) => <li key={test.name}>{test.status === 'passed' ? '通过' : test.status === 'failed' ? '失败' : '需人工确认'} · {test.name}：{test.detail}</li>)}</ul>{candidate.draft.validationErrors.map((error) => <p role="alert" key={error}>{error}</p>)}</details>
+        {candidate.draft.risk.executionBlocked ? <p role="note">此草稿包含脚本：生成、打包和安装均不会执行；以后首次执行仍需单独授权。</p> : null}
+      </div> : <p role="alert">旧候选尚未生成受控草稿；确认时会先完成校验和打包。</p>}
+      <footer><button type="button" disabled={candidate.draft ? !ready : false} onClick={() => onConfirm(candidate.id)}>{candidate.recommendation === 'enhance' ? '确认增强并安装' : '确认安装'}</button><button type="button" onClick={() => onReject(candidate.id)}>拒绝草稿</button></footer>
+    </article>;
+  }) : <p>暂无草稿或候选。点击“立即分析”扫描最近成果；也可以直接让 Otto 创建一个 Skill。</p>}</div></DialogFrame>;
 }
 
 export function CustomAgentManagerDialog({

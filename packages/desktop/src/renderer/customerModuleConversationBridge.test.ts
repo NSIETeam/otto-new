@@ -124,4 +124,26 @@ describe('客户模块通用 Schema 对话桥', () => {
     expect(messages.at(-1)?.text).toContain('宿主超时');
     expect(messages.at(-1)?.text).toContain('重新运行');
   });
+
+  it('统一草稿中心标记付费确认，并在失败后切换为明确重试动作', async () => {
+    const runModule = vi.fn(async () => { throw new Error('宿主超时'); });
+    const { common, registry } = harness({ runModule });
+    await handleCustomerModuleConversation({ ...common, text: '运行合同审查器，合同内容：测试，风险等级：低' });
+    expect(registry.summary('session-1', 'account-1', 1_000)).toMatchObject({
+      source: 'customer-module', title: '合同审查器', phase: 'awaiting_confirmation',
+      missingFields: [], confirmationText: '确认运行并同意费用', incursCost: true,
+    });
+    expect(registry.beginRun('session-1', 'account-1')).toBe(true);
+    const submitting = registry.summary('session-1', 'account-1', 1_000);
+    expect(submitting?.phase).toBe('submitting');
+    expect(submitting?.confirmationText).toBeUndefined();
+    const runningId = registry.get('session-1', 'account-1', 1_000)!.id;
+    expect(registry.discard(runningId, 'session-1', 'account-1', 1_000)).toBe(false);
+    registry.finishRun('session-1', 'account-1');
+
+    await handleCustomerModuleConversation({ ...common, text: '确认运行并同意费用' });
+    expect(registry.summary('session-1', 'account-1', 1_000)).toMatchObject({
+      phase: 'failed', confirmationText: '重新运行并同意费用',
+    });
+  });
 });

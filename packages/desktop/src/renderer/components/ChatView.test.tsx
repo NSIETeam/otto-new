@@ -14,6 +14,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, fireEvent, screen } from '@testing-library/react';
 import type { OttoMessage, SessionSummary, ModelInfo } from 'otto-server';
+import type { ConversationActionDraftSummary } from '../conversationActionDraft.js';
 import { ChatView } from './ChatView.js';
 
 vi.mock('../assets/otto-avatar.png', () => ({ default: 'avatar.png' }));
@@ -170,5 +171,34 @@ describe('ChatView 重新生成携带消息 id', () => {
     expect(toggle.querySelector('svg')).toBeTruthy();
     fireEvent.click(toggle);
     expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('从统一草稿卡继续填写时，只把下一个缺失字段带入输入框', () => {
+    const conversationDraft: ConversationActionDraftSummary = {
+      id: 'parking-draft', source: 'park-service', title: '停车办理申请',
+      phase: 'collecting', updatedAt: Date.now(), expiresAt: Date.now() + 60_000,
+      missingFields: ['申请内容', '申请数量'],
+    };
+    render(
+      <ChatView
+        session={SESSION}
+        messages={twoRounds()}
+        models={MODELS}
+        currentModel="m1"
+        busy={false}
+        onSend={vi.fn()}
+        onCancel={vi.fn()}
+        onSetModel={vi.fn()}
+        onRegenerate={vi.fn()}
+        onOpenSetup={vi.fn()}
+        onNewChat={vi.fn()}
+        onClearContext={vi.fn()}
+        conversationDrafts={[conversationDraft]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '继续填写停车办理申请' }));
+    expect((screen.getByPlaceholderText('给 Otto 发送消息...') as HTMLTextAreaElement).value)
+      .toBe('申请内容：');
   });
 });

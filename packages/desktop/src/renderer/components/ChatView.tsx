@@ -31,6 +31,8 @@ import {
 import type { SlashCommand } from './SlashCommands.js';
 import { IconArrowDown, IconFolderOpen, IconMessageCircle, IconPanelRight, OttoAvatar } from './icons.js';
 import { isProjectSession, workspaceDisplayName } from '../sessionListView.js';
+import type { ConversationActionDraftSummary } from '../conversationActionDraft.js';
+import { ConversationDraftCenter } from './ConversationDraftCenter.js';
 
 
 /** 视口距底多近算「贴底」（px），贴底才自动跟随流式增量。 */
@@ -106,6 +108,9 @@ interface ChatViewProps {
   onToggleRightPanel?: () => void;
   pendingAgent?: PendingAgentSelection | null;
   onClearPendingAgent?: () => void;
+  conversationDrafts?: readonly ConversationActionDraftSummary[];
+  onConfirmConversationDraft?: (draft: ConversationActionDraftSummary) => void;
+  onCancelConversationDraft?: (draft: ConversationActionDraftSummary) => void;
 }
 
 export function ChatView({
@@ -139,6 +144,9 @@ export function ChatView({
   onToggleRightPanel,
   pendingAgent,
   onClearPendingAgent,
+  conversationDrafts = [],
+  onConfirmConversationDraft,
+  onCancelConversationDraft,
 }: ChatViewProps): React.JSX.Element {
   const threadRef = useRef<HTMLDivElement>(null);
   // 用户是否贴在底部（决定流式增量是否自动跟随）。
@@ -333,6 +341,15 @@ export function ChatView({
 
       {/* 园区服务插件：常驻挂载（右侧面板「园区服务」入口经事件打开弹窗）。 */}
 
+      <ConversationDraftCenter
+        drafts={conversationDrafts}
+        onContinue={(conversationDraft) => {
+          const field = conversationDraft.missingFields[0];
+          if (field) fillDraft(`${field}：`);
+        }}
+        onConfirm={(conversationDraft) => onConfirmConversationDraft?.(conversationDraft)}
+        onCancel={(conversationDraft) => onCancelConversationDraft?.(conversationDraft)}
+      />
 
       <Composer
         models={models}

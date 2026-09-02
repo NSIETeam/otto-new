@@ -162,4 +162,25 @@ describe('园区申请表对话桥', () => {
     expect(await handleParkServiceActionConversation({ ...common, text: '给我讲个笑话' })).toBe(false);
     expect(submitTicket).not.toHaveBeenCalled();
   });
+
+  it('向统一草稿中心暴露园区申请的缺失字段和确认状态', async () => {
+    const { common, registry } = harness();
+    await handleParkServiceActionConversation({ ...common, text: '申请停车位' });
+    expect(registry.summary('session-1', 'account-1', 1_000)).toMatchObject({
+      source: 'park-service', title: '停车办理申请', phase: 'collecting',
+      missingFields: ['申请内容', '申请数量'],
+    });
+
+    await handleParkServiceActionConversation({ ...common, text: '申请内容：地下固定停车位，申请数量：1' });
+    expect(registry.summary('session-1', 'account-1', 1_000)).toMatchObject({
+      phase: 'awaiting_confirmation', missingFields: [], confirmationText: '确认提交',
+    });
+    expect(registry.beginSubmission('session-1', 'account-1')).toBe(true);
+    const submitting = registry.summary('session-1', 'account-1', 1_000);
+    expect(submitting?.phase).toBe('submitting');
+    expect(submitting?.confirmationText).toBeUndefined();
+    const id = registry.get('session-1', 'account-1', 1_000)!.id;
+    expect(registry.discard(id, 'session-1', 'account-1', 1_000)).toBe(false);
+    registry.finishSubmission('session-1', 'account-1');
+  });
 });

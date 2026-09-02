@@ -258,4 +258,26 @@ describe('物业报修对话模块桥', () => {
     });
     await firstConfirmation;
   });
+
+  it('向统一草稿中心提供严格隔离的报修摘要，并只取消指定草稿', () => {
+    const registry = new ModuleActionDraftRegistry();
+    const transition = prepareModuleAction({
+      text: '我要物业报修', sessionId: 'session-1', accountId: 'account-1', defaults, now: 1_000,
+    });
+    expect(transition?.draft).toBeTruthy();
+    registry.save(transition!.draft!);
+
+    expect(registry.summary('session-1', 'account-2', 1_000)).toBeNull();
+    expect(registry.summary('session-1', 'account-1', 1_000)).toMatchObject({
+      source: 'repair', title: '物业报修', phase: 'collecting',
+      missingFields: ['报修类别', '故障描述', '紧急程度'],
+    });
+    expect(registry.discard('wrong-id', 'session-1', 'account-1', 1_000)).toBe(false);
+    expect(registry.beginSubmission('session-1', 'account-1')).toBe(true);
+    expect(registry.summary('session-1', 'account-1', 1_000)?.phase).toBe('submitting');
+    expect(registry.discard(transition!.draft!.id, 'session-1', 'account-1', 1_000)).toBe(false);
+    registry.finishSubmission('session-1', 'account-1');
+    expect(registry.discard(transition!.draft!.id, 'session-1', 'account-1', 1_000)).toBe(true);
+    expect(registry.get('session-1', 'account-1', 1_000)).toBeNull();
+  });
 });

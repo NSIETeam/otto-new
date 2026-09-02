@@ -137,6 +137,7 @@ import {
   WorkspaceCapabilityDraftRegistry,
   handleWorkspaceCapabilityConversation,
 } from './workspaceCapabilityConversationBridge.js';
+import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
 import { AtoaConsultDialog } from './components/AtoaConsultDialog.js';
 import { executeEnterpriseCollaborationRelay } from './enterpriseCollaborationRelay.js';
 import {
@@ -289,6 +290,7 @@ function OttoWorkspaceApp({
   const customerModuleActionDraftsRef = useRef(new CustomerModuleConversationDraftRegistry());
   const recruitmentActionDraftsRef = useRef(new RecruitmentConversationDraftRegistry());
   const workspaceCapabilityDraftsRef = useRef(new WorkspaceCapabilityDraftRegistry());
+  const [, setConversationDraftRevision] = useState(0);
   const enterpriseUnreadTrackerRef = useRef<EnterpriseUnreadNotificationTracker | null>(null);
   const centralIdentity = useMemo(
     () => resolveCentralEnterpriseIdentity(account),
@@ -1239,7 +1241,10 @@ function OttoWorkspaceApp({
           submit: (input) => window.otto.enterpriseTicketSubmit(input),
           postMessage: actions.postLocalChatMessage,
         });
-        if (handled) return true;
+        if (handled) {
+          setConversationDraftRevision((revision) => revision + 1);
+          return true;
+        }
 
         const parkActionHandled = await handleParkServiceActionConversation({
           text,
@@ -1262,7 +1267,10 @@ function OttoWorkspaceApp({
           submitSurvey: window.otto.enterpriseParkSurveySubmit,
           postMessage: actions.postLocalChatMessage,
         });
-        if (parkActionHandled) return true;
+        if (parkActionHandled) {
+          setConversationDraftRevision((revision) => revision + 1);
+          return true;
+        }
 
         const parkQueryHandled = await handleParkQueryConversation({
           text,
@@ -1288,7 +1296,10 @@ function OttoWorkspaceApp({
           runModule: window.otto.customerModuleRun,
           postMessage: actions.postLocalChatMessage,
         });
-        if (customerModuleHandled) return true;
+        if (customerModuleHandled) {
+          setConversationDraftRevision((revision) => revision + 1);
+          return true;
+        }
 
         const recruitmentHandled = await handleRecruitmentConversation({
           text,
@@ -1437,6 +1448,39 @@ function OttoWorkspaceApp({
       }
       actions.sendMessage(text, source, attachments, undefined, authorizedContext);
       return true;
+  };
+
+  const conversationActionDrafts = (() => {
+    if (!activeSession) return [];
+    const now = Date.now();
+    return [
+      moduleActionDraftsRef.current.summary(activeSession.sessionId, account.id, now),
+      parkServiceActionDraftsRef.current.summary(activeSession.sessionId, account.id, now),
+      customerModuleActionDraftsRef.current.summary(activeSession.sessionId, account.id, now),
+    ].filter((draft): draft is ConversationActionDraftSummary => draft !== null);
+  })();
+
+  const cancelConversationActionDraft = (draft: ConversationActionDraftSummary): void => {
+    if (!activeSession) return;
+    const now = Date.now();
+    const registry = draft.source === 'repair'
+      ? moduleActionDraftsRef.current
+      : draft.source === 'park-service'
+        ? parkServiceActionDraftsRef.current
+        : customerModuleActionDraftsRef.current;
+    const discarded = registry.discard(draft.id, activeSession.sessionId, account.id, now);
+    setConversationDraftRevision((revision) => revision + 1);
+    if (!discarded) {
+      const current = registry.summary(activeSession.sessionId, account.id, now);
+      if (current?.id === draft.id && current.phase === 'submitting') {
+        actions.postSystemNote(`“${draft.title}”正在执行，操作可能已经发送，不能通过删除草稿撤回；请等待最终结果。`);
+        return;
+      }
+      actions.postSystemNote(`“${draft.title}”草稿已失效或属于其他会话，没有执行任何操作。`);
+      return;
+    }
+    actions.postLocalChatMessage('user', `取消“${draft.title}”草稿`);
+    actions.postLocalChatMessage('assistant', `已取消“${draft.title}”草稿，未执行真实操作。`);
   };
 
   const handleNewChat = (): void => {
@@ -1919,6 +1963,20 @@ function OttoWorkspaceApp({
               onToggleRightPanel={toggleRightPanel}
               pendingAgent={pendingAgent}
               onClearPendingAgent={() => setPendingAgent(null)}
+              conversationDrafts={conversationActionDrafts}
+              onConfirmConversationDraft={(draft) => {
+                if (!draft.confirmationText) return;
+                const confirmation = handleSend(draft.confirmationText, 'local');
+                setConversationDraftRevision((revision) => revision + 1);
+                void confirmation.then(
+                  () => setConversationDraftRevision((revision) => revision + 1),
+                  (error) => {
+                    setConversationDraftRevision((revision) => revision + 1);
+                    actions.postSystemNote(`“${draft.title}”执行失败：${error instanceof Error ? error.message : String(error)}`);
+                  },
+                );
+              }}
+              onCancelConversationDraft={cancelConversationActionDraft}
               commands={slashCommands}
               onRunServerCommand={(name, args) => {
                 if (!activeSession) return;

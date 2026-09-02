@@ -2,6 +2,8 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
+import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
+
 export const CUSTOMER_MODULE_DRAFT_TTL_MS = 30 * 60 * 1_000;
 const MAX_DRAFTS = 5_000;
 const MAX_SCHEMA_FIELDS = 50;
@@ -346,6 +348,42 @@ export class CustomerModuleConversationDraftRegistry {
     const key = this.key(sessionId, accountId);
     this.drafts.delete(key);
     this.running.delete(key);
+  }
+
+  summary(
+    sessionId: string,
+    accountId: string,
+    now: number = Date.now(),
+  ): ConversationActionDraftSummary | null {
+    const draft = this.get(sessionId, accountId, now);
+    if (!draft) return null;
+    const missing = missingRequired(draft).map((item) => item.label);
+    const paid = paidModel(draft.permissions);
+    const failed = draft.phase === 'run_failed';
+    const running = this.running.has(this.key(sessionId, accountId));
+    return {
+      id: draft.id,
+      source: 'customer-module',
+      title: draft.moduleName,
+      phase: running ? 'submitting' : draft.phase === 'run_failed' ? 'failed' : draft.phase,
+      updatedAt: draft.updatedAt,
+      expiresAt: draft.expiresAt,
+      missingFields: missing,
+      incursCost: paid,
+      ...(!running && missing.length === 0 ? {
+        confirmationText: failed
+          ? paid ? '重新运行并同意费用' : '重新运行'
+          : paid ? '确认运行并同意费用' : '确认运行',
+      } : {}),
+    };
+  }
+
+  discard(id: string, sessionId: string, accountId: string, now: number = Date.now()): boolean {
+    const draft = this.get(sessionId, accountId, now);
+    if (!draft || draft.id !== id) return false;
+    if (this.running.has(this.key(sessionId, accountId))) return false;
+    this.clear(sessionId, accountId);
+    return true;
   }
 
   beginRun(sessionId: string, accountId: string): boolean {

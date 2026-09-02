@@ -1,0 +1,19 @@
+.otto-module-conversation-note {
+  flex: none;
+  margin: 10px 10px 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--otto-accent) 22%, var(--otto-border));
+  border-radius: var(--otto-radius-sm);
+  background: color-mix(in srgb, var(--otto-accent) 5%, var(--otto-surface));
+  color: var(--otto-text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.otto-module-conversation-note strong { color: var(--otto-text); }
+
+.otto-right-panel--panel > .otto-module-workspace-shell {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}

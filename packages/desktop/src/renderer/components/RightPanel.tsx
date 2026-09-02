@@ -3,7 +3,9 @@
 import React from 'react';
 import type { ModuleDefinition } from '../moduleCatalog.js';
 import type { ModuleWorkspaceLayout } from '../moduleWorkspace.js';
+import { preferredModuleConversationPrompt } from '../moduleConversationHint.js';
 import { ModuleWorkspace } from './ModuleWorkspace.js';
+import './RightPanelConversationHint.css';
 
 /** Thin boundary: App owns capabilities, persistence, and business dialogs. */
 export interface RightPanelProps {
@@ -40,6 +42,9 @@ export function RightPanel({
   onLayoutChange,
 }: RightPanelProps): React.JSX.Element {
   const hidden = presentation === 'panel' && collapsed;
+  const conversationPrompt = presentation === 'panel'
+    ? preferredModuleConversationPrompt(modules)
+    : null;
   return (
     <aside
       className={`otto-right-panel otto-right-panel--${presentation}${hidden ? ' otto-right-panel--collapsed' : ''}`}
@@ -48,17 +53,24 @@ export function RightPanel({
       aria-hidden={hidden || undefined}
     >
       {readiness === 'ready' ? (
-        <ModuleWorkspace
-          presentation={presentation}
-          scopeKey={scopeKey}
-          layout={layout}
-          modules={modules}
-          onActivate={onActivate}
-          onUnavailableModule={onUnavailableModule}
-          onOpenMarketplace={onOpenMarketplace}
-          onAddGroup={onAddGroup}
-          onLayoutChange={onLayoutChange}
-        />
+        <>
+          {conversationPrompt ? (
+            <p className="otto-module-conversation-note" role="note">
+              <strong>也可以直接对 Otto 说：</strong>“{conversationPrompt}”
+            </p>
+          ) : null}
+          <ModuleWorkspace
+            presentation={presentation}
+            scopeKey={scopeKey}
+            layout={layout}
+            modules={modules}
+            onActivate={onActivate}
+            onUnavailableModule={onUnavailableModule}
+            onOpenMarketplace={onOpenMarketplace}
+            onAddGroup={onAddGroup}
+            onLayoutChange={onLayoutChange}
+          />
+        </>
       ) : readiness === 'failed' ? (
         <div className="otto-module-workspace__loading" role="status">
           <span>暂时无法加载可用模块。</span>

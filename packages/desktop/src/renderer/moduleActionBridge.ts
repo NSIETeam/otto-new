@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
+
 /**
  * Conversation-to-module bridge.
  *
@@ -433,6 +435,36 @@ export class ModuleActionDraftRegistry {
 
   clear(sessionId: string, accountId: string): void {
     this.drafts.delete(this.key(sessionId, accountId));
+  }
+
+  summary(
+    sessionId: string,
+    accountId: string,
+    now: number = Date.now(),
+  ): ConversationActionDraftSummary | null {
+    const draft = this.get(sessionId, accountId, now);
+    if (!draft) return null;
+    const missing = missingFields(draft.fields).map((field) => REPAIR_FIELD_LABELS[field]);
+    const submitting = this.submitting.has(this.key(sessionId, accountId));
+    return {
+      id: draft.id,
+      source: 'repair',
+      title: '物业报修',
+      phase: submitting ? 'submitting' : draft.phase,
+      updatedAt: draft.updatedAt,
+      expiresAt: draft.expiresAt,
+      missingFields: missing,
+      ...(!submitting && missing.length === 0 ? { confirmationText: '确认提交' } : {}),
+    };
+  }
+
+  discard(id: string, sessionId: string, accountId: string, now: number = Date.now()): boolean {
+    const draft = this.get(sessionId, accountId, now);
+    if (!draft || draft.id !== id) return false;
+    if (this.submitting.has(this.key(sessionId, accountId))) return false;
+    this.clear(sessionId, accountId);
+    this.submitting.delete(this.key(sessionId, accountId));
+    return true;
   }
 
   beginSubmission(sessionId: string, accountId: string): boolean {

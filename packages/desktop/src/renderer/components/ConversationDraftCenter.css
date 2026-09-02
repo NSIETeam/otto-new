@@ -1,0 +1,89 @@
+.otto-conversation-drafts {
+  display: grid;
+  gap: 8px;
+  margin: 0 clamp(16px, 4vw, 44px) 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--otto-accent) 28%, var(--otto-border));
+  border-radius: var(--otto-radius-md);
+  background: color-mix(in srgb, var(--otto-accent) 5%, var(--otto-surface));
+  color: var(--otto-text);
+}
+
+.otto-conversation-drafts > header,
+.otto-conversation-drafts__item,
+.otto-conversation-drafts__copy > div,
+.otto-conversation-drafts__actions {
+  display: flex;
+  align-items: center;
+}
+
+.otto-conversation-drafts > header {
+  gap: 7px;
+  font-size: 12px;
+}
+
+.otto-conversation-drafts > header span {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: var(--otto-radius-pill);
+  background: var(--otto-accent);
+  color: white;
+  text-align: center;
+}
+
+.otto-conversation-drafts__list { display: grid; gap: 7px; }
+
+.otto-conversation-drafts__item {
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 10px;
+  border: 1px solid var(--otto-border);
+  border-radius: var(--otto-radius-sm);
+  background: var(--otto-surface-raised);
+}
+
+.otto-conversation-drafts__copy { min-width: 0; }
+.otto-conversation-drafts__copy > div { gap: 8px; }
+.otto-conversation-drafts__copy > div > span {
+  padding: 2px 6px;
+  border-radius: var(--otto-radius-pill);
+  background: var(--otto-accent-soft);
+  color: var(--otto-accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.otto-conversation-drafts__copy > div > span.is-failed {
+  background: color-mix(in srgb, var(--otto-danger) 12%, transparent);
+  color: var(--otto-danger);
+}
+.otto-conversation-drafts__copy p {
+  overflow: hidden;
+  margin: 4px 0 2px;
+  color: var(--otto-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.otto-conversation-drafts__copy small { color: var(--otto-text-tertiary); }
+.otto-conversation-drafts__actions { flex: none; gap: 6px; }
+.otto-conversation-drafts__actions button {
+  padding: 6px 9px;
+  border: 1px solid var(--otto-border);
+  border-radius: var(--otto-radius-sm);
+  background: var(--otto-surface);
+  color: var(--otto-text);
+  cursor: pointer;
+}
+.otto-conversation-drafts__actions button.is-primary {
+  border-color: var(--otto-accent);
+  background: var(--otto-accent);
+  color: white;
+}
+.otto-conversation-drafts__actions button.is-quiet { color: var(--otto-text-secondary); }
+.otto-conversation-drafts__actions button:focus-visible { box-shadow: var(--otto-shadow-focus); outline: none; }
+
+@media (max-width: 760px) {
+  .otto-conversation-drafts { margin-inline: 12px; }
+  .otto-conversation-drafts__item { align-items: flex-start; flex-direction: column; }
+  .otto-conversation-drafts__actions { width: 100%; }
+}

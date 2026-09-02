@@ -9,6 +9,7 @@ import {
   serviceOptionValue,
   type ParkServiceFormField,
 } from './parkServiceFormSchema.js';
+import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
 
 export const PARK_SERVICE_ACTION_TTL_MS = 30 * 60 * 1_000;
 const MAX_DRAFTS = 10_000;
@@ -542,6 +543,35 @@ export class ParkServiceActionDraftRegistry {
     const key = this.key(sessionId, accountId);
     this.drafts.delete(key);
     this.submitting.delete(key);
+  }
+
+  summary(
+    sessionId: string,
+    accountId: string,
+    now: number = Date.now(),
+  ): ConversationActionDraftSummary | null {
+    const draft = this.get(sessionId, accountId, now);
+    if (!draft) return null;
+    const missing = draft.kind === 'ticket' ? ticketMissing(draft) : surveyMissing(draft);
+    const submitting = this.submitting.has(this.key(sessionId, accountId));
+    return {
+      id: draft.id,
+      source: 'park-service',
+      title: draft.kind === 'ticket' ? `${SERVICE_NAMES[draft.serviceId]}申请` : draft.surveyTitle,
+      phase: submitting ? 'submitting' : draft.phase,
+      updatedAt: draft.updatedAt,
+      expiresAt: draft.expiresAt,
+      missingFields: missing,
+      ...(!submitting && missing.length === 0 ? { confirmationText: '确认提交' } : {}),
+    };
+  }
+
+  discard(id: string, sessionId: string, accountId: string, now: number = Date.now()): boolean {
+    const draft = this.get(sessionId, accountId, now);
+    if (!draft || draft.id !== id) return false;
+    if (this.submitting.has(this.key(sessionId, accountId))) return false;
+    this.clear(sessionId, accountId);
+    return true;
   }
 
   beginSubmission(sessionId: string, accountId: string): boolean {

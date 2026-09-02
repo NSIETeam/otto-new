@@ -61,4 +61,12 @@ describe('RightPanel module workspace boundary', () => {
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(retry).toHaveBeenCalledTimes(1);
   });
+
+  it('在侧栏给出当前可用模块的真实对话调用示例，但页面版不重复展示', () => {
+    const { rerender } = renderPanel();
+    expect(screen.getByRole('note').textContent).toContain('让 PPT 创作专家帮我处理这项任务');
+
+    rerender(<RightPanel busy={false} ready scopeKey="scope" layout={layout} modules={modules} presentation="page" onActivate={vi.fn()} onOpenMarketplace={vi.fn()} onLayoutChange={vi.fn()}/>);
+    expect(screen.queryByRole('note')).toBeNull();
+  });
 });

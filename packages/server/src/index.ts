@@ -12,6 +12,9 @@
 
 export * from './protocol.js';
 export * from './agentTurnTracker.js';
+export * from './adaptiveExecution.js';
+export * from './complexityRouter.js';
+export * from './taskGraph.js';
 export * from './turnControlPolicy.js';
 export * from './turnRecoveryStore.js';
 export * from './sessions.js';

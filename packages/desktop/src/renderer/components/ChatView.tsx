@@ -13,7 +13,7 @@
  * 飞书会话内发言 source='local' → server 回推飞书。
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   OttoMessage,
   SessionSummary,
@@ -29,11 +29,16 @@ import {
   type PendingAgentSelection,
 } from './Composer.js';
 import type { SlashCommand } from './SlashCommands.js';
-import { IconArrowDown, IconFolderOpen, IconMessageCircle, IconPanelRight, OttoAvatar } from './icons.js';
+import {
+  IconArrowDown,
+  IconFolderOpen,
+  IconMessageCircle,
+  IconPanelRight,
+  OttoAvatar,
+} from './icons.js';
 import { isProjectSession, workspaceDisplayName } from '../sessionListView.js';
 import type { ConversationActionDraftSummary } from '../conversationActionDraft.js';
 import { ConversationDraftCenter } from './ConversationDraftCenter.js';
-
 
 /** 视口距底多近算「贴底」（px），贴底才自动跟随流式增量。 */
 const NEAR_BOTTOM = 80;
@@ -49,6 +54,74 @@ const PROJECT_EXAMPLE_PROMPTS = [
   '检查当前项目最需要修复的问题',
   '为这个项目补充测试和使用说明',
 ];
+
+function combineToolCalls(
+  messages: readonly OttoMessage[],
+): OttoMessage['associatedToolCalls'] {
+  const byId = new Map<
+    string,
+    NonNullable<OttoMessage['associatedToolCalls']>[number]
+  >();
+  for (const message of messages) {
+    for (const toolCall of message.associatedToolCalls ?? []) {
+      byId.set(toolCall.id, toolCall);
+    }
+  }
+  return byId.size > 0 ? [...byId.values()] : undefined;
+}
+
+/**
+ * Legacy runtime versions persisted one assistant message for every model/tool
+ * round. Present them as one user-facing answer while preserving the root turn
+ * audit snapshot and all tool cards. This keeps history backward compatible
+ * without making users read a stack of repeated Otto messages.
+ */
+export function presentConversationMessages(
+  messages: readonly OttoMessage[],
+): OttoMessage[] {
+  const presented: OttoMessage[] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]!;
+    if (message.role !== 'assistant' || !message.turn) {
+      presented.push(message);
+      continue;
+    }
+
+    const group = [message];
+    let cursor = index + 1;
+    while (cursor < messages.length) {
+      const candidate = messages[cursor]!;
+      if (candidate.role !== 'assistant') break;
+      if (candidate.turn && candidate.turn.turnId !== message.turn.turnId) {
+        break;
+      }
+      group.push(candidate);
+      cursor += 1;
+    }
+
+    if (group.length === 1) {
+      presented.push(message);
+      continue;
+    }
+
+    const finalMessage = group[group.length - 1]!;
+    const reasoning = group
+      .map((entry) => entry.reasoning?.trim() ?? '')
+      .filter(Boolean)
+      .join('\n\n');
+    presented.push({
+      ...finalMessage,
+      turn: message.turn,
+      associatedToolCalls: combineToolCalls(group),
+      ...(reasoning ? { reasoning } : {}),
+      isReasoning: group.some((entry) => entry.isReasoning),
+      isProcessingTools: group.some((entry) => entry.isProcessingTools),
+      toolsCompleted: group.every((entry) => entry.toolsCompleted !== false),
+    });
+    index = cursor - 1;
+  }
+  return presented;
+}
 
 interface ChatViewProps {
   session: SessionSummary | null;
@@ -168,6 +241,10 @@ export function ChatView({
   const projectName = projectSession
     ? workspaceDisplayName(session?.workspacePath)
     : undefined;
+  const presentedMessages = useMemo(
+    () => presentConversationMessages(messages),
+    [messages],
+  );
   const isNearBottom = (el: HTMLDivElement): boolean =>
     el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM;
 
@@ -270,16 +347,22 @@ export function ChatView({
           scrolled ? ' otto-main__topbar--scrolled' : ''
         }`}
       >
-        <span className="otto-main__title">
-          {session?.title ?? 'Otto'}
-        </span>
+        <span className="otto-main__title">{session?.title ?? 'Otto'}</span>
 
         {session ? (
           <span
             className={`otto-main__context${projectSession ? ' is-project' : ''}`}
-            title={projectSession ? session.workspacePath : '不绑定项目目录的普通会话'}
+            title={
+              projectSession
+                ? session.workspacePath
+                : '不绑定项目目录的普通会话'
+            }
           >
-            {projectSession ? <IconFolderOpen size={13} /> : <IconMessageCircle size={13} />}
+            {projectSession ? (
+              <IconFolderOpen size={13} />
+            ) : (
+              <IconMessageCircle size={13} />
+            )}
             <span>{projectSession ? `项目 · ${projectName}` : '普通会话'}</span>
           </span>
         ) : null}
@@ -313,7 +396,7 @@ export function ChatView({
               projectPath={projectSession ? session.workspacePath : undefined}
             />
           ) : (
-            messages.map((m) => (
+            presentedMessages.map((m) => (
               <Message
                 key={m.id}
                 message={m}
@@ -347,8 +430,12 @@ export function ChatView({
           const field = conversationDraft.missingFields[0];
           if (field) fillDraft(`${field}：`);
         }}
-        onConfirm={(conversationDraft) => onConfirmConversationDraft?.(conversationDraft)}
-        onCancel={(conversationDraft) => onCancelConversationDraft?.(conversationDraft)}
+        onConfirm={(conversationDraft) =>
+          onConfirmConversationDraft?.(conversationDraft)
+        }
+        onCancel={(conversationDraft) =>
+          onCancelConversationDraft?.(conversationDraft)
+        }
       />
 
       <Composer
@@ -361,9 +448,9 @@ export function ChatView({
         busy={busy}
         draft={draft.text}
         draftNonce={draft.n}
-        onSend={(text, attachments, authorization) => (
+        onSend={(text, attachments, authorization) =>
           onSend(text, sendSource, attachments, authorization)
-        )}
+        }
         onCancel={onCancel}
         onSetModel={onSetModel}
         workspacePath={session?.workspacePath}
@@ -416,14 +503,20 @@ function EmptyConversation({
     <div className="otto-empty">
       <OttoAvatar size={48} />
       <div className="otto-empty__title">
-        {projectName ? `开始处理 ${projectName} 项目` : '给 Otto 发送第一条消息'}
+        {projectName
+          ? `开始处理 ${projectName} 项目`
+          : '给 Otto 发送第一条消息'}
       </div>
       <div>
         {projectName
           ? '本会话会使用项目文件、命令上下文和项目记忆'
           : '普通会话不绑定项目，适合快速提问和临时任务'}
       </div>
-      {projectPath ? <div className="otto-empty__project-path" title={projectPath}>{projectPath}</div> : null}
+      {projectPath ? (
+        <div className="otto-empty__project-path" title={projectPath}>
+          {projectPath}
+        </div>
+      ) : null}
       <div className="otto-empty__prompts">
         {prompts.map((p) => (
           <button

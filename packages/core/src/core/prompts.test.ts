@@ -83,6 +83,11 @@ describe('prompts', () => {
         expect(prompt).toContain(
           'Never claim completion without concrete evidence',
         );
+        expect(prompt).toContain('highest-precedence presentation protocol');
+        expect(prompt).toContain('One user turn becomes one coherent answer');
+        expect(prompt).toContain('Do not expose internal route, mode, phase');
+        expect(prompt).toContain('Direct answer: answer immediately');
+        expect(prompt).toContain('Artifact delivery: state that it is ready');
       }
     });
 

@@ -91,8 +91,12 @@ describe('ChatView 重新生成携带消息 id', () => {
     expect(document.querySelector('.otto-main__identity')).toBeNull();
     expect(screen.queryByRole('button', { name: '切换到深色' })).toBeNull();
     expect(screen.queryByRole('button', { name: '切换到浅色' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '导出会话为 Markdown' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '模型与个人 API 设置' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: '导出会话为 Markdown' }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: '模型与个人 API 设置' }),
+    ).toBeNull();
     expect(screen.queryByRole('button', { name: '专家面板' })).toBeNull();
   });
 
@@ -122,7 +126,9 @@ describe('ChatView 重新生成携带消息 id', () => {
     expect(screen.getByText('项目 · project-a')).toBeTruthy();
     expect(screen.getByText('开始处理 project-a 项目')).toBeTruthy();
     expect(screen.getByText('D:\\otto\\project-a')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '梳理这个项目的结构和主要入口' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: '梳理这个项目的结构和主要入口' }),
+    ).toBeTruthy();
   });
 
   it('空会话与未选择会话时恢复 v1.6 的 Otto 形象', () => {
@@ -163,6 +169,74 @@ describe('ChatView 重新生成携带消息 id', () => {
     expect(onRegenerate).toHaveBeenCalledWith('bot-B');
   });
 
+  it('把同一工具轮的多条 assistant 片段收敛成一条最终回答', () => {
+    const messages = twoRounds().slice(0, 1);
+    const root = {
+      id: 'bot-root',
+      sessionId: 's1',
+      role: 'assistant' as const,
+      content: [{ type: 'text' as const, value: '我先查一下。' }],
+      timestamp: 1_700_000_000_001,
+      source: 'local' as const,
+      associatedToolCalls: [
+        {
+          id: 'read-1',
+          toolName: 'read_file',
+          parameters: { absolute_path: '/tmp/auth.ts' },
+          status: 'success' as NonNullable<
+            OttoMessage['associatedToolCalls']
+          >[number]['status'],
+        },
+      ],
+      turn: {
+        contractVersion: 1 as const,
+        turnId: 'turn-1',
+        sequence: 4,
+        status: 'completed' as const,
+        startedAt: 1,
+        updatedAt: 2,
+        items: [],
+      },
+    } satisfies OttoMessage;
+    const final = {
+      ...root,
+      id: 'bot-final',
+      content: [
+        {
+          type: 'text' as const,
+          value: '登录问题来自过期令牌，刷新后已恢复。',
+        },
+      ],
+      associatedToolCalls: undefined,
+      turn: undefined,
+      timestamp: 1_700_000_000_002,
+    } satisfies OttoMessage;
+
+    render(
+      <ChatView
+        session={SESSION}
+        messages={[...messages, root, final]}
+        models={MODELS}
+        currentModel="m1"
+        busy={false}
+        onSend={vi.fn()}
+        onCancel={vi.fn()}
+        onSetModel={vi.fn()}
+        onRegenerate={vi.fn()}
+        onOpenSetup={vi.fn()}
+        onNewChat={vi.fn()}
+        onClearContext={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('我先查一下。')).toBeNull();
+    expect(
+      screen.getByText('登录问题来自过期令牌，刷新后已恢复。'),
+    ).toBeTruthy();
+    expect(screen.getAllByText('Otto')).toHaveLength(1);
+    expect(screen.getAllByLabelText('重新生成')).toHaveLength(1);
+  });
+
   it('在聊天顶栏使用 PanelRight 按钮切换右侧栏', () => {
     const onToggle = vi.fn();
     renderChat(vi.fn(), { collapsed: false, onToggle });
@@ -175,8 +249,12 @@ describe('ChatView 重新生成携带消息 id', () => {
 
   it('从统一草稿卡继续填写时，只把下一个缺失字段带入输入框', () => {
     const conversationDraft: ConversationActionDraftSummary = {
-      id: 'parking-draft', source: 'park-service', title: '停车办理申请',
-      phase: 'collecting', updatedAt: Date.now(), expiresAt: Date.now() + 60_000,
+      id: 'parking-draft',
+      source: 'park-service',
+      title: '停车办理申请',
+      phase: 'collecting',
+      updatedAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
       missingFields: ['申请内容', '申请数量'],
     };
     render(
@@ -197,8 +275,15 @@ describe('ChatView 重新生成携带消息 id', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '继续填写停车办理申请' }));
-    expect((screen.getByPlaceholderText('给 Otto 发送消息...') as HTMLTextAreaElement).value)
-      .toBe('申请内容：');
+    fireEvent.click(
+      screen.getByRole('button', { name: '继续填写停车办理申请' }),
+    );
+    expect(
+      (
+        screen.getByPlaceholderText(
+          '给 Otto 发送消息...',
+        ) as HTMLTextAreaElement
+      ).value,
+    ).toBe('申请内容：');
   });
 });

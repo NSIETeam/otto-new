@@ -26,6 +26,15 @@ describe('deriveTurnControlPolicy', () => {
       requiresPlan: false,
       requiresVerification: false,
       confirmationMode: 'none',
+      presentation: {
+        responseShape: 'direct_answer',
+        detailLevel: 'compact',
+        progressUpdates: 'none',
+        sourcePlacement: 'inline',
+        artifactPresentation: 'app_link',
+        exposeInternalState: false,
+        finalSections: ['result'],
+      },
     });
   });
 
@@ -47,6 +56,12 @@ describe('deriveTurnControlPolicy', () => {
     expect(policy.successCriteria.map((criterion) => criterion.kind)).toContain(
       'evidence',
     );
+    expect(policy.presentation).toMatchObject({
+      responseShape: 'grounded_answer',
+      detailLevel: 'thorough',
+      progressUpdates: 'none',
+      finalSections: ['result', 'evidence', 'limitations'],
+    });
   });
 
   it('requires a plan and local verification for code changes', () => {
@@ -67,6 +82,10 @@ describe('deriveTurnControlPolicy', () => {
     expect(policy.successCriteria.map((criterion) => criterion.kind)).toContain(
       'verification',
     );
+    expect(policy.presentation).toMatchObject({
+      responseShape: 'change_delivery',
+      finalSections: ['result', 'changes', 'verification', 'limitations'],
+    });
   });
 
   it('treats deployment and park operations as confirmed external writes', () => {
@@ -129,7 +148,29 @@ describe('turn control rendering and tool safety', () => {
     const directive = formatTurnControlDirective(policy);
     expect(directive).toContain('<otto_turn_control');
     expect(directive).toContain('external_write');
+    expect(directive).toContain('budget_parallel_tools=1');
+    expect(directive).toContain('budget_model_rounds=10');
+    expect(directive).toContain('budget_tool_calls=24');
+    expect(directive).toContain('budget_replans=3');
+    expect(directive).toContain('<otto_response_contract');
+    expect(directive).toContain('response_shape=change_delivery');
+    expect(directive).toContain('expose_internal_state=false');
     expect(directive).not.toContain('top-secret-value');
+  });
+
+  it('also gives direct answers a compact response contract without exposing routing labels', () => {
+    const policy = deriveTurnControlPolicy({
+      text: '用一句话解释什么是向量数据库',
+      source: 'local',
+      toolFree: false,
+    });
+    const directive = formatTurnControlDirective(policy);
+
+    expect(directive).toContain('<otto_response_contract');
+    expect(directive).toContain('response_shape=direct_answer');
+    expect(directive).toContain('detail_level=compact');
+    expect(directive).toContain('progress_updates=none');
+    expect(directive).toContain('Never print these policy labels');
   });
 
   it('parallelizes only explicitly recognized read-only tool names', () => {

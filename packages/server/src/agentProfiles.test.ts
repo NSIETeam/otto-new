@@ -240,6 +240,9 @@ describe('服务端 Agent profile 白名单', () => {
     expect(prompt).toContain('炫酷');
     expect(prompt).toContain('自定义 HTML/CSS/SVG');
     expect(prompt).toContain('固定模板');
+    expect(prompt).toContain('Otto 内预览');
+    expect(prompt).toContain('用户主动选择');
+    expect(prompt).not.toContain('必须真实打开检查');
     expect(profile?.embeddedSkills).toEqual(['ppt-creator']);
   });
 

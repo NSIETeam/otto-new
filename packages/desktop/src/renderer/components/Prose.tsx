@@ -19,7 +19,9 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import type { MessageContentPart } from 'otto-server';
-import { IconCopy, IconCheck, IconExternalLink, IconFolder } from './icons.js';
+import type { LocalArtifactPreviewResult } from '../../preload/index.js';
+import { IconCopy, IconCheck, IconExternalLink, IconFile, IconFolder } from './icons.js';
+import { PresentationPreviewDialog } from './PresentationPreviewDialog.js';
 
 /** 把内容片段折叠为纯文本（非 text 片段给出可读占位）。 */
 export function contentToText(content: MessageContentPart[]): string {
@@ -263,11 +265,26 @@ export function normalizeLocalOutputPath(value: string): string | null {
   }
   if (/^[a-zA-Z]:[\\/][^\r\n]+$/u.test(candidate)) return candidate;
   if (/^\\\\[^\\/\s]+[\\/][^\r\n]+$/u.test(candidate)) return candidate;
+  if (/^~[\\/][^\r\n]+$/u.test(candidate)) return candidate;
   if (/^\/(?:Users|home|tmp|var\/tmp|Volumes)\/[^\r\n]+$/u.test(candidate)) return candidate;
   return null;
 }
 
-function LocalOutputPath({ value }: { value: string }): React.JSX.Element {
+function localFileName(value: string): string {
+  return value.replace(/\\/gu, '/').split('/').at(-1) || value;
+}
+
+function isPresentationPath(value: string): boolean {
+  return /\.pptx?$/iu.test(value.trim());
+}
+
+export function LocalOutputPath({
+  value,
+  label,
+}: {
+  value: string;
+  label?: string;
+}): React.JSX.Element {
   const [info, setInfo] = useState<{
     exists: boolean;
     kind: 'file' | 'directory' | 'missing';
@@ -275,6 +292,9 @@ function LocalOutputPath({ value }: { value: string }): React.JSX.Element {
   } | null>(null);
   const [busy, setBusy] = useState<'open' | 'reveal' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [preview, setPreview] = useState<LocalArtifactPreviewResult | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -309,39 +329,96 @@ function LocalOutputPath({ value }: { value: string }): React.JSX.Element {
     }
   };
 
-  if (!info?.exists) return <code>{value}</code>;
-  const targetName = info.kind === 'directory' ? '文件夹' : '文件';
+  const loadInternalPreview = async (): Promise<void> => {
+    setPreviewLoading(true);
+    setPreview(null);
+    setError(null);
+    try {
+      setPreview(await window.otto.previewLocalArtifact(value));
+    } catch {
+      setError('无法读取 PPT 预览。');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const showInternalPreview = (
+    event: React.MouseEvent<HTMLAnchorElement>,
+  ): void => {
+    event.preventDefault();
+    setPreviewOpen(true);
+    void loadInternalPreview();
+  };
+
+  const presentation = isPresentationPath(value) && info?.kind !== 'directory';
+  if (!presentation && !info?.exists) {
+    return <code title={value}>{label ?? value}</code>;
+  }
+  const availableInfo = info?.exists ? info : null;
+  const targetName = info?.kind === 'directory' ? '文件夹' : '文件';
+  const visibleLabel = label || localFileName(value);
   return (
     <span className="otto-local-path">
-      <code title={value}>{value}</code>
-      <span className="otto-local-path__actions">
-        {info.canOpen ? (
+      {presentation ? (
+        <a
+          href="#"
+          className="otto-local-path__preview-link"
+          title={`在 Otto 中预览 ${visibleLabel}`}
+          aria-label={`在 Otto 中预览 ${visibleLabel}`}
+          aria-busy={previewLoading}
+          onClick={showInternalPreview}
+        >
+          <IconFile size={15} />
+          <span>{visibleLabel}</span>
+        </a>
+      ) : (
+        <code title={value}>{value}</code>
+      )}
+      {!presentation && availableInfo ? (
+        <span className="otto-local-path__actions">
+          {availableInfo.canOpen ? (
+            <button
+              type="button"
+              className="otto-local-path__button"
+              title={`打开${targetName}`}
+              aria-label={`打开${targetName}`}
+              disabled={busy !== null}
+              onClick={() => void activate('open')}
+            >
+              <IconExternalLink size={13} />
+            </button>
+          ) : null}
           <button
             type="button"
             className="otto-local-path__button"
-            title={`打开${targetName}`}
-            aria-label={`打开${targetName}`}
+            title="在文件夹中显示"
+            aria-label="在文件夹中显示"
             disabled={busy !== null}
-            onClick={() => void activate('open')}
+            onClick={() => void activate('reveal')}
           >
-            <IconExternalLink size={13} />
+            <IconFolder size={13} />
           </button>
-        ) : null}
-        <button
-          type="button"
-          className="otto-local-path__button"
-          title="在文件夹中显示"
-          aria-label="在文件夹中显示"
-          disabled={busy !== null}
-          onClick={() => void activate('reveal')}
-        >
-          <IconFolder size={13} />
-        </button>
-      </span>
-      {error ? (
+        </span>
+      ) : null}
+      {error && !presentation ? (
         <span className="otto-local-path__error" role="status" title={error}>
           打开失败
         </span>
+      ) : null}
+      {presentation ? (
+        <PresentationPreviewDialog
+          open={previewOpen}
+          filePath={value}
+          preview={preview}
+          loading={previewLoading}
+          error={error}
+          onClose={() => setPreviewOpen(false)}
+          onReveal={() => void activate('reveal')}
+          onOpenExternally={() => void activate('open')}
+          onRetry={() => void loadInternalPreview()}
+          canReveal={Boolean(info?.exists)}
+          canOpenExternally={Boolean(info?.exists && info.canOpen)}
+        />
       ) : null}
     </span>
   );

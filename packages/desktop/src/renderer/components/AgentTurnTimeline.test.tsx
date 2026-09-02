@@ -10,7 +10,7 @@ import type { AgentTurnSnapshot } from 'otto-server';
 import { AgentTurnTimeline } from './AgentTurnTimeline.js';
 
 describe('AgentTurnTimeline', () => {
-  it('renders semantic stages, plan steps and confirmation state without raw tool names', () => {
+  it('renders useful work and confirmation details without exposing internal execution states', () => {
     const turn: AgentTurnSnapshot = {
       contractVersion: 1,
       turnId: 'turn-1',
@@ -83,10 +83,16 @@ describe('AgentTurnTimeline', () => {
     expect(screen.getByText('核对上下文')).toBeTruthy();
     expect(screen.getByText('实现并验证')).toBeTruthy();
     expect(screen.getByText('1 项等待你的确认')).toBeTruthy();
-    expect(screen.getByText('计划执行 · 本地写入')).toBeTruthy();
     expect(screen.getByRole('list', { name: '成功条件验证' })).toBeTruthy();
     expect(screen.getByText('已满足')).toBeTruthy();
     expect(screen.getByText('未验证')).toBeTruthy();
+    expect(screen.queryByText('规划并完成变更')).toBeNull();
+    expect(screen.queryByText('理解任务并组织回答')).toBeNull();
+    expect(screen.queryByText('计划执行 · 本地写入')).toBeNull();
+    expect(screen.queryByText('进行中')).toBeNull();
+    expect(screen.queryByText('等待确认')).toBeNull();
+    expect(screen.queryByText('已完成')).toBeNull();
+    expect(screen.queryByText('需要处理')).toBeNull();
     expect(screen.queryByText('todo_write')).toBeNull();
   });
 
@@ -119,7 +125,7 @@ describe('AgentTurnTimeline', () => {
       ],
     };
     render(<AgentTurnTimeline turn={turn} />);
-    expect(screen.getByRole('region', { name: '本轮产物' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
     expect(screen.getByText('园区报告.pdf')).toBeTruthy();
     expect(screen.getByText('已验证')).toBeTruthy();
     expect(screen.getByRole('region', { name: '引用来源' })).toBeTruthy();

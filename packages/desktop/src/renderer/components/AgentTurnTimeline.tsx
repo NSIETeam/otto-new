@@ -7,45 +7,12 @@
 import React from 'react';
 import type {
   AgentTurnItem,
-  AgentTurnItemStatus,
   AgentTurnSnapshot,
   TurnVerificationCheck,
 } from 'otto-server';
-
-function statusLabel(status: AgentTurnItemStatus): string {
-  switch (status) {
-    case 'in_progress':
-      return '进行中';
-    case 'awaiting_confirmation':
-      return '等待确认';
-    case 'completed':
-      return '已完成';
-    case 'cancelled':
-      return '已停止';
-    case 'failed':
-      return '需要处理';
-    default:
-      return '待处理';
-  }
-}
+import { LocalOutputPath } from './Prose.js';
 
 function itemDetail(item: AgentTurnItem): string | undefined {
-  if (item.type === 'control') {
-    const execution = {
-      direct: '直接回答',
-      tool_assisted: '工具辅助',
-      parallel_read: '并行读取',
-      planned: '计划执行',
-      restricted: '受限执行',
-    }[item.executionMode];
-    const risk = {
-      read_only: '只读',
-      local_write: '本地写入',
-      external_write: '外部写入',
-      destructive: '破坏性操作',
-    }[item.riskLevel];
-    return `${execution} · ${risk}`;
-  }
   if (item.type === 'tool_group') {
     if (item.awaitingConfirmation > 0) {
       return `${item.awaitingConfirmation} 项等待你的确认`;
@@ -89,9 +56,6 @@ function TimelineItem({ item }: { item: AgentTurnItem }): React.JSX.Element {
       <div className="otto-turn-item__content">
         <div className="otto-turn-item__line">
           <span className="otto-turn-item__label">{item.label}</span>
-          <span className="otto-turn-item__status">
-            {statusLabel(item.status)}
-          </span>
         </div>
         {detail ? <div className="otto-turn-item__detail">{detail}</div> : null}
         {item.type === 'plan' ? (
@@ -129,43 +93,79 @@ function TimelineItem({ item }: { item: AgentTurnItem }): React.JSX.Element {
 
 export function AgentTurnTimeline({
   turn,
+  includeReferences = true,
 }: {
   turn: AgentTurnSnapshot;
+  includeReferences?: boolean;
 }): React.JSX.Element | null {
   const citations = turn.citations ?? [];
   const artifacts = turn.artifacts ?? [];
+  // Execution mode, policy and risk stay available to the runtime/audit trail,
+  // but are deliberately not rendered. Users should see useful work, decisions
+  // that need them, and evidence — not the agent's internal routing labels.
+  const visibleItems = turn.items.filter((item) => {
+    if (item.type === 'control' || item.type === 'stage') return false;
+    if (item.type === 'tool_group') {
+      return item.awaitingConfirmation > 0 || item.failed > 0;
+    }
+    return true;
+  });
   if (
-    turn.items.length === 0 &&
-    citations.length === 0 &&
-    artifacts.length === 0
+    visibleItems.length === 0 &&
+    (!includeReferences || citations.length === 0) &&
+    (!includeReferences || artifacts.length === 0)
   )
     return null;
   return (
     <div className="otto-turn-summary">
-      {turn.items.length > 0 ? (
+      {visibleItems.length > 0 ? (
         <ol className="otto-turn-timeline" aria-label="Otto 处理进度">
-          {turn.items.map((item) => (
+          {visibleItems.map((item) => (
             <TimelineItem key={item.id} item={item} />
           ))}
         </ol>
       ) : null}
+      {includeReferences ? <AgentTurnReferences turn={turn} /> : null}
+    </div>
+  );
+}
+
+export function AgentTurnReferences({
+  turn,
+  omittedArtifactPaths = [],
+  omittedCitationUris = [],
+}: {
+  turn: AgentTurnSnapshot;
+  omittedArtifactPaths?: readonly string[];
+  omittedCitationUris?: readonly string[];
+}): React.JSX.Element | null {
+  const omittedArtifacts = new Set(omittedArtifactPaths);
+  const omittedCitations = new Set(omittedCitationUris);
+  const artifacts = (turn.artifacts ?? []).filter(
+    (artifact) => !artifact.path || !omittedArtifacts.has(artifact.path),
+  );
+  const citations = (turn.citations ?? []).filter(
+    (citation) => !citation.uri || !omittedCitations.has(citation.uri),
+  );
+  if (artifacts.length === 0 && citations.length === 0) return null;
+  return (
+    <div className="otto-turn-summary otto-turn-summary--references">
       {artifacts.length > 0 ? (
-        <section className="otto-turn-references" aria-label="本轮产物">
-          <h4>本轮产物</h4>
+        <section className="otto-turn-references" aria-label="交付物">
+          <h4>交付物</h4>
           <ul>
             {artifacts.map((artifact) => (
               <li key={artifact.id}>
-                <span className="otto-turn-references__label">
-                  {artifact.label}
-                </span>
                 {artifact.path ? (
-                  <span
-                    className="otto-turn-references__meta"
-                    title={artifact.path}
-                  >
-                    {artifact.path}
+                  <LocalOutputPath
+                    value={artifact.path}
+                    label={artifact.label}
+                  />
+                ) : (
+                  <span className="otto-turn-references__label">
+                    {artifact.label}
                   </span>
-                ) : null}
+                )}
                 <span
                   className={`otto-turn-references__state otto-turn-references__state--${artifact.verified ? 'verified' : 'pending'}`}
                 >

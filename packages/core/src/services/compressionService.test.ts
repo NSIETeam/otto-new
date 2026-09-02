@@ -4,35 +4,49 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Content } from '../types/extendedContent.js';
 import type { Config } from '../config/config.js';
 import type { OttoClient } from '../core/client.js';
 import type { ContentGenerator } from '../core/contentGenerator.js';
-import { CompressionService, findIndexAfterFraction } from './compressionService.js';
+import {
+  CompressionService,
+  findIndexAfterFraction,
+} from './compressionService.js';
 
 // Mock dependencies
 vi.mock('../core/prompts.js', () => ({
   getCompressionPrompt: () => 'Mock compression prompt',
-  formatCompactSummary: (raw: string) => raw // 测试中直接返回原文
+  formatCompactSummary: (raw: string) => raw, // 测试中直接返回原文
 }));
 
 vi.mock('../core/tokenLimits.js', () => ({
-  tokenLimit: (_model: string) => 1000 // Mock token limit
+  tokenLimit: (_model: string) => 1000, // Mock token limit
 }));
 
 vi.mock('../utils/messageInspectors.js', () => ({
-  isFunctionResponse: (content: Content) => content.role === 'user' &&
-           content.parts?.some(part => !!part.functionResponse)
+  isFunctionResponse: (content: Content) =>
+    content.role === 'user' &&
+    content.parts?.some((part) => !!part.functionResponse),
 }));
 
 describe('CompressionService', () => {
   let compressionService: CompressionService;
   type MockFn = ReturnType<typeof vi.fn>;
-  let mockContentGenerator: ContentGenerator & { countTokens: MockFn; generateContent: MockFn };
-  let mockGeminiClient: OttoClient & { getContentGenerator: MockFn; createTemporaryChat: MockFn };
-  let mockChat: { sendMessage: MockFn; setHistory: MockFn; getHistory: MockFn; setTools: MockFn };
+  let mockContentGenerator: ContentGenerator & {
+    countTokens: MockFn;
+    generateContent: MockFn;
+  };
+  let mockGeminiClient: OttoClient & {
+    getContentGenerator: MockFn;
+    createTemporaryChat: MockFn;
+  };
+  let mockChat: {
+    sendMessage: MockFn;
+    setHistory: MockFn;
+    getHistory: MockFn;
+    setTools: MockFn;
+  };
   let mockConfig: Config & { getToolRegistry: MockFn };
 
   beforeEach(() => {
@@ -45,7 +59,10 @@ describe('CompressionService', () => {
     mockContentGenerator = {
       countTokens: vi.fn(),
       generateContent: vi.fn(),
-    } as unknown as ContentGenerator & { countTokens: MockFn; generateContent: MockFn };
+    } as unknown as ContentGenerator & {
+      countTokens: MockFn;
+      generateContent: MockFn;
+    };
 
     mockChat = {
       sendMessage: vi.fn(),
@@ -57,12 +74,15 @@ describe('CompressionService', () => {
     mockGeminiClient = {
       getContentGenerator: vi.fn().mockReturnValue(mockContentGenerator),
       createTemporaryChat: vi.fn().mockResolvedValue(mockChat),
-    } as unknown as OttoClient & { getContentGenerator: MockFn; createTemporaryChat: MockFn };
+    } as unknown as OttoClient & {
+      getContentGenerator: MockFn;
+      createTemporaryChat: MockFn;
+    };
 
     mockConfig = {
       getToolRegistry: vi.fn().mockResolvedValue({
-        getFunctionDeclarations: vi.fn().mockReturnValue([])
-      })
+        getFunctionDeclarations: vi.fn().mockReturnValue([]),
+      }),
     } as unknown as Config & { getToolRegistry: MockFn };
   });
 
@@ -83,9 +103,7 @@ describe('CompressionService', () => {
     });
 
     it('should handle edge cases', () => {
-      const history: Content[] = [
-        { role: 'user', parts: [{ text: 'short' }] },
-      ];
+      const history: Content[] = [{ role: 'user', parts: [{ text: 'short' }] }];
 
       expect(() => findIndexAfterFraction(history, 0)).toThrow();
       expect(() => findIndexAfterFraction(history, 1)).toThrow();
@@ -99,13 +117,22 @@ describe('CompressionService', () => {
 
   describe('shouldCompress', () => {
     it('should not compress empty history', async () => {
-      const result = await compressionService.shouldCompress([], 'test-model', mockContentGenerator);
+      const result = await compressionService.shouldCompress(
+        [],
+        'test-model',
+        mockContentGenerator,
+      );
       expect(result.shouldCompress).toBe(false);
     });
 
     it('should compress when forced', async () => {
       const history = [{ role: 'user', parts: [{ text: 'test' }] }];
-      const result = await compressionService.shouldCompress(history, 'test-model', mockContentGenerator, true);
+      const result = await compressionService.shouldCompress(
+        history,
+        'test-model',
+        mockContentGenerator,
+        true,
+      );
       expect(result.shouldCompress).toBe(true);
     });
 
@@ -113,7 +140,11 @@ describe('CompressionService', () => {
       const history = [{ role: 'user', parts: [{ text: 'test' }] }];
       mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 800 }); // 80% of 1000
 
-      const result = await compressionService.shouldCompress(history, 'test-model', mockContentGenerator);
+      const result = await compressionService.shouldCompress(
+        history,
+        'test-model',
+        mockContentGenerator,
+      );
       expect(result.shouldCompress).toBe(true);
       expect(result.tokenCount).toBe(800);
     });
@@ -122,17 +153,120 @@ describe('CompressionService', () => {
       const history = [{ role: 'user', parts: [{ text: 'test' }] }];
       mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 600 }); // 60% of 1000
 
-      const result = await compressionService.shouldCompress(history, 'test-model', mockContentGenerator);
+      const result = await compressionService.shouldCompress(
+        history,
+        'test-model',
+        mockContentGenerator,
+      );
       expect(result.shouldCompress).toBe(false);
       expect(result.tokenCount).toBe(600);
     });
 
     it('should handle token counting errors', async () => {
       const history = [{ role: 'user', parts: [{ text: 'test' }] }];
-      mockContentGenerator.countTokens.mockRejectedValue(new Error('Token counting failed'));
+      mockContentGenerator.countTokens.mockRejectedValue(
+        new Error('Token counting failed'),
+      );
 
-      const result = await compressionService.shouldCompress(history, 'test-model', mockContentGenerator);
+      const result = await compressionService.shouldCompress(
+        history,
+        'test-model',
+        mockContentGenerator,
+      );
       expect(result.shouldCompress).toBe(false);
+    });
+  });
+  describe('hierarchical compaction', () => {
+    it('cleans only older tool outputs and preserves the newest exchange verbatim', () => {
+      const oldToolMessages: Content[] = Array.from(
+        { length: 7 },
+        (_, index) => ({
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: `tool_${index}`,
+                response: { output: `old tool output ${index} `.repeat(100) },
+              },
+            },
+          ],
+        }),
+      ) as Content[];
+      const newestUser: Content = {
+        role: 'user',
+        parts: [{ text: 'N'.repeat(6_000) }],
+      };
+      const newestModel: Content = {
+        role: 'model',
+        parts: [{ text: 'latest answer must remain exact' }],
+      };
+      const history = [...oldToolMessages, newestUser, newestModel];
+
+      const cleaned = compressionService.lightweightCleanup(history);
+
+      expect(cleaned.at(-2)).toEqual(newestUser);
+      expect(cleaned.at(-1)).toEqual(newestModel);
+      expect(JSON.stringify(cleaned[0])).toContain('[L1 cleaned]');
+      expect(JSON.stringify(cleaned[1])).toContain('[L1 cleaned]');
+      expect(JSON.stringify(cleaned[2])).toContain('old tool output 2');
+    });
+
+    it('starts preventive L2 compaction only at a completed tool boundary', () => {
+      const completedToolHistory: Content[] = [
+        { role: 'user', parts: [{ text: 'task' }] },
+        {
+          role: 'model',
+          parts: [{ functionCall: { name: 'read_file', args: {} } }],
+        },
+        {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'read_file',
+                response: { output: 'done' },
+              },
+            },
+          ],
+        },
+      ] as Content[];
+      const pendingToolHistory = completedToolHistory.slice(0, 2);
+      const completedTurnHistory: Content[] = [
+        ...completedToolHistory,
+        {
+          role: 'model',
+          parts: [{ text: 'final answer after using the tool' }],
+        },
+      ];
+
+      expect(
+        compressionService.shouldPreventiveCompress(
+          completedToolHistory,
+          3_000,
+          4_000,
+        ),
+      ).toBe(true);
+      expect(
+        compressionService.shouldPreventiveCompress(
+          completedTurnHistory,
+          3_000,
+          4_000,
+        ),
+      ).toBe(true);
+      expect(
+        compressionService.shouldPreventiveCompress(
+          pendingToolHistory,
+          3_000,
+          4_000,
+        ),
+      ).toBe(false);
+      expect(
+        compressionService.shouldPreventiveCompress(
+          completedToolHistory,
+          2_399,
+          4_000,
+        ),
+      ).toBe(false);
     });
   });
 
@@ -141,20 +275,19 @@ describe('CompressionService', () => {
     for (let i = 0; i < length; i++) {
       history.push({
         role: i % 2 === 0 ? 'user' : 'model',
-        parts: [{ text: `Message ${i}` }]
+        parts: [{ text: `Message ${i}` }],
       });
     }
     return history;
   };
 
   describe('compressHistory', () => {
-
     it('should successfully compress history', async () => {
       const history = createMockHistory(10); // 10条消息
       mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 500 });
 
       mockChat.sendMessage.mockResolvedValue({
-        candidates: [{ content: { parts: [{ text: 'Compression summary' }] } }]
+        candidates: [{ content: { parts: [{ text: 'Compression summary' }] } }],
       });
 
       const result = await compressionService.compressHistory(
@@ -164,7 +297,7 @@ describe('CompressionService', () => {
         'test-compression-model',
         mockGeminiClient,
         'test-prompt-id',
-        new AbortController().signal
+        new AbortController().signal,
       );
 
       expect(result.success).toBe(true);
@@ -179,7 +312,7 @@ describe('CompressionService', () => {
       mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 400 });
 
       mockChat.sendMessage.mockResolvedValue({
-        candidates: [{ content: { parts: [{ text: 'Summary' }] } }]
+        candidates: [{ content: { parts: [{ text: 'Summary' }] } }],
       });
 
       const result = await compressionService.compressHistory(
@@ -189,7 +322,7 @@ describe('CompressionService', () => {
         'test-compression-model',
         mockGeminiClient,
         'test-prompt-id',
-        new AbortController().signal
+        new AbortController().signal,
       );
 
       expect(result.success).toBe(true);
@@ -219,11 +352,13 @@ describe('CompressionService', () => {
         'test-compression-model',
         mockGeminiClient,
         'test-prompt-id',
-        new AbortController().signal
+        new AbortController().signal,
       );
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Insufficient conversation history to compress');
+      expect(result.error).toBe(
+        'Insufficient conversation history to compress',
+      );
       expect(mockChat.sendMessage).not.toHaveBeenCalled();
     });
 
@@ -233,7 +368,17 @@ describe('CompressionService', () => {
         { role: 'model', parts: [{ text: 'Got it!' }] }, // 环境确认
         { role: 'user', parts: [{ text: 'Task 1' }] },
         { role: 'model', parts: [{ text: 'Response 1' }] },
-        { role: 'user', parts: [{ functionResponse: { name: 'tool', response: { output: 'result' } } }] } as unknown as Content, // 工具响应
+        {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'tool',
+                response: { output: 'result' },
+              },
+            },
+          ],
+        } as unknown as Content, // 工具响应
         { role: 'model', parts: [{ text: 'Tool result processed' }] },
         { role: 'user', parts: [{ text: 'Task 2' }] },
         { role: 'model', parts: [{ text: 'Response 2' }] },
@@ -241,7 +386,7 @@ describe('CompressionService', () => {
 
       mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 400 });
       mockChat.sendMessage.mockResolvedValue({
-        candidates: [{ content: { parts: [{ text: 'Summary' }] } }]
+        candidates: [{ content: { parts: [{ text: 'Summary' }] } }],
       });
 
       const result = await compressionService.compressHistory(
@@ -251,7 +396,7 @@ describe('CompressionService', () => {
         'test-compression-model',
         mockGeminiClient,
         'test-prompt-id',
-        new AbortController().signal
+        new AbortController().signal,
       );
 
       expect(result.success).toBe(true);
@@ -271,7 +416,7 @@ describe('CompressionService', () => {
         'test-compression-model',
         mockGeminiClient,
         'test-prompt-id',
-        new AbortController().signal
+        new AbortController().signal,
       );
 
       expect(result.success).toBe(false);
@@ -291,7 +436,7 @@ describe('CompressionService', () => {
         'test-compression-model',
         mockGeminiClient,
         'test-prompt-id',
-        new AbortController().signal
+        new AbortController().signal,
       );
 
       expect(result).toBeNull();
@@ -303,7 +448,7 @@ describe('CompressionService', () => {
       mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 800 }); // Over threshold
 
       mockChat.sendMessage.mockResolvedValue({
-        candidates: [{ content: { parts: [{ text: 'Summary' }] } }]
+        candidates: [{ content: { parts: [{ text: 'Summary' }] } }],
       });
 
       const result = await compressionService.tryCompress(
@@ -313,7 +458,7 @@ describe('CompressionService', () => {
         'test-compression-model',
         mockGeminiClient,
         'test-prompt-id',
-        new AbortController().signal
+        new AbortController().signal,
       );
 
       expect(result).not.toBeNull();
@@ -335,7 +480,10 @@ describe('CompressionService', () => {
       it('should handle main agent typical scenario', async () => {
         const history: Content[] = [
           { role: 'user', parts: [{ text: 'Environment info...' }] },
-          { role: 'model', parts: [{ text: 'Got it. Thanks for the context!' }] },
+          {
+            role: 'model',
+            parts: [{ text: 'Got it. Thanks for the context!' }],
+          },
           { role: 'user', parts: [{ text: 'User task 1' }] },
           { role: 'model', parts: [{ text: 'AI response 1' }] },
           { role: 'user', parts: [{ text: 'User task 2' }] },
@@ -344,9 +492,11 @@ describe('CompressionService', () => {
           { role: 'model', parts: [{ text: 'AI response 3' }] },
         ];
 
-        mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 800 });
+        mockContentGenerator.countTokens.mockResolvedValue({
+          totalTokens: 800,
+        });
         mockChat.sendMessage.mockResolvedValue({
-          candidates: [{ content: { parts: [{ text: 'Summary' }] } }]
+          candidates: [{ content: { parts: [{ text: 'Summary' }] } }],
         });
 
         const result = await compressionService.tryCompress(
@@ -356,7 +506,7 @@ describe('CompressionService', () => {
           'test-compression-model',
           mockGeminiClient,
           'test-prompt-id',
-          new AbortController().signal
+          new AbortController().signal,
         );
 
         expect(result!.success).toBe(true);
@@ -376,7 +526,10 @@ describe('CompressionService', () => {
       it('should handle subagent typical scenario', async () => {
         const history: Content[] = [
           { role: 'user', parts: [{ text: 'Environment info...' }] },
-          { role: 'model', parts: [{ text: 'Got it. Thanks for the context!' }] },
+          {
+            role: 'model',
+            parts: [{ text: 'Got it. Thanks for the context!' }],
+          },
           { role: 'user', parts: [{ text: 'Task: Implement feature X' }] },
           { role: 'model', parts: [{ text: 'I will analyze this task...' }] },
           { role: 'user', parts: [{ text: 'Continue after tools' }] },
@@ -384,27 +537,8 @@ describe('CompressionService', () => {
         ];
 
         // 不应该触发压缩（60% < 80%阈值）
-        mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 600 });
-
-        const result = await compressionService.tryCompress(
-          mockConfig,
-          history,
-          'test-model',
-          'test-compression-model',
-          mockGeminiClient,
-          'test-prompt-id',
-          new AbortController().signal
-        );
-
-        expect(result).toBeNull();
-      });
-
-      it('should compress subagent when threshold exceeded', async () => {
-        const history = createMockHistory(12); // 更多历史
-        mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 850 }); // 85% > 80%阈值
-
-        mockChat.sendMessage.mockResolvedValue({
-          candidates: [{ content: { parts: [{ text: 'Task summary' }] } }]
+        mockContentGenerator.countTokens.mockResolvedValue({
+          totalTokens: 600,
         });
 
         const result = await compressionService.tryCompress(
@@ -414,7 +548,30 @@ describe('CompressionService', () => {
           'test-compression-model',
           mockGeminiClient,
           'test-prompt-id',
-          new AbortController().signal
+          new AbortController().signal,
+        );
+
+        expect(result).toBeNull();
+      });
+
+      it('should compress subagent when threshold exceeded', async () => {
+        const history = createMockHistory(12); // 更多历史
+        mockContentGenerator.countTokens.mockResolvedValue({
+          totalTokens: 850,
+        }); // 85% > 80%阈值
+
+        mockChat.sendMessage.mockResolvedValue({
+          candidates: [{ content: { parts: [{ text: 'Task summary' }] } }],
+        });
+
+        const result = await compressionService.tryCompress(
+          mockConfig,
+          history,
+          'test-model',
+          'test-compression-model',
+          mockGeminiClient,
+          'test-prompt-id',
+          new AbortController().signal,
         );
 
         expect(result!.success).toBe(true);
@@ -432,15 +589,17 @@ describe('CompressionService', () => {
 
       mockContentGenerator.countTokens.mockResolvedValue({ totalTokens: 800 });
 
-      await expect(compressionService.tryCompress(
-        mockConfig,
-        history,
-        'test-model',
-        'test-compression-model',
-        mockGeminiClient,
-        'test-prompt-id',
-        new AbortController().signal
-      )).rejects.toThrow('Insufficient conversation history to compress');
+      await expect(
+        compressionService.tryCompress(
+          mockConfig,
+          history,
+          'test-model',
+          'test-compression-model',
+          mockGeminiClient,
+          'test-prompt-id',
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow('Insufficient conversation history to compress');
     }, 30000); // retryWithBackoff 需要更长的超时
 
     it('should handle compression failure gracefully', async () => {
@@ -449,15 +608,17 @@ describe('CompressionService', () => {
 
       mockChat.sendMessage.mockRejectedValue(new Error('API error'));
 
-      await expect(compressionService.tryCompress(
-        mockConfig,
-        history,
-        'test-model',
-        'test-compression-model',
-        mockGeminiClient,
-        'test-prompt-id',
-        new AbortController().signal
-      )).rejects.toThrow('API error');
+      await expect(
+        compressionService.tryCompress(
+          mockConfig,
+          history,
+          'test-model',
+          'test-compression-model',
+          mockGeminiClient,
+          'test-prompt-id',
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow('API error');
     }, 30000); // retryWithBackoff 需要更长的超时
   });
 
@@ -488,8 +649,14 @@ describe('CompressionService', () => {
       for (let i = 0; i < 3; i++) {
         try {
           await compressionService.tryCompress(
-            mockConfig, history, 'test-model', 'test-compression-model',
-            mockGeminiClient, 'test-prompt-id', new AbortController().signal, false
+            mockConfig,
+            history,
+            'test-model',
+            'test-compression-model',
+            mockGeminiClient,
+            'test-prompt-id',
+            new AbortController().signal,
+            false,
           );
         } catch {
           // expected
@@ -501,8 +668,14 @@ describe('CompressionService', () => {
 
       // 此时自动压缩应该被跳过
       const result = await compressionService.tryCompress(
-        mockConfig, history, 'test-model', 'test-compression-model',
-        mockGeminiClient, 'test-prompt-id', new AbortController().signal, false
+        mockConfig,
+        history,
+        'test-model',
+        'test-compression-model',
+        mockGeminiClient,
+        'test-prompt-id',
+        new AbortController().signal,
+        false,
       );
       expect(result).toBeNull();
     }, 60000);
@@ -516,8 +689,14 @@ describe('CompressionService', () => {
       for (let i = 0; i < 3; i++) {
         try {
           await compressionService.tryCompress(
-            mockConfig, history, 'test-model', 'test-compression-model',
-            mockGeminiClient, 'test-prompt-id', new AbortController().signal, false
+            mockConfig,
+            history,
+            'test-model',
+            'test-compression-model',
+            mockGeminiClient,
+            'test-prompt-id',
+            new AbortController().signal,
+            false,
           );
         } catch {
           // expected
@@ -528,12 +707,18 @@ describe('CompressionService', () => {
 
       // force=true 应该绕过熔断器（但仍会因为 mock 返回错误而失败）
       mockChat.sendMessage.mockResolvedValue({
-        candidates: [{ content: { parts: [{ text: 'Summary' }] } }]
+        candidates: [{ content: { parts: [{ text: 'Summary' }] } }],
       });
 
       const result = await compressionService.tryCompress(
-        mockConfig, history, 'test-model', 'test-compression-model',
-        mockGeminiClient, 'test-prompt-id', new AbortController().signal, true
+        mockConfig,
+        history,
+        'test-model',
+        'test-compression-model',
+        mockGeminiClient,
+        'test-prompt-id',
+        new AbortController().signal,
+        true,
       );
 
       // 如果强制压缩成功，熔断器应该被重置

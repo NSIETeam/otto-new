@@ -806,6 +806,42 @@ describe('filterToolsByMessage (workflow gate)', () => {
     expect(decls.map((d) => d.name)).toContain('workflow');
   });
 
+  it('keeps workflow tool when trusted runtime routing authorizes orchestration', async () => {
+    await chatWithTools.sendMessageStream(
+      {
+        message: '全面检查各层代码并完成回归测试',
+        runtimeControl: { allowWorkflow: true },
+      },
+      'p-runtime-route',
+      SceneType.CHAT_CONVERSATION,
+    );
+
+    const callArg = vi.mocked(mockModelsModule.generateContentStream).mock.calls[0][0];
+    const decls = (callArg.config?.tools as unknown as LooseToolDeclaration[])?.[0]?.functionDeclarations ?? [];
+    expect(decls.map((d) => d.name)).toContain('workflow');
+  });
+
+  it('applies the gate to request-scoped tool declarations from the runtime', async () => {
+    const requestScoped = new OttoChat(mockConfig, mockModelsModule, {}, []);
+    vi.mocked(mockModelsModule.generateContentStream).mockResolvedValue(makeStreamResponse());
+    await requestScoped.sendMessageStream(
+      {
+        message: '全面检查各层代码并完成回归测试',
+        runtimeControl: { allowWorkflow: true },
+        config: { tools: toolsWithWorkflow },
+      },
+      'p-request-tools',
+      SceneType.CHAT_CONVERSATION,
+    );
+
+    const callArg = vi.mocked(mockModelsModule.generateContentStream).mock.calls[0][0];
+    const decls = (callArg.config?.tools as unknown as LooseToolDeclaration[])?.[0]?.functionDeclarations ?? [];
+    expect(decls.map((declaration) => declaration.name)).toEqual([
+      'workflow',
+      'shell',
+    ]);
+  });
+
   it('trigger word match is case-insensitive (WORKFLOW, Workflow)', async () => {
     for (const word of ['WORKFLOW', 'Workflow', 'WorkFlow']) {
       vi.mocked(mockModelsModule.generateContentStream).mockResolvedValue(makeStreamResponse());

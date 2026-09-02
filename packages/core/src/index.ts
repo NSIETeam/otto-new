@@ -40,6 +40,7 @@ export {
 // Export extended types
 export * from './types/extendedContent.js';
 export * from './types/customModel.js';
+export * from './services/compressionInvariants.js';
 
 // Export Core Logic
 export * from './core/client.js';
@@ -131,6 +132,7 @@ export { AuthServer } from './auth/login/authServer.js';
 export * from './services/fileDiscoveryService.js';
 export * from './services/fileSystemService.js';
 export * from './services/gitService.js';
+export * from './services/compressionService.js';
 export * from './services/sessionManager.js';
 export {
   TaskWatchdog,

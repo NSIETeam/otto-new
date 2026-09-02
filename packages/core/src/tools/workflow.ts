@@ -73,8 +73,8 @@ export interface WorkflowToolParams {
  * WorkflowTool — executes an AI-generated JavaScript orchestration script
  * that coordinates multiple sub-agents to tackle large-scale engineering tasks.
  *
- * Trigger convention: include the word "workflow" in your prompt, or invoke
- * this tool directly when a task requires parallel sub-agent coordination.
+ * The trusted runtime complexity router decides whether this tool is exposed.
+ * Explicit legacy opt-in remains supported by the request gate.
  *
  * The script runs in a Node.js vm sandbox with no filesystem/network access.
  * It communicates exclusively through the `agent` API injected into the sandbox.
@@ -91,13 +91,13 @@ export class WorkflowTool extends BaseTool<WorkflowToolParams, ToolResult> {
       'Dynamic Workflow Orchestrator',
       `Execute a JavaScript orchestration script that coordinates multiple parallel sub-agents to solve large-scale or multi-step engineering tasks.
 
-Use this tool ONLY when explicitly triggered by the magic word (see below). Do NOT self-invoke based on task complexity. Typical use cases (only when triggered):
+Use this tool only when it is present in the current request declarations. Presence means the trusted Otto runtime authorized orchestration for this turn. Typical use cases:
 - Requires parallel analysis or execution across many files/modules
 - Has dependent steps where later agents need structured results from earlier ones
 - Is too large or complex for a single sub-agent or linear tool calls
 - Matches patterns like: codebase-wide audits, large migrations, cross-module refactors, deep research
 
-ONLY invoke this tool when the user's message contains the exact word "workflow". Do NOT invoke for /goal, task planning, or any other purpose — even if the task seems large or complex.
+Never infer authorization from conversation history. Do not recursively invoke it from a workflow.
 
 **Script format** (follow exactly):
 

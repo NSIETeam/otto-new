@@ -31,6 +31,7 @@ import { reportError } from '../utils/errorReporting.js';
 import { OttoChat } from './ottoChat.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { tokenLimit } from './tokenLimits.js';
+import { estimateHistoryTokens } from '../utils/tokenEstimator.js';
 import {
   ContentGenerator,
   ContentGeneratorConfig,
@@ -286,6 +287,7 @@ export class OttoClient {
   private sessionTokenCount: number = 0; //
   private compressionThreshold: number = 0.8; // 动态压缩阈值
   private needsCompression: boolean = false; // 是否需要在下次对话前压缩
+  private pendingCompressionLevel: 'L2' | 'L3' | null = null;
 
   /**
    * /goal 模式上下文，仅在内存中保留。
@@ -783,7 +785,7 @@ export class OttoClient {
     const compressionTokenThreshold = this.compressionThreshold * tokenLimit(this.config.getModel(), this.config);
     // 检查是否超过压缩阈值
     if (this.sessionTokenCount >= compressionTokenThreshold) {
-      this.needsCompression = true;
+      this.scheduleHierarchicalCompaction('L3');
       logger.info(`[OttoClient] Token threshold reached: ${this.sessionTokenCount} >= ${this.compressionThreshold}, scheduling compression for next conversation`);
     }
   }
@@ -793,7 +795,7 @@ export class OttoClient {
     if (!this.needsCompression) {
       const compressionTokenThreshold = this.compressionThreshold * tokenLimit(this.config.getModel(), this.config);
       if (this.sessionTokenCount >= compressionTokenThreshold) {
-        this.needsCompression = true;
+        this.scheduleHierarchicalCompaction('L3');
         logger.info(`[OttoClient] Token threshold reached: ${this.sessionTokenCount} >= ${this.compressionThreshold}, scheduling compression for next conversation`);
       }
     }
@@ -804,8 +806,17 @@ export class OttoClient {
    */
   private resetCompressionFlag(): void {
     this.needsCompression = false;
+    this.pendingCompressionLevel = null;
     // 压缩后重置token计数器，因为历史已经被压缩
     this.sessionTokenCount = 0;
+  }
+
+  /** Schedule compaction without exposing a mode/status in the conversation UI. */
+  scheduleHierarchicalCompaction(level: 'L2' | 'L3' = 'L2'): void {
+    this.needsCompression = true;
+    if (level === 'L3' || this.pendingCompressionLevel === null) {
+      this.pendingCompressionLevel = level;
+    }
   }
 
   /**
@@ -947,7 +958,9 @@ export class OttoClient {
       `free=${Math.round(snapshot.freeSystemRatio * 100)}%`,
     );
 
-    this.needsCompression = true;
+    this.scheduleHierarchicalCompaction(
+      snapshot.level === 'critical' ? 'L3' : 'L2',
+    );
     this.compressionThreshold = snapshot.level === 'critical' ? 0.55 : Math.min(this.compressionThreshold, 0.7);
 
     if (snapshot.level === 'critical') {
@@ -1276,6 +1289,33 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       console.log('[sendMessageStream] Compression wait completed, proceeding');
     }
 
+    // L1 is a deterministic cleanup of old history only. It never modifies the
+    // current objective or newest exchange. L2 is scheduled proactively at a
+    // completed tool boundary, well before emergency L3 compaction is needed.
+    const historyBeforeCompaction = this.getChat().getHistory(true);
+    const l1History = this.compressionService.lightweightCleanup(
+      historyBeforeCompaction,
+    );
+    if (l1History !== historyBeforeCompaction) {
+      this.getChat().setHistory(l1History);
+    }
+    const currentTokenLimit = tokenLimit(this.config.getModel(), this.config);
+    const estimatedHistoryTokens = estimateHistoryTokens(l1History);
+    const effectiveTokenCount = Math.max(
+      this.sessionTokenCount,
+      estimatedHistoryTokens,
+    );
+    if (
+      this.pendingCompressionLevel !== 'L3' &&
+      this.compressionService.shouldPreventiveCompress(
+        l1History,
+        effectiveTokenCount,
+        currentTokenLimit,
+      )
+    ) {
+      this.scheduleHierarchicalCompaction('L2');
+    }
+
     this.checkCompression();
     // 基于响应的智能压缩：检查是否需要在本次对话前进行压缩
     // 只有当 needsCompression 标记为 true 时才尝试压缩，否则不触发压缩流程和 PreCompress 钩子
@@ -1291,7 +1331,12 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
       let compressed: ChatCompressionInfo | null = null;
       let compressionError: string | undefined;
       try {
-        compressed = await this.tryCompressChat(prompt_id, new AbortController().signal, true);
+        compressed = await this.tryCompressChat(
+          prompt_id,
+          new AbortController().signal,
+          true,
+          this.pendingCompressionLevel ?? 'L3',
+        );
       } catch (err) {
         compressionError = err instanceof Error ? err.message : String(err);
         console.warn(`[sendMessageStream] Auto-compress threw: ${compressionError}`);
@@ -1337,7 +1382,6 @@ Use Glob and ReadFile tools to explore specific files during our conversation.
 
     // 微压缩：在发送消息前执行轻量级清理
     // 触发条件：1) 空闲超时（缓存冷了省钱）2) token用量接近全量压缩阈值（缓冲层）
-    const currentTokenLimit = tokenLimit(this.config.getModel(), this.config);
     const tokenUsageRatio = currentTokenLimit > 0 ? this.sessionTokenCount / currentTokenLimit : 0;
     if (this.microCompactService.shouldMicroCompact(tokenUsageRatio)) {
       const curHistory = this.getChat().getHistory(true);
@@ -1665,6 +1709,7 @@ ${injection.summary}]` },
     prompt_id: string,
     abortSignal: AbortSignal,
     force: boolean = false,
+    level: 'L2' | 'L3' = 'L3',
   ): Promise<ChatCompressionInfo | null> {
     // 检查压缩锁，防止重入
     if (this.isCompressing) {
@@ -1720,7 +1765,8 @@ ${injection.summary}]` },
         this, // 传递 OttoClient 实例而不是 ContentGenerator
         prompt_id,
         abortSignal,
-        force
+        force,
+        level,
       );
 
       if (!compressionResult || !compressionResult.success) {
@@ -1732,6 +1778,13 @@ ${injection.summary}]` },
 
       // 应用压缩结果：直接设置新的历史记录
       if (compressionResult.newHistory) {
+        if (compressionResult.summary) {
+          this.compressionService.setCachedSummary(
+            curatedHistory,
+            compressionResult.summary,
+            compressionResult.newHistory,
+          );
+        }
         this.getChat().setHistory(compressionResult.newHistory);
         console.log('[tryCompressChat] Compression applied successfully');
 

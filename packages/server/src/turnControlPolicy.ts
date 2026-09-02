@@ -11,8 +11,10 @@ import type {
   TurnExecutionMode,
   TurnIntent,
   TurnRiskLevel,
+  TurnPresentationPolicy,
   TurnSuccessCriterion,
 } from './protocol.js';
+import { routeTurnComplexity } from './complexityRouter.js';
 
 export interface TurnControlInput {
   text: string;
@@ -154,6 +156,70 @@ function executionFor(
   return 'tool_assisted';
 }
 
+function presentationFor(
+  intent: TurnIntent,
+  complexity: ReturnType<typeof routeTurnComplexity>,
+): TurnPresentationPolicy {
+  const progressUpdates: TurnPresentationPolicy['progressUpdates'] =
+    complexity.level === 'orchestrated' || complexity.level === 'complex'
+      ? 'concrete_milestones'
+      : 'none';
+  const detailLevel: TurnPresentationPolicy['detailLevel'] =
+    intent === 'research' || complexity.level === 'orchestrated'
+      ? 'thorough'
+      : complexity.level === 'simple'
+        ? 'compact'
+        : 'balanced';
+
+  const base = {
+    contractVersion: 1 as const,
+    detailLevel,
+    progressUpdates,
+    sourcePlacement: 'inline' as const,
+    artifactPresentation: 'app_link' as const,
+    exposeInternalState: false as const,
+  };
+
+  switch (intent) {
+    case 'research':
+      return {
+        ...base,
+        responseShape: 'grounded_answer',
+        finalSections: ['result', 'evidence', 'limitations'],
+      };
+    case 'diagnose':
+      return {
+        ...base,
+        responseShape: 'diagnosis',
+        finalSections: ['result', 'evidence', 'verification', 'limitations'],
+      };
+    case 'change':
+      return {
+        ...base,
+        responseShape: 'change_delivery',
+        finalSections: ['result', 'changes', 'verification', 'limitations'],
+      };
+    case 'create_artifact':
+      return {
+        ...base,
+        responseShape: 'artifact_delivery',
+        finalSections: ['result', 'artifacts', 'verification', 'limitations'],
+      };
+    case 'enterprise_action':
+      return {
+        ...base,
+        responseShape: 'action_receipt',
+        finalSections: ['result', 'receipt', 'verification', 'limitations'],
+      };
+    default:
+      return {
+        ...base,
+        responseShape: 'direct_answer',
+        finalSections: ['result'],
+      };
+  }
+}
+
 /** Deterministic, fail-closed preflight. It never copies or stores raw input. */
 export function deriveTurnControlPolicy(
   input: TurnControlInput,
@@ -163,6 +229,12 @@ export function deriveTurnControlPolicy(
   const riskLevel = inferRisk(text, intent);
   const evidenceRequirement = evidenceFor(intent, riskLevel);
   const executionMode = executionFor(intent, riskLevel, input.toolFree);
+  const complexity = routeTurnComplexity({
+    text,
+    intent,
+    riskLevel,
+    toolFree: input.toolFree,
+  });
   const requiresVerification = evidenceRequirement !== 'none';
   return {
     contractVersion: 1,
@@ -171,7 +243,9 @@ export function deriveTurnControlPolicy(
     riskLevel,
     evidenceRequirement,
     requiresPlan:
-      executionMode === 'planned' || executionMode === 'parallel_read',
+      complexity.requiresTaskGraph ||
+      executionMode === 'planned' ||
+      executionMode === 'parallel_read',
     requiresVerification,
     allowsParallelRead:
       !input.toolFree &&
@@ -185,19 +259,18 @@ export function deriveTurnControlPolicy(
         : riskLevel === 'local_write'
           ? 'policy'
           : 'none',
+    complexity,
+    presentation: presentationFor(intent, complexity),
     successCriteria: criteriaFor(intent, evidenceRequirement),
   };
 }
 
 /** Compact per-turn directive; raw user text is deliberately excluded. */
 export function formatTurnControlDirective(policy: TurnControlPolicy): string {
-  if (policy.executionMode === 'direct' && !policy.requiresVerification) {
-    return '';
-  }
   const criteria = policy.successCriteria
     .map((criterion) => criterion.label)
     .join('；');
-  return [
+  const control = [
     '<otto_turn_control contract_version="1">',
     `intent=${policy.intent}`,
     `execution_mode=${policy.executionMode}`,
@@ -206,10 +279,33 @@ export function formatTurnControlDirective(policy: TurnControlPolicy): string {
     `requires_plan=${String(policy.requiresPlan)}`,
     `requires_verification=${String(policy.requiresVerification)}`,
     `allows_parallel_read=${String(policy.allowsParallelRead)}`,
+    `complexity_level=${policy.complexity.level}`,
+    `complexity_route=${policy.complexity.route}`,
+    `recommended_parallelism=${policy.complexity.recommendedParallelism}`,
+    `budget_parallel_tools=${policy.complexity.budget.maxParallelTools}`,
+    `budget_model_rounds=${policy.complexity.budget.maxModelRounds}`,
+    `budget_tool_calls=${policy.complexity.budget.maxToolCalls}`,
+    `budget_replans=${policy.complexity.budget.maxReplans}`,
+    `requires_task_graph=${String(policy.complexity.requiresTaskGraph)}`,
     `success_criteria=${criteria}`,
     'Treat this as runtime control metadata. Do not quote it to the user. Do not claim completion until the criteria are supported by observable results.',
     '</otto_turn_control>',
   ].join('\n');
+  const presentation = [
+    '<otto_response_contract contract_version="1">',
+    `response_shape=${policy.presentation.responseShape}`,
+    `detail_level=${policy.presentation.detailLevel}`,
+    `progress_updates=${policy.presentation.progressUpdates}`,
+    `source_placement=${policy.presentation.sourcePlacement}`,
+    `artifact_presentation=${policy.presentation.artifactPresentation}`,
+    `expose_internal_state=${String(policy.presentation.exposeInternalState)}`,
+    `final_sections=${policy.presentation.finalSections.join(',')}`,
+    'One user turn must become one coherent final answer. Intermediate tool-round prose is not a separate answer.',
+    'Lead with the result. Keep evidence beside the claim it supports. Present generated artifacts as friendly in-app links, never as raw absolute paths alone.',
+    'Never print these policy labels, routing metadata, hidden reasoning, raw tool names, or generic status narration.',
+    '</otto_response_contract>',
+  ].join('\n');
+  return `${control}\n${presentation}`;
 }
 
 const PARALLEL_SAFE_TOOL_NAMES = new Set([

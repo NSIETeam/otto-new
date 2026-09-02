@@ -10,8 +10,10 @@ import {
   ToolCallStatus,
   type AgentArtifactReference,
   type AgentCitationReference,
+  type AgentTaskGraphSnapshot,
   type AgentRetryRecord,
   type AgentTurnEventMsg,
+  type AgentAdaptationRecord,
   type AgentTurnItem,
   type AgentTurnItemStatus,
   type AgentTurnOutcome,
@@ -29,6 +31,7 @@ import {
   deriveTurnControlPolicy,
   isParallelSafeToolName,
 } from './turnControlPolicy.js';
+import { TaskGraphCoordinator } from './taskGraph.js';
 
 type TurnEventName = AgentTurnEventMsg['payload']['event'];
 
@@ -158,6 +161,15 @@ function cloneItem(item: AgentTurnItem): AgentTurnItem {
 function cloneControl(policy: TurnControlPolicy): TurnControlPolicy {
   return {
     ...policy,
+    complexity: {
+      ...policy.complexity,
+      reasons: [...policy.complexity.reasons],
+      budget: { ...policy.complexity.budget },
+    },
+    presentation: {
+      ...policy.presentation,
+      finalSections: [...policy.presentation.finalSections],
+    },
     successCriteria: policy.successCriteria.map((criterion) => ({
       ...criterion,
     })),
@@ -280,11 +292,12 @@ function artifactPaths(tool: ToolCall): string[] {
     const direct = value.trim().replace(/^['"]|['"]$/gu, '');
     const embedded =
       value.match(
-        /(?:[A-Za-z]:[\\/]|\.{0,2}[\\/])[^\r\n<>"|?*]+?\.(?:csv|docx?|gif|html?|jpe?g|json|md|pdf|png|pptx?|svg|tar|txt|webp|xlsx?|xml|yaml|yml|zip)/giu,
+        /(?:[A-Za-z]:[\\/]|~[\\/]|\.{0,2}[\\/])[^\r\n<>"|?*]+?\.(?:csv|docx?|gif|html?|jpe?g|json|md|pdf|png|pptx?|svg|tar|txt|webp|xlsx?|xml|yaml|yml|zip)/giu,
       ) ?? [];
     const looksLikeStandalonePath =
       ARTIFACT_EXTENSION.test(direct) &&
-      (/^(?:[A-Za-z]:[\\/]|\.{0,2}[\\/])/u.test(direct) || !/\s/u.test(direct));
+      (/^(?:[A-Za-z]:[\\/]|~[\\/]|\.{0,2}[\\/])/u.test(direct) ||
+        !/\s/u.test(direct));
     return looksLikeStandalonePath ? [direct, ...embedded] : embedded;
   });
   return [
@@ -331,9 +344,11 @@ export class AgentTurnTracker {
   readonly turnId: string;
   private readonly startedAt = Date.now();
   private readonly control: TurnControlPolicy;
+  private readonly taskGraph: TaskGraphCoordinator;
   private verification: TurnVerification;
   private readonly lineage: TurnRunLineage;
   private retries: AgentRetryRecord[] = [];
+  private adaptations: AgentAdaptationRecord[] = [];
   private artifacts: AgentArtifactReference[] = [];
   private citations: AgentCitationReference[] = [];
   private outcome: AgentTurnOutcome | undefined;
@@ -358,6 +373,7 @@ export class AgentTurnTracker {
       turnId?: string;
       attempt?: number;
       resumedFromSequence?: number;
+      taskGraphSnapshot?: AgentTaskGraphSnapshot;
     } = {},
   ) {
     this.turnId = options.turnId ?? randomUUID();
@@ -376,6 +392,9 @@ export class AgentTurnTracker {
           toolFree: false,
         }),
     );
+    this.taskGraph = options.taskGraphSnapshot
+      ? TaskGraphCoordinator.restore(this.control, options.taskGraphSnapshot)
+      : new TaskGraphCoordinator(this.control);
     this.verification = {
       status: this.control.requiresVerification ? 'pending' : 'not_required',
       checks: this.control.successCriteria.map((criterion) => ({
@@ -433,6 +452,22 @@ export class AgentTurnTracker {
 
   updateToolCalls(toolCalls: readonly ToolCall[]): void {
     if (toolCalls.length === 0) return;
+    this.taskGraph.observeTools(
+      toolCalls.map((tool) => ({
+        name: tool.toolName,
+        status:
+          tool.status === ToolCallStatus.Success
+            ? 'success'
+            : tool.status === ToolCallStatus.Error
+              ? 'error'
+              : tool.status === ToolCallStatus.Canceled
+                ? 'cancelled'
+                : 'running',
+        mutating: isMutationTool(tool),
+        verification: isExplicitVerificationTool(tool),
+        evidenceId: tool.id,
+      })),
+    );
     for (const tool of toolCalls) {
       this.observedTools.set(tool.id, {
         ...tool,
@@ -502,6 +537,10 @@ export class AgentTurnTracker {
     this.finishCurrentStage('completed');
     const satisfied = this.finalizeVerification();
     if (satisfied) {
+      if (this.control.requiresVerification) {
+        this.taskGraph.markVerificationPassed();
+      }
+      this.taskGraph.markDelivered();
       this.finishTurn('completed', { type: 'success' });
       return;
     }
@@ -601,6 +640,30 @@ export class AgentTurnTracker {
     ];
   }
 
+  recordAdaptation(
+    adaptation: Omit<AgentAdaptationRecord, 'revision' | 'timestamp'>,
+  ): void {
+    const record: AgentAdaptationRecord = {
+      ...adaptation,
+      revision: this.adaptations.length + 1,
+      timestamp: Date.now(),
+    };
+    this.adaptations = [...this.adaptations, record];
+    this.taskGraph.applyAdaptation(record);
+    if (this.rootMessageId) this.emit('item_updated');
+  }
+
+  /** Internal model directive; callers must not render it as UI status. */
+  taskGraphDirective(): string {
+    return this.control.complexity.requiresTaskGraph
+      ? this.taskGraph.directive()
+      : '';
+  }
+
+  taskGraphSnapshot(): AgentTaskGraphSnapshot {
+    return this.taskGraph.snapshot();
+  }
+
   recordArtifact(reference: AgentArtifactReference): void {
     this.artifacts = [
       ...this.artifacts.filter((artifact) => artifact.id !== reference.id),
@@ -691,8 +754,10 @@ export class AgentTurnTracker {
       verification: cloneVerification(this.verification),
       lineage: { ...this.lineage },
       retries: this.retries.map((retry) => ({ ...retry })),
+      adaptations: this.adaptations.map((adaptation) => ({ ...adaptation })),
       artifacts: this.artifacts.map((artifact) => ({ ...artifact })),
       citations: this.citations.map((citation) => ({ ...citation })),
+      taskGraph: this.taskGraph.snapshot(),
       ...(this.outcome ? { outcome: { ...this.outcome } } : {}),
       ...(this.completedAt ? { completedAt: this.completedAt } : {}),
     };

@@ -233,6 +233,46 @@ export type TurnIntent =
 export type TurnExecutionMode =
   'direct' | 'tool_assisted' | 'parallel_read' | 'planned' | 'restricted';
 
+export type TurnComplexityLevel =
+  'simple' | 'moderate' | 'complex' | 'orchestrated';
+
+export type TurnExecutionRoute =
+  | 'direct'
+  | 'single_agent'
+  | 'parallel_tools'
+  | 'planned_agent'
+  | 'subagents'
+  | 'workflow'
+  | 'restricted';
+
+export type TurnComplexityReason =
+  | 'cross_layer'
+  | 'broad_scope'
+  | 'multi_objective'
+  | 'long_horizon'
+  | 'parallelizable'
+  | 'evidence_heavy'
+  | 'uncertain_diagnosis'
+  | 'explicit_orchestration';
+
+/** Deterministic routing metadata. Raw user input is deliberately excluded. */
+export interface TurnComplexityProfile {
+  contractVersion: 1;
+  level: TurnComplexityLevel;
+  score: number;
+  route: TurnExecutionRoute;
+  recommendedParallelism: number;
+  budget: {
+    maxParallelTools: number;
+    maxModelRounds: number;
+    maxToolCalls: number;
+    maxReplans: number;
+  };
+  requiresTaskGraph: boolean;
+  exposesWorkflowTool: boolean;
+  reasons: TurnComplexityReason[];
+}
+
 export type TurnRiskLevel =
   'read_only' | 'local_write' | 'external_write' | 'destructive';
 
@@ -248,6 +288,40 @@ export interface TurnSuccessCriterion {
   label: string;
 }
 
+/**
+ * Internal response-presentation policy. It guides the model and renderer but
+ * its labels are never shown to users as modes or statuses.
+ */
+export type TurnResponseShape =
+  | 'direct_answer'
+  | 'grounded_answer'
+  | 'diagnosis'
+  | 'change_delivery'
+  | 'artifact_delivery'
+  | 'action_receipt';
+
+export type TurnDetailLevel = 'compact' | 'balanced' | 'thorough';
+
+export type TurnFinalSection =
+  | 'result'
+  | 'evidence'
+  | 'changes'
+  | 'artifacts'
+  | 'verification'
+  | 'receipt'
+  | 'limitations';
+
+export interface TurnPresentationPolicy {
+  contractVersion: 1;
+  responseShape: TurnResponseShape;
+  detailLevel: TurnDetailLevel;
+  progressUpdates: 'none' | 'concrete_milestones';
+  sourcePlacement: 'inline';
+  artifactPresentation: 'app_link';
+  exposeInternalState: false;
+  finalSections: TurnFinalSection[];
+}
+
 export interface TurnControlPolicy {
   contractVersion: 1;
   intent: TurnIntent;
@@ -258,6 +332,8 @@ export interface TurnControlPolicy {
   requiresVerification: boolean;
   allowsParallelRead: boolean;
   confirmationMode: 'none' | 'policy' | 'always';
+  complexity: TurnComplexityProfile;
+  presentation: TurnPresentationPolicy;
   successCriteria: TurnSuccessCriterion[];
 }
 
@@ -288,6 +364,30 @@ export interface AgentRetryRecord {
   outcome: 'retrying' | 'succeeded' | 'failed' | 'unknown_outcome';
 }
 
+/** Internal audit record for a runtime strategy change; never rendered as UI status. */
+export interface AgentAdaptationRecord {
+  revision: number;
+  timestamp: number;
+  category:
+    | 'transient'
+    | 'permission'
+    | 'not_found'
+    | 'invalid_input'
+    | 'stale_state'
+    | 'context_overflow'
+    | 'unknown_side_effect'
+    | 'unsupported'
+    | 'unknown';
+  action:
+    | 'retry_once'
+    | 'switch_strategy'
+    | 'request_input'
+    | 'compact_context'
+    | 'reconcile';
+  toolName: string;
+  attempt: number;
+}
+
 export interface AgentArtifactReference {
   id: string;
   label: string;
@@ -302,6 +402,49 @@ export interface AgentCitationReference {
   uri?: string;
   sourceType: 'local' | 'web' | 'enterprise' | 'tool';
   verified: boolean;
+}
+
+export type AgentTaskGraphNodeKind =
+  'understand' | 'gather' | 'execute' | 'verify' | 'recover' | 'deliver';
+
+export type AgentTaskGraphNodeStatus =
+  'pending' | 'in_progress' | 'completed' | 'blocked' | 'failed' | 'cancelled';
+
+export interface AgentTaskGraphNode {
+  id: string;
+  label: string;
+  kind: AgentTaskGraphNodeKind;
+  status: AgentTaskGraphNodeStatus;
+  dependsOn?: string[];
+  attempt?: number;
+  evidenceIds?: string[];
+  strategy?:
+    | 'retry'
+    | 'refresh_state'
+    | 'correct_input'
+    | 'alternate_source'
+    | 'compact_context'
+    | 'request_access'
+    | 'reconcile_outcome'
+    | 'supported_path'
+    | 'inspect_evidence';
+}
+
+export interface AgentTaskGraphRevision {
+  revision: number;
+  timestamp: number;
+  reason: string;
+  preservedNodeIds: string[];
+  changedNodeIds: string[];
+}
+
+/** Internal execution graph persisted for recovery and audit, not UI chrome. */
+export interface AgentTaskGraphSnapshot {
+  contractVersion: 1;
+  revision: number;
+  route: TurnExecutionRoute;
+  nodes: AgentTaskGraphNode[];
+  revisions: AgentTaskGraphRevision[];
 }
 
 export type AgentTurnOutcome =
@@ -386,8 +529,10 @@ export interface AgentTurnSnapshot {
   verification?: TurnVerification;
   lineage?: TurnRunLineage;
   retries?: AgentRetryRecord[];
+  adaptations?: AgentAdaptationRecord[];
   artifacts?: AgentArtifactReference[];
   citations?: AgentCitationReference[];
+  taskGraph?: AgentTaskGraphSnapshot;
   outcome?: AgentTurnOutcome;
 }
 

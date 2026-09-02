@@ -1410,6 +1410,7 @@ const IPC = {
   openPath: 'otto:open-path',
   inspectLocalPath: 'otto:inspect-local-path',
   activateLocalPath: 'otto:activate-local-path',
+  previewLocalArtifact: 'otto:preview-local-artifact',
   selectFiles: 'otto:select-files',
   selectFolders: 'otto:select-folders',
   selectWorkspaceDirectory: 'otto:select-workspace-directory',
@@ -1658,6 +1659,21 @@ export type DesktopPetBehaviorEvent =
   | 'open-main';
 
 /** preload 暴露给 renderer 的 API 形状（renderer 据此声明 window.otto 类型）。 */
+export interface LocalArtifactPreviewSlide {
+  number: number;
+  fileName: string;
+  dataUrl: string;
+}
+
+export interface LocalArtifactPreviewResult {
+  ok: boolean;
+  kind: 'slides' | 'unsupported';
+  fileName: string;
+  mimeType: string;
+  slides: LocalArtifactPreviewSlide[];
+  error?: string;
+}
+
 export interface OttoBridge {
   /** 连接到本地 server（解析端点后建 WS）。返回是否连上。 */
   connect(): Promise<boolean>;
@@ -1691,6 +1707,8 @@ export interface OttoBridge {
     path: string,
     action: 'open' | 'reveal',
   ): Promise<{ ok: boolean; error?: string }>;
+  /** 在 Otto 内读取已生成 PPT 的逐页静态预览；不会启动系统默认应用。 */
+  previewLocalArtifact(path: string): Promise<LocalArtifactPreviewResult>;
   /**
    * 原生文件选择器：打开系统文件对话框，返回完整路径数组。
    * 用户主动授权选择，不受浏览器沙箱限制。
@@ -2692,6 +2710,13 @@ const bridge: OttoBridge = {
       ok: boolean;
       error?: string;
     }>;
+  },
+
+  previewLocalArtifact(path: string): Promise<LocalArtifactPreviewResult> {
+    return ipcRenderer.invoke(
+      IPC.previewLocalArtifact,
+      path,
+    ) as Promise<LocalArtifactPreviewResult>;
   },
 
   selectFiles(): Promise<string[]> {

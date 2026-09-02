@@ -14,6 +14,8 @@ import {
   classifyRecoveryTool,
   toolExecutionFingerprint,
 } from './turnRecoveryStore.js';
+import { deriveTurnControlPolicy } from './turnControlPolicy.js';
+import { TaskGraphCoordinator } from './taskGraph.js';
 
 let root: string;
 let store: FileTurnRecoveryStore;
@@ -194,5 +196,44 @@ describe('FileTurnRecoveryStore', () => {
       await readFile(store.pathForSession('session-e'), 'utf8'),
     ) as Record<string, unknown>;
     expect(raw).toMatchObject({ version: 1, sessionId: 'session-e' });
+  });
+
+  it('persists the task graph so a restarted turn keeps completed evidence', async () => {
+    const record = await store.begin({
+      sessionId: 'session-graph',
+      turnId: 'turn-graph',
+      intentHash: 'intent-graph',
+    });
+    const policy = deriveTurnControlPolicy({
+      text: '检查并修改登录代码，然后运行测试',
+      source: 'local',
+      toolFree: false,
+    });
+    const graph = new TaskGraphCoordinator(policy);
+    graph.observeTools([
+      {
+        name: 'read_file',
+        status: 'success',
+        mutating: false,
+        verification: false,
+        evidenceId: 'read-login-1',
+      },
+    ]);
+
+    await store.recordTaskGraph(record, graph.snapshot());
+    const recovered = await new FileTurnRecoveryStore(root).recoverInterrupted(
+      'session-graph',
+    );
+    const restored = TaskGraphCoordinator.restore(
+      policy,
+      recovered!.taskGraph!,
+    );
+
+    expect(
+      restored.snapshot().nodes.find((node) => node.kind === 'gather'),
+    ).toMatchObject({
+      status: 'completed',
+      evidenceIds: ['read-login-1'],
+    });
   });
 });

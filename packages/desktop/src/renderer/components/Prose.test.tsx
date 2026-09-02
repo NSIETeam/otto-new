@@ -42,8 +42,137 @@ describe('Prose 轻量 Markdown', () => {
     expect(normalizeLocalOutputPath('/home/otto/report.xlsx')).toBe(
       '/home/otto/report.xlsx',
     );
+    expect(normalizeLocalOutputPath('~/Desktop/report.pptx')).toBe(
+      '~/Desktop/report.pptx',
+    );
     expect(normalizeLocalOutputPath('npm install')).toBeNull();
     expect(normalizeLocalOutputPath('energy-manager-plugin.js')).toBeNull();
+  });
+
+  it('PPT 交付物显示文件名链接，点击后在 Otto 内预览而不启动系统应用', async () => {
+    const outputPath = '~/Desktop/apple-flywheel/苹果公司介绍.pptx';
+    const inspectLocalPath = vi.fn(async () => ({
+      exists: true,
+      kind: 'file' as const,
+      canOpen: true,
+    }));
+    const previewLocalArtifact = vi.fn(async () => ({
+      ok: true as const,
+      kind: 'slides' as const,
+      fileName: '苹果公司介绍.pptx',
+      mimeType:
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      slides: [
+        {
+          number: 1,
+          fileName: 'slide-01.png',
+          dataUrl: 'data:image/png;base64,c2xpZGUtMQ==',
+        },
+        {
+          number: 2,
+          fileName: 'slide-02.png',
+          dataUrl: 'data:image/png;base64,c2xpZGUtMg==',
+        },
+      ],
+    }));
+    const activateLocalPath = vi.fn(async () => ({ ok: true }));
+    (window as unknown as { otto: unknown }).otto = {
+      inspectLocalPath,
+      previewLocalArtifact,
+      activateLocalPath,
+    };
+
+    const { getByRole, queryByText } = render(
+      <Prose text={`交付物：\`${outputPath}\``} />,
+    );
+
+    const previewLink = await waitFor(() =>
+      getByRole('link', { name: '在 Otto 中预览 苹果公司介绍.pptx' }),
+    );
+    expect(previewLink.textContent).toContain('苹果公司介绍.pptx');
+    expect(queryByText(outputPath)).toBeNull();
+
+    fireEvent.click(previewLink);
+    await waitFor(() =>
+      expect(getByRole('dialog', { name: '预览 苹果公司介绍.pptx' })).toBeTruthy(),
+    );
+    expect(previewLocalArtifact).toHaveBeenCalledWith(outputPath);
+    expect(getByRole('img', { name: '第 1 页' })).toBeTruthy();
+    expect(activateLocalPath).not.toHaveBeenCalledWith(outputPath, 'open');
+
+    const dialog = getByRole('dialog', { name: '预览 苹果公司介绍.pptx' });
+    fireEvent.keyDown(dialog, { key: 'ArrowRight' });
+    await waitFor(() => expect(getByRole('img', { name: '第 2 页' })).toBeTruthy());
+    fireEvent.keyDown(dialog, { key: 'Home' });
+    await waitFor(() => expect(getByRole('img', { name: '第 1 页' })).toBeTruthy());
+
+    fireEvent.click(getByRole('button', { name: '放大 PPT' }));
+    expect(getByRole('status', { name: '当前缩放比例' }).textContent).toBe(
+      '125%',
+    );
+  });
+
+  it('PPT 路径检查尚未结束时也只显示文件名，不闪现本机绝对路径', () => {
+    const outputPath = 'C:\\Users\\wg\\Desktop\\季度复盘.pptx';
+    (window as unknown as { otto: unknown }).otto = {
+      inspectLocalPath: vi.fn(() => new Promise(() => undefined)),
+      previewLocalArtifact: vi.fn(),
+      activateLocalPath: vi.fn(),
+    };
+
+    const { getByRole, queryByText } = render(
+      <Prose text={`交付物：\`${outputPath}\``} />,
+    );
+
+    expect(getByRole('link', { name: '在 Otto 中预览 季度复盘.pptx' })).toBeTruthy();
+    expect(queryByText(outputPath)).toBeNull();
+  });
+
+  it('PPT 内部预览失败后可以重试，缺失文件不提供无效的系统操作', async () => {
+    const outputPath = '~/Desktop/季度复盘.pptx';
+    const previewLocalArtifact = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        kind: 'unsupported',
+        fileName: '季度复盘.pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        slides: [],
+        error: '尚未生成逐页预览。',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        kind: 'slides',
+        fileName: '季度复盘.pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        slides: [{
+          number: 1,
+          fileName: 'slide-01.png',
+          dataUrl: 'data:image/png;base64,c2xpZGUtMQ==',
+        }],
+      });
+    (window as unknown as { otto: unknown }).otto = {
+      inspectLocalPath: vi.fn(async () => ({
+        exists: false,
+        kind: 'missing' as const,
+        canOpen: false,
+      })),
+      previewLocalArtifact,
+      activateLocalPath: vi.fn(),
+    };
+
+    const { getByRole, queryByRole } = render(
+      <Prose text={`交付物：\`${outputPath}\``} />,
+    );
+    fireEvent.click(getByRole('link', { name: '在 Otto 中预览 季度复盘.pptx' }));
+
+    await waitFor(() => expect(getByRole('button', { name: '重新加载预览' })).toBeTruthy());
+    expect(queryByRole('button', { name: '在文件夹中显示' })).toBeNull();
+    expect(queryByRole('button', { name: '用其他应用打开' })).toBeNull();
+    fireEvent.click(getByRole('button', { name: '重新加载预览' }));
+
+    await waitFor(() => expect(getByRole('img', { name: '第 1 页' })).toBeTruthy());
+    expect(previewLocalArtifact).toHaveBeenCalledTimes(2);
   });
 
   it('存在的输出文件提供直接打开与文件夹定位操作', async () => {

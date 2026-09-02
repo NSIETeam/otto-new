@@ -1,7 +1,14 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 export type EvaluationLane =
-  'agent' | 'coding' | 'policy' | 'recovery' | 'rpa' | 'spreadsheet';
+  | 'agent'
+  | 'coding'
+  | 'context'
+  | 'planning'
+  | 'policy'
+  | 'recovery'
+  | 'rpa'
+  | 'spreadsheet';
 
 export interface EvaluationEvidence {
   kind:
@@ -10,6 +17,8 @@ export interface EvaluationEvidence {
     | 'artifact'
     | 'assertion'
     | 'citation'
+    | 'context_compaction'
+    | 'plan_revision'
     | 'recovery_checkpoint'
     | 'verification';
   summary: string;

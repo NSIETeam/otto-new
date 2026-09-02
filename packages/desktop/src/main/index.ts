@@ -91,6 +91,7 @@ import { cancelDurableWorkflowsForQuit } from './durable-workflow-quit.js';
 import { migrateDesktopRenderCachesForUpgrade } from './render-cache-migration.js';
 import { McpCredentialVault } from './mcpCredentialVault.js';
 import { ConversationDraftVault } from './conversationDraftVault.js';
+import { buildLocalArtifactPreview } from './local-artifact-preview.js';
 
 function ignoreBrokenPipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
@@ -675,6 +676,7 @@ const IPC = {
   openPath: 'otto:open-path',
   inspectLocalPath: 'otto:inspect-local-path',
   activateLocalPath: 'otto:activate-local-path',
+  previewLocalArtifact: 'otto:preview-local-artifact',
   selectFiles: 'otto:select-files',
   selectFolders: 'otto:select-folders',
   selectWorkspaceDirectory: 'otto:select-workspace-directory',
@@ -5956,18 +5958,33 @@ function registerIpc(): void {
   });
 
   const resolveUserLocalPath = (candidate: unknown): string | null => {
-    // 仅允许当前用户 home 内已存在的绝对路径。realpath 同时阻止符号链接越界。
-    if (
-      typeof candidate !== 'string' ||
-      candidate.length === 0 ||
-      !path.isAbsolute(candidate)
-    ) {
+    // 仅允许用户 home 或经原生选择器授权的工作目录内的现存路径。
+    // realpath 同时阻止符号链接从可信根目录越界。
+    if (typeof candidate !== 'string' || candidate.length === 0) {
       return null;
     }
     try {
       const home = fs.realpathSync(app.getPath('home'));
-      const resolved = fs.realpathSync(path.resolve(candidate));
-      return resolved === home || resolved.startsWith(home + path.sep)
+      const expanded =
+        candidate === '~'
+          ? home
+          : /^~[\\/]/u.test(candidate)
+            ? path.join(home, candidate.slice(2))
+            : candidate;
+      if (!path.isAbsolute(expanded)) return null;
+      const resolved = fs.realpathSync(path.resolve(expanded));
+      const trustedRoots = [home, ...workspaceDirectories.list()].flatMap(
+        (root) => {
+          try {
+            return [fs.realpathSync(root)];
+          } catch {
+            return [];
+          }
+        },
+      );
+      return trustedRoots.some(
+        (root) => resolved === root || resolved.startsWith(root + path.sep),
+      )
         ? resolved
         : null;
     } catch {
@@ -6037,6 +6054,24 @@ function registerIpc(): void {
   ipcMain.handle(IPC.inspectLocalPath, (_e, p: unknown) => {
     const { exists, kind, canOpen } = inspectUserLocalPath(p);
     return { exists, kind, canOpen };
+  });
+  ipcMain.handle(IPC.previewLocalArtifact, async (_e, p: unknown) => {
+    const inspected = inspectUserLocalPath(p);
+    if (
+      !inspected.resolved ||
+      !inspected.exists ||
+      inspected.kind !== 'file'
+    ) {
+      return {
+        ok: false,
+        kind: 'unsupported',
+        fileName: typeof p === 'string' ? path.basename(p) : 'PPT',
+        mimeType: 'application/octet-stream',
+        slides: [],
+        error: '文件不存在，或不在当前用户目录内。',
+      };
+    }
+    return buildLocalArtifactPreview(inspected.resolved);
   });
   ipcMain.handle(
     IPC.activateLocalPath,

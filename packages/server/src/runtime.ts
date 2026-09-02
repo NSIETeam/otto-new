@@ -60,6 +60,10 @@ import { randomUUID } from 'node:crypto';
 import type { SessionStore, SessionRuntime } from './sessions.js';
 import { AgentTurnTracker } from './agentTurnTracker.js';
 import {
+  AdaptiveExecutionCoordinator,
+  type ExecutionFailureObservation,
+} from './adaptiveExecution.js';
+import {
   deriveTurnControlPolicy,
   formatTurnControlDirective,
   isParallelSafeToolName,
@@ -651,17 +655,48 @@ export class CoreSessionRuntime implements SessionRuntime {
       source,
       toolFree: Boolean(this.options.toolFree),
     });
-    const turnTracker = new AgentTurnTracker(
-      this.store,
-      this.sessionId,
-      turnControl,
-      recovery
-        ? {
-            turnId: recovery.turnId,
-            attempt: recovery.attempt,
-          }
-        : undefined,
-    );
+    let turnTracker: AgentTurnTracker;
+    try {
+      turnTracker = new AgentTurnTracker(
+        this.store,
+        this.sessionId,
+        turnControl,
+        recovery
+          ? {
+              turnId: recovery.turnId,
+              attempt: recovery.attempt,
+              ...(recovery.taskGraph
+                ? { taskGraphSnapshot: recovery.taskGraph }
+                : {}),
+            }
+          : undefined,
+      );
+    } catch {
+      const reason = '上次任务图无法安全恢复，需要核对已执行操作';
+      if (this.recoveryStore && recovery) {
+        recovery = await this.recoveryStore.markReconciliationRequired(
+          recovery,
+          reason,
+        );
+        this.activeRecovery = recovery;
+      }
+      turnTracker = new AgentTurnTracker(
+        this.store,
+        this.sessionId,
+        turnControl,
+        recovery
+          ? { turnId: recovery.turnId, attempt: recovery.attempt }
+          : undefined,
+      );
+    }
+    if (this.recoveryStore && recovery) {
+      recovery = await this.recoveryStore.recordTaskGraph(
+        recovery,
+        turnTracker.taskGraphSnapshot(),
+      );
+      this.activeRecovery = recovery;
+    }
+    const adaptiveExecution = new AdaptiveExecutionCoordinator();
     if (recovery?.status === 'reconciliation_required') {
       turnTracker.markReconciliationRequired(
         recovery.reconciliationReason || '上次执行结果未知，禁止自动重放',
@@ -706,7 +741,12 @@ export class CoreSessionRuntime implements SessionRuntime {
     const caps = getModelCapabilities(modelName);
 
     // 首轮 user message：把协议 content 构造成 core Part[]（文本 + 图片 inlineData）。
-    const turnDirective = formatTurnControlDirective(turnControl);
+    const turnDirective = [
+      formatTurnControlDirective(turnControl),
+      turnTracker.taskGraphDirective(),
+    ]
+      .filter(Boolean)
+      .join('\n');
     let currentMessages: Content[] = [
       {
         role: MESSAGE_ROLES.USER,
@@ -751,16 +791,24 @@ export class CoreSessionRuntime implements SessionRuntime {
       this.store.setStatus(this.sessionId, 'thinking');
       this.publishRuntimeActivity('turn', 'started');
       let turnCount = 0;
-      const maxTurns = this.config.getMaxSessionTurns();
+      let toolCallCount = 0;
+      let replanCount = 0;
+      const configuredMaxTurns = this.config.getMaxSessionTurns();
+      const routedMaxTurns = turnControl.complexity.budget.maxModelRounds;
+      const maxTurns =
+        configuredMaxTurns > 0
+          ? Math.min(configuredMaxTurns, routedMaxTurns)
+          : routedMaxTurns;
 
       // 多回合工具往返循环（移植自 nonInteractiveCli）。
       // 每一轮：流式拿文本+functionCalls；有工具则执行并回灌，无工具则收口。
       while (true) {
         turnCount++;
-        if (maxTurns > 0 && turnCount > maxTurns) {
-          const message = '已达到本会话最大回合数。';
+        if (turnCount > maxTurns) {
+          const message = `本轮执行已达到模型回合预算（${maxTurns}），已安全停止。`;
           this.fail('max_turns', message);
           turnTracker.fail(message);
+          this.publishRuntimeActivity('turn', 'failed', message);
           break;
         }
         if (signal.aborted) {
@@ -781,21 +829,27 @@ export class CoreSessionRuntime implements SessionRuntime {
 
         while (true) {
           try {
-            const responseStream = await chat.sendMessageStream(
-              {
-                message: currentMessages[0]?.parts ?? [],
-                config: {
-                  abortSignal: signal,
-                  tools: this.options.toolFree
-                    ? []
-                    : [
-                        {
-                          functionDeclarations:
-                            toolRegistry.getFunctionDeclarations(),
-                        },
-                      ],
-                },
+            const routedRequest = {
+              message: currentMessages[0]?.parts ?? [],
+              runtimeControl: {
+                allowWorkflow: turnControl.complexity.exposesWorkflowTool,
               },
+              config: {
+                abortSignal: signal,
+                tools: this.options.toolFree
+                  ? []
+                  : [
+                      {
+                        functionDeclarations:
+                          toolRegistry.getFunctionDeclarations(),
+                      },
+                    ],
+              },
+            } as Parameters<typeof chat.sendMessageStream>[0] & {
+              runtimeControl: { allowWorkflow: boolean };
+            };
+            const responseStream = await chat.sendMessageStream(
+              routedRequest,
               promptId,
               SceneType.CHAT_CONVERSATION,
             );
@@ -950,9 +1004,27 @@ export class CoreSessionRuntime implements SessionRuntime {
           }
         }
 
+        const remainingToolCalls =
+          turnControl.complexity.budget.maxToolCalls - toolCallCount;
+        if (processed.length > remainingToolCalls) {
+          const message = `本轮工具调用将超出执行预算（${turnControl.complexity.budget.maxToolCalls}），未执行超额调用。`;
+          if (assistantId !== null) {
+            this.store.patchMessage(this.sessionId, assistantId, {
+              isStreaming: false,
+              isProcessingTools: false,
+              toolsCompleted: true,
+            });
+          }
+          this.fail('execution_budget_exceeded', message);
+          turnTracker.fail(message);
+          this.publishRuntimeActivity('turn', 'failed', message);
+          break;
+        }
+        toolCallCount += processed.length;
+
         const toolMessageId = assistantId ?? startAssistant();
         assistantId = toolMessageId;
-        const toolResponseParts = await this.runToolCalls(
+        const toolBatch = await this.runToolCalls(
           processed,
           promptId,
           toolRegistry,
@@ -966,9 +1038,72 @@ export class CoreSessionRuntime implements SessionRuntime {
           break;
         }
 
+        const adaptiveDecisions = toolBatch.failures.map((failure) =>
+          adaptiveExecution.observe(failure),
+        );
+        for (const decision of adaptiveDecisions) {
+          turnTracker.recordAdaptation({
+            category: decision.category,
+            action: decision.action,
+            toolName: decision.toolName,
+            attempt: decision.attempt,
+          });
+        }
+        const requestedReplans = adaptiveDecisions.some(
+          (decision) => decision.replanRequired,
+        )
+          ? 1
+          : 0;
+        if (
+          replanCount + requestedReplans >
+          turnControl.complexity.budget.maxReplans
+        ) {
+          const message = `本轮已达到重规划预算（${turnControl.complexity.budget.maxReplans}），已停止重复失败路径。`;
+          this.store.patchMessage(this.sessionId, toolMessageId, {
+            isStreaming: false,
+            isProcessingTools: false,
+            toolsCompleted: true,
+          });
+          this.fail('execution_budget_exceeded', message);
+          turnTracker.fail(message);
+          this.publishRuntimeActivity('turn', 'failed', message);
+          break;
+        }
+        replanCount += requestedReplans;
+        if (this.recoveryStore && this.activeRecovery) {
+          this.activeRecovery = await this.recoveryStore.recordTaskGraph(
+            this.activeRecovery,
+            turnTracker.taskGraphSnapshot(),
+          );
+        }
+        if (
+          adaptiveDecisions.some(
+            (decision) => decision.action === 'compact_context',
+          )
+        ) {
+          this.config.getOttoClient().scheduleHierarchicalCompaction('L3');
+        }
+        const adaptiveDirective = [
+          adaptiveExecution.buildDirective(
+            adaptiveDecisions,
+            toolBatch.completedToolNames,
+          ),
+          adaptiveDecisions.some((decision) => decision.replanRequired)
+            ? turnTracker.taskGraphDirective()
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
+
         // 工具响应回灌为下一轮 user message；重置本段 assistant 累积。
         currentMessages = [
-          { role: MESSAGE_ROLES.USER, parts: toolResponseParts },
+          {
+            role: MESSAGE_ROLES.USER,
+            parts: [
+              ...toolBatch.parts,
+              ...(adaptiveDirective ? [{ text: adaptiveDirective }] : []),
+            ],
+          },
         ];
         assistantId = null;
         assistantText = '';
@@ -1024,7 +1159,7 @@ export class CoreSessionRuntime implements SessionRuntime {
 
   /**
    * 执行一批工具调用（带并发上限），把状态/结果 publish 成 tool_calls_update，
-   * 返回工具响应 Part[]（回灌给 core 下一轮）。
+   * 返回工具响应以及结构化成败观察（回灌给 core 下一轮）。
    */
   private async runToolCalls(
     calls: FunctionCall[],
@@ -1033,7 +1168,11 @@ export class CoreSessionRuntime implements SessionRuntime {
     maxConcurrent: number,
     signal: AbortSignal,
     messageId: string,
-  ): Promise<Part[]> {
+  ): Promise<{
+    parts: Part[];
+    failures: ExecutionFailureObservation[];
+    completedToolNames: string[];
+  }> {
     const responseParts: Part[] = [];
 
     // 某些 provider（尤其 Gemini 原生 functionCall）不提供 id。一次绑定后全程复用，
@@ -1097,7 +1236,9 @@ export class CoreSessionRuntime implements SessionRuntime {
     // 只有控制策略允许且名称已经过只读审查的工具才能并发。未知工具、写入、
     // 外部操作和审批动作全部单独成块，避免模型把相邻调用误当成可安全并行。
     const chunks: Array<typeof callsWithIds> = [];
-    const limit = Math.max(1, maxConcurrent || 1);
+    const routedParallelism =
+      this.activeTurnControl?.complexity.budget.maxParallelTools ?? 1;
+    const limit = Math.max(1, Math.min(maxConcurrent || 1, routedParallelism));
     let parallelReads: typeof callsWithIds = [];
     const flushParallelReads = (): void => {
       if (parallelReads.length === 0) return;
@@ -1399,7 +1540,32 @@ export class CoreSessionRuntime implements SessionRuntime {
       if (signal.aborted) cancelActiveCards();
     }
 
-    return responseParts;
+    const callsById = new Map(
+      callsWithIds.map((call) => [call.callId, call] as const),
+    );
+    const failures: ExecutionFailureObservation[] = [];
+    const completedToolNames: string[] = [];
+    for (const [callId, card] of cards) {
+      const call = callsById.get(callId);
+      if (!call) continue;
+      if (card.status === ToolCallStatus.Success) {
+        completedToolNames.push(call.name);
+        continue;
+      }
+      if (card.status !== ToolCallStatus.Error) continue;
+      failures.push({
+        toolName: call.name,
+        callFingerprint: call.fingerprint,
+        message: card.result?.error || 'tool execution failed',
+        sideEffect: isParallelSafeToolName(call.name)
+          ? 'read_only'
+          : call.replayClass === 'never_replay'
+            ? 'external_write'
+            : 'local_write',
+      });
+    }
+
+    return { parts: responseParts, failures, completedToolNames };
   }
 
   /** 普通工具确认：手动模式全问；自动模式只问高危/删除。 */

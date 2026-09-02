@@ -7,7 +7,7 @@
 /**
  * 单条消息渲染。spec §主聊天区：
  *   - 用户消息：右对齐 peach 气泡 + 时间 + amber 双勾已读回执；图片缩略图可点开放大。
- *   - Otto 回复：副图标 + 名 + 时间 + 正文 + 工具卡 + 动作行（复制 / 重新生成）。
+ *   - Otto 回复：副图标 + 名 + 时间 + 正文 + 工具卡；最终回答提供复制 / 重新生成。
  *
  * 动作行只保留复制与重新生成——这两个是真的落地功能；原先的赞/踩仅本地高亮、
  * 不落库不发帧、切会话即丢，是误导用户的假按钮，已移除。
@@ -23,7 +23,7 @@ import {
   type RespondQuestionFn,
 } from './ToolCalls.js';
 import { OttoSecondaryMark } from './OttoSecondaryMark.js';
-import { AgentTurnTimeline } from './AgentTurnTimeline.js';
+import { AgentTurnReferences, AgentTurnTimeline } from './AgentTurnTimeline.js';
 import {
   IconCheckCheck,
   IconCheck,
@@ -220,6 +220,24 @@ function BotMessage({
       ? buildToolCompletionSummary(tools)
       : '';
   const displayText = text || fallbackSummary;
+  const showProcessTrace = Boolean(
+    message.reasoning ||
+    tools.length > 0 ||
+    message.turn?.status === 'failed' ||
+    message.turn?.status === 'incomplete' ||
+    message.turn?.status === 'interrupted' ||
+    message.turn?.status === 'cancelled',
+  );
+  const mentionedArtifactPaths = (message.turn?.artifacts ?? [])
+    .map((artifact) => artifact.path)
+    .filter((artifactPath): artifactPath is string =>
+      Boolean(artifactPath && displayText.includes(artifactPath)),
+    );
+  const mentionedCitationUris = (message.turn?.citations ?? [])
+    .map((citation) => citation.uri)
+    .filter((citationUri): citationUri is string =>
+      Boolean(citationUri && displayText.includes(citationUri)),
+    );
 
   return (
     <div className="otto-msg-bot">
@@ -232,7 +250,7 @@ function BotMessage({
           </span>
         </div>
 
-        {message.turn || message.reasoning || tools.length > 0 ? (
+        {showProcessTrace ? (
           <ProcessTrace
             turn={message.turn}
             reasoning={message.reasoning}
@@ -249,7 +267,15 @@ function BotMessage({
           <TypingIndicator />
         ) : null}
 
-        {!message.isStreaming ? (
+        {!responding && message.turn ? (
+          <AgentTurnReferences
+            turn={message.turn}
+            omittedArtifactPaths={mentionedArtifactPaths}
+            omittedCitationUris={mentionedCitationUris}
+          />
+        ) : null}
+
+        {!responding && text.trim() ? (
           <MessageActions
             onCopy={() => onCopy(displayText)}
             onRegenerate={() => onRegenerate(message.id)}
@@ -353,7 +379,9 @@ function ProcessTrace({
       <div className={`otto-collapse${open ? ' otto-collapse--open' : ''}`}>
         <div className="otto-collapse__inner">
           <div className="otto-process-trace__body">
-            {turn ? <AgentTurnTimeline turn={turn} /> : null}
+            {turn ? (
+              <AgentTurnTimeline turn={turn} includeReferences={false} />
+            ) : null}
             {reasoning ? (
               <div className="otto-reasoning__body">{reasoning}</div>
             ) : null}

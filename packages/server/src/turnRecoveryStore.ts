@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import type { AgentTaskGraphSnapshot } from './protocol.js';
 import { isParallelSafeToolName } from './turnControlPolicy.js';
 
 export type TurnRecoveryReplayClass =
@@ -35,6 +36,7 @@ export interface TurnRecoveryRecord {
   createdAt: number;
   updatedAt: number;
   reconciliationReason?: string;
+  taskGraph?: AgentTaskGraphSnapshot;
   tools: TurnRecoveryToolRecord[];
 }
 
@@ -125,6 +127,13 @@ function isRecoveryRecord(value: unknown): value is TurnRecoveryRecord {
     Number.isSafeInteger(record.attempt) &&
     typeof record.createdAt === 'number' &&
     typeof record.updatedAt === 'number' &&
+    (record.taskGraph === undefined ||
+      (typeof record.taskGraph === 'object' &&
+        record.taskGraph !== null &&
+        record.taskGraph.contractVersion === 1 &&
+        Number.isSafeInteger(record.taskGraph.revision) &&
+        Array.isArray(record.taskGraph.nodes) &&
+        Array.isArray(record.taskGraph.revisions))) &&
     Array.isArray(record.tools) &&
     record.tools.every(
       (tool) =>
@@ -335,6 +344,25 @@ export class FileTurnRecoveryStore {
     input: TurnRecoveryToolInput,
   ): Promise<TurnRecoveryRecord> {
     return this.updateTool(record, input, 'failed');
+  }
+
+  async recordTaskGraph(
+    record: TurnRecoveryRecord,
+    taskGraph: AgentTaskGraphSnapshot,
+  ): Promise<TurnRecoveryRecord> {
+    return this.serialize(record.sessionId, async () => {
+      const latest = (await this.load(record.sessionId)) ?? record;
+      if (latest.turnId !== record.turnId) {
+        throw new Error('turn recovery identity changed during execution');
+      }
+      const next: TurnRecoveryRecord = {
+        ...latest,
+        updatedAt: Date.now(),
+        taskGraph: structuredClone(taskGraph),
+      };
+      await this.write(next);
+      return next;
+    });
   }
 
   private async updateTool(

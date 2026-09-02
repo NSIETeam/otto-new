@@ -34,6 +34,8 @@ import {
   toolExecutionFingerprint,
   turnIntentHash,
 } from './turnRecoveryStore.js';
+import { deriveTurnControlPolicy } from './turnControlPolicy.js';
+import { TaskGraphCoordinator } from './taskGraph.js';
 
 const noOpWorkLogger = { log: async () => undefined };
 
@@ -264,6 +266,11 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
       '<otto_turn_control contract_version="1">',
     );
     expect(parts[0]?.text).toContain('evidence_requirement=primary_sources');
+    expect(parts[0]?.text).toContain(
+      '<otto_response_contract contract_version="1">',
+    );
+    expect(parts[0]?.text).toContain('response_shape=grounded_answer');
+    expect(parts[0]?.text).toContain('expose_internal_state=false');
     expect(parts[0]?.text).not.toContain('secret-42');
     expect(parts[1]?.text).toBe(question);
 
@@ -273,6 +280,207 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
     expect(assistant?.turn?.control?.intent).toBe('research');
     expect(assistant?.turn?.status).toBe('incomplete');
     expect(assistant?.turn?.verification?.status).not.toBe('passed');
+  });
+
+  it('同一只读失败只重试一次，随后向模型注入改路约束并保留审计记录', async () => {
+    const requests: Array<{ message?: Array<{ text?: string }> }> = [];
+    const turns = [
+      () =>
+        (async function* () {
+          yield toolChunk('read_file', 'read-1');
+        })(),
+      () =>
+        (async function* () {
+          yield toolChunk('read_file', 'read-2');
+        })(),
+      () =>
+        (async function* () {
+          yield chunk('已改用其他证据完成核对。', 'STOP');
+        })(),
+    ];
+    const tool = {
+      name: 'read_file',
+      shouldConfirmExecute: async () => false,
+      execute: vi.fn(async () => {
+        throw new Error('ETIMEDOUT while reading source');
+      }),
+    };
+    let round = 0;
+    const config = {
+      initialize: async () => undefined,
+      refreshAuth: async () => undefined,
+      getToolRegistry: async () => ({
+        discoverMcpTools: async () => undefined,
+        getFunctionDeclarations: () => [],
+        getTool: (name: string) => (name === tool.name ? tool : undefined),
+        getAllTools: () => [tool],
+      }),
+      getOttoClient: () => ({
+        getChat: async () => ({
+          sendMessageStream: async (request: {
+            message?: Array<{ text?: string }>;
+          }) => {
+            requests.push(request);
+            return turns[Math.min(round++, turns.length - 1)]();
+          },
+        }),
+        scheduleHierarchicalCompaction: vi.fn(),
+      }),
+      getModel: () => 'test-model',
+      getMaxSessionTurns: () => 10,
+    } as unknown as Config;
+    const store = new InMemorySessionStore();
+    const session = store.createSession({ title: '动态改路' });
+    const runtime = new CoreSessionRuntime(
+      store,
+      session.sessionId,
+      config,
+      noOpWorkLogger,
+    );
+
+    await runtime.initialize();
+    await runtime.run(
+      [{ type: 'text', value: '核对这个文件并给出结论' }],
+      'local',
+    );
+
+    expect(tool.execute).toHaveBeenCalledTimes(2);
+    const secondDirective = requests[1]?.message
+      ?.map((part) => part.text ?? '')
+      .join('\n');
+    const thirdDirective = requests[2]?.message
+      ?.map((part) => part.text ?? '')
+      .join('\n');
+    expect(secondDirective).toContain(
+      'Retry the same read operation at most once',
+    );
+    expect(thirdDirective).toContain('Do not repeat an identical failed call');
+    const turn = store
+      .getHistory(session.sessionId)
+      .find((message) => message.turn)?.turn;
+    expect(turn?.adaptations).toMatchObject([
+      { category: 'transient', action: 'retry_once', attempt: 1 },
+      { category: 'transient', action: 'switch_strategy', attempt: 2 },
+    ]);
+  });
+
+  it('工具报告上下文超限时调度 L3 压缩，而不是继续膨胀历史', async () => {
+    const scheduleHierarchicalCompaction = vi.fn();
+    const config = makeFakeConfigWithTool(
+      [
+        () =>
+          (async function* () {
+            yield toolChunk('test_tool', 'context-full');
+          })(),
+        () =>
+          (async function* () {
+            yield chunk('上下文整理后继续。', 'STOP');
+          })(),
+      ],
+      async () => {
+        throw new Error('maximum context length exceeded');
+      },
+    );
+    const originalClient = config.getOttoClient();
+    vi.spyOn(config, 'getOttoClient').mockReturnValue({
+      ...originalClient,
+      scheduleHierarchicalCompaction,
+    } as ReturnType<Config['getOttoClient']>);
+    const store = new InMemorySessionStore();
+    const session = store.createSession({ title: '长任务压缩' });
+    const runtime = new CoreSessionRuntime(
+      store,
+      session.sessionId,
+      config,
+      noOpWorkLogger,
+    );
+
+    await runtime.initialize();
+    await runtime.run([{ type: 'text', value: '继续完成长任务' }], 'local');
+
+    expect(scheduleHierarchicalCompaction).toHaveBeenCalledWith('L3');
+  });
+
+  it('用路由预算限制模型往返，不受过大的全局回合上限放大', async () => {
+    const execute = vi.fn(async () => ({
+      llmContent: 'ok',
+      returnDisplay: 'ok',
+    }));
+    const endlessToolTurn = () =>
+      (async function* () {
+        yield toolChunk('test_tool');
+      })();
+    const config = makeFakeConfigWithTool([endlessToolTurn], execute);
+    vi.spyOn(config, 'getMaxSessionTurns').mockReturnValue(99);
+    const store = new InMemorySessionStore();
+    const session = store.createSession({ title: '执行预算' });
+    const frames: ServerToClient[] = [];
+    store.subscribe(session.sessionId, (frame) => frames.push(frame));
+    const runtime = new CoreSessionRuntime(
+      store,
+      session.sessionId,
+      config,
+      noOpWorkLogger,
+    );
+
+    await runtime.initialize();
+    await runtime.run([{ type: 'text', value: '回答这个问题' }], 'local');
+
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(frames).toContainEqual({
+      type: 'error',
+      payload: expect.objectContaining({
+        sessionId: session.sessionId,
+        code: 'max_turns',
+        message: expect.stringContaining('模型回合预算（3）'),
+      }),
+    });
+  });
+
+  it('整批工具调用超预算时一个都不执行', async () => {
+    const execute = vi.fn(async () => ({
+      llmContent: 'unexpected',
+      returnDisplay: 'unexpected',
+    }));
+    const config = makeFakeConfigWithTool(
+      [
+        () =>
+          (async function* () {
+            yield {
+              candidates: [{ content: { parts: [] } }],
+              functionCalls: Array.from({ length: 7 }, (_, index) => ({
+                id: `over-budget-${index}`,
+                name: 'test_tool',
+                args: {},
+              })),
+            };
+          })(),
+      ],
+      execute,
+    );
+    const store = new InMemorySessionStore();
+    const session = store.createSession({ title: '工具预算' });
+    const frames: ServerToClient[] = [];
+    store.subscribe(session.sessionId, (frame) => frames.push(frame));
+    const runtime = new CoreSessionRuntime(
+      store,
+      session.sessionId,
+      config,
+      noOpWorkLogger,
+    );
+
+    await runtime.initialize();
+    await runtime.run([{ type: 'text', value: '回答这个问题' }], 'local');
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(frames).toContainEqual({
+      type: 'error',
+      payload: expect.objectContaining({
+        sessionId: session.sessionId,
+        code: 'execution_budget_exceeded',
+        message: expect.stringContaining('工具调用将超出执行预算（6）'),
+      }),
+    });
   });
 
   it('外部写入工具没有可审查确认信息时失败关闭，不得执行或伪装完成', async () => {
@@ -1268,6 +1476,64 @@ describe('CoreSessionRuntime · AskUserQuestion 交互闸门', () => {
 });
 
 describe('CoreSessionRuntime · 工具状态收口', () => {
+  it('恢复图与当前路由不匹配时转入核对，而不是崩溃或重放', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'otto-runtime-corrupt-graph-'),
+    );
+    try {
+      const recoveryStore = new FileTurnRecoveryStore(root);
+      const store = new InMemorySessionStore();
+      const session = store.createSession({ title: '恢复图路由错位' });
+      let recovery = await recoveryStore.begin({
+        sessionId: session.sessionId,
+        turnId: 'turn-corrupt-graph',
+        intentHash: turnIntentHash('run tool'),
+      });
+      const incompatiblePolicy = deriveTurnControlPolicy({
+        text: '全面检查前端、服务端和数据库，修复并运行测试',
+        source: 'local',
+        toolFree: false,
+      });
+      recovery = await recoveryStore.recordTaskGraph(
+        recovery,
+        new TaskGraphCoordinator(incompatiblePolicy).snapshot(),
+      );
+      expect(recovery.taskGraph?.route).not.toBe('direct');
+
+      const config = makeFakeConfig(() =>
+        (async function* () {
+          yield chunk('已停止执行，请核对。', 'STOP');
+        })(),
+      );
+      const runtime = new CoreSessionRuntime(
+        store,
+        session.sessionId,
+        config,
+        noOpWorkLogger,
+        { recoveryStore },
+      );
+      await runtime.initialize();
+      await runtime.run([{ type: 'text', value: 'run tool' }], 'local');
+
+      expect(await recoveryStore.load(session.sessionId)).toMatchObject({
+        status: 'reconciliation_required',
+        taskGraph: { route: 'direct' },
+      });
+      expect(
+        store.getHistory(session.sessionId).find((message) => message.turn)
+          ?.turn,
+      ).toMatchObject({
+        status: 'interrupted',
+        outcome: {
+          type: 'unknown_outcome',
+          requiresReconciliation: true,
+        },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('崩溃前已启动的未知副作用不会重放，而是进入待核对终态', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'otto-runtime-recovery-'),
@@ -1701,7 +1967,9 @@ describe('CoreSessionRuntime · 工具状态收口', () => {
   });
 
   it('取消正在执行的未知副作用时显示待核对，并保留可恢复检查点', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-runtime-cancel-recovery-'));
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'otto-runtime-cancel-recovery-'),
+    );
     try {
       let releaseTool!: () => void;
       const toolGate = new Promise<void>((resolve) => (releaseTool = resolve));
@@ -1734,14 +2002,18 @@ describe('CoreSessionRuntime · 工具状态收口', () => {
       );
       await runtime.initialize();
 
-      const running = runtime.run([{ type: 'text', value: 'run tool' }], 'local');
+      const running = runtime.run(
+        [{ type: 'text', value: 'run tool' }],
+        'local',
+      );
       await toolStarted;
       runtime.cancel();
       releaseTool();
       await running;
 
       expect(
-        store.getHistory(session.sessionId).find((message) => message.turn)?.turn,
+        store.getHistory(session.sessionId).find((message) => message.turn)
+          ?.turn,
       ).toMatchObject({
         status: 'interrupted',
         outcome: {
@@ -1752,6 +2024,12 @@ describe('CoreSessionRuntime · 工具状态收口', () => {
       expect(await recoveryStore.load(session.sessionId)).toMatchObject({
         status: 'reconciliation_required',
         attempt: 2,
+        taskGraph: {
+          contractVersion: 1,
+          nodes: expect.arrayContaining([
+            expect.objectContaining({ kind: 'understand' }),
+          ]),
+        },
       });
     } finally {
       await rm(root, { recursive: true, force: true });

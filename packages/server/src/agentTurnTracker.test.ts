@@ -305,4 +305,39 @@ describe('AgentTurnTracker', () => {
     snapshot = tracker.snapshot();
     expect(snapshot.artifacts[0]?.verified).toBe(true);
   });
+
+  it('preserves a home-relative PPT path instead of truncating it to /Desktop', () => {
+    const store = new InMemorySessionStore();
+    const session = store.createSession();
+    const root = store.appendMessage(session.sessionId, {
+      role: 'assistant',
+      content: [],
+      source: 'local',
+    });
+    const tracker = new AgentTurnTracker(store, session.sessionId);
+    tracker.attachAssistantMessage(root.id);
+    tracker.updateToolCalls([
+      tool({
+        id: 'ppt-1',
+        toolName: 'generate_presentation',
+        parameters: {
+          outputPath: '~/Desktop/apple-flywheel/苹果公司介绍.pptx',
+        },
+        status: ToolCallStatus.Success,
+        result: {
+          success: true,
+          data: '已生成 ~/Desktop/apple-flywheel/苹果公司介绍.pptx',
+          executionTime: 3,
+          toolName: 'generate_presentation',
+        },
+      }),
+    ]);
+
+    expect(tracker.snapshot().artifacts).toEqual([
+      expect.objectContaining({
+        label: '苹果公司介绍.pptx',
+        path: '~/Desktop/apple-flywheel/苹果公司介绍.pptx',
+      }),
+    ]);
+  });
 });

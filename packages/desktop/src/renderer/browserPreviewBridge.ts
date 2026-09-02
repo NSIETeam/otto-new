@@ -416,6 +416,15 @@ if (!previewWindow.otto) {
       }),
     activateLocalPath: () =>
       Promise.resolve({ ok: false, error: '浏览器预览不支持打开本地文件' }),
+    previewLocalArtifact: () =>
+      Promise.resolve({
+        ok: false,
+        kind: 'unsupported' as const,
+        fileName: 'PPT',
+        mimeType: 'application/octet-stream',
+        slides: [],
+        error: '浏览器预览不支持读取本地 PPT',
+      }),
     saveTextFile: () => Promise.resolve(null),
     getPathForFile: (file: File) =>
       (file as File & { path?: string }).path || file.name,

@@ -11,13 +11,17 @@
  *   3) User 图片缩略图可点开放大（lightbox），点遮罩 / Esc 关闭。
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent, screen } from '@testing-library/react';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 import type { OttoMessage } from 'otto-server';
 import { Message } from './Message.js';
 
 // mock 图片资源导入（webpack 里是 data URI，vitest 下给个占位）。
 vi.mock('../assets/otto-avatar.png', () => ({ default: 'avatar.png' }));
+
+afterEach(() => {
+  delete (window as unknown as { otto?: unknown }).otto;
+});
 
 function botMessage(overrides: Partial<OttoMessage> = {}): OttoMessage {
   return {
@@ -56,9 +60,121 @@ function userMessageWithImage(): OttoMessage {
 }
 
 describe('Message 动作行', () => {
+  it('把完成的 PPT 交付物直接放在回答下方，不藏进已收起的处理记录', async () => {
+    const outputPath = 'C:\\Users\\otto\\Desktop\\经营汇报.pptx';
+    (window as unknown as { otto: unknown }).otto = {
+      inspectLocalPath: vi.fn(async () => ({
+        exists: true,
+        kind: 'file' as const,
+        canOpen: true,
+      })),
+      previewLocalArtifact: vi.fn(),
+      activateLocalPath: vi.fn(),
+    };
+    render(
+      <Message
+        message={botMessage({
+          content: [{ type: 'text', value: 'PPT 已生成，可以直接查看。' }],
+          turn: {
+            contractVersion: 1,
+            turnId: 'turn-ppt',
+            sequence: 2,
+            status: 'completed',
+            startedAt: 1,
+            updatedAt: 2,
+            items: [
+              {
+                id: 'control',
+                type: 'control',
+                status: 'completed',
+                label: '生成演示文稿',
+                intent: 'change',
+                executionMode: 'planned',
+                riskLevel: 'local_write',
+                evidenceRequirement: 'local_verification',
+              },
+            ],
+            artifacts: [
+              {
+                id: 'deck',
+                label: '经营汇报.pptx',
+                path: outputPath,
+                mimeType:
+                  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                verified: true,
+              },
+            ],
+          },
+        })}
+        onCopy={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /处理记录/ })).toBeNull();
+    expect(screen.getByRole('region', { name: '交付物' })).toBeTruthy();
+    expect(
+      await screen.findByRole('link', {
+        name: '在 Otto 中预览 经营汇报.pptx',
+      }),
+    ).toBeTruthy();
+  });
+
+  it('正文已包含同一 PPT 链接时不再重复展示产物卡', async () => {
+    const outputPath = 'C:\\Users\\otto\\Desktop\\经营汇报.pptx';
+    (window as unknown as { otto: unknown }).otto = {
+      inspectLocalPath: vi.fn(async () => ({
+        exists: true,
+        kind: 'file' as const,
+        canOpen: true,
+      })),
+      previewLocalArtifact: vi.fn(),
+      activateLocalPath: vi.fn(),
+    };
+    render(
+      <Message
+        message={botMessage({
+          content: [{ type: 'text', value: `交付物：\`${outputPath}\`` }],
+          turn: {
+            contractVersion: 1,
+            turnId: 'turn-ppt-inline',
+            sequence: 2,
+            status: 'completed',
+            startedAt: 1,
+            updatedAt: 2,
+            items: [],
+            artifacts: [
+              {
+                id: 'deck',
+                label: '经营汇报.pptx',
+                path: outputPath,
+                verified: true,
+              },
+            ],
+          },
+        })}
+        onCopy={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('link', {
+          name: '在 Otto 中预览 经营汇报.pptx',
+        }),
+      ).toHaveLength(1),
+    );
+    expect(screen.queryByRole('region', { name: '交付物' })).toBeNull();
+  });
+
   it('bot 消息使用独立刺猬刺球标记，不再把完整吉祥物当作消息头像', () => {
     const { container } = render(
-      <Message message={botMessage()} onCopy={vi.fn()} onRegenerate={vi.fn()} />,
+      <Message
+        message={botMessage()}
+        onCopy={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
     );
     const mark = screen.getByLabelText('Otto 回复');
     expect(mark.querySelector('.otto-response-mark__ball')).toBeTruthy();
@@ -75,7 +191,9 @@ describe('Message 动作行', () => {
       />,
     );
     expect(
-      screen.getByRole('status', { name: 'Otto 正在回答' }).classList.contains('is-active'),
+      screen
+        .getByRole('status', { name: 'Otto 正在回答' })
+        .classList.contains('is-active'),
     ).toBe(true);
 
     rerender(
@@ -86,19 +204,112 @@ describe('Message 动作行', () => {
       />,
     );
     expect(
-      screen.getByRole('status', { name: 'Otto 正在回答' }).classList.contains('is-active'),
+      screen
+        .getByRole('status', { name: 'Otto 正在回答' })
+        .classList.contains('is-active'),
     ).toBe(true);
   });
 
   it('bot 消息只渲染复制与重新生成，不再有赞 / 踩', () => {
     render(
-      <Message message={botMessage()} onCopy={vi.fn()} onRegenerate={vi.fn()} />,
+      <Message
+        message={botMessage()}
+        onCopy={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
     );
     expect(screen.getByLabelText('复制')).toBeTruthy();
     expect(screen.getByLabelText('重新生成')).toBeTruthy();
     // 关键：假的赞 / 踩按钮已彻底移除。
     expect(screen.queryByLabelText('赞')).toBeNull();
     expect(screen.queryByLabelText('踩')).toBeNull();
+  });
+
+  it('只有结构化 turn、没有推理和工具时不渲染空的处理记录', () => {
+    render(
+      <Message
+        message={botMessage({
+          turn: {
+            contractVersion: 1,
+            turnId: 'turn-direct',
+            sequence: 2,
+            status: 'completed',
+            startedAt: 1,
+            updatedAt: 2,
+            items: [],
+          },
+        })}
+        onCopy={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /处理记录/ })).toBeNull();
+    expect(screen.getByText('Otto 的回复')).toBeTruthy();
+  });
+
+  it('带工具过程的最终回答仍保留复制和重新生成，动作不再挂在中间过程上', () => {
+    render(
+      <Message
+        message={botMessage({
+          content: [
+            { type: 'text', value: '已完成核对，登录问题来自过期令牌。' },
+          ],
+          associatedToolCalls: [
+            {
+              id: 'read-1',
+              toolName: 'read_file',
+              parameters: { absolute_path: '/tmp/auth.ts' },
+              status: 'success' as NonNullable<
+                OttoMessage['associatedToolCalls']
+              >[number]['status'],
+            },
+          ],
+          turn: {
+            contractVersion: 1,
+            turnId: 'turn-final',
+            sequence: 4,
+            status: 'completed',
+            startedAt: 1,
+            updatedAt: 2,
+            items: [],
+          },
+        })}
+        onCopy={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('复制')).toBeTruthy();
+    expect(screen.getByLabelText('重新生成')).toBeTruthy();
+  });
+
+  it('工具处理记录不显示复制或重新生成，动作只属于最终回答', () => {
+    render(
+      <Message
+        message={botMessage({
+          content: [],
+          associatedToolCalls: [
+            {
+              id: 'search-1',
+              toolName: 'web_search',
+              parameters: { query: 'Apple earnings' },
+              status: 'success' as NonNullable<
+                OttoMessage['associatedToolCalls']
+              >[number]['status'],
+            },
+          ],
+        })}
+        onCopy={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('查找网上资料（Apple earnings）已完成。'),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText('复制')).toBeNull();
+    expect(screen.queryByLabelText('重新生成')).toBeNull();
   });
 
   it('点重新生成时回调收到该 bot 消息的 id', () => {
@@ -131,14 +342,18 @@ describe('Message 动作行', () => {
       <Message
         message={botMessage({
           reasoning: '先定位可用的 PPT Skill。',
-          associatedToolCalls: [{
-            id: 'skill-1',
-            toolName: 'find-skills',
-            displayName: 'find-skills',
-            description: '搜索 PPT 美化 Skill',
-            parameters: {},
-            status: 'success' as NonNullable<OttoMessage['associatedToolCalls']>[number]['status'],
-          }],
+          associatedToolCalls: [
+            {
+              id: 'skill-1',
+              toolName: 'find-skills',
+              displayName: 'find-skills',
+              description: '搜索 PPT 美化 Skill',
+              parameters: {},
+              status: 'success' as NonNullable<
+                OttoMessage['associatedToolCalls']
+              >[number]['status'],
+            },
+          ],
         })}
         onCopy={vi.fn()}
         onRegenerate={vi.fn()}
@@ -164,13 +379,17 @@ describe('Message 动作行', () => {
               id: 'read-1',
               toolName: 'read_file',
               parameters: { absolute_path: '/tmp/report.pdf' },
-              status: 'success' as NonNullable<OttoMessage['associatedToolCalls']>[number]['status'],
+              status: 'success' as NonNullable<
+                OttoMessage['associatedToolCalls']
+              >[number]['status'],
             },
             {
               id: 'exec-1',
               toolName: 'run_shell_command',
               parameters: { command: 'npm run build' },
-              status: 'error' as NonNullable<OttoMessage['associatedToolCalls']>[number]['status'],
+              status: 'error' as NonNullable<
+                OttoMessage['associatedToolCalls']
+              >[number]['status'],
               result: {
                 success: false,
                 error: '构建脚本失败',
@@ -197,12 +416,16 @@ describe('Message 动作行', () => {
       <Message
         message={botMessage({
           content: [{ type: 'text', value: '文件已读取，重点如下。' }],
-          associatedToolCalls: [{
-            id: 'read-1',
-            toolName: 'read_file',
-            parameters: { absolute_path: '/tmp/report.pdf' },
-            status: 'success' as NonNullable<OttoMessage['associatedToolCalls']>[number]['status'],
-          }],
+          associatedToolCalls: [
+            {
+              id: 'read-1',
+              toolName: 'read_file',
+              parameters: { absolute_path: '/tmp/report.pdf' },
+              status: 'success' as NonNullable<
+                OttoMessage['associatedToolCalls']
+              >[number]['status'],
+            },
+          ],
         })}
         onCopy={vi.fn()}
         onRegenerate={vi.fn()}
@@ -210,7 +433,9 @@ describe('Message 动作行', () => {
     );
 
     expect(screen.getByText('文件已读取，重点如下。')).toBeTruthy();
-    expect(screen.queryByText(/查看相关资料（PDF：report.pdf）已完成。/)).toBeNull();
+    expect(
+      screen.queryByText(/查看相关资料（PDF：report.pdf）已完成。/),
+    ).toBeNull();
   });
 
   it('Skill 执行时展开显示，执行完成后自动隐藏且仍可手动展开', () => {
@@ -220,7 +445,9 @@ describe('Message 动作行', () => {
       displayName: 'find-skills',
       description: '搜索 PPT 美化 Skill',
       parameters: {},
-      status: 'executing' as NonNullable<OttoMessage['associatedToolCalls']>[number]['status'],
+      status: 'executing' as NonNullable<
+        OttoMessage['associatedToolCalls']
+      >[number]['status'],
     };
     const { rerender } = render(
       <Message
@@ -241,10 +468,14 @@ describe('Message 动作行', () => {
       <Message
         message={botMessage({
           isProcessingTools: false,
-          associatedToolCalls: [{
-            ...tool,
-            status: 'success' as NonNullable<OttoMessage['associatedToolCalls']>[number]['status'],
-          }],
+          associatedToolCalls: [
+            {
+              ...tool,
+              status: 'success' as NonNullable<
+                OttoMessage['associatedToolCalls']
+              >[number]['status'],
+            },
+          ],
         })}
         onCopy={vi.fn()}
         onRegenerate={vi.fn()}
@@ -261,17 +492,21 @@ describe('Message 动作行', () => {
     render(
       <Message
         message={botMessage({
-          associatedToolCalls: [{
-            id: 'approval-1',
-            toolName: 'run_shell_command',
-            parameters: {},
-            status: 'awaiting_approval' as NonNullable<OttoMessage['associatedToolCalls']>[number]['status'],
-            confirmationDetails: {
-              type: 'exec',
-              title: '允许执行？',
-              command: 'npm test',
+          associatedToolCalls: [
+            {
+              id: 'approval-1',
+              toolName: 'run_shell_command',
+              parameters: {},
+              status: 'awaiting_approval' as NonNullable<
+                OttoMessage['associatedToolCalls']
+              >[number]['status'],
+              confirmationDetails: {
+                type: 'exec',
+                title: '允许执行？',
+                command: 'npm test',
+              },
             },
-          }],
+          ],
         })}
         onCopy={vi.fn()}
         onRegenerate={vi.fn()}

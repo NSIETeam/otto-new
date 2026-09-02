@@ -11,6 +11,8 @@ import type {
 /** The minimum safety lanes required before a release can claim mature-agent safeguards. */
 export const REQUIRED_RELEASE_LANES = [
   'agent',
+  'planning',
+  'context',
   'spreadsheet',
   'recovery',
   'rpa',
@@ -139,9 +141,10 @@ export async function runDeterministicScenarios(
 export async function writeEvaluationReport(
   report: EvaluationReport,
   artifactDir: string,
+  fileName = 'latest.json',
 ): Promise<void> {
   await mkdir(artifactDir, { recursive: true });
-  const target = path.join(artifactDir, 'latest.json');
+  const target = path.join(artifactDir, path.basename(fileName));
   const temporary = `${target}.${process.pid}.tmp`;
   await writeFile(temporary, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   await rename(temporary, target);

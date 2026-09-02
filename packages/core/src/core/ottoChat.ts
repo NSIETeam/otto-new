@@ -46,6 +46,13 @@ import { realTimeTokenEventManager } from '../events/realTimeTokenEvents.js';
 type ToolIdentity = { id?: string; name?: string };
 import { SessionManager } from '../services/sessionManager.js';
 
+type OttoSendMessageParameters = SendMessageParameters & {
+  /** Trusted runtime routing metadata; never inferred from model-visible text. */
+  runtimeControl?: {
+    allowWorkflow?: boolean;
+  };
+};
+
 /**
  * Returns true if the response is valid, false otherwise.
  */
@@ -323,7 +330,7 @@ export class OttoChat {
    * ```
    */
   async sendMessage(
-    params: SendMessageParameters,
+    params: OttoSendMessageParameters,
     prompt_id: string,
     scene: SceneType,
   ): Promise<GenerateContentResponse> {
@@ -361,7 +368,15 @@ export class OttoChat {
         return this.contentGenerator.generateContent({
           model: modelToUse,
           contents: stripUIFieldsFromArray(requestContents),
-          config: { ...this.generationConfig, ...params.config, tools: filterToolsByMessage(userContent, this.generationConfig.tools) as Tool[] },
+          config: {
+            ...this.generationConfig,
+            ...params.config,
+            tools: filterToolsByMessage(
+              userContent,
+              params.config?.tools ?? this.generationConfig.tools,
+              params.runtimeControl?.allowWorkflow === true,
+            ) as Tool[],
+          },
         }, scene);
       };
 
@@ -981,7 +996,7 @@ export class OttoChat {
    * ```
    */
   async sendMessageStream(
-    params: SendMessageParameters,
+    params: OttoSendMessageParameters,
     prompt_id: string,
     scene: SceneType,
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
@@ -1018,7 +1033,15 @@ export class OttoChat {
         return this.contentGenerator.generateContentStream({
           model: modelToUse,
           contents: stripUIFieldsFromArray(requestContents),
-          config: { ...this.generationConfig, ...params.config, tools: filterToolsByMessage(userContent, this.generationConfig.tools) as Tool[] },
+          config: {
+            ...this.generationConfig,
+            ...params.config,
+            tools: filterToolsByMessage(
+              userContent,
+              params.config?.tools ?? this.generationConfig.tools,
+              params.runtimeControl?.allowWorkflow === true,
+            ) as Tool[],
+          },
         }, scene);
       };
 
@@ -1437,12 +1460,15 @@ export class OttoChat {
 /**
  * Filter tools for a single request based on the current user message.
  *
- * WorkflowTool is only exposed when the user's message contains the exact
- * trigger word "workflow" (case-insensitive). This is a hard, per-request
- * enforcement layer that complements the prompt-level description constraints.
- * Historical context (prior workflow invocations) cannot bypass this gate.
+ * WorkflowTool is exposed only when the trusted runtime complexity router
+ * authorizes it, or for the legacy explicit "workflow" opt-in. Historical
+ * model-visible context cannot bypass this per-request gate.
  */
-function filterToolsByMessage(userContent: Content, tools: unknown): unknown {
+function filterToolsByMessage(
+  userContent: Content,
+  tools: unknown,
+  allowWorkflow = false,
+): unknown {
   if (!tools || !Array.isArray(tools)) return tools;
 
   const userText = (userContent.parts ?? [])
@@ -1451,7 +1477,7 @@ function filterToolsByMessage(userContent: Content, tools: unknown): unknown {
     .join('');
 
   const hasWorkflowTrigger = /\bworkflow\b/i.test(userText);
-  if (hasWorkflowTrigger) return tools;
+  if (allowWorkflow || hasWorkflowTrigger) return tools;
 
   // Remove WorkflowTool from this request's tool declarations
   return (tools as Tool[]).map(toolGroup => {

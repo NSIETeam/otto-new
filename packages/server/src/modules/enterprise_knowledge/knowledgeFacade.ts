@@ -4,6 +4,7 @@
 
 import {
   addEnterpriseKnowledgeInRepository,
+  deleteEnterpriseKnowledgeInRepository,
   listEnterpriseKnowledgeForAdministrationFromRepository,
   listEnterpriseKnowledgeForBackupFromRepository,
   listEnterpriseKnowledgeFromRepository,
@@ -38,6 +39,9 @@ export function createEnterpriseKnowledgeFacade(
     },
     saveKnowledge(input: AddEnterpriseKnowledgeInput) {
       return saveEnterpriseKnowledgeInRepository(store, input);
+    },
+    deleteKnowledge(input: { id: number; organizationId?: string }) {
+      return deleteEnterpriseKnowledgeInRepository(store, input);
     },
     getKnowledge(
       department?: string,

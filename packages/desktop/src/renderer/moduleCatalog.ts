@@ -221,6 +221,7 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
   },
   {
     id: 'enterprise-memory', label: '企业记忆', category: 'capability', icon: 'enterprise-memory',
+    description: '自动学习企业制度、偏好、决定和解决方法，在相关工作中自动调用，并由管理员审核、深化或删除。',
     activation: { kind: 'dialog', dialog: 'enterprise-memory' },
     availabilityRule: 'enterprise-memory',
   },

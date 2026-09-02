@@ -20,6 +20,22 @@ beforeEach(() => {
     enterpriseKnowledgeRevise: vi.fn(async () => ({ status: 'updated' })),
     enterpriseKnowledgeRevalidate: vi.fn(async () => ({ status: 'active' })),
     enterpriseKnowledgeReview: vi.fn(async () => ({ status: 'approved' })),
+    enterpriseKnowledgeDelete: vi.fn(async (id: string) => ({ id, deleted: true as const })),
+    enterpriseKnowledgeAnalyze: vi.fn(async (input) => ({
+      shouldUpdate: false,
+      title: input.title,
+      category: input.category,
+      content: input.content,
+      confidence: input.confidence,
+      rationale: '当前内容已经准确概括现有证据。',
+      changes: [],
+      uncertainties: [],
+      usedEvidenceIds: [],
+      analysisVersion: 'test',
+      modelProvider: 'test-model',
+      inputTokens: 0,
+      outputTokens: 0,
+    })),
     enterpriseKnowledgeRevisions: vi.fn(async () => []),
     enterpriseKnowledgeEvidence: vi.fn(async () => []),
     workLogRecent: vi.fn(async () => []),
@@ -55,31 +71,15 @@ describe('WorkspaceDialogs', () => {
     expect(screen.queryByText('旧组织制度')).toBeNull();
   });
 
-  it('企业记忆保留最近工作成果候选，并按成果来源沉淀', async () => {
-    Object.assign(window.otto, {
-      workLogRecent: vi.fn(async () => [{
-        date: '2026-08-27',
-        entries: [{
-          time: '10:30', category: '文档', action: '完成客户方案', success: true,
-          details: '交付最终版', entryType: 'work_result', taskTitle: '客户方案定稿',
-        }],
-      }]),
-    });
+  it('企业记忆直接解释自动学习和自动调用，不再要求用户手动沉淀最近成果', async () => {
     render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
 
-    await screen.findByText('客户方案定稿');
-    fireEvent.click(screen.getByRole('button', { name: '沉淀' }));
-
-    await waitFor(() => expect(window.otto.enterpriseKnowledgeRecord).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceType: 'work_result',
-        title: '客户方案定稿',
-        content: '客户方案定稿\n交付最终版',
-      }),
-    ));
-    await waitFor(() => expect(
-      (screen.getByRole('button', { name: '沉淀' }) as HTMLButtonElement).disabled,
-    ).toBe(false));
+    await screen.findByText('Otto 正在学习这家企业怎样工作');
+    expect(screen.getByText(/完成对话和工作后，Otto 会自动识别/)).toBeTruthy();
+    expect(screen.getByText(/已经确认的记忆会在相关问题中自动调用/)).toBeTruthy();
+    expect(screen.queryByText('最近成果候选')).toBeNull();
+    expect(screen.queryByRole('button', { name: '沉淀' })).toBeNull();
+    expect(window.otto.workLogRecent).not.toHaveBeenCalled();
   });
 
   it('企业知识保留部门、证据、来源和完整记忆沿革', async () => {
@@ -102,9 +102,9 @@ describe('WorkspaceDialogs', () => {
 
     await screen.findByText('交付规范');
     expect(screen.getByText('客户成功部')).toBeTruthy();
-    expect(screen.getByText('3 条证据')).toBeTruthy();
-    expect(screen.getByText('来源：项目复盘')).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: '记忆沿革' }));
+    expect(screen.getByText('已被 3 次工作验证')).toBeTruthy();
+    expect(screen.getByText(/遇到相关问题时，Otto 会自动参考/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: '如何变得更准确' }));
     await screen.findByText('初版流程');
     expect(screen.getByText(/管理员 · 形成知识/)).toBeTruthy();
   });
@@ -125,7 +125,7 @@ describe('WorkspaceDialogs', () => {
     await screen.findByText('合同审批规则');
     expect(screen.getByText(/复核日期/)).toBeTruthy();
     expect(screen.getByText(/有效期至/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '复核有效' }));
+    fireEvent.click(screen.getByRole('button', { name: '仍然有效' }));
     fireEvent.change(screen.getByRole('textbox', { name: '复核依据' }), {
       target: { value: '已核对最新合同制度原文并由法务负责人确认有效' },
     });
@@ -138,6 +138,78 @@ describe('WorkspaceDialogs', () => {
       'knowledge-lifecycle',
       { rationale: '已核对最新合同制度原文并由法务负责人确认有效', validForDays: 180 },
     ));
+  });
+
+  it('管理员可以让 AI 结合新增证据深化记忆，检查后再形成新版本', async () => {
+    Object.assign(window.otto, {
+      enterpriseKnowledgeList: vi.fn(async () => [{
+        id: 'knowledge-ai', organizationId: 'org-a', sourceId: 'auto-1',
+        sourceType: 'auto_capture', title: '客户交付规则', department: '客户成功部',
+        category: '流程', content: '交付前需要检查。', contributor: null,
+        confidence: 0.78, status: 'active', version: 2, evidenceCount: 2,
+        createdAt: '2026-08-20T00:00:00.000Z',
+      }]),
+      enterpriseKnowledgeEvidence: vi.fn(async () => [{
+        id: 'evidence-ai', knowledgeId: 'knowledge-ai', sourceId: 'session-1',
+        content: '客户验收前必须完成安全扫描并留存报告。', tags: ['交付'], contributor: '项目经理',
+        confidence: 0.96, verified: true, impactScore: 0.9, impactReasons: ['重复验证'],
+        observedAt: '2026-09-01T08:00:00.000Z', stance: 'affirmative', contested: false,
+      }]),
+      enterpriseKnowledgeAnalyze: vi.fn(async () => ({
+        shouldUpdate: true,
+        title: '客户交付前安全检查规则',
+        category: '交付流程',
+        content: '客户验收前必须完成安全扫描，并留存扫描报告。',
+        confidence: 0.94,
+        rationale: '新增证据补全了检查项目和留痕要求。',
+        changes: ['明确安全扫描', '补充报告留存'],
+        uncertainties: ['未明确报告保管期限'],
+        usedEvidenceIds: ['evidence-ai'],
+        analysisVersion: 'test',
+        modelProvider: 'test-model',
+        inputTokens: 30,
+        outputTokens: 20,
+      })),
+    });
+    render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
+
+    await screen.findByText('客户交付规则');
+    fireEvent.click(screen.getByRole('button', { name: 'AI 深化' }));
+    await screen.findByText('新增证据补全了检查项目和留痕要求。');
+    expect(screen.getByDisplayValue('客户验收前必须完成安全扫描，并留存扫描报告。')).toBeTruthy();
+    expect(window.otto.enterpriseKnowledgeRevise).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '应用并形成新版本' }));
+
+    await waitFor(() => expect(window.otto.enterpriseKnowledgeRevise).toHaveBeenCalledWith(
+      'knowledge-ai',
+      expect.objectContaining({
+        title: '客户交付前安全检查规则',
+        category: '交付流程',
+        content: '客户验收前必须完成安全扫描，并留存扫描报告。',
+        confidence: 0.94,
+        changeNote: expect.stringContaining('管理员确认 AI 深化建议'),
+      }),
+    ));
+  });
+
+  it('企业管理员确认后可以永久删除记忆及其学习依据', async () => {
+    Object.assign(window.otto, {
+      enterpriseKnowledgeList: vi.fn(async () => [{
+        id: 'knowledge-delete', organizationId: 'org-a', sourceId: 'auto-delete',
+        sourceType: 'auto_capture', title: '已废止制度', department: null,
+        category: '制度', content: '这条制度已经废止。', contributor: null,
+        confidence: 0.88, status: 'active', version: 1, evidenceCount: 1,
+        createdAt: '2026-08-20T00:00:00.000Z',
+      }]),
+    });
+    render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
+
+    await screen.findByText('已废止制度');
+    fireEvent.click(screen.getByRole('button', { name: '永久删除' }));
+
+    await waitFor(() => expect(window.otto.enterpriseKnowledgeDelete).toHaveBeenCalledWith('knowledge-delete'));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('无法撤销'));
+    await waitFor(() => expect(screen.queryByText('已废止制度')).toBeNull());
   });
 
   it('冲突知识必须在新版界面完成证据取舍后才可形成裁决版本', async () => {
@@ -165,7 +237,7 @@ describe('WorkspaceDialogs', () => {
 
     await screen.findByText('退款审批规则');
     expect((screen.getByRole('button', { name: '先裁决冲突' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: '证据' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看学习依据' }));
     await screen.findByText('最新版制度要求财务经理审批。');
     fireEvent.click(screen.getAllByRole('button', { name: '采纳' })[0]);
     fireEvent.click(screen.getAllByRole('button', { name: '排除' })[1]);
@@ -196,7 +268,7 @@ describe('WorkspaceDialogs', () => {
     const onClose = vi.fn();
     render(<EnterpriseMemoryDialog open role="company_admin" onClose={onClose} />);
     await screen.findByText('暂无企业知识。');
-    fireEvent.click(screen.getByRole('button', { name: '新增知识' }));
+    fireEvent.click(screen.getByRole('button', { name: '手动补充' }));
     fireEvent.change(screen.getByRole('textbox', { name: '知识标题' }), {
       target: { value: '尚未保存的制度' },
     });

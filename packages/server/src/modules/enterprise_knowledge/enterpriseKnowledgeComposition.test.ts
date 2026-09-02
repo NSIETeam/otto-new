@@ -144,4 +144,41 @@ describe('enterprise knowledge composition', () => {
       database.close();
     }
   });
+
+  it('permanently deletes only the selected tenant memory and its supporting evidence', () => {
+    const database = createDatabase();
+    const knowledge = createComposition(database);
+
+    try {
+      const first = knowledge.observeKnowledge({
+        organizationId: 'org-a', category: 'solution',
+        content: '重大故障根因是缓存键缺少企业编号，修复后测试通过。',
+        contributor: '成员甲', contributorAccountId: 'account-a',
+        sourceId: 'delete-a-1', sourceSessionId: 'delete-session-a-1',
+        confidence: 0.95, verified: true,
+      });
+      expect(first.promoted).toBe(false);
+      const promoted = knowledge.observeKnowledge({
+        organizationId: 'org-a', category: 'solution',
+        content: '复测确认重大故障来自缓存键缺少企业编号，补齐后验证通过。',
+        contributor: '成员乙', contributorAccountId: 'account-b',
+        sourceId: 'delete-a-2', sourceSessionId: 'delete-session-a-2',
+        confidence: 0.94, verified: true,
+      }).knowledge!;
+      const otherTenant = knowledge.saveKnowledge({
+        organizationId: 'org-b', sourceId: 'keep-b', category: 'process',
+        content: '另一个企业的知识必须保留。',
+      }).entry;
+
+      expect(knowledge.deleteKnowledge({ id: promoted.id, organizationId: 'org-a' })).toBe(true);
+      expect(knowledge.deleteKnowledge({ id: promoted.id, organizationId: 'org-a' })).toBe(false);
+      expect(knowledge.getKnowledgeForAdministration('', undefined, 'org-a')).toEqual([]);
+      expect(database.prepare(
+        'SELECT COUNT(*) AS count FROM knowledge_retention_evidence WHERE organization_id = ?',
+      ).get('org-a')).toEqual({ count: 0 });
+      expect(knowledge.getKnowledge(undefined, undefined, 'org-b')[0]?.id).toBe(otherTenant.id);
+    } finally {
+      database.close();
+    }
+  });
 });

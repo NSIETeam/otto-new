@@ -2995,6 +2995,14 @@ export class EnterpriseClient {
     return mapEnterpriseKnowledgeItem(response.knowledge);
   }
 
+  async deleteKnowledge(id: string): Promise<{ id: string; deleted: true }> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    if (!/^\d+$/u.test(id)) throw new Error('知识编号不正确');
+    return this.request(`/enterprise/knowledge/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
   async reviseKnowledge(
     id: string,
     input: {

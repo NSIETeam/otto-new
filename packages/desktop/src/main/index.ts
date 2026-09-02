@@ -187,6 +187,10 @@ import { transcribeRecruitmentInterview } from './recruitment-transcription.js';
 import { createRecruitmentIntelligenceAnalyzer } from './recruitmentIntelligenceModel.js';
 import type { RecruitmentSemanticAnalysisInput } from './recruitmentSemantic.js';
 import {
+  createEnterpriseMemoryIntelligenceAnalyzer,
+  type EnterpriseMemoryIntelligenceInput,
+} from './enterpriseMemoryIntelligenceModel.js';
+import {
   EnterpriseSkillLibrary,
   type EnterpriseSkillScope,
 } from './enterpriseSkillLibrary.js';
@@ -795,7 +799,9 @@ const IPC = {
   enterpriseKnowledgeRecord: 'otto:enterprise-knowledge-record',
   enterpriseKnowledgeList: 'otto:enterprise-knowledge-list',
   enterpriseKnowledgeReview: 'otto:enterprise-knowledge-review',
+  enterpriseKnowledgeDelete: 'otto:enterprise-knowledge-delete',
   enterpriseKnowledgeRevise: 'otto:enterprise-knowledge-revise',
+  enterpriseKnowledgeAnalyze: 'otto:enterprise-knowledge-analyze',
   enterpriseKnowledgeRevalidate: 'otto:enterprise-knowledge-revalidate',
   enterpriseKnowledgeRevisions: 'otto:enterprise-knowledge-revisions',
   enterpriseKnowledgeEvidence: 'otto:enterprise-knowledge-evidence',
@@ -902,6 +908,7 @@ const customerModuleRunControllers = new Map<string, AbortController>();
 const customerModuleModelInvoke = createCustomerModuleModelInvoke();
 const generateCustomAgent = createCustomAgentGenerator();
 const analyzeRecruitmentResume = createRecruitmentIntelligenceAnalyzer();
+const analyzeEnterpriseMemory = createEnterpriseMemoryIntelligenceAnalyzer();
 let policyIntelligenceService: PolicyIntelligenceService | undefined;
 
 function getPolicyIntelligenceService(): PolicyIntelligenceService {
@@ -3609,6 +3616,59 @@ function registerIpc(): void {
       body.action,
       typeof body.note === 'string' ? body.note : undefined,
     );
+  });
+  ipcMain.handle(IPC.enterpriseKnowledgeDelete, async (_e, input: unknown) => {
+    loadEnterpriseSession();
+    const body = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+    if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
+      throw new Error('知识删除参数不正确');
+    }
+    return enterpriseClient.deleteKnowledge(body.id);
+  });
+  ipcMain.handle(IPC.enterpriseKnowledgeAnalyze, async (_e, input: unknown) => {
+    loadEnterpriseSession();
+    if (!enterpriseClient.authenticatedAccountSnapshot()?.isAdmin) {
+      throw new Error('只有企业管理员可以使用 AI 深化企业记忆');
+    }
+    if (!input || typeof input !== 'object') throw new Error('企业记忆分析参数不正确');
+    const body = input as Record<string, unknown>;
+    if (
+      typeof body.id !== 'string' || !/^\d+$/u.test(body.id)
+      || typeof body.title !== 'string' || !body.title.trim()
+      || typeof body.category !== 'string' || !body.category.trim()
+      || typeof body.content !== 'string' || !body.content.trim()
+      || typeof body.confidence !== 'number' || !Number.isFinite(body.confidence)
+      || !Array.isArray(body.evidence) || body.evidence.length > 50
+    ) throw new Error('企业记忆分析字段不完整');
+    const evidence = body.evidence.flatMap((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+      const item = value as Record<string, unknown>;
+      if (
+        typeof item.id !== 'string' || !/^\d+$/u.test(item.id)
+        || typeof item.content !== 'string' || !item.content.trim()
+        || typeof item.verified !== 'boolean'
+        || typeof item.contested !== 'boolean'
+        || typeof item.confidence !== 'number' || !Number.isFinite(item.confidence)
+        || typeof item.observedAt !== 'string'
+      ) return [];
+      return [{
+        id: item.id,
+        content: item.content,
+        verified: item.verified,
+        contested: item.contested,
+        confidence: Math.min(1, Math.max(0, item.confidence)),
+        observedAt: item.observedAt,
+      }];
+    });
+    if (evidence.length !== body.evidence.length) throw new Error('企业记忆证据格式不正确');
+    return analyzeEnterpriseMemory({
+      id: body.id,
+      title: body.title,
+      category: body.category,
+      content: body.content,
+      confidence: Math.min(1, Math.max(0, body.confidence)),
+      evidence,
+    } satisfies EnterpriseMemoryIntelligenceInput);
   });
   ipcMain.handle(IPC.enterpriseKnowledgeRevise, async (_e, input: unknown) => {
     loadEnterpriseSession();

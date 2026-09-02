@@ -7005,6 +7005,35 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
     expect(JSON.stringify(await memberAfterReview.json())).toContain(
       '签署前必须核对主体、金额、违约责任和授权文件。',
     );
+
+    const memberDeleteAttempt = await fetch(
+      `${base}/enterprise/knowledge/${pendingPayload.knowledgeId}`,
+      { method: 'DELETE', headers: { authorization: `Bearer ${legalToken}` } },
+    );
+    expect(memberDeleteAttempt.status).toBe(403);
+    await expect(memberDeleteAttempt.json()).resolves.toEqual({
+      error: '只有企业管理员可以永久删除知识',
+    });
+
+    const deletion = await fetch(
+      `${base}/enterprise/knowledge/${pendingPayload.knowledgeId}`,
+      { method: 'DELETE', headers: { authorization: `Bearer ${adminToken}` } },
+    );
+    expect(deletion.status).toBe(200);
+    await expect(deletion.json()).resolves.toEqual({
+      id: String(pendingPayload.knowledgeId),
+      deleted: true,
+    });
+    const afterDeletion = await fetch(
+      `${base}/enterprise/knowledge?q=${encodeURIComponent('合同复核')}`,
+      { headers: { authorization: `Bearer ${adminToken}` } },
+    );
+    expect(JSON.stringify(await afterDeletion.json())).not.toContain('合同复核清单');
+    const repeatedDeletion = await fetch(
+      `${base}/enterprise/knowledge/${pendingPayload.knowledgeId}`,
+      { method: 'DELETE', headers: { authorization: `Bearer ${adminToken}` } },
+    );
+    expect(repeatedDeletion.status).toBe(404);
   }, 30_000);
 
   it('关闭企业知识功能后禁止知识读写，入职与召回也不泄露知识但保留任务历史', async () => {

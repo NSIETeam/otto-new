@@ -1475,6 +1475,24 @@ describe('EnterpriseClient', () => {
     expect(init.headers).toMatchObject({ authorization: 'Bearer session-token' });
   });
 
+  it('企业管理员永久删除知识时使用租户会话调用 DELETE 接口', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, API_V2_HEALTH))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        account: ACCOUNT, token: 'session-token', expiresAt: '2099-01-01',
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, { id: '12', deleted: true }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    await client.loginWithPassword('https://enterprise.otto.test', 'staff01', 'password');
+
+    await expect(client.deleteKnowledge('12')).resolves.toEqual({ id: '12', deleted: true });
+    expect(fetchMock.mock.calls[2]?.[0]).toBe('https://enterprise.otto.test/enterprise/knowledge/12');
+    const init = fetchMock.mock.calls[2]?.[1] as RequestInit;
+    expect(init.method).toBe('DELETE');
+    expect(init.headers).toMatchObject({ authorization: 'Bearer session-token' });
+    await expect(client.deleteKnowledge('../12')).rejects.toThrow('知识编号不正确');
+  });
+
   it('企业管理员可修订知识并读取版本历史', async () => {
     const knowledgeRow = {
       id: 12,

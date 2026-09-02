@@ -1319,6 +1319,7 @@ export type {
 export const {
   observeKnowledge,
   addKnowledge,
+  deleteKnowledge,
   getKnowledge,
   getKnowledgeForAdministration,
   getKnowledgeForBackup,

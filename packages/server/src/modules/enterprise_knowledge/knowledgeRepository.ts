@@ -153,6 +153,11 @@ export interface RevalidateEnterpriseKnowledgeInput {
   validForDays: number;
 }
 
+export interface DeleteEnterpriseKnowledgeInput {
+  id: number;
+  organizationId?: string;
+}
+
 function requireOrganization(store: EnterpriseKnowledgeRepositoryStore, value?: string): string {
   const organizationId = value?.trim() || store.defaultOrganizationId;
   if (!organizationId || !store.organizationExists(organizationId)) {
@@ -517,6 +522,37 @@ export function addEnterpriseKnowledgeInRepository(
 ): boolean {
   return saveEnterpriseKnowledgeInRepository(store, { ...input, status: input.status ?? 'active' })
     .outcome === 'added';
+}
+
+/**
+ * Permanently removes one tenant-scoped memory and all of the evidence that
+ * was used to form it. This is intentionally separate from archive: archive
+ * keeps history, while an administrator choosing delete expects the memory to
+ * disappear from recall, revisions and future evidence-based refinement.
+ */
+export function deleteEnterpriseKnowledgeInRepository(
+  store: EnterpriseKnowledgeRepositoryStore,
+  input: DeleteEnterpriseKnowledgeInput,
+): boolean {
+  if (!Number.isSafeInteger(input.id) || input.id <= 0) {
+    throw new Error('knowledge id is invalid');
+  }
+  const organizationId = requireOrganization(store, input.organizationId);
+  const database = store.db();
+  return runTransaction(database, () => {
+    const current = getEntry(database, input.id, organizationId);
+    if (!current) return false;
+    database.prepare(
+      'UPDATE knowledge SET supersedes_id = NULL WHERE organization_id = ? AND supersedes_id = ?',
+    ).run(organizationId, input.id);
+    database.prepare(
+      'DELETE FROM knowledge_retention_evidence WHERE organization_id = ? AND promoted_knowledge_id = ?',
+    ).run(organizationId, input.id);
+    const result = database.prepare(
+      'DELETE FROM knowledge WHERE id = ? AND organization_id = ?',
+    ).run(input.id, organizationId) as { changes?: number };
+    return Number(result.changes ?? 0) > 0;
+  });
 }
 
 function escapeLikeLiteral(value: string): string {

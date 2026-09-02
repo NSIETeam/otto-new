@@ -72,17 +72,33 @@ interface KnowledgeEvidence {
   contested: boolean;
 }
 
-interface KnowledgeCandidate {
-  date: string;
-  entry: {
-    time: string; category: string; action: string; success: boolean; details?: string;
-    entryType: 'tool' | 'work_result'; taskTitle?: string;
-  };
+interface KnowledgeAiProposal {
+  rationale: string;
+  changes: string[];
+  uncertainties: string[];
+  usedEvidenceIds: string[];
+  modelProvider: string;
 }
 
 function formatKnowledgeDate(value: string | null | undefined): string {
   if (!value) return '';
   return new Date(value).toLocaleDateString('zh-CN');
+}
+
+function knowledgeSourceLabel(sourceType?: string): string {
+  if (sourceType === 'auto_capture') return 'Otto 自动学习';
+  if (sourceType === 'manual') return '管理员补充';
+  if (sourceType === 'document') return '企业文档';
+  if (sourceType === 'work_result' || sourceType === 'task_log') return '工作过程自动提炼';
+  if (sourceType === 'offboarding') return '离职交接';
+  return '企业工作中形成';
+}
+
+function knowledgeReliabilityLabel(confidence: number): string {
+  if (confidence >= 0.9) return '可信度很高';
+  if (confidence >= 0.75) return '可信度较高';
+  if (confidence >= 0.6) return '仍在学习';
+  return '需要更多验证';
 }
 
 export function EnterpriseMemoryDialog({ open, role, onClose }: {
@@ -94,11 +110,11 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [view, setView] = useState<'knowledge' | 'timeline'>('knowledge');
-  const [candidates, setCandidates] = useState<KnowledgeCandidate[]>([]);
   const [busyId, setBusyId] = useState('');
   const [editor, setEditor] = useState<{
-    id?: string; title: string; category: string; content: string;
+    id?: string; title: string; category: string; content: string; confidence?: number;
     resolveConflict?: boolean; adjudication?: Omit<KnowledgeAdjudication, 'id' | 'adjudicatedBy'>;
+    aiProposal?: KnowledgeAiProposal;
   } | null>(null);
   const [revalidation, setRevalidation] = useState<{
     id: string; title: string; rationale: string; validForDays: number;
@@ -113,16 +129,12 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
     const epoch = ++epochRef.current;
     setLoading(true); setError('');
     try {
-      const [next, recentWork] = await Promise.all([
-        window.otto.enterpriseKnowledgeList({ query: queryRef.current.trim() || undefined, includeReview: true }),
-        window.otto.workLogRecent(7).catch(() => []),
-      ]);
+      const next = await window.otto.enterpriseKnowledgeList({
+        query: queryRef.current.trim() || undefined,
+        includeReview: true,
+      });
       if (epoch === epochRef.current) {
         setItems(next);
-        setCandidates(recentWork
-          .flatMap((day) => day.entries.map((entry) => ({ date: day.date, entry })))
-          .filter(({ entry }) => entry.entryType === 'work_result' && entry.success)
-          .slice(0, 3));
       }
     } catch (cause) {
       if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause));
@@ -136,7 +148,7 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
       setQuery(''); setItems([]); setLoading(false);
       setEditor(null); setRevalidation(null); setRevisions({}); setEvidence({});
       setAdjudications({}); setError(''); setNotice('');
-      setView('knowledge'); setCandidates([]); setBusyId('');
+      setView('knowledge'); setBusyId('');
     }
   }, [open, refresh]);
   const requestClose = (): void => {
@@ -154,8 +166,13 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
     setBusyId(operationId);
     try {
       if (editor.id) await window.otto.enterpriseKnowledgeRevise(editor.id, {
-        title: editor.title.trim(), category: editor.category.trim(), content: editor.content.trim(), confidence: 0.95,
-        changeNote: editor.resolveConflict ? '管理员核对证据并裁决冲突' : '管理员在企业记忆弹窗中修订',
+        title: editor.title.trim(), category: editor.category.trim(), content: editor.content.trim(),
+        confidence: editor.confidence ?? 0.95,
+        changeNote: editor.resolveConflict
+          ? '管理员核对证据并裁决冲突'
+          : editor.aiProposal
+            ? `管理员确认 AI 深化建议：${editor.aiProposal.rationale}`.slice(0, 500)
+            : '管理员在企业记忆弹窗中修订',
         resolveConflict: editor.resolveConflict,
         adjudication: editor.resolveConflict ? editor.adjudication : undefined,
       });
@@ -167,7 +184,11 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
         setAdjudications((current) => { const next = { ...current }; delete next[editor.id!]; return next; });
       }
       setEditor(null);
-      setNotice(editor.resolveConflict ? '冲突已裁决并形成新版本，请再次确认后发布。' : editor.id ? '知识已修订，新版本立即用于后续检索。' : '企业知识已发布。');
+      setNotice(editor.resolveConflict
+        ? '冲突已裁决并形成新版本，请再次确认后发布。'
+        : editor.aiProposal
+          ? '深化后的新版本已形成，Otto 会在后续相关工作中使用。'
+          : editor.id ? '知识已修订，新版本立即用于后续检索。' : '企业知识已发布。');
       setBusyId(''); await refresh();
     } catch (cause) { if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (epoch === epochRef.current) setBusyId(''); }
@@ -216,6 +237,69 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
     } catch (cause) { if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (epoch === epochRef.current) setBusyId(''); }
   };
+  const deepenKnowledge = async (item: KnowledgeItem): Promise<void> => {
+    const epoch = epochRef.current;
+    setBusyId(item.id); setError(''); setNotice('');
+    try {
+      const loaded = evidence[item.id] ?? await window.otto.enterpriseKnowledgeEvidence(item.id);
+      if (epoch !== epochRef.current) return;
+      setEvidence((current) => ({ ...current, [item.id]: loaded }));
+      const proposal = await window.otto.enterpriseKnowledgeAnalyze({
+        id: item.id,
+        title: item.title || item.category,
+        category: item.category,
+        content: item.content,
+        confidence: item.confidence,
+        evidence: loaded.map((entry) => ({
+          id: entry.id,
+          content: entry.content,
+          verified: entry.verified,
+          contested: entry.contested,
+          confidence: entry.confidence,
+          observedAt: entry.observedAt,
+        })),
+      });
+      if (epoch !== epochRef.current) return;
+      if (!proposal.shouldUpdate) {
+        setNotice(`AI 已检查：${proposal.rationale || '现有内容已经能够准确概括当前证据，暂不需要形成新版本。'}`);
+        return;
+      }
+      setRevalidation(null);
+      setEditor({
+        id: item.id,
+        title: proposal.title,
+        category: proposal.category,
+        content: proposal.content,
+        confidence: proposal.confidence,
+        aiProposal: {
+          rationale: proposal.rationale,
+          changes: proposal.changes,
+          uncertainties: proposal.uncertainties,
+          usedEvidenceIds: proposal.usedEvidenceIds,
+          modelProvider: proposal.modelProvider,
+        },
+      });
+      setNotice('AI 已结合最新证据生成深化建议。请管理员检查后再应用。');
+    } catch (cause) {
+      if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause));
+    } finally { if (epoch === epochRef.current) setBusyId(''); }
+  };
+  const deleteKnowledge = async (item: KnowledgeItem): Promise<void> => {
+    const title = item.title || item.category;
+    if (!window.confirm(`永久删除“${title}”吗？\n\n此操作会同时删除版本记录和自动学习证据，无法撤销；Otto 之后不会再调用它。`)) return;
+    const epoch = epochRef.current;
+    setBusyId(item.id); setError(''); setNotice('');
+    try {
+      await window.otto.enterpriseKnowledgeDelete(item.id);
+      if (epoch !== epochRef.current) return;
+      setItems((current) => current.filter((entry) => entry.id !== item.id));
+      setRevisions((current) => { const next = { ...current }; delete next[item.id]; return next; });
+      setEvidence((current) => { const next = { ...current }; delete next[item.id]; return next; });
+      setNotice(`已永久删除“${title}”，Otto 不会再调用这条记忆。`);
+    } catch (cause) {
+      if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause));
+    } finally { if (epoch === epochRef.current) setBusyId(''); }
+  };
   const setEvidenceDisposition = (knowledgeId: string, evidenceId: string, disposition: 'accepted' | 'rejected'): void => {
     setAdjudications((current) => {
       const draft = current[knowledgeId] ?? { acceptedEvidenceIds: [], rejectedEvidenceIds: [], rationale: '' };
@@ -253,27 +337,6 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
       if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause));
     });
   }, [items, open, revisions, role, view]);
-  const submitCandidate = async ({ date, entry }: KnowledgeCandidate): Promise<void> => {
-    const title = (entry.taskTitle || entry.action || '工作成果').trim();
-    const sourceId = `work-result:${date}:${entry.time}:${title}`.slice(0, 150);
-    const epoch = epochRef.current;
-    setBusyId(sourceId); setError(''); setNotice('');
-    try {
-      const result = await window.otto.enterpriseKnowledgeRecord({
-        sourceId, title, category: entry.category || 'work_result',
-        content: [title, entry.details].filter(Boolean).join('\n'), confidence: 0.82,
-        sourceType: 'work_result', sourceLabel: `${date} ${entry.time} Otto 工作成果`,
-      });
-      if (epoch !== epochRef.current) return;
-      setNotice(result.reviewStatus === 'active' ? '已沉淀为企业知识。'
-        : result.status === 'exists' ? '这项成果已经在审核队列中。'
-          : '已提交为知识候选，管理员确认后会进入企业知识库。');
-      setBusyId('');
-      await refresh();
-    } catch (cause) {
-      if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause));
-    } finally { if (epoch === epochRef.current) setBusyId(''); }
-  };
   const timeline = items.filter((item) => !item.status || item.status === 'active')
     .flatMap((item) => (revisions[item.id]?.length ? revisions[item.id] : [{
       id: `current-${item.id}`, version: item.version ?? 1, title: item.title,
@@ -281,23 +344,47 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
       changeNote: '当前版本', createdAt: item.updatedAt || item.createdAt,
     }]).map((revision) => ({ item, revision })))
     .sort((left, right) => (right.revision.createdAt || '').localeCompare(left.revision.createdAt || ''));
+  const visibleItems = items.filter((item) => item.status !== 'archived');
+  const activeCount = visibleItems.filter((item) => !item.status || item.status === 'active').length;
+  const pendingCount = visibleItems.filter((item) => item.status === 'pending_review').length;
+  const automaticallyLearnedCount = visibleItems.filter((item) => item.sourceType === 'auto_capture').length;
   if (!open) return null;
   return <DialogFrame title="企业记忆" onClose={requestClose}>
+    <section className="otto-enterprise-memory-hero" aria-label="企业记忆工作方式">
+      <div className="otto-enterprise-memory-hero__copy">
+        <span className="otto-enterprise-memory-hero__eyebrow">自动学习已开启</span>
+        <h3>Otto 正在学习这家企业怎样工作</h3>
+        <p>完成对话和工作后，Otto 会自动识别稳定的制度、偏好、决定与解决方法。普通闲聊、敏感凭据和低可信内容不会进入企业记忆。</p>
+        <p>已经确认的记忆会在相关问题中自动调用；遇到更多证据时会提高可信度，也可以交给 AI 重新归纳，再由管理员确认新版本。</p>
+      </div>
+      <div className="otto-enterprise-memory-hero__stats" aria-label="企业记忆概况">
+        <div><strong>{activeCount}</strong><span>Otto 已掌握</span></div>
+        <div><strong>{pendingCount}</strong><span>待管理员确认</span></div>
+        <div><strong>{automaticallyLearnedCount}</strong><span>自动学习形成</span></div>
+      </div>
+    </section>
     <div role="tablist" aria-label="企业知识与记忆" className="otto-enterprise-memory-switch">
-      <button type="button" role="tab" aria-selected={view === 'knowledge'} onClick={() => setView('knowledge')}>企业知识</button>
-      <button type="button" role="tab" aria-selected={view === 'timeline'} onClick={() => setView('timeline')}>记忆沿革</button>
+      <button type="button" role="tab" aria-selected={view === 'knowledge'} onClick={() => setView('knowledge')}>已掌握与待确认</button>
+      <button type="button" role="tab" aria-selected={view === 'timeline'} onClick={() => setView('timeline')}>如何变得更准确</button>
     </div>
     <div className="otto-workspace-dialog__toolbar">
       <form onSubmit={(event) => { event.preventDefault(); void refresh(); }}><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="搜索企业知识" placeholder="搜索制度、流程、项目结论"/><button type="submit">搜索</button></form>
-      {role === 'company_admin' ? <button type="button" onClick={() => setEditor({ title: '', category: '制度流程', content: '' })}>新增知识</button> : null}
+      {role === 'company_admin' ? <button type="button" onClick={() => setEditor({ title: '', category: '制度流程', content: '' })}>手动补充</button> : null}
       <button type="button" disabled={loading} onClick={() => void refresh()}>{loading ? '加载中…' : '刷新'}</button>
     </div>
     {view === 'knowledge' && editor ? <form className="otto-workspace-dialog__editor" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      {editor.aiProposal ? <section className="otto-enterprise-memory-ai-proposal" aria-label="AI 深化建议">
+        <span>AI 深化建议 · 尚未保存</span>
+        <strong>{editor.aiProposal.rationale}</strong>
+        {editor.aiProposal.changes.length ? <ul>{editor.aiProposal.changes.map((change) => <li key={change}>{change}</li>)}</ul> : null}
+        {editor.aiProposal.uncertainties.length ? <div><b>仍需人工判断</b><ul>{editor.aiProposal.uncertainties.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
+        <small>依据 {editor.aiProposal.usedEvidenceIds.length} 条企业证据 · {editor.aiProposal.modelProvider}。请检查下方内容，管理员保存后才会形成新版本。</small>
+      </section> : null}
       <input aria-label="知识标题" value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })}/>
       <input aria-label="知识分类" value={editor.category} onChange={(event) => setEditor({ ...editor, category: event.target.value })}/>
       <textarea aria-label="知识内容" rows={6} value={editor.content} onChange={(event) => setEditor({ ...editor, content: event.target.value })}/>
       {editor.resolveConflict ? <small>保存后会记录本次证据取舍和裁决依据，并生成待再次确认的新版本。</small> : null}
-      <div><button type="button" disabled={Boolean(busyId)} onClick={() => setEditor(null)}>取消</button><button type="submit" disabled={Boolean(busyId)}>{busyId ? '保存中…' : editor.resolveConflict ? '保存裁决版本' : editor.id ? '保存修订' : '发布知识'}</button></div>
+      <div><button type="button" disabled={Boolean(busyId)} onClick={() => setEditor(null)}>取消</button><button type="submit" disabled={Boolean(busyId)}>{busyId ? '保存中…' : editor.resolveConflict ? '保存裁决版本' : editor.aiProposal ? '应用并形成新版本' : editor.id ? '保存修订' : '发布知识'}</button></div>
     </form> : null}
     {view === 'knowledge' && revalidation ? <form className="otto-workspace-dialog__editor otto-enterprise-memory-revalidation" onSubmit={(event) => { event.preventDefault(); void saveRevalidation(); }}>
       <strong>复核：{revalidation.title}</strong>
@@ -307,34 +394,26 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
       <div><button type="button" disabled={Boolean(busyId)} onClick={() => setRevalidation(null)}>取消</button><button type="submit" disabled={Boolean(busyId)}>{busyId ? '保存中…' : '确认复核'}</button></div>
     </form> : null}
     {error ? <p role="alert" className="otto-workspace-dialog__error">{error}</p> : null}{notice ? <p role="status">{notice}</p> : null}
-    {view === 'knowledge' && candidates.length ? <section className="otto-enterprise-memory-candidates" aria-label="可沉淀的工作成果">
-      <strong>最近成果候选</strong><span>提交后先审核，不会静默发布给全公司</span>
-      {candidates.map((candidate) => {
-        const title = candidate.entry.taskTitle || candidate.entry.action;
-        const sourceId = `work-result:${candidate.date}:${candidate.entry.time}:${title}`.slice(0, 150);
-        const submitted = items.some((item) => item.sourceId?.endsWith(sourceId));
-        return <div key={sourceId}><span><strong>{title}</strong><small>{candidate.date} {candidate.entry.time}</small></span><button type="button" disabled={submitted || busyId === sourceId} onClick={() => void submitCandidate(candidate)}>{submitted ? '已提交' : busyId === sourceId ? '提交中…' : '沉淀'}</button></div>;
-      })}
-    </section> : null}
     {view === 'timeline' ? <div className="otto-enterprise-memory-timeline" aria-label="企业记忆沿革">{timeline.map(({ item, revision }) => <article key={`${item.id}-${revision.id}`}>
       <time>{formatKnowledgeDate(revision.createdAt)}</time><div><span>{item.department || '全组织'} · {revision.category || item.category} · v{revision.version}</span><strong>{revision.title || item.title || item.category}</strong><p>{revision.content}</p><small>{revision.changedBy || item.contributor || '系统沉淀'} · {revision.changeNote || revision.status || '形成知识'}</small>{revision.adjudication ? <small>裁决依据：{revision.adjudication.rationale} · 采纳 {revision.adjudication.acceptedEvidenceIds.length} 条 · 排除 {revision.adjudication.rejectedEvidenceIds.length} 条</small> : null}</div>
-    </article>)}</div> : <div className="otto-workspace-dialog__list otto-enterprise-memory-list">{items.filter((item) => item.status !== 'archived').map((item) => {
+    </article>)}</div> : <div className="otto-workspace-dialog__list otto-enterprise-memory-list">{visibleItems.map((item) => {
       const contested = Boolean(item.sourceLabel?.includes('证据存在冲突'));
       const expiresAt = Date.parse(item.expiresAt || '');
       const reviewDueAt = Date.parse(item.reviewDueAt || '');
       const expired = Number.isFinite(expiresAt) && expiresAt <= Date.now();
       const reviewDue = !expired && Number.isFinite(reviewDueAt) && reviewDueAt <= Date.now();
       return <article key={item.id} className="otto-enterprise-memory-card">
-        <div className="otto-enterprise-memory-card__meta"><span>{item.department || '全组织'}</span><span>{item.category}</span><span>{item.status === 'pending_review' ? '待审核' : '已发布'}</span><span>v{item.version ?? 1}</span><span>{Math.round(item.confidence * 100)}%</span>{expired ? <strong className="is-expired">已过期</strong> : reviewDue ? <strong className="is-review-due">待复核</strong> : null}</div>
-        {item.evidenceCount ? <div className="otto-enterprise-memory-card__evidence"><strong>{item.evidenceCount} 条证据</strong><span>{item.distinctSessionCount || 0} 个会话</span><span>{item.distinctContributorCount || 0} 名贡献者</span>{item.verifiedEvidenceCount ? <span>{item.verifiedEvidenceCount} 条已验证</span> : null}{item.lastObservedAt ? <span>最近验证 {formatKnowledgeDate(item.lastObservedAt)}</span> : null}</div> : item.sourceType === 'manual' ? <div className="otto-enterprise-memory-card__evidence"><strong>管理员确认发布</strong></div> : null}
-        <h3>{item.title || item.category}</h3><p>{item.content}</p>{item.sourceLabel || item.sourceId ? <div className="otto-enterprise-memory-card__source">来源：{item.sourceLabel || item.sourceId}</div> : null}<small>{item.contributor || '系统沉淀'} · {formatKnowledgeDate(item.updatedAt || item.createdAt)}</small>
+        <div className="otto-enterprise-memory-card__meta"><span>{item.department || '全组织'}</span><span>{item.category}</span><strong>{item.status === 'pending_review' ? '待你确认' : '对话中已启用'}</strong><span>{knowledgeSourceLabel(item.sourceType)}</span>{expired ? <strong className="is-expired">已过期</strong> : reviewDue ? <strong className="is-review-due">待复核</strong> : null}</div>
+        {item.evidenceCount ? <div className="otto-enterprise-memory-card__evidence"><strong>已被 {item.evidenceCount} 次工作验证</strong><span>{item.distinctSessionCount || 0} 个独立会话</span><span>{item.distinctContributorCount || 0} 名贡献者</span>{item.verifiedEvidenceCount ? <span>{item.verifiedEvidenceCount} 次明确确认</span> : null}{item.lastObservedAt ? <span>最近学习 {formatKnowledgeDate(item.lastObservedAt)}</span> : null}</div> : item.sourceType === 'manual' ? <div className="otto-enterprise-memory-card__evidence"><strong>由管理员直接确认</strong></div> : null}
+        <h3>{item.title || item.category}</h3><p>{item.content}</p><div className="otto-enterprise-memory-card__usage">{item.status === 'pending_review' ? '确认后，Otto 才会在相关对话和工作中自动使用。' : '遇到相关问题时，Otto 会自动参考这条企业记忆。'}</div><small>{knowledgeReliabilityLabel(item.confidence)} · 已深化 {Math.max(0, (item.version ?? 1) - 1)} 次 · {item.contributor || 'Otto 自动学习'} · {formatKnowledgeDate(item.updatedAt || item.createdAt)}</small>
         {item.reviewDueAt || item.expiresAt ? <div className="otto-enterprise-memory-card__lifecycle">{item.reviewDueAt ? <span>复核日期 {formatKnowledgeDate(item.reviewDueAt)}</span> : null}{item.expiresAt ? <span>有效期至 {formatKnowledgeDate(item.expiresAt)}</span> : null}</div> : null}
         {role === 'company_admin' ? <footer>
-          {item.sourceType === 'auto_capture' || (item.evidenceCount ?? 0) > 0 ? <button type="button" disabled={busyId === item.id} onClick={() => void toggleEvidence(item.id)}>{evidence[item.id] !== undefined ? '收起证据' : '证据'}</button> : null}
-          {item.status === 'pending_review' ? <button type="button" disabled={busyId === item.id || contested} title={contested ? '请先修订内容并完成冲突裁决' : undefined} onClick={() => void review(item.id, 'approve')}>{contested ? '先裁决冲突' : '发布'}</button> : null}
-          <button type="button" disabled={busyId === item.id || (contested && !isAdjudicationReady(item.id))} title={contested && !isAdjudicationReady(item.id) ? '请先处理全部冲突证据，并填写至少 12 个字的裁决依据' : undefined} onClick={() => setEditor({ id: item.id, title: item.title || item.category, category: item.category, content: item.content, resolveConflict: contested, adjudication: contested ? adjudications[item.id] : undefined })}>{contested ? '审查并裁决' : '修订'}</button>
-          {item.status === 'active' && !contested ? <button type="button" disabled={busyId === item.id} onClick={() => { setEditor(null); setRevalidation({ id: item.id, title: item.title || item.category, rationale: '', validForDays: item.sourceType === 'auto_capture' ? 180 : 365 }); }}>复核有效</button> : null}
-          <button type="button" disabled={busyId === item.id} onClick={() => void toggleRevisions(item.id)}>{revisions[item.id] !== undefined ? '收起版本' : '版本'}</button><button type="button" disabled={busyId === item.id} onClick={() => void review(item.id, 'archive')}>归档</button>
+          {item.sourceType === 'auto_capture' || (item.evidenceCount ?? 0) > 0 ? <button type="button" disabled={busyId === item.id} onClick={() => void toggleEvidence(item.id)}>{evidence[item.id] !== undefined ? '收起学习依据' : '查看学习依据'}</button> : null}
+          {item.status === 'pending_review' ? <button type="button" disabled={busyId === item.id || contested} title={contested ? '请先修订内容并完成冲突裁决' : undefined} onClick={() => void review(item.id, 'approve')}>{contested ? '先裁决冲突' : '确认并让 Otto 使用'}</button> : null}
+          <button type="button" disabled={busyId === item.id || contested} title={contested ? '请先完成人工冲突裁决' : '让大模型结合全部学习依据重新归纳，保存前仍需管理员确认'} onClick={() => void deepenKnowledge(item)}>{busyId === item.id ? '分析中…' : 'AI 深化'}</button>
+          <button type="button" disabled={busyId === item.id || (contested && !isAdjudicationReady(item.id))} title={contested && !isAdjudicationReady(item.id) ? '请先处理全部冲突证据，并填写至少 12 个字的裁决依据' : undefined} onClick={() => setEditor({ id: item.id, title: item.title || item.category, category: item.category, content: item.content, resolveConflict: contested, adjudication: contested ? adjudications[item.id] : undefined })}>{contested ? '审查并裁决' : '人工修改'}</button>
+          {item.status === 'active' && !contested ? <button type="button" disabled={busyId === item.id} onClick={() => { setEditor(null); setRevalidation({ id: item.id, title: item.title || item.category, rationale: '', validForDays: item.sourceType === 'auto_capture' ? 180 : 365 }); }}>仍然有效</button> : null}
+          <button type="button" disabled={busyId === item.id} onClick={() => void toggleRevisions(item.id)}>{revisions[item.id] !== undefined ? '收起变化' : '查看变化'}</button><button type="button" disabled={busyId === item.id} onClick={() => void review(item.id, 'archive')}>停止使用</button><button className="otto-enterprise-memory-delete" type="button" disabled={busyId === item.id} onClick={() => void deleteKnowledge(item)}>永久删除</button>
         </footer> : null}
         {evidence[item.id] !== undefined ? <div className="otto-enterprise-memory-evidence" aria-label="知识证据明细">
           {evidence[item.id].length === 0 ? <div className="otto-enterprise-memory-evidence__empty">此条知识没有可展示的自动提炼证据。</div> : <>{evidence[item.id].map((entry) => <article key={entry.id}>

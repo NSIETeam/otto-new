@@ -51,6 +51,10 @@ import type {
   RecruitmentSemanticAnalysisInput,
   RecruitmentSemanticEvaluation,
 } from '../main/recruitmentSemantic.js';
+import type {
+  EnterpriseMemoryIntelligenceInput,
+  EnterpriseMemoryIntelligenceResult,
+} from '../main/enterpriseMemoryIntelligenceModel.js';
 
 /**
  * 飞书守护状态（main 从 server /health 透传；renderer 徽标据此渲染）。
@@ -1474,7 +1478,9 @@ const IPC = {
   enterpriseKnowledgeRecord: 'otto:enterprise-knowledge-record',
   enterpriseKnowledgeList: 'otto:enterprise-knowledge-list',
   enterpriseKnowledgeReview: 'otto:enterprise-knowledge-review',
+  enterpriseKnowledgeDelete: 'otto:enterprise-knowledge-delete',
   enterpriseKnowledgeRevise: 'otto:enterprise-knowledge-revise',
+  enterpriseKnowledgeAnalyze: 'otto:enterprise-knowledge-analyze',
   enterpriseKnowledgeRevalidate: 'otto:enterprise-knowledge-revalidate',
   enterpriseKnowledgeRevisions: 'otto:enterprise-knowledge-revisions',
   enterpriseKnowledgeEvidence: 'otto:enterprise-knowledge-evidence',
@@ -2123,6 +2129,10 @@ export interface OttoBridge {
     action: 'approve' | 'archive',
     note?: string,
   ): Promise<EnterpriseKnowledgeItem>;
+  enterpriseKnowledgeDelete(id: string): Promise<{ id: string; deleted: true }>;
+  enterpriseKnowledgeAnalyze(
+    input: EnterpriseMemoryIntelligenceInput,
+  ): Promise<EnterpriseMemoryIntelligenceResult>;
   enterpriseKnowledgeRevise(
     id: string,
     input: {
@@ -3523,6 +3533,20 @@ const bridge: OttoBridge = {
       action,
       note,
     }) as Promise<EnterpriseKnowledgeItem>;
+  },
+  enterpriseKnowledgeDelete(id: string): Promise<{ id: string; deleted: true }> {
+    return ipcRenderer.invoke(IPC.enterpriseKnowledgeDelete, { id }) as Promise<{
+      id: string;
+      deleted: true;
+    }>;
+  },
+  enterpriseKnowledgeAnalyze(
+    input: EnterpriseMemoryIntelligenceInput,
+  ): Promise<EnterpriseMemoryIntelligenceResult> {
+    return ipcRenderer.invoke(
+      IPC.enterpriseKnowledgeAnalyze,
+      input,
+    ) as Promise<EnterpriseMemoryIntelligenceResult>;
   },
   enterpriseKnowledgeRevise(id, input) {
     return ipcRenderer.invoke(IPC.enterpriseKnowledgeRevise, {

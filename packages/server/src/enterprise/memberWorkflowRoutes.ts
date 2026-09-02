@@ -464,6 +464,27 @@ export async function handleMemberWorkflowRoute({
   }
 
   const knowledgeMatch = path.match(/^\/enterprise\/knowledge\/(\d+)$/u);
+  if (knowledgeMatch && method === 'DELETE') {
+    if (!db.getOrganizationFeatures(memberAccount!.organizationId).knowledge) {
+      sendJSON(res, 403, { error: '企业知识功能已由管理员关闭' });
+      return true;
+    }
+    if (!memberAccount!.isAdmin) {
+      sendJSON(res, 403, { error: '只有企业管理员可以永久删除知识' });
+      return true;
+    }
+    const id = Number(knowledgeMatch[1]);
+    const deleted = db.deleteKnowledge({
+      id,
+      organizationId: memberAccount!.organizationId,
+    });
+    if (!deleted) {
+      sendJSON(res, 404, { error: 'knowledge not found' });
+      return true;
+    }
+    sendJSON(res, 200, { id: String(id), deleted: true });
+    return true;
+  }
   if (knowledgeMatch && method === 'PATCH') {
     if (!db.getOrganizationFeatures(memberAccount!.organizationId).knowledge) {
       sendJSON(res, 403, { error: '企业知识功能已由管理员关闭' });

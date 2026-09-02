@@ -38,6 +38,7 @@ const harness = vi.hoisted(() => ({
   },
   updateActions: { silentCheck: vi.fn() },
   moduleCapabilityRetry: vi.fn(),
+  workspaceModules: { current: [] as Array<Record<string, unknown>> },
   organizationFeatures: {
     current: {
       enterprise_tree: true,
@@ -141,7 +142,7 @@ vi.mock('./state/useModuleWorkspaceCapabilities.js', () => ({
   useModuleWorkspaceCapabilities: () => ({
     status: 'ready',
     ready: true,
-    modules: [],
+    modules: harness.workspaceModules.current,
     organizationFeatures: harness.organizationFeatures.current,
     organizationFeatureState: {
       configured: harness.configuredOrganizationFeatures.current,
@@ -237,6 +238,8 @@ vi.mock('./components/ChatView.js', () => ({
           <button type="button" onClick={() => void onSend('会议室顶灯不亮，普通', 'local')}>complete-repair-chat</button>
           <button type="button" onClick={() => void onSend('确认提交', 'local')}>confirm-repair-chat</button>
           <button type="button" onClick={() => void onSend('查看最新园区公告', 'local')}>query-announcement-chat</button>
+          <button type="button" onClick={() => void onSend('在企业知识里查请假制度', 'local')}>query-enterprise-memory-chat</button>
+          <button type="button" onClick={() => void onSend('让PPT 创作专家制作融资路演', 'local')}>launch-expert-chat</button>
         </>
       ) : null}
       {onRespondQuestion ? (
@@ -491,6 +494,8 @@ beforeEach(() => {
   localStorage.clear();
   harness.auth.current = authFor(accountA, 'signed-in');
   harness.centralIdentity.current = { edition: 'personal', role: 'member', profiles: [] };
+  harness.workspaceModules.current = [];
+  harness.storeActions.launchAgentProfileWithPrompt.mockReturnValue({ accepted: true });
   Object.assign(harness.organizationFeatures.current, {
     enterprise_tree: true,
     park_service: true,
@@ -675,6 +680,52 @@ describe('App workspace UI integration', () => {
       expect.stringContaining('园区停电通知'),
     );
     expect(harness.storeActions.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('queries enterprise memory and launches an explicitly named expert from the main conversation', async () => {
+    configureEnterpriseWorkspace();
+    harness.workspaceModules.current = [{
+      id: 'agent-ppt',
+      label: 'PPT 创作专家',
+      category: 'common',
+      icon: 'agent',
+      availability: 'available',
+      activation: { kind: 'agent', profileId: 'ppt' },
+    }];
+    const enterpriseKnowledgeList = vi.fn(async () => [{
+      id: 'knowledge-1',
+      organizationId: 'organization-a',
+      sourceId: 'manual-1',
+      title: '请假制度',
+      department: null,
+      category: '制度流程',
+      content: '请假应提前提交审批。',
+      contributor: '管理员',
+      confidence: 0.95,
+      status: 'active' as const,
+      createdAt: '2026-09-02T09:00:00.000Z',
+    }]);
+    Object.assign(window.otto, { enterpriseKnowledgeList });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'query-enterprise-memory-chat' }));
+    await waitFor(() => expect(harness.storeActions.postLocalChatMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.stringContaining('请假制度'),
+    ));
+    expect(harness.storeActions.sendMessage).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'launch-expert-chat' }));
+    await waitFor(() => expect(harness.storeActions.launchAgentProfileWithPrompt).toHaveBeenCalledWith(
+      'PPT 创作专家',
+      'ppt',
+      '制作融资路演',
+      'local',
+      undefined,
+      expect.stringContaining('请假制度'),
+      undefined,
+      undefined,
+    ));
   });
 
   it('uses the next account right-panel preference on the account-switch render', () => {

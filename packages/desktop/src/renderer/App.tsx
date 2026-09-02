@@ -133,6 +133,10 @@ import {
   RecruitmentConversationDraftRegistry,
   handleRecruitmentConversation,
 } from './recruitmentConversationBridge.js';
+import {
+  WorkspaceCapabilityDraftRegistry,
+  handleWorkspaceCapabilityConversation,
+} from './workspaceCapabilityConversationBridge.js';
 import { AtoaConsultDialog } from './components/AtoaConsultDialog.js';
 import { executeEnterpriseCollaborationRelay } from './enterpriseCollaborationRelay.js';
 import {
@@ -284,6 +288,7 @@ function OttoWorkspaceApp({
   const parkServiceActionDraftsRef = useRef(new ParkServiceActionDraftRegistry());
   const customerModuleActionDraftsRef = useRef(new CustomerModuleConversationDraftRegistry());
   const recruitmentActionDraftsRef = useRef(new RecruitmentConversationDraftRegistry());
+  const workspaceCapabilityDraftsRef = useRef(new WorkspaceCapabilityDraftRegistry());
   const enterpriseUnreadTrackerRef = useRef<EnterpriseUnreadNotificationTracker | null>(null);
   const centralIdentity = useMemo(
     () => resolveCentralEnterpriseIdentity(account),
@@ -1298,6 +1303,94 @@ function OttoWorkspaceApp({
           postMessage: actions.postLocalChatMessage,
         });
         if (recruitmentHandled) return true;
+
+        const workspaceCapabilityHandled = await handleWorkspaceCapabilityConversation({
+          text,
+          sessionId,
+          accountId: account.id,
+          enterpriseMemoryEnabled:
+            edition === 'enterprise'
+            && moduleCapabilities.organizationFeatures?.knowledge === true,
+          role: centralIdentity.role,
+          experts: moduleCapabilities.modules.flatMap((module) => (
+            module.activation.kind === 'agent'
+              ? [{
+                  id: module.id,
+                  label: module.label,
+                  profileId: module.activation.profileId,
+                  customAgentId: module.activation.customAgentId,
+                  available: module.availability === 'available',
+                }]
+              : []
+          )),
+          autoSkillCandidates: product.state.pendingAutoSkills,
+          registry: workspaceCapabilityDraftsRef.current,
+          listKnowledge: window.otto.enterpriseKnowledgeList,
+          recordKnowledge: window.otto.enterpriseKnowledgeRecord,
+          launchExpert: async (expert, task) => {
+            let expertKnowledgeContext = '';
+            if (
+              edition === 'enterprise'
+              && moduleCapabilities.organizationFeatures?.knowledge === true
+            ) {
+              try {
+                const knowledge = await Promise.race([
+                  window.otto.enterpriseKnowledgeList({ query: task }),
+                  new Promise<never>((_, reject) => {
+                    window.setTimeout(
+                      () => reject(new Error('enterprise knowledge lookup timeout')),
+                      1_200,
+                    );
+                  }),
+                ]);
+                expertKnowledgeContext = buildEnterpriseKnowledgePromptContext(knowledge);
+              } catch {
+                actions.postSystemNote('企业知识检索暂不可用；专家仍会启动，但未附加企业知识上下文。');
+              }
+            }
+            const customAgent = expert.customAgentId
+              ? customAgents.find((agent) => agent.id === expert.customAgentId)
+              : undefined;
+            const expertTask = customAgent
+              ? `${buildCustomAgentKickoff(customAgent, {
+                  edition,
+                  organizationName: account.organizationName,
+                  department: account.department,
+                  positionTitle: account.positionTitle,
+                })}\n\n用户当前任务：${task}`
+              : task;
+            return actions.launchAgentProfileWithPrompt(
+              expert.label,
+              expert.profileId,
+              expertTask,
+              source,
+              undefined,
+              expertKnowledgeContext,
+              activeSession?.workspacePath,
+              authorization,
+            ).accepted;
+          },
+          selectExpert: (expert) => {
+            const module = moduleCapabilities.modules.find((item) => item.id === expert.id);
+            setMainView('chat');
+            setPendingAgent({
+              moduleId: expert.id,
+              title: expert.label,
+              profileId: expert.profileId,
+              customAgentId: expert.customAgentId,
+              icon: module?.icon ?? 'agent',
+            });
+          },
+          openSkillZone: () => {
+            hideParkServices();
+            setModuleModal(null);
+            setMainView('skillzone');
+          },
+          confirmAutoSkill: product.actions.confirmPendingAutoSkill,
+          rejectAutoSkill: product.actions.rejectPendingAutoSkill,
+          postMessage: actions.postLocalChatMessage,
+        });
+        if (workspaceCapabilityHandled) return true;
       }
       let authorizedContext = '';
       if (

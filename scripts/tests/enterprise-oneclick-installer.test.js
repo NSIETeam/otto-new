@@ -480,6 +480,7 @@ describe('enterprise one-click schema contract', () => {
       'position_invites',
       'park_service_push',
       'park_repair_v1',
+      'park_carpool_v1',
       'data_protection_v1',
       'encrypted_attachment_storage_v1',
       'encrypted_message_storage_v1',
@@ -1298,6 +1299,24 @@ false
       expect(readme).toContain(`\`${key}\``);
     }
   });
+  it('preserves the server-only carpool map configuration through installation', () => {
+    const envExample = readFileSync(ENV_EXAMPLE, 'utf8');
+    const common = readFileSync(COMMON_SH, 'utf8');
+    const installer = readFileSync(INSTALL_SH, 'utf8');
+    const readme = readFileSync(README, 'utf8');
+    const allowlist = common.match(/case "\$key" in([\s\S]*?)\n\s*\*\)/)?.[1] ?? '';
+    const runtimeEnv = installer.match(
+      /write_env "\$ENV_TEMP" \\\n([\s\S]*?)\ninstall -o root/,
+    )?.[1] ?? '';
+
+    for (const key of ['OTTO_AMAP_WEB_SERVICE_KEY', 'OTTO_PARK_CARPOOL_MINIMUM_OVERLAP']) {
+      expect(envExample).toMatch(new RegExp(`^${key}=`, 'm'));
+      expect(allowlist).toContain(key);
+      expect(runtimeEnv).toContain(`  ${key} `);
+      expect(readme).toContain(`\`${key}\``);
+    }
+    expect(installer).toContain('OTTO_PARK_CARPOOL_MINIMUM_OVERLAP 必须是 0 到 1 之间的数字');
+  });
 });
 
 describe('enterprise one-click health contract', () => {
@@ -1326,7 +1345,7 @@ describe('enterprise one-click health contract', () => {
     expect(runtime).toContain("flag: 'wx'");
   });
 
-  it('requires upgrade, A2A and park repair capabilities in canary and acceptance docs', () => {
+  it('requires upgrade, A2A, repair and carpool capabilities in canary and acceptance docs', () => {
     const healthCheck = readFileSync(HEALTH_CHECK, 'utf8');
     const readme = readFileSync(README, 'utf8');
 
@@ -1334,6 +1353,7 @@ describe('enterprise one-click health contract', () => {
       'personal_enterprise_upgrade',
       'atoa',
       'park_repair_v1',
+      'park_carpool_v1',
       'data_protection_v1',
       'encrypted_attachment_storage_v1',
       'encrypted_message_storage_v1',

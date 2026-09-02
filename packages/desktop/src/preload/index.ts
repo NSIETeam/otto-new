@@ -924,6 +924,78 @@ export interface EnterprisePark {
   tenantRoomNumber?: string | null;
 }
 
+export type EnterpriseParkCarpoolTravelOption = 'driver' | 'rider' | 'shared_taxi';
+export type EnterpriseParkCarpoolCompatibleMode =
+  | 'current_rides_candidate_vehicle'
+  | 'candidate_rides_current_vehicle'
+  | 'shared_taxi';
+export interface EnterpriseParkCarpoolCoordinate { longitude: number; latitude: number }
+export interface EnterpriseParkCarpoolPlace {
+  label: string;
+  coordinate: EnterpriseParkCarpoolCoordinate;
+}
+export interface EnterpriseParkCarpoolPlaceSuggestion extends EnterpriseParkCarpoolPlace {
+  id: string;
+  address: string;
+  district: string;
+}
+export interface EnterpriseParkCarpoolIntent {
+  id: string;
+  accountId: string;
+  organizationId: string;
+  organizationName: string;
+  displayName: string;
+  parkId: string;
+  travelDate: string;
+  origin: EnterpriseParkCarpoolPlace;
+  destination: EnterpriseParkCarpoolPlace;
+  departureTime: string;
+  flexibleMinutes: number;
+  travelOptions: EnterpriseParkCarpoolTravelOption[];
+  route: {
+    provider: string;
+    distanceMeters: number;
+    durationSeconds: number;
+    polyline: EnterpriseParkCarpoolCoordinate[];
+  };
+  status: 'active' | 'paused' | 'grouped' | 'expired';
+  lastConfirmedAt: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface EnterpriseParkCarpoolMatch {
+  intentId: string;
+  displayName: string;
+  organizationName: string;
+  verifiedParkMember: true;
+  departureTime: string;
+  timeDifferenceMinutes: number;
+  overlapPercent: number;
+  commonDistanceMeters: number;
+  compatibleModes: EnterpriseParkCarpoolCompatibleMode[];
+  originArea: string;
+  destinationArea: string;
+  freshness: 'just_updated' | 'recent' | 'departing_soon';
+  explanation: string;
+}
+export interface EnterpriseParkCarpoolState {
+  capability: 'park_carpool_v1';
+  mapConfigured: boolean;
+  parkId: string;
+  currentIntent: EnterpriseParkCarpoolIntent | null;
+  matches: EnterpriseParkCarpoolMatch[];
+  generatedAt: string;
+}
+export interface EnterpriseParkCarpoolPublishInput {
+  travelDate: string;
+  origin: EnterpriseParkCarpoolPlace;
+  destination: EnterpriseParkCarpoolPlace;
+  departureTime: string;
+  flexibleMinutes: number;
+  travelOptions: EnterpriseParkCarpoolTravelOption[];
+}
+
 export interface EnterprisePublicProfileInput {
   summary: string;
   website: string;
@@ -1452,6 +1524,11 @@ const IPC = {
   enterpriseAtoaInbox: 'otto:enterprise-atoa-inbox',
   enterpriseParkServicePush: 'otto:enterprise-park-service-push',
   enterpriseParkView: 'otto:enterprise-park-view',
+  enterpriseParkCarpoolGet: 'otto:enterprise-park-carpool-get',
+  enterpriseParkCarpoolSearchPlaces: 'otto:enterprise-park-carpool-search-places',
+  enterpriseParkCarpoolPublish: 'otto:enterprise-park-carpool-publish',
+  enterpriseParkCarpoolRefresh: 'otto:enterprise-park-carpool-refresh',
+  enterpriseParkCarpoolStop: 'otto:enterprise-park-carpool-stop',
   enterpriseParkRegister: 'otto:enterprise-park-register',
   enterpriseParkJoin: 'otto:enterprise-park-join',
   enterpriseParkProfileUpdate: 'otto:enterprise-park-profile-update',
@@ -2177,6 +2254,16 @@ export interface OttoBridge {
     recipientCount?: number;
   }>;
   enterpriseParkView(): Promise<EnterprisePark | null>;
+  enterpriseParkCarpoolGet(): Promise<EnterpriseParkCarpoolState>;
+  enterpriseParkCarpoolSearchPlaces(
+    query: string,
+    city?: string,
+  ): Promise<EnterpriseParkCarpoolPlaceSuggestion[]>;
+  enterpriseParkCarpoolPublish(
+    input: EnterpriseParkCarpoolPublishInput,
+  ): Promise<EnterpriseParkCarpoolIntent>;
+  enterpriseParkCarpoolRefresh(): Promise<EnterpriseParkCarpoolState>;
+  enterpriseParkCarpoolStop(intentId: string): Promise<EnterpriseParkCarpoolIntent>;
   enterpriseParkRegister(input: {
     name: string;
     slug?: string;
@@ -3755,6 +3842,36 @@ const bridge: OttoBridge = {
     return ipcRenderer.invoke(
       IPC.enterpriseParkView,
     ) as Promise<EnterprisePark | null>;
+  },
+  enterpriseParkCarpoolGet(): Promise<EnterpriseParkCarpoolState> {
+    return ipcRenderer.invoke(IPC.enterpriseParkCarpoolGet) as Promise<EnterpriseParkCarpoolState>;
+  },
+  enterpriseParkCarpoolSearchPlaces(
+    query: string,
+    city?: string,
+  ): Promise<EnterpriseParkCarpoolPlaceSuggestion[]> {
+    return ipcRenderer.invoke(
+      IPC.enterpriseParkCarpoolSearchPlaces,
+      query,
+      city,
+    ) as Promise<EnterpriseParkCarpoolPlaceSuggestion[]>;
+  },
+  enterpriseParkCarpoolPublish(
+    input: EnterpriseParkCarpoolPublishInput,
+  ): Promise<EnterpriseParkCarpoolIntent> {
+    return ipcRenderer.invoke(
+      IPC.enterpriseParkCarpoolPublish,
+      input,
+    ) as Promise<EnterpriseParkCarpoolIntent>;
+  },
+  enterpriseParkCarpoolRefresh(): Promise<EnterpriseParkCarpoolState> {
+    return ipcRenderer.invoke(IPC.enterpriseParkCarpoolRefresh) as Promise<EnterpriseParkCarpoolState>;
+  },
+  enterpriseParkCarpoolStop(intentId: string): Promise<EnterpriseParkCarpoolIntent> {
+    return ipcRenderer.invoke(
+      IPC.enterpriseParkCarpoolStop,
+      intentId,
+    ) as Promise<EnterpriseParkCarpoolIntent>;
   },
   enterpriseParkRegister(input: {
     name: string;

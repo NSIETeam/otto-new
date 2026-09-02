@@ -851,6 +851,11 @@ const IPC = {
   enterpriseAtoaInbox: 'otto:enterprise-atoa-inbox',
   enterpriseParkServicePush: 'otto:enterprise-park-service-push',
   enterpriseParkView: 'otto:enterprise-park-view',
+  enterpriseParkCarpoolGet: 'otto:enterprise-park-carpool-get',
+  enterpriseParkCarpoolSearchPlaces: 'otto:enterprise-park-carpool-search-places',
+  enterpriseParkCarpoolPublish: 'otto:enterprise-park-carpool-publish',
+  enterpriseParkCarpoolRefresh: 'otto:enterprise-park-carpool-refresh',
+  enterpriseParkCarpoolStop: 'otto:enterprise-park-carpool-stop',
   enterpriseParkRegister: 'otto:enterprise-park-register',
   enterpriseParkJoin: 'otto:enterprise-park-join',
   enterpriseParkProfileUpdate: 'otto:enterprise-park-profile-update',
@@ -4292,6 +4297,53 @@ function registerIpc(): void {
   ipcMain.handle(IPC.enterpriseParkView, async () => {
     loadEnterpriseSession();
     return enterpriseClient.getParkView();
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolGet, async () => {
+    loadEnterpriseSession();
+    return enterpriseClient.getParkCarpoolState();
+  });
+  ipcMain.handle(
+    IPC.enterpriseParkCarpoolSearchPlaces,
+    async (_event, query: unknown, city: unknown) => {
+      loadEnterpriseSession();
+      if (typeof query !== 'string') throw new Error('地点关键词格式不正确');
+      return enterpriseClient.searchParkCarpoolPlaces(
+        query,
+        typeof city === 'string' ? city : undefined,
+      );
+    },
+  );
+  ipcMain.handle(
+    IPC.enterpriseParkCarpoolPublish,
+    async (_event, value: unknown) => {
+      loadEnterpriseSession();
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('同行意向格式不正确');
+      }
+      const body = value as Record<string, unknown>;
+      if (
+        typeof body.travelDate !== 'string'
+        || typeof body.departureTime !== 'string'
+        || typeof body.flexibleMinutes !== 'number'
+        || !Array.isArray(body.travelOptions)
+        || !body.origin || typeof body.origin !== 'object'
+        || !body.destination || typeof body.destination !== 'object'
+      ) throw new Error('同行意向缺少必填信息');
+      return enterpriseClient.publishParkCarpoolIntent(
+        body as unknown as Parameters<EnterpriseClient['publishParkCarpoolIntent']>[0],
+      );
+    },
+  );
+  ipcMain.handle(IPC.enterpriseParkCarpoolRefresh, async () => {
+    loadEnterpriseSession();
+    return enterpriseClient.refreshParkCarpoolMatches();
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolStop, async (_event, intentId: unknown) => {
+    loadEnterpriseSession();
+    if (typeof intentId !== 'string' || !intentId.trim()) {
+      throw new Error('同行意向编号不正确');
+    }
+    return enterpriseClient.stopParkCarpoolIntent(intentId);
   });
   ipcMain.handle(IPC.enterpriseParkRegister, async (_event, input: unknown) => {
     loadEnterpriseSession();

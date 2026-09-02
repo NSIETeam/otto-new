@@ -23,6 +23,7 @@ const NO_PARK: ParkModuleAuthorization = {
   hasParkContext: false,
   canViewStatistics: false,
   canViewStaffTasks: false,
+  canUseCarpool: false,
 };
 
 const INTERNAL_ADMIN_PREVIEW_FEATURES: EnterpriseOrganizationFeatures = {
@@ -45,6 +46,7 @@ const INTERNAL_ADMIN_PREVIEW_PARK: ParkModuleAuthorization = {
   hasParkContext: true,
   canViewStatistics: true,
   canViewStaffTasks: true,
+  canUseCarpool: true,
 };
 
 const INTERNAL_ADMIN_PREVIEW_PARK_IDENTITY: ModuleGroupParkIdentity = {
@@ -142,18 +144,24 @@ export function useModuleWorkspaceCapabilities(input: {
             };
           }
           let canViewStaffTasks = false;
+          let canUseCarpool = false;
           if (hasParkContext) {
-            try {
-              const tickets = await window.otto.enterpriseTicketList();
-              canViewStaffTasks = tickets.some((ticket) => ticket.isRecipient === true);
-            } catch {
-              // 工单是园区能力中的可选数据源；失败时仅隐藏员工待办入口。
+            const [ticketResult, carpoolResult] = await Promise.allSettled([
+              window.otto.enterpriseTicketList(),
+              typeof window.otto.enterpriseParkCarpoolGet === 'function'
+                ? window.otto.enterpriseParkCarpoolGet()
+                : Promise.reject(new Error('park carpool capability unavailable')),
+            ]);
+            if (ticketResult.status === 'fulfilled') {
+              canViewStaffTasks = ticketResult.value.some((ticket) => ticket.isRecipient === true);
             }
+            if (carpoolResult.status === 'fulfilled') canUseCarpool = true;
           }
           parkAuthorization = {
             hasParkContext,
             canViewStatistics: hasParkContext && Boolean(park?.isAdminOrganization),
             canViewStaffTasks,
+            canUseCarpool,
             disabledReason: hasParkContext ? undefined : '当前企业尚未绑定园区服务空间',
           };
         } catch (cause) {

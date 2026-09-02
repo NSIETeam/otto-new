@@ -34,6 +34,7 @@ function enterpriseContext(
       hasParkContext: true,
       canViewStatistics: true,
       canViewStaffTasks: true,
+      canUseCarpool: true,
     },
     customAgents: [],
     ...overrides,
@@ -130,12 +131,30 @@ describe('capability-driven availability', () => {
         hasParkContext: true,
         canViewStatistics: false,
         canViewStaffTasks: false,
+        canUseCarpool: false,
       },
     }));
 
     expect(catalog.find((module) => module.id === 'park-overview')?.availability).toBe('hidden');
     expect(catalog.find((module) => module.id === 'park-staff-tasks')?.availability).toBe('hidden');
     expect(catalog.find((module) => module.id === 'park-announcement')?.availability).toBe('available');
+    expect(catalog.find((module) => module.id === 'park-carpool')?.availability).toBe('hidden');
+  });
+
+  it('shows the carpool assistant only after the server confirms the dedicated capability', () => {
+    expect(buildModuleCatalog(enterpriseContext()).find((module) => module.id === 'park-carpool'))
+      .toMatchObject({
+        availability: 'available',
+        activation: { kind: 'dialog', dialog: 'park-carpool' },
+      });
+    expect(buildModuleCatalog(enterpriseContext({
+      parkAuthorization: {
+        hasParkContext: true,
+        canViewStatistics: true,
+        canViewStaffTasks: true,
+        canUseCarpool: false,
+      },
+    })).find((module) => module.id === 'park-carpool')?.availability).toBe('hidden');
   });
 
   it('keeps personal edition free of enterprise and park capabilities', () => {

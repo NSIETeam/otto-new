@@ -56,7 +56,7 @@ export type RecruitmentModuleTarget =
 export type ModuleActivation =
   | { kind: 'dialog'; dialog: 'park'; target: ParkModuleTarget }
   | { kind: 'dialog'; dialog: 'recruitment'; target: RecruitmentModuleTarget }
-  | { kind: 'dialog'; dialog: 'enterprise-memory' | 'auto-skill' | 'policy-intelligence' }
+  | { kind: 'dialog'; dialog: 'enterprise-memory' | 'auto-skill' | 'policy-intelligence' | 'park-carpool' }
   | { kind: 'route'; route: 'skill-zone' }
   | { kind: 'agent'; profileId: string; customAgentId?: string }
   | { kind: 'customer-module'; moduleId: string; version: string };
@@ -65,6 +65,7 @@ export interface ParkModuleAuthorization {
   hasParkContext: boolean;
   canViewStatistics: boolean;
   canViewStaffTasks: boolean;
+  canUseCarpool?: boolean;
   disabledReason?: string;
 }
 
@@ -93,6 +94,7 @@ type StaticAvailabilityRule =
   | 'park'
   | 'park-statistics'
   | 'park-staff'
+  | 'park-carpool'
   | 'recruitment'
   | 'enterprise-memory'
   | 'auto-skill'
@@ -159,6 +161,12 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
     description: '根据同园区企业主动公开的能力、产品与合作需求，生成可解释的合作线索。',
     activation: { kind: 'dialog', dialog: 'park', target: 'enterprise-star-map' },
     availabilityRule: 'park',
+  },
+  {
+    id: 'park-carpool', label: '拼车助手', category: 'park', icon: 'park-carpool',
+    description: '发布当日出行意向，匹配同园区内路线与时间相近的同行伙伴。',
+    activation: { kind: 'dialog', dialog: 'park-carpool' },
+    availabilityRule: 'park-carpool',
   },
   {
     id: 'park-staff-tasks', label: '园区待办', category: 'park', icon: 'park-staff-tasks',
@@ -268,6 +276,9 @@ function staticAvailability(
   if (rule === 'park-staff' && !context.parkAuthorization.canViewStaffTasks) {
     return 'hidden';
   }
+  if (rule === 'park-carpool' && context.parkAuthorization.canUseCarpool !== true) {
+    return 'hidden';
+  }
   return 'available';
 }
 
@@ -275,7 +286,7 @@ function staticDisabledReason(
   rule: StaticAvailabilityRule,
   context: ModuleCatalogContext,
 ): string | undefined {
-  if (rule !== 'park' || context.edition !== 'enterprise') return undefined;
+  if ((rule !== 'park' && rule !== 'park-carpool') || context.edition !== 'enterprise') return undefined;
   if (!context.organizationFeatures?.park_service) return '当前企业尚未启用园区服务';
   if (!context.parkAuthorization.hasParkContext) {
     return context.parkAuthorization.disabledReason ?? '当前企业尚未绑定园区服务空间';

@@ -35,6 +35,14 @@ beforeEach(() => {
       adminOrganizationId: 'park-admin', createdAt: '', updatedAt: '',
     })),
     enterpriseTicketList: vi.fn(async () => []),
+    enterpriseParkCarpoolGet: vi.fn(async () => ({
+      capability: 'park_carpool_v1' as const,
+      mapConfigured: true,
+      parkId: 'park-hongchuang',
+      currentIntent: null,
+      matches: [],
+      generatedAt: '2026-09-02T00:00:00.000Z',
+    })),
   });
 });
 
@@ -121,6 +129,33 @@ describe('useModuleWorkspaceCapabilities', () => {
 
     await waitFor(() => expect(view.result.current.status).toBe('ready'));
     expect(view.result.current.modules.find((module) => module.id === 'park-staff-tasks')?.availability)
+      .toBe('available');
+  });
+
+  it('exposes carpool only when its dedicated server endpoint succeeds', async () => {
+    const view = renderHook(() => useModuleWorkspaceCapabilities({
+      edition: 'enterprise', serverUrl: 'https://enterprise.example.com',
+      organizationId: 'tenant-org', accountId: 'member-a', accountIsAdmin: false,
+      profiles: BASE_AGENT_PROFILES, customAgents: [],
+    }));
+    await waitFor(() => expect(view.result.current.status).toBe('ready'));
+    expect(view.result.current.modules.find((module) => module.id === 'park-carpool')?.availability)
+      .toBe('available');
+
+    Object.assign(window.otto, {
+      enterpriseParkCarpoolGet: vi.fn(async () => {
+        throw new Error('enterprise server capability missing: park_carpool_v1');
+      }),
+    });
+    const unavailable = renderHook(() => useModuleWorkspaceCapabilities({
+      edition: 'enterprise', serverUrl: 'https://another-enterprise.example.com',
+      organizationId: 'tenant-org', accountId: 'member-a', accountIsAdmin: false,
+      profiles: BASE_AGENT_PROFILES, customAgents: [],
+    }));
+    await waitFor(() => expect(unavailable.result.current.status).toBe('ready'));
+    expect(unavailable.result.current.modules.find((module) => module.id === 'park-carpool')?.availability)
+      .toBe('hidden');
+    expect(unavailable.result.current.modules.find((module) => module.id === 'park-announcement')?.availability)
       .toBe('available');
   });
 

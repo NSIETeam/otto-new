@@ -242,6 +242,7 @@ export const ENTERPRISE_CAPABILITIES = [
   'park_tenants_v1',
   'park_tenant_profiles_v1',
   'park_service_statistics_v1',
+  'park_carpool_v1',
   'private_deployment_v1',
   'private_deployment_bootstrap_v1',
   'license_enforcement_v1',

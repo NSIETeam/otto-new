@@ -13608,6 +13608,49 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-policy-intelligence__list footer { align-items: center; justify-content: space-between !important; }
 @media (max-width: 720px) { .otto-policy-intelligence__profile { grid-template-columns: 1fr; } }
 
+.otto-carpool__hero { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 12px; padding: 18px; border: 1px solid color-mix(in srgb, var(--otto-accent) 42%, var(--otto-border)); border-radius: 16px; background: linear-gradient(135deg, color-mix(in srgb, var(--otto-accent) 13%, var(--otto-bg)), var(--otto-surface)); }
+.otto-carpool__hero > div { flex: 1; }
+.otto-carpool__hero strong { font-size: 18px; }
+.otto-carpool__hero p, .otto-carpool__chat-hint, .otto-carpool__place p, .otto-carpool__modes p, .otto-carpool__privacy { margin: 5px 0 0; color: var(--otto-text-secondary); font-size: 12px; line-height: 1.6; }
+.otto-carpool__hero > span { padding: 6px 10px; border-radius: 999px; color: var(--otto-accent); background: color-mix(in srgb, var(--otto-accent) 12%, transparent); font-size: 12px; font-weight: 700; }
+.otto-carpool__chat-hint { margin: 0 0 16px; padding: 10px 12px; border-left: 3px solid var(--otto-accent); background: color-mix(in srgb, var(--otto-accent) 6%, transparent); }
+.otto-carpool__form { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--otto-border); border-radius: 16px; background: var(--otto-surface); }
+.otto-carpool__place, .otto-carpool__modes { min-width: 0; margin: 0; padding: 0; border: 0; }
+.otto-carpool__place legend, .otto-carpool__modes legend { padding: 0; font-weight: 700; }
+.otto-carpool__place > div:first-of-type { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 8px; }
+.otto-carpool__place input, .otto-carpool__row input, .otto-carpool__row select { min-width: 0; padding: 10px 12px; border: 1px solid var(--otto-border); border-radius: 10px; color: var(--otto-text); background: var(--otto-bg); }
+.otto-carpool__place small { display: block; margin-top: 6px; color: var(--otto-danger); }
+.otto-carpool__places { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; margin-top: 8px; }
+.otto-carpool__places button { display: grid; gap: 3px; min-width: 0; padding: 10px; border: 1px solid var(--otto-border); border-radius: 10px; text-align: left; background: var(--otto-bg); }
+.otto-carpool__places button.is-selected { border-color: var(--otto-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--otto-accent) 15%, transparent); }
+.otto-carpool__places span { overflow: hidden; color: var(--otto-text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.otto-carpool__row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(150px, 1fr); gap: 12px; }
+.otto-carpool__row label { display: grid; gap: 6px; color: var(--otto-text-secondary); font-size: 12px; }
+.otto-carpool__modes > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.otto-carpool__modes label { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; align-items: start; padding: 11px; border: 1px solid var(--otto-border); border-radius: 12px; }
+.otto-carpool__modes label span { grid-column: 2; color: var(--otto-text-secondary); font-size: 11px; line-height: 1.45; }
+.otto-carpool__privacy { padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--otto-accent) 7%, var(--otto-bg)); }
+.otto-carpool__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.otto-carpool__actions .is-secondary, .otto-carpool__confirm .is-secondary { color: var(--otto-text); background: transparent; }
+.otto-carpool__confirm { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--otto-danger) 45%, var(--otto-border)); border-radius: 12px; }
+.otto-carpool__confirm p { flex: 1; margin: 0; }
+.otto-carpool__confirm div { display: flex; gap: 8px; }
+.otto-carpool__results { display: grid; gap: 10px; margin-top: 18px; }
+.otto-carpool__results > header { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+.otto-carpool__results h3, .otto-carpool__results header p { margin: 0; }
+.otto-carpool__results header p, .otto-carpool__results header > span { color: var(--otto-text-secondary); font-size: 12px; }
+.otto-carpool__results article { padding: 14px 16px; border: 1px solid var(--otto-border); border-radius: 14px; background: var(--otto-surface); }
+.otto-carpool__results h4 { margin: 8px 0 4px; }
+.otto-carpool__results article > p, .otto-carpool__results details p { margin: 5px 0; color: var(--otto-text-secondary); font-size: 12px; line-height: 1.55; }
+.otto-carpool__score { display: flex; align-items: center; justify-content: space-between; color: var(--otto-accent); }
+.otto-carpool__score span { color: var(--otto-text-secondary); font-size: 11px; }
+.otto-carpool__results details { margin-top: 9px; }
+.otto-carpool__results summary { cursor: pointer; font-size: 12px; font-weight: 700; }
+.otto-carpool__results footer { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--otto-border); color: var(--otto-text-secondary); font-size: 11px; }
+.otto-carpool__empty { padding: 28px; border: 1px dashed var(--otto-border); border-radius: 14px; text-align: center; }
+.otto-carpool__empty p { margin: 6px 0 0; color: var(--otto-text-secondary); font-size: 12px; }
+@media (max-width: 720px) { .otto-carpool__places, .otto-carpool__row, .otto-carpool__modes > div { grid-template-columns: 1fr !important; } .otto-carpool__hero, .otto-carpool__results > header { align-items: flex-start; flex-direction: column; } }
+
 /* ══════════════ Otto 官方智能招聘工作台 ══════════════ */
 .otto-recruitment-overlay { z-index: 1180; padding: 24px; }
 .otto-recruitment {

@@ -60,6 +60,7 @@ export const HONGCHUANG_PARK_SERVICE_MODULE_IDS = [
   'park-repair',
   'park-vehicle-visit',
   'park-enterprise-star-map',
+  'park-carpool',
 ] as const;
 
 export const SMART_RECRUITMENT_MODULE_IDS = [
@@ -76,11 +77,11 @@ export const OFFICIAL_MODULE_GROUP_TEMPLATES: readonly ModuleGroupTemplateDefini
       source: 'official',
       packageId: 'otto.group.hongchuang-park-services',
       publisherId: OTTO_OFFICIAL_PUBLISHER_ID,
-      version: '1.1.0',
+      version: '1.2.0',
     },
     groupId: 'park-services',
     name: '宏创园区服务',
-    description: '面向产业园区的十项官方能力，覆盖九项标准服务与可解释的企业合作星链图。',
+    description: '面向北控宏创科技园的十一项官方能力，新增隐私友好的拼车匹配助手。',
     icon: 'park-overview',
     editions: ['enterprise'],
     rows: 3,

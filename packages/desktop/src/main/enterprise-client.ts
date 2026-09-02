@@ -805,6 +805,89 @@ export interface EnterprisePark {
   tenantRoomNumber?: string | null;
 }
 
+export type EnterpriseParkCarpoolTravelOption = 'driver' | 'rider' | 'shared_taxi';
+export type EnterpriseParkCarpoolCompatibleMode =
+  | 'current_rides_candidate_vehicle'
+  | 'candidate_rides_current_vehicle'
+  | 'shared_taxi';
+
+export interface EnterpriseParkCarpoolCoordinate {
+  longitude: number;
+  latitude: number;
+}
+
+export interface EnterpriseParkCarpoolPlace {
+  label: string;
+  coordinate: EnterpriseParkCarpoolCoordinate;
+}
+
+export interface EnterpriseParkCarpoolPlaceSuggestion
+  extends EnterpriseParkCarpoolPlace {
+  id: string;
+  address: string;
+  district: string;
+}
+
+export interface EnterpriseParkCarpoolIntent {
+  id: string;
+  accountId: string;
+  organizationId: string;
+  organizationName: string;
+  displayName: string;
+  parkId: string;
+  travelDate: string;
+  origin: EnterpriseParkCarpoolPlace;
+  destination: EnterpriseParkCarpoolPlace;
+  departureTime: string;
+  flexibleMinutes: number;
+  travelOptions: EnterpriseParkCarpoolTravelOption[];
+  route: {
+    provider: string;
+    distanceMeters: number;
+    durationSeconds: number;
+    polyline: EnterpriseParkCarpoolCoordinate[];
+  };
+  status: 'active' | 'paused' | 'grouped' | 'expired';
+  lastConfirmedAt: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EnterpriseParkCarpoolMatch {
+  intentId: string;
+  displayName: string;
+  organizationName: string;
+  verifiedParkMember: true;
+  departureTime: string;
+  timeDifferenceMinutes: number;
+  overlapPercent: number;
+  commonDistanceMeters: number;
+  compatibleModes: EnterpriseParkCarpoolCompatibleMode[];
+  originArea: string;
+  destinationArea: string;
+  freshness: 'just_updated' | 'recent' | 'departing_soon';
+  explanation: string;
+}
+
+export interface EnterpriseParkCarpoolState {
+  capability: 'park_carpool_v1';
+  mapConfigured: boolean;
+  parkId: string;
+  currentIntent: EnterpriseParkCarpoolIntent | null;
+  matches: EnterpriseParkCarpoolMatch[];
+  generatedAt: string;
+}
+
+export interface EnterpriseParkCarpoolPublishInput {
+  travelDate: string;
+  origin: EnterpriseParkCarpoolPlace;
+  destination: EnterpriseParkCarpoolPlace;
+  departureTime: string;
+  flexibleMinutes: number;
+  travelOptions: EnterpriseParkCarpoolTravelOption[];
+}
+
 export interface EnterprisePublicProfileInput {
   summary: string;
   website: string;
@@ -3377,6 +3460,65 @@ export class EnterpriseClient {
         '/enterprise/park/view',
       )
     ).park;
+  }
+
+  async getParkCarpoolState(): Promise<EnterpriseParkCarpoolState> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    await this.assertCompatibleServer(this.serverUrl, ['park_carpool_v1']);
+    return (
+      await this.request<{ state: EnterpriseParkCarpoolState }>(
+        '/enterprise/park-carpool',
+      )
+    ).state;
+  }
+
+  async searchParkCarpoolPlaces(
+    query: string,
+    city?: string,
+  ): Promise<EnterpriseParkCarpoolPlaceSuggestion[]> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    await this.assertCompatibleServer(this.serverUrl, ['park_carpool_v1']);
+    const search = new URLSearchParams({ q: query });
+    if (city?.trim()) search.set('city', city.trim());
+    return (
+      await this.request<{ places: EnterpriseParkCarpoolPlaceSuggestion[] }>(
+        `/enterprise/park-carpool/places?${search.toString()}`,
+      )
+    ).places;
+  }
+
+  async publishParkCarpoolIntent(
+    input: EnterpriseParkCarpoolPublishInput,
+  ): Promise<EnterpriseParkCarpoolIntent> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    await this.assertCompatibleServer(this.serverUrl, ['park_carpool_v1']);
+    return (
+      await this.request<{ intent: EnterpriseParkCarpoolIntent }>(
+        '/enterprise/park-carpool/intents',
+        { method: 'PUT', body: JSON.stringify(input) },
+      )
+    ).intent;
+  }
+
+  async refreshParkCarpoolMatches(): Promise<EnterpriseParkCarpoolState> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    await this.assertCompatibleServer(this.serverUrl, ['park_carpool_v1']);
+    return (
+      await this.request<{ state: EnterpriseParkCarpoolState }>(
+        '/enterprise/park-carpool/matches',
+      )
+    ).state;
+  }
+
+  async stopParkCarpoolIntent(intentId: string): Promise<EnterpriseParkCarpoolIntent> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    await this.assertCompatibleServer(this.serverUrl, ['park_carpool_v1']);
+    return (
+      await this.request<{ intent: EnterpriseParkCarpoolIntent }>(
+        '/enterprise/park-carpool/intents/stop',
+        { method: 'POST', body: JSON.stringify({ intentId }) },
+      )
+    ).intent;
   }
 
   async registerPark(input: {

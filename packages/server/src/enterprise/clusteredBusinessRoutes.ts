@@ -39,6 +39,14 @@ import type {
   PostgresEnterpriseAccountView,
   PostgresEnterpriseCoreRepository,
 } from './postgresCoreRepository.js';
+import type { EncryptedFieldValue } from '../modules/data_platform/index.js';
+import {
+  createAmapParkCarpoolProvider,
+  createParkCarpoolService,
+  type ParkCarpoolIntent,
+  type ParkCarpoolPrincipal,
+  type ParkCarpoolStore,
+} from '../modules/park_carpool/index.js';
 
 type BusinessRepository = Pick<
   PostgresEnterpriseBusinessRepository,
@@ -54,6 +62,9 @@ type BusinessRepository = Pick<
   | 'listParkTenantMemberships'
   | 'listTicketRecordsForAccount'
   | 'listAddressedBusinessRecords'
+  | 'listParkCarpoolIntentRecords'
+  | 'encryptBusinessSensitiveText'
+  | 'decryptBusinessSensitiveText'
 > &
   Pick<
     PostgresEnterpriseCoreRepository,
@@ -1170,8 +1181,21 @@ async function parkAuthority(input: ClusteredBusinessRouteInput): Promise<{
   membership: PostgresBusinessRecord<ParkMembershipPayload> | null;
   resourceOrganizationId: string;
 }> {
-  const organizationId = input.member.organizationId;
-  const ownPark = await input.repository.getBusinessRecord<ParkPayload>({
+  return parkAuthorityForOrganization(
+    input.repository,
+    input.member.organizationId,
+  );
+}
+
+async function parkAuthorityForOrganization(
+  repository: BusinessRepository,
+  organizationId: string,
+): Promise<{
+  park: PostgresBusinessRecord<ParkPayload> | null;
+  membership: PostgresBusinessRecord<ParkMembershipPayload> | null;
+  resourceOrganizationId: string;
+}> {
+  const ownPark = await repository.getBusinessRecord<ParkPayload>({
     organizationId,
     domain: 'park',
     resourceType: 'park',
@@ -1185,7 +1209,7 @@ async function parkAuthority(input: ClusteredBusinessRouteInput): Promise<{
     };
   }
   const membership =
-    await input.repository.getBusinessRecord<ParkMembershipPayload>({
+    await repository.getBusinessRecord<ParkMembershipPayload>({
       organizationId,
       domain: 'park',
       resourceType: 'membership',
@@ -1198,7 +1222,7 @@ async function parkAuthority(input: ClusteredBusinessRouteInput): Promise<{
       resourceOrganizationId: organizationId,
     };
   }
-  const park = await input.repository.getBusinessRecord<ParkPayload>({
+  const park = await repository.getBusinessRecord<ParkPayload>({
     organizationId: membership.payload.adminOrganizationId,
     domain: 'park',
     resourceType: 'park',
@@ -1232,6 +1256,305 @@ function recordPayloadView<T extends Record<string, unknown>>(
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
+}
+
+type ClusteredCarpoolPayload = {
+  parkId: string;
+  travelDate: string;
+  departureTime: string;
+  flexibleMinutes: number;
+  travelOptions: ParkCarpoolIntent['travelOptions'];
+  routeDistanceMeters: number;
+  routeDurationSeconds: number;
+  sensitive: EncryptedFieldValue;
+  lastConfirmedAt: string;
+  expiresAt: string;
+  createdAt: string;
+};
+
+type ClusteredCarpoolSensitive = Pick<
+  ParkCarpoolIntent,
+  'origin' | 'destination' | 'route'
+>;
+
+function carpoolEncryptionContext(intentId: string, accountId: string): string {
+  return `park-carpool:v1:${intentId}:${accountId}`;
+}
+
+async function clusteredCarpoolPrincipal(
+  repository: BusinessRepository,
+  accountId: string,
+  organizationId?: string,
+): Promise<ParkCarpoolPrincipal | null> {
+  const account = await repository.getAccount(accountId, organizationId);
+  if (!account) return null;
+  const [organization, features, authority] = await Promise.all([
+    repository.getOrganization(account.organizationId),
+    repository.getOrganizationFeatures(account.organizationId),
+    parkAuthorityForOrganization(repository, account.organizationId),
+  ]);
+  return {
+    accountId: account.id,
+    organizationId: account.organizationId,
+    organizationName: account.organizationName,
+    displayName: account.name,
+    parkId: authority.park?.status === 'active'
+      ? authority.park.resourceId
+      : null,
+    active: account.status === 'active' && organization?.status === 'active',
+    parkServiceEnabled: features.park_services,
+  };
+}
+
+async function clusteredCarpoolIntentFromRecord(
+  repository: BusinessRepository,
+  record: PostgresBusinessRecord<ClusteredCarpoolPayload>,
+): Promise<ParkCarpoolIntent | null> {
+  const accountId = record.ownerAccountId;
+  if (!accountId) return null;
+  const principal = await clusteredCarpoolPrincipal(
+    repository,
+    accountId,
+    record.organizationId,
+  );
+  if (
+    !principal
+    || !principal.active
+    || !principal.parkServiceEnabled
+    || principal.parkId !== record.payload.parkId
+  ) return null;
+  const sensitive = JSON.parse(repository.decryptBusinessSensitiveText(
+    record.payload.sensitive,
+    carpoolEncryptionContext(record.resourceId, accountId),
+  )) as ClusteredCarpoolSensitive;
+  return {
+    id: record.resourceId,
+    accountId,
+    organizationId: record.organizationId,
+    organizationName: principal.organizationName,
+    displayName: principal.displayName,
+    parkId: record.payload.parkId,
+    travelDate: record.payload.travelDate,
+    origin: sensitive.origin,
+    destination: sensitive.destination,
+    departureTime: record.payload.departureTime,
+    flexibleMinutes: record.payload.flexibleMinutes,
+    travelOptions: record.payload.travelOptions,
+    route: {
+      ...sensitive.route,
+      distanceMeters: record.payload.routeDistanceMeters,
+      durationSeconds: record.payload.routeDurationSeconds,
+    },
+    status: record.status as ParkCarpoolIntent['status'],
+    lastConfirmedAt: record.payload.lastConfirmedAt,
+    expiresAt: record.payload.expiresAt,
+    createdAt: record.payload.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function createClusteredCarpoolStore(
+  input: ClusteredBusinessRouteInput,
+): ParkCarpoolStore {
+  return {
+    getPrincipal(accountId) {
+      return clusteredCarpoolPrincipal(input.repository, accountId);
+    },
+    async getIntent(accountId, travelDate) {
+      const account = await input.repository.getAccount(accountId);
+      if (!account) return null;
+      const records = await input.repository.listBusinessRecords<ClusteredCarpoolPayload>({
+        organizationId: account.organizationId,
+        domain: 'park',
+        resourceType: 'carpool_intent',
+        ownerAccountId: accountId,
+        statuses: ['active', 'paused', 'grouped', 'expired'],
+        limit: 30,
+      });
+      const record = records.find((candidate) => (
+        !travelDate || candidate.payload.travelDate === travelDate
+      ));
+      return record
+        ? clusteredCarpoolIntentFromRecord(input.repository, record)
+        : null;
+    },
+    async listActiveIntents(parkId, travelDate) {
+      const records = await input.repository.listParkCarpoolIntentRecords<ClusteredCarpoolPayload>({
+        parkId,
+        travelDate,
+        statuses: ['active'],
+        limit: 500,
+      });
+      const decoded = await Promise.all(records.map((record) => (
+        clusteredCarpoolIntentFromRecord(input.repository, record)
+      )));
+      return decoded.filter((intent): intent is ParkCarpoolIntent => (
+        intent !== null && intent.parkId === parkId
+      ));
+    },
+    async saveIntent(intent) {
+      const sensitive = input.repository.encryptBusinessSensitiveText(
+        JSON.stringify({
+          origin: intent.origin,
+          destination: intent.destination,
+          route: intent.route,
+        } satisfies ClusteredCarpoolSensitive),
+        carpoolEncryptionContext(intent.id, intent.accountId),
+      );
+      const payload: ClusteredCarpoolPayload = {
+        parkId: intent.parkId,
+        travelDate: intent.travelDate,
+        departureTime: intent.departureTime,
+        flexibleMinutes: intent.flexibleMinutes,
+        travelOptions: intent.travelOptions,
+        routeDistanceMeters: intent.route.distanceMeters,
+        routeDurationSeconds: intent.route.durationSeconds,
+        sensitive,
+        lastConfirmedAt: intent.lastConfirmedAt,
+        expiresAt: intent.expiresAt,
+        createdAt: intent.createdAt,
+      };
+      const identity = {
+        organizationId: intent.organizationId,
+        domain: 'park' as const,
+        resourceType: 'carpool_intent',
+        resourceId: intent.id,
+      };
+      const current = await input.repository.getBusinessRecord<ClusteredCarpoolPayload>(identity);
+      let saved: PostgresBusinessRecord<ClusteredCarpoolPayload> | null;
+      if (current) {
+        saved = await input.repository.updateBusinessRecord({
+            ...identity,
+            expectedVersion: current.version,
+            status: 'active',
+            payload,
+          });
+      } else {
+        try {
+          saved = await input.repository.createBusinessRecord({
+            ...identity,
+            ownerAccountId: intent.accountId,
+            status: 'active',
+            payload,
+          });
+        } catch (error) {
+          const raced = await input.repository.getBusinessRecord<ClusteredCarpoolPayload>(identity);
+          if (!raced || raced.ownerAccountId !== intent.accountId) throw error;
+          saved = await input.repository.updateBusinessRecord({
+            ...identity,
+            expectedVersion: raced.version,
+            status: 'active',
+            payload,
+          });
+        }
+      }
+      if (!saved) throw new Error('同行意向已被其他操作更新，请重试');
+      return (await clusteredCarpoolIntentFromRecord(input.repository, saved))!;
+    },
+    async stopIntent(accountId, intentId, stoppedAt) {
+      const account = await input.repository.getAccount(accountId);
+      if (!account) return null;
+      const identity = {
+        organizationId: account.organizationId,
+        domain: 'park' as const,
+        resourceType: 'carpool_intent',
+        resourceId: intentId,
+      };
+      const current = await input.repository.getBusinessRecord<ClusteredCarpoolPayload>(identity);
+      if (!current || current.ownerAccountId !== accountId || current.status !== 'active') return null;
+      const saved = await input.repository.updateBusinessRecord({
+        ...identity,
+        expectedVersion: current.version,
+        status: 'paused',
+        payload: { ...current.payload, lastConfirmedAt: stoppedAt },
+      });
+      return saved
+        ? clusteredCarpoolIntentFromRecord(input.repository, saved)
+        : null;
+    },
+  };
+}
+
+function clusteredCarpoolErrorStatus(error: unknown): number {
+  const message = error instanceof Error ? error.message : '';
+  if (/账号不可用|未启用园区服务|尚未绑定园区|无权/u.test(message)) return 403;
+  if (/地图服务/u.test(message)) return 503;
+  if (/其他操作更新/u.test(message)) return 409;
+  return 400;
+}
+
+async function handleParkCarpool(
+  input: ClusteredBusinessRouteInput,
+): Promise<boolean> {
+  if (!input.path.startsWith('/enterprise/park-carpool')) return false;
+  const configuredOverlap = Number(
+    process.env.OTTO_PARK_CARPOOL_MINIMUM_OVERLAP || 0.35,
+  );
+  const service = createParkCarpoolService({
+    store: createClusteredCarpoolStore(input),
+    mapProvider: createAmapParkCarpoolProvider({
+      key: process.env.OTTO_AMAP_WEB_SERVICE_KEY,
+    }),
+    createId: (accountId, travelDate) => `carpool_intent_${createHash('sha256')
+      .update(`${accountId}\0${travelDate}`, 'utf8')
+      .digest('hex')
+      .slice(0, 32)}`,
+    minimumOverlap: Number.isFinite(configuredOverlap)
+      && configuredOverlap >= 0
+      && configuredOverlap <= 1
+      ? configuredOverlap
+      : 0.35,
+  });
+  try {
+    if (
+      (input.path === '/enterprise/park-carpool'
+        || input.path === '/enterprise/park-carpool/matches')
+      && input.method === 'GET'
+    ) {
+      input.sendJson(input.res, 200, {
+        state: input.path.endsWith('/matches')
+          ? await service.refreshMatches(input.member.id)
+          : await service.getState(input.member.id),
+      });
+      return true;
+    }
+    if (input.path === '/enterprise/park-carpool/places' && input.method === 'GET') {
+      input.sendJson(input.res, 200, {
+        places: await service.searchPlaces(
+          input.member.id,
+          input.url.searchParams.get('q') ?? '',
+          input.url.searchParams.get('city') ?? undefined,
+        ),
+      });
+      return true;
+    }
+    if (input.path === '/enterprise/park-carpool/intents' && input.method === 'PUT') {
+      const body = await input.readBody(input.req);
+      input.sendJson(input.res, 200, {
+        intent: await service.publishIntent(input.member.id, body as never),
+      });
+      return true;
+    }
+    if (
+      input.path === '/enterprise/park-carpool/intents/stop'
+      && input.method === 'POST'
+    ) {
+      const body = await input.readBody(input.req);
+      input.sendJson(input.res, 200, {
+        intent: await service.stopIntent(
+          input.member.id,
+          typeof body.intentId === 'string' ? body.intentId : '',
+        ),
+      });
+      return true;
+    }
+    input.sendJson(input.res, 404, { error: 'carpool route not found' });
+  } catch (error) {
+    input.sendJson(input.res, clusteredCarpoolErrorStatus(error), {
+      error: error instanceof Error ? error.message : '拼车助手请求失败',
+    });
+  }
+  return true;
 }
 
 async function handlePark(
@@ -3272,6 +3595,7 @@ export async function handleClusteredBusinessRoute(
     (await handleKnowledge(input)) ||
     (await handleSkills(input)) ||
     (await handleEnterprisePublicProfile(input)) ||
+    (await handleParkCarpool(input)) ||
     (await handlePark(input)) ||
     (await handleTickets(input)) ||
     (await handleCommercialControl(input))

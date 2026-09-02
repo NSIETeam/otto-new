@@ -64,6 +64,7 @@ import { CustomerModuleRunDialog } from './components/CustomerModuleRunDialog.js
 import { ModuleGroupCatalogDialog } from './components/ModuleGroupCatalogDialog.js';
 import { RecruitmentWorkbenchDialog } from './components/RecruitmentWorkbenchDialog.js';
 import { PolicyIntelligenceDialog } from './components/PolicyIntelligenceDialog.js';
+import { ParkCarpoolDialog } from './components/ParkCarpoolDialog.js';
 import { ConfirmDialog } from './components/ConfirmDialog.js';
 import {
   AutoSkillDialog,
@@ -143,6 +144,10 @@ import {
   PolicyConversationRegistry,
   handlePolicyIntelligenceConversation,
 } from './policyIntelligenceConversationBridge.js';
+import {
+  ParkCarpoolConversationRegistry,
+  handleParkCarpoolConversation,
+} from './parkCarpoolConversationBridge.js';
 import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
 import { ConversationTicketLinkRegistry } from './conversationTicketLinks.js';
 import { AtoaConsultDialog } from './components/AtoaConsultDialog.js';
@@ -298,6 +303,7 @@ function OttoWorkspaceApp({
   const recruitmentActionDraftsRef = useRef(new RecruitmentConversationDraftRegistry());
   const workspaceCapabilityDraftsRef = useRef(new WorkspaceCapabilityDraftRegistry());
   const policyConversationRef = useRef(new PolicyConversationRegistry());
+  const parkCarpoolConversationRef = useRef(new ParkCarpoolConversationRegistry());
   const conversationTicketLinksRef = useRef(new ConversationTicketLinkRegistry());
   const [conversationDraftRevision, setConversationDraftRevision] = useState(0);
   const conversationDraftVaultScope = useMemo(
@@ -445,6 +451,9 @@ function OttoWorkspaceApp({
   const effectiveParkService = internalAdminPreview || (
     edition === 'enterprise' &&
     moduleCapabilities.organizationFeatures?.park_service === true
+  );
+  const effectiveParkCarpool = internalAdminPreview || moduleCapabilities.modules.some(
+    (module) => module.id === 'park-carpool' && module.availability === 'available',
   );
   const availableModuleIds = useMemo(
     () => moduleCapabilities.modules.filter((module) => module.availability === 'available').map((module) => module.id),
@@ -1410,6 +1419,20 @@ function OttoWorkspaceApp({
         && text.trim()
         && (!attachments || attachments.length === 0)
       ) {
+        if (effectiveParkCarpool && !targetDraft) {
+          const carpoolHandled = await handleParkCarpoolConversation({
+            text,
+            scopeId: `${account.organizationId}:${account.id}`,
+            sessionId,
+            registry: parkCarpoolConversationRef.current,
+            getState: window.otto.enterpriseParkCarpoolGet,
+            searchPlaces: window.otto.enterpriseParkCarpoolSearchPlaces,
+            publish: window.otto.enterpriseParkCarpoolPublish,
+            stop: window.otto.enterpriseParkCarpoolStop,
+            postMessage: actions.postLocalChatMessage,
+          });
+          if (carpoolHandled) return true;
+        }
         const handled = await handleModuleActionConversation({
           text,
           sessionId,
@@ -2322,6 +2345,11 @@ function OttoWorkspaceApp({
         open={moduleModal?.kind === 'policy-intelligence'}
         scopeId={policyScopeId}
         seedProfile={policySeedProfile}
+        onClose={() => setModuleModal(null)}
+      />
+      <ParkCarpoolDialog
+        key={`${moduleWorkspaceScopeKey}:park-carpool`}
+        open={moduleModal?.kind === 'park-carpool'}
         onClose={() => setModuleModal(null)}
       />
       <EnterpriseMemoryDialog

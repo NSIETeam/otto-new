@@ -463,6 +463,13 @@ sudoedit "$CONFIG_SNAPSHOT"
 
 这些可选项留空不会阻止报修记录写入，但对应的外部通知通道不会发送。安装器会把它们写入 `/etc/otto-enterprise/enterprise.env`，不会放进迁移包或日志。
 
+拼车助手地图能力为可选配置：
+
+- `OTTO_AMAP_WEB_SERVICE_KEY`：高德 Web 服务 Key，仅供服务端地点检索和驾车路线规划；不会通过桌面端 IPC 返回给用户；
+- `OTTO_PARK_CARPOOL_MINIMUM_OVERLAP`：路线最低重合比例，取值 `0` 至 `1`，默认 `0.35`。
+
+Key 留空时，拼车接口会明确返回“地图服务尚未配置”，客户端保留可诊断入口但禁用发布，不会降级为虚构地点、直线距离或伪造匹配百分比。出发地、目的地和路线按敏感字段加密保存；候选结果只返回概略区域、时间差和可解释重合度。
+
 跨私有服务器联邦为可选配置：
 
 - `OTTO_FEDERATION_ENABLED`：仅在已完成 Control 联邦网关注册和验签配置后设为 `1`；
@@ -544,7 +551,7 @@ curl --fail --show-error \
 - `capabilities` 同时包含 `password_auth`、`sms_registration`、
   `personal_enterprise_upgrade`、`organization_invites`、`usage_summary`、
   `admin_console`、`direct_messages`、`atoa`、`position_invites`、
-  `park_service_push`、`park_repair_v1`、`data_protection_v1`、
+  `park_service_push`、`park_repair_v1`、`park_carpool_v1`、`data_protection_v1`、
   `encrypted_attachment_storage_v1`、`encrypted_message_storage_v1`、
   `signed_telemetry_transport_v1`、`data_governance_v1`、
   `privacy_self_service`

@@ -864,6 +864,7 @@ export function createClusteredEnterpriseServer(
             'enterprise_knowledge_v1',
             'enterprise_skill_market_v1',
             'enterprise_park_services_v1',
+            'park_carpool_v1',
             'enterprise_ticketing_v1',
             'commercial_control_v1',
             'managed_model_gateway_v1',

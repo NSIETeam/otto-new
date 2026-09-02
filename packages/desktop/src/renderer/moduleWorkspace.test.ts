@@ -31,6 +31,7 @@ const enterpriseCapabilities: ModuleWorkspaceCapabilities = {
     'park-parking',
     'park-network-phone',
     'park-meeting-room',
+    'park-carpool',
     'agent-enterprise-work',
     'agent-ppt',
     'agent-meeting',
@@ -158,6 +159,35 @@ describe('module workspace parsing and normalization', () => {
       ...parsed,
       groups: parsed.groups.map((group) => ({ ...group, moduleIds: group.moduleIds.filter((id) => id !== 'policy-intelligence') })),
     }), enterpriseCapabilities).groups[0].moduleIds).not.toContain('policy-intelligence');
+  });
+
+  it('migrates an installed Hongchuang group once to add carpool without restoring it after removal', () => {
+    const parsed = parseModuleWorkspace(JSON.stringify({
+      version: 1,
+      groups: [{
+        id: 'park-services', name: '宏创园区服务', rows: 3,
+        moduleIds: ['park-announcement', 'park-repair'],
+        package: {
+          source: 'official',
+          packageId: 'otto.group.hongchuang-park-services',
+          publisherId: 'otto.official',
+          version: '1.1.0',
+        },
+      }],
+    }), enterpriseCapabilities);
+
+    expect(parsed.groups[0].moduleIds).toContain('park-carpool');
+    expect(parsed.groups[0].package?.version).toBe('1.2.0');
+
+    const afterRemoval = parseModuleWorkspace(JSON.stringify({
+      ...parsed,
+      groups: parsed.groups.map((group) => ({
+        ...group,
+        moduleIds: group.moduleIds.filter((id) => id !== 'park-carpool'),
+      })),
+    }), enterpriseCapabilities);
+    expect(afterRemoval.groups[0].moduleIds).not.toContain('park-carpool');
+    expect(afterRemoval.groups[0].package?.version).toBe('1.2.0');
   });
 
   it('deduplicates module IDs globally, repairs group IDs, clamps rows, and keeps unknown modules', () => {

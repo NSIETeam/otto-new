@@ -26,6 +26,7 @@ import {
 } from '../modules/commercial_control/index.js';
 import { handleOrganizationRoute } from '../modules/identity_organization/index.js';
 import { handleGeneralizedParkRoute } from './generalizedParkRoutes.js';
+import { handleParkCarpoolRoute } from './parkCarpoolRoutes.js';
 import { handleHealthRoute } from './healthRoutes.js';
 import { handlePrivateDeploymentBootstrapRoute } from './privateDeploymentBootstrapRoutes.js';
 import type { PrivateDeploymentBootstrapCoordinator } from '../modules/deployment_lifecycle/index.js';
@@ -290,6 +291,21 @@ export async function dispatchEnterpriseRoute({
       readBody,
       sendJSON,
       extractToken,
+    })
+  ) {
+    return true;
+  }
+
+  if (
+    await handleParkCarpoolRoute({
+      path,
+      method,
+      url,
+      req,
+      res,
+      memberAccount,
+      readBody,
+      sendJSON,
     })
   ) {
     return true;

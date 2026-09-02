@@ -73,6 +73,12 @@ import {
   PARK_STATISTICS_SCHEMA_CONTRIBUTOR,
 } from '../modules/park_services/index.js';
 import {
+  createAmapParkCarpoolProvider,
+  createParkCarpoolService,
+  createParkCarpoolSqliteStore,
+  PARK_CARPOOL_SCHEMA_CONTRIBUTOR,
+} from '../modules/park_carpool/index.js';
+import {
   createCustomerModuleMarketplaceFacade,
   CUSTOMER_MODULE_SCHEMA_CONTRIBUTOR,
   SqliteCustomerModuleMarketplaceStore,
@@ -259,7 +265,7 @@ const PRIVACY_DELETION_LEDGER_KEY_PATH = path.join(
 );
 
 export const DEFAULT_ORGANIZATION_ID = 'org_default';
-export const ENTERPRISE_SCHEMA_VERSION = 25;
+export const ENTERPRISE_SCHEMA_VERSION = 26;
 export const ORGANIZATION_INVITE_VALIDITY_MS = 7 * 24 * 60 * 60 * 1000;
 const ORGANIZATION_INVITE_ALPHABET =
   'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
@@ -286,6 +292,7 @@ function initSchema(d: Database): void {
       defaultOrganizationId: DEFAULT_ORGANIZATION_ID,
     }),
     PARK_RESOURCE_SCHEMA_CONTRIBUTOR,
+    PARK_CARPOOL_SCHEMA_CONTRIBUTOR,
     createCreditsSchemaContributor({
       defaultOrganizationId: DEFAULT_ORGANIZATION_ID,
     }),
@@ -1186,6 +1193,52 @@ export const {
   inviteCodeRawLength: INVITE_CODE_RAW_LENGTH,
   audit: logAudit,
 });
+
+const parkCarpoolStore = createParkCarpoolSqliteStore({
+  db: getDB,
+  fieldCipher,
+  getPrincipal(accountId) {
+    const account = getAccount(accountId);
+    if (!account) return null;
+    const organization = getOrganization(account.organizationId);
+    const park = getParkForOrganization(account.organizationId);
+    return {
+      accountId: account.id,
+      organizationId: account.organizationId,
+      organizationName: account.organizationName,
+      displayName: account.name,
+      parkId: park?.status === 'active' ? park.id : null,
+      active: account.status === 'active' && organization?.status === 'active',
+      parkServiceEnabled:
+        getOrganizationFeatures(account.organizationId).park_service,
+    };
+  },
+});
+
+const configuredCarpoolOverlap = Number(process.env.OTTO_PARK_CARPOOL_MINIMUM_OVERLAP || 0.35);
+const parkCarpoolService = createParkCarpoolService({
+  store: parkCarpoolStore,
+  mapProvider: createAmapParkCarpoolProvider({
+    key: process.env.OTTO_AMAP_WEB_SERVICE_KEY,
+  }),
+  createId: (accountId, travelDate) => `carpool_intent_${createHash('sha256')
+    .update(`${accountId}\0${travelDate}`, 'utf8')
+    .digest('hex')
+    .slice(0, 32)}`,
+  minimumOverlap: Number.isFinite(configuredCarpoolOverlap)
+    && configuredCarpoolOverlap >= 0
+    && configuredCarpoolOverlap <= 1
+    ? configuredCarpoolOverlap
+    : 0.35,
+});
+
+export const {
+  getState: getParkCarpoolState,
+  searchPlaces: searchParkCarpoolPlaces,
+  publishIntent: publishParkCarpoolIntent,
+  stopIntent: stopParkCarpoolIntent,
+  refreshMatches: refreshParkCarpoolMatches,
+} = parkCarpoolService;
 
 export {
   PARK_MEETING_CLOSE_MINUTES,

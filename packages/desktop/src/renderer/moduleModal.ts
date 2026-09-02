@@ -12,6 +12,7 @@ export type ModuleModalState =
   | { kind: 'enterprise-memory' }
   | { kind: 'auto-skill' }
   | { kind: 'policy-intelligence' }
+  | { kind: 'park-carpool' }
   | { kind: 'custom-expert'; expertId?: string }
   | { kind: 'customer-module'; moduleId: string; version: string }
   | null;

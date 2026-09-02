@@ -61,6 +61,7 @@ const requiredCapabilities = [
   'position_invites',
   'park_service_push',
   'park_repair_v1',
+  'park_carpool_v1',
   'data_protection_v1',
   'encrypted_attachment_storage_v1',
   'encrypted_message_storage_v1',

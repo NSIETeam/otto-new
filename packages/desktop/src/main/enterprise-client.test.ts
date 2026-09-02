@@ -2291,6 +2291,36 @@ describe('EnterpriseClient', () => {
     });
   });
 
+  it('拼车助手在能力确认后访问专用接口，且不会绕过 capability 门禁', async () => {
+    const state = {
+      capability: 'park_carpool_v1' as const,
+      mapConfigured: true,
+      parkId: 'park_hc',
+      currentIntent: null,
+      matches: [],
+      generatedAt: '2026-09-02T00:00:00.000Z',
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, {
+        ...API_V2_HEALTH,
+        capabilities: [...API_V2_HEALTH.capabilities, 'park_carpool_v1'],
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, { state }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    client.restore({ serverUrl: 'https://enterprise.otto.test', token: 'session-token' });
+
+    await expect(client.getParkCarpoolState()).resolves.toEqual(state);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://enterprise.otto.test/enterprise/park-carpool');
+
+    const missingFetch = vi.fn().mockResolvedValueOnce(jsonResponse(200, API_V2_HEALTH));
+    const missingClient = new EnterpriseClient(missingFetch as typeof fetch);
+    missingClient.restore({ serverUrl: 'https://enterprise.otto.test', token: 'session-token' });
+    await expect(missingClient.getParkCarpoolState()).rejects.toThrow(
+      '企业服务器版本过旧或功能不完整，请联系管理员升级后重试',
+    );
+    expect(missingFetch).toHaveBeenCalledOnce();
+  });
+
   it('恢复会话遇到旧服务器时保留服务器地址和 token，并返回明确的升级提示', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, { status: 'ok' }));
     const client = new EnterpriseClient(fetchMock as typeof fetch);

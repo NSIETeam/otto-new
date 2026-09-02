@@ -48,6 +48,7 @@ const MODULE_LINE_ICON_REGISTRY = {
   'park-electric-card': IconCreditCard,
   'park-repair': IconRepair,
   'park-vehicle-visit': IconCar,
+  'park-carpool': IconCar,
   'park-staff-tasks': IconClipboardList,
   'park-my-applications': IconHistory,
   'enterprise-memory': IconBrain,

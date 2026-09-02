@@ -22,6 +22,10 @@ import type {
   PostgresClientLike,
   PostgresPoolLike,
 } from '../modules/data_platform/postgresDatabaseLifecycle.js';
+import {
+  createEncryptedFieldCipher,
+  type EncryptedFieldValue,
+} from '../modules/data_platform/index.js';
 
 export const POSTGRES_BUSINESS_DOMAINS = [
   'knowledge',
@@ -218,6 +222,24 @@ export function createPostgresEnterpriseBusinessRepository(input: {
       throw new Error('account sync encryption key provider is unavailable');
     }
     return input.accountSyncKeyProvider;
+  }
+
+  function encryptBusinessSensitiveText(
+    value: string,
+    context: string,
+  ): EncryptedFieldValue {
+    return createEncryptedFieldCipher({
+      keyProvider: accountSyncKeyProvider(),
+    }).encryptText(value, context);
+  }
+
+  function decryptBusinessSensitiveText(
+    value: EncryptedFieldValue,
+    context: string,
+  ): string {
+    return createEncryptedFieldCipher({
+      keyProvider: accountSyncKeyProvider(),
+    }).decryptText(value, context);
   }
 
   async function listAccountSyncSnapshots(raw: {
@@ -621,6 +643,35 @@ export function createPostgresEnterpriseBusinessRepository(input: {
     return result.rows.map((row) => recordView<T>(row));
   }
 
+  async function listParkCarpoolIntentRecords<T = Record<string, unknown>>(raw: {
+    parkId: string;
+    travelDate: string;
+    statuses?: readonly string[];
+    limit?: number;
+  }): Promise<Array<PostgresBusinessRecord<T>>> {
+    const parkId = identifier(raw.parkId, 'park id');
+    const travelDate = raw.travelDate.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(travelDate)) {
+      throw new Error('travel date is invalid');
+    }
+    const statuses = (raw.statuses ?? ['active'])
+      .map((status) => identifier(status, 'status'))
+      .slice(0, 10);
+    const limit = Math.min(500, Math.max(1, Math.floor(raw.limit ?? 200)));
+    const result = await input.pool.query<BusinessRecordRow>(
+      `SELECT organization_id, domain, resource_type, resource_id,
+              owner_account_id, status, version, payload, created_at, updated_at
+       FROM enterprise_business_records
+       WHERE domain = 'park' AND resource_type = 'carpool_intent'
+         AND payload->>'parkId' = $1 AND payload->>'travelDate' = $2
+         AND status = ANY($3::text[])
+       ORDER BY updated_at DESC, resource_id
+       LIMIT $4`,
+      [parkId, travelDate, statuses, limit],
+    );
+    return result.rows.map((row) => recordView<T>(row));
+  }
+
   return {
     listAccountSyncSnapshots,
     putAccountSyncSnapshot,
@@ -634,6 +685,9 @@ export function createPostgresEnterpriseBusinessRepository(input: {
     listParkTenantMemberships,
     listTicketRecordsForAccount,
     listAddressedBusinessRecords,
+    listParkCarpoolIntentRecords,
+    encryptBusinessSensitiveText,
+    decryptBusinessSensitiveText,
   };
 }
 

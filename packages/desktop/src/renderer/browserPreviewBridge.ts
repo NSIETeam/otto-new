@@ -66,6 +66,10 @@ if (!previewWindow.otto) {
     assessments: [] as Array<Record<string, unknown>>,
     syncStatus: 'idle',
   };
+  let previewCarpoolState: Record<string, unknown> = {
+    capability: 'park_carpool_v1', mapConfigured: true, parkId: 'preview-park',
+    currentIntent: null, matches: [], generatedAt: new Date().toISOString(),
+  };
   const previewParkPublications: Array<Record<string, unknown>> = [
     {
       id: 'preview-publication-announcement',
@@ -756,6 +760,51 @@ if (!previewWindow.otto) {
       tenantAddress: '科技大厦 A 座',
       tenantRoomNumber: '1203 室',
     }),
+    enterpriseParkCarpoolGet: () => Promise.resolve(structuredClone(previewCarpoolState)),
+    enterpriseParkCarpoolSearchPlaces: (query: string) => Promise.resolve([{
+      id: `preview-place-${query}`,
+      label: query,
+      address: query.includes('园区') ? '七北路与宏福大道交叉口' : '北京市昌平区',
+      district: '昌平区',
+      coordinate: query.includes('园区')
+        ? { longitude: 116.372, latitude: 40.106 }
+        : { longitude: 116.317, latitude: 40.071 },
+    }]),
+    enterpriseParkCarpoolPublish: (input: Record<string, unknown>) => {
+      const now = new Date().toISOString();
+      const intent = {
+        id: 'preview-carpool-intent', accountId: previewAccount.id,
+        organizationId: previewAccount.organizationId,
+        organizationName: previewAccount.organizationName,
+        displayName: previewAccount.name, parkId: 'preview-park', ...input,
+        route: { provider: 'preview-map', distanceMeters: 12_400, durationSeconds: 1_900, polyline: [] },
+        status: 'active', lastConfirmedAt: now, expiresAt: now,
+        createdAt: now, updatedAt: now,
+      };
+      previewCarpoolState = {
+        ...previewCarpoolState,
+        currentIntent: intent,
+        matches: [{
+          intentId: 'preview-carpool-peer', displayName: '李某',
+          organizationName: '宏创智能制造', verifiedParkMember: true,
+          departureTime: input.departureTime, timeDifferenceMinutes: 10,
+          overlapPercent: 88, commonDistanceMeters: 10_500,
+          compatibleModes: ['current_rides_candidate_vehicle'],
+          originArea: '宏创园区南门', destinationArea: '回龙观',
+          freshness: 'just_updated',
+          explanation: '路线同向共同路段约 10.5 公里，路线重合度约 88%，出发时间相差 10 分钟。',
+        }],
+        generatedAt: now,
+      };
+      return Promise.resolve(structuredClone(intent));
+    },
+    enterpriseParkCarpoolRefresh: () => Promise.resolve(structuredClone(previewCarpoolState)),
+    enterpriseParkCarpoolStop: () => {
+      const current = previewCarpoolState.currentIntent as Record<string, unknown> | null;
+      const intent = current ? { ...current, status: 'paused', updatedAt: new Date().toISOString() } : null;
+      previewCarpoolState = { ...previewCarpoolState, currentIntent: intent, matches: [] };
+      return Promise.resolve(structuredClone(intent));
+    },
     enterpriseTicketList: () => Promise.resolve(previewTickets),
     enterpriseParkPublications: () => Promise.resolve(previewParkPublications.map((item) => ({ ...item }))),
     enterpriseParkPublicationRead: (publicationId: string) => {

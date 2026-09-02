@@ -8,7 +8,9 @@
  * 原文证据、缺失证据和待核实问题，最终决定必须由人工作出。
  */
 
-export const RECRUITMENT_ANALYSIS_VERSION = 'otto-recruitment-evidence-v1.0';
+import type { RecruitmentSemanticEvaluation } from '../main/recruitmentSemantic.js';
+
+export const RECRUITMENT_ANALYSIS_VERSION = 'otto-recruitment-evidence-v2.0';
 
 export interface CandidateIdentity {
   name?: string;
@@ -54,8 +56,11 @@ export interface InterviewQuestion {
   id: string;
   criterion: string;
   question: string;
+  rationale: string;
   followUps: string[];
   rubric: string;
+  goodSignals: string[];
+  concernSignals: string[];
 }
 
 export interface InterviewKit {
@@ -286,8 +291,29 @@ export function analyzeCandidateResume(input: {
 
 export function generateInterviewKit(
   analysis: CandidateResumeAnalysis,
+  semanticEvaluation?: RecruitmentSemanticEvaluation | null,
   now = new Date().toISOString(),
 ): InterviewKit {
+  if (semanticEvaluation?.interviewQuestions.length) {
+    return {
+      candidateId: analysis.candidateId,
+      questions: semanticEvaluation.interviewQuestions.map((question, index) => ({
+        id: `semantic-question-${index + 1}`,
+        criterion: question.criterion,
+        question: question.question,
+        rationale: question.rationale,
+        followUps: question.followUps,
+        rubric: [
+          question.goodSignals.length ? `积极信号：${question.goodSignals.join('；')}` : '',
+          question.concernSignals.length ? `关注信号：${question.concernSignals.join('；')}` : '',
+        ].filter(Boolean).join('。') || '结合回答中的具体情境、本人行动和结果进行人工判断。',
+        goodSignals: question.goodSignals,
+        concernSignals: question.concernSignals,
+      })),
+      generatedAt: now,
+      engineVersion: semanticEvaluation.analysisVersion,
+    };
+  }
   const targets = analysis.findings.filter((finding) => finding.status !== 'supported');
   const fallback = analysis.findings.slice(0, 3);
   return {
@@ -296,12 +322,15 @@ export function generateInterviewKit(
       id: `question-${index + 1}`,
       criterion: finding.criterion,
       question: `请用一个真实项目说明你如何满足“${finding.criterion}”。`,
+      rationale: '本地材料抽取未找到充分证据，需在面试中核实。',
       followUps: [
         '当时的背景、目标和约束是什么？',
         '哪些行动由你本人完成？',
         '结果如何量化，谁可以验证？',
       ],
       rubric: '必须包含情境、任务、本人行动、结果以及至少一项可核验事实；不得用团队成果替代个人贡献。',
+      goodSignals: ['能说明本人行动、取舍与可核验结果'],
+      concernSignals: ['只复述名词或团队成果，无法说明个人贡献'],
     })),
     generatedAt: now,
     engineVersion: RECRUITMENT_ANALYSIS_VERSION,
@@ -494,21 +523,37 @@ export function createHumanHiringDecision(input: {
 }
 
 export function buildCandidateComparisonReport(
-  analyses: readonly CandidateResumeAnalysis[],
+  entries: ReadonlyArray<
+    | CandidateResumeAnalysis
+    | { analysis: CandidateResumeAnalysis; semanticEvaluation?: RecruitmentSemanticEvaluation | null }
+  >,
 ): string {
-  const rows = analyses.map((analysis) => {
-    const supported = analysis.findings.filter((finding) => finding.status === 'supported').length;
-    const uncertain = analysis.findings.filter((finding) => finding.status === 'uncertain').length;
-    const missing = analysis.findings.filter((finding) => finding.status === 'missing').length;
-    return `| ${analysis.identity.name || analysis.candidateId} | ${supported} | ${uncertain} | ${missing} | ${analysis.questions.length} |`;
+  const rows = entries.map((entry) => {
+    const analysis = 'analysis' in entry ? entry.analysis : entry;
+    const semantic = 'analysis' in entry ? entry.semanticEvaluation : null;
+    if (!semantic) {
+      return `| ${analysis.identity.name || analysis.candidateId} | 待模型分析 | — | — | — | — |`;
+    }
+    const dimensions = new Map(semantic.dimensions.map((dimension) => [dimension.id, dimension.score]));
+    const pendingHardRequirements = semantic.hardRequirements.filter((requirement) => (
+      requirement.status !== 'met'
+    )).length;
+    return [
+      `| ${analysis.identity.name || analysis.candidateId}`,
+      `${semantic.overallScore}`,
+      `${semantic.evidenceCoverage}%`,
+      `${dimensions.get('core_capability') ?? '—'}`,
+      `${dimensions.get('delivery_impact') ?? '—'}`,
+      `${pendingHardRequirements} |`,
+    ].join(' | ');
   });
   return [
-    '# 候选人证据对比报告',
+    '# 候选人全文语义对比报告',
     '',
-    '> 本报告不提供自动排名或录用概率；所有结论必须由招聘人员复核原文证据。',
+    '> 匹配度反映当前材料与当前岗位的语义贴合程度，不是录用概率，也不会自动排名或淘汰候选人。所有判断必须由招聘人员回查原文证据。',
     '',
-    '| 候选人 | 已支持条件 | 待核实条件 | 缺失条件 | 建议追问 |',
-    '|---|---:|---:|---:|---:|',
+    '| 候选人 | 综合匹配度 | 证据覆盖 | 核心能力 | 交付结果 | 待核实硬性条件 |',
+    '|---|---:|---:|---:|---:|---:|',
     ...rows,
   ].join('\n');
 }

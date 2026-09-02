@@ -21,10 +21,15 @@ import {
   type RecruitmentAuditEvent,
   type RecruitmentWorkspaceStore,
 } from '../recruitmentWorkspaceStore.js';
+import {
+  RECRUITMENT_SEMANTIC_ANALYSIS_VERSION,
+  type RecruitmentHardRequirement,
+  type RecruitmentMatchLevel,
+} from '../../main/recruitmentSemantic.js';
 
 const TARGET_LABELS: Readonly<Record<RecruitmentModuleTarget, string>> = {
-  'resume-analysis': '简历分析',
-  'candidate-screening': '人员初步分析',
+  'resume-analysis': '批量简历',
+  'candidate-screening': '综合评估',
   'interview-audio': '音频面试分析',
   'interview-kit': '面试材料',
   'privacy-audit': '隐私与审计',
@@ -61,6 +66,22 @@ function findingStatusLabel(status: CandidateResumeAnalysis['findings'][number][
   if (status === 'supported') return '有直接证据';
   if (status === 'uncertain') return '证据不足';
   return '未找到证据';
+}
+
+function matchLevelLabel(level: RecruitmentMatchLevel): string {
+  if (level === 'strong') return '高度贴合';
+  if (level === 'good') return '较为贴合';
+  if (level === 'partial') return '部分贴合';
+  if (level === 'weak') return '贴合较弱';
+  return '材料不足';
+}
+
+function hardRequirementLabel(status: RecruitmentHardRequirement['status']): string {
+  if (status === 'met') return '已有充分证据';
+  if (status === 'partially_met') return '部分证明';
+  if (status === 'not_met') return '原文明示不满足';
+  if (status === 'not_demonstrated') return '全文尚未证明';
+  return '需要核实';
 }
 
 export function RecruitmentWorkbenchDialog({
@@ -102,7 +123,8 @@ export function RecruitmentWorkbenchDialog({
   const setCandidates = (value: React.SetStateAction<CandidateWorkspace[]>): void => workspaceStore.setCandidates(value);
   const setActiveCandidateId = (value: React.SetStateAction<string>): void => workspaceStore.setActiveCandidateId(value);
   const setAudits = (value: React.SetStateAction<RecruitmentAuditEvent[]>): void => workspaceStore.setAudits(value);
-  const [busy, setBusy] = useState<'resume' | 'audio' | 'export' | ''>('');
+  const [busy, setBusy] = useState<'resume' | 'reanalyze' | 'audio' | 'export' | ''>('');
+  const [resumeProgress, setResumeProgress] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [decision, setDecision] = useState<HiringDecisionAudit['decision']>('hold');
@@ -112,7 +134,9 @@ export function RecruitmentWorkbenchDialog({
 
   const activeCandidate = candidates.find((candidate) => candidate.id === activeCandidateId) ?? null;
   const interviewKit = useMemo(
-    () => activeCandidate ? generateInterviewKit(activeCandidate.analysis) : null,
+    () => activeCandidate
+      ? generateInterviewKit(activeCandidate.analysis, activeCandidate.semanticEvaluation)
+      : null,
     [activeCandidate],
   );
 
@@ -153,40 +177,121 @@ export function RecruitmentWorkbenchDialog({
       return;
     }
     setBusy('resume');
+    setResumeProgress('');
     try {
-      const [filePath] = await window.otto.selectFiles();
-      if (!filePath) return;
-      if (!RESUME_EXTENSIONS.has(extension(filePath))) {
-        throw new Error('简历仅支持 PDF、DOCX、TXT 或 Markdown 文件');
+      const filePaths = (await window.otto.selectFiles()).slice(0, 20);
+      if (!filePaths.length) return;
+      const imported: CandidateWorkspace[] = [];
+      let failed = 0;
+      for (let index = 0; index < filePaths.length; index += 1) {
+        const filePath = filePaths[index];
+        setResumeProgress(`正在读取并进行全文分析 ${index + 1}/${filePaths.length}`);
+        if (!RESUME_EXTENSIONS.has(extension(filePath))) {
+          failed += 1;
+          continue;
+        }
+        try {
+          const extracted = await window.otto.extractEditableDocument(filePath);
+          if (!extracted.content.trim()) throw new Error('简历中没有提取到可分析文字');
+          const candidateId = `candidate:${crypto.randomUUID()}`;
+          const consentAt = new Date().toISOString();
+          const expiresAt = new Date(Date.now() + retentionDays * 86_400_000).toISOString();
+          const analysis = analyzeCandidateResume({
+            candidateId,
+            resumeText: extracted.content,
+            jobDescription,
+          });
+          let semanticEvaluation: CandidateWorkspace['semanticEvaluation'] = null;
+          let semanticError = '';
+          try {
+            semanticEvaluation = await window.otto.recruitmentAnalyzeResume({
+              candidateId,
+              jobTitle,
+              jobDescription,
+              redactedResume: analysis.redactedResume,
+            });
+          } catch (cause) {
+            semanticError = cause instanceof Error ? cause.message : String(cause);
+          }
+          imported.push({
+            id: candidateId,
+            fileName: extracted.fileName,
+            consentAt,
+            retentionDays,
+            expiresAt,
+            analysis,
+            semanticEvaluation,
+            semanticError,
+            jobTitleSnapshot: jobTitle,
+            jobDescriptionSnapshot: jobDescription,
+            transcriptText: '',
+            transcriptReport: null,
+            transcriptWarning: '',
+            decision: null,
+          });
+          addAudit(makeAudit(
+            candidateId,
+            semanticEvaluation ? 'resume_semantic_analyzed' : 'resume_semantic_failed',
+            semanticEvaluation
+              ? `模型已阅读脱敏简历全文；材料匹配度 ${semanticEvaluation.overallScore}，证据覆盖 ${semanticEvaluation.evidenceCoverage}%。`
+              : `简历已脱敏并提取，但模型分析失败：${semanticError}`,
+            'system',
+            semanticEvaluation
+              ? `${semanticEvaluation.analysisVersion}/${semanticEvaluation.modelProvider}`
+              : null,
+          ));
+        } catch {
+          failed += 1;
+        }
       }
-      const extracted = await window.otto.extractEditableDocument(filePath);
-      if (!extracted.content.trim()) throw new Error('简历中没有提取到可分析文字');
-      const candidateId = `candidate:${crypto.randomUUID()}`;
-      const consentAt = new Date().toISOString();
-      const expiresAt = new Date(Date.now() + retentionDays * 86_400_000).toISOString();
-      const analysis = analyzeCandidateResume({
-        candidateId,
-        resumeText: extracted.content,
-        jobDescription,
-      });
-      setCandidates((current) => [...current, {
-        id: candidateId,
-        fileName: extracted.fileName,
-        consentAt,
-        retentionDays,
-        expiresAt,
-        analysis,
-        transcriptText: '',
-        transcriptReport: null,
-        transcriptWarning: '',
-        decision: null,
-      }]);
-      setActiveCandidateId(candidateId);
-      addAudit(makeAudit(candidateId, 'resume_analyzed',
-        `已解析 ${extracted.sourceFormat.toUpperCase()} 简历；身份字段与能力评价已分离，保存期限 ${retentionDays} 天。`));
-      setNotice('简历解析完成。Otto 只生成证据项和待核实问题，不会自动淘汰候选人。');
+      if (!imported.length) throw new Error('所选文件均未能提取出可分析的简历正文');
+      setCandidates((current) => [...current, ...imported]);
+      setActiveCandidateId(imported[0].id);
+      setConsentConfirmed(false);
+      const analyzed = imported.filter((candidate) => candidate.semanticEvaluation).length;
+      const modelFailed = imported.length - analyzed;
+      setNotice(
+        `已导入 ${imported.length} 份简历，${analyzed} 份完成全文智能分析`
+        + `${modelFailed ? `，${modelFailed} 份可稍后重试` : ''}`
+        + `${failed ? `；另有 ${failed} 个文件未能读取` : ''}。`,
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy('');
+      setResumeProgress('');
+    }
+  };
+
+  const reanalyzeCandidate = async (): Promise<void> => {
+    if (!activeCandidate || busy) return;
+    setBusy('reanalyze'); setError(''); setNotice('');
+    try {
+      const semanticEvaluation = await window.otto.recruitmentAnalyzeResume({
+        candidateId: activeCandidate.id,
+        jobTitle,
+        jobDescription,
+        redactedResume: activeCandidate.analysis.redactedResume,
+      });
+      updateCandidate(activeCandidate.id, (candidate) => ({
+        ...candidate,
+        semanticEvaluation,
+        semanticError: '',
+        jobTitleSnapshot: jobTitle,
+        jobDescriptionSnapshot: jobDescription,
+      }));
+      addAudit(makeAudit(
+        activeCandidate.id,
+        'resume_semantic_reanalyzed',
+        `按当前岗位说明重新执行全文语义分析；材料匹配度 ${semanticEvaluation.overallScore}，证据覆盖 ${semanticEvaluation.evidenceCoverage}%。`,
+        'system',
+        `${semanticEvaluation.analysisVersion}/${semanticEvaluation.modelProvider}`,
+      ));
+      setNotice('已按当前岗位说明重新完成全文智能分析。');
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      updateCandidate(activeCandidate.id, (candidate) => ({ ...candidate, semanticError: message }));
+      setError(`全文智能分析失败：${message}`);
     } finally {
       setBusy('');
     }
@@ -310,7 +415,7 @@ export function RecruitmentWorkbenchDialog({
               <div><strong>候选人</strong><span>{candidates.length}</span></div>
               {candidates.map((candidate) => (
                 <button key={candidate.id} type="button" className={candidate.id === activeCandidateId ? 'is-active' : ''} onClick={() => setActiveCandidateId(candidate.id)}>
-                  <strong>{candidate.analysis.identity.name || '候选人（身份已隔离）'}</strong>
+                  <span><strong>{candidate.analysis.identity.name || '候选人（身份已隔离）'}</strong>{candidate.semanticEvaluation ? <b>{candidate.semanticEvaluation.overallScore}</b> : <b className="is-pending">待分析</b>}</span>
                   <small>{candidate.fileName}</small>
                 </button>
               ))}
@@ -319,38 +424,56 @@ export function RecruitmentWorkbenchDialog({
             <main className="otto-recruitment__main">
               <div className="otto-recruitment__page-head">
                 <div><span>OTTO OFFICIAL</span><h3>{TARGET_LABELS[activeTarget]}</h3></div>
-                <small>分析引擎 {RECRUITMENT_ANALYSIS_VERSION}</small>
+                <small>全文语义引擎 {RECRUITMENT_SEMANTIC_ANALYSIS_VERSION}</small>
               </div>
 
               {activeTarget === 'resume-analysis' ? <>
                 <section className="otto-recruitment-card otto-recruitment-setup">
                   <div className="otto-recruitment-fields">
                     <label><span>岗位名称</span><input aria-label="岗位名称" value={jobTitle} onChange={(event) => setJobTitle(event.target.value)} placeholder="例如：高级前端工程师" /></label>
-                    <label className="is-wide"><span>岗位要求</span><textarea aria-label="岗位要求" rows={6} value={jobDescription} onChange={(event) => setJobDescription(event.target.value)} placeholder="逐条填写必须条件和优先条件，Otto 将按原文寻找证据。" /></label>
+                    <label className="is-wide"><span>岗位职责与要求</span><textarea aria-label="岗位要求" rows={8} value={jobDescription} onChange={(event) => setJobDescription(event.target.value)} placeholder="粘贴完整 JD，包括业务背景、主要职责、必须条件和加分项。Otto 会结合简历全文分析同义经验、实际职责、项目深度和可迁移能力。" /></label>
                     <label><span>材料保存期限</span><select aria-label="材料保存期限" value={retentionDays} onChange={(event) => setRetentionDays(Number(event.target.value))}><option value={7}>7 天</option><option value={30}>30 天</option><option value={90}>90 天</option></select></label>
                   </div>
-                  <label className="otto-recruitment-consent"><input type="checkbox" checked={consentConfirmed} onChange={(event) => setConsentConfirmed(event.target.checked)} /><span>已取得候选人对本次招聘分析及限定期限保存材料的授权</span></label>
-                  <div className="otto-recruitment-actions"><button type="button" className="is-primary" disabled={busy === 'resume'} onClick={() => void importResume()}>{busy === 'resume' ? '解析中…' : '导入 PDF / DOCX 简历'}</button></div>
+                  <label className="otto-recruitment-consent"><input type="checkbox" checked={consentConfirmed} onChange={(event) => setConsentConfirmed(event.target.checked)} /><span>已取得候选人（本批次全部人员）对招聘分析及限定期限保存材料的授权</span></label>
+                  <div className="otto-recruitment-import-note"><strong>全文智能分析</strong><span>可一次选择最多 20 份简历。身份字段先在本地隔离，再把脱敏全文交给当前模型综合分析；不会按关键词出现次数打分。</span></div>
+                  <div className="otto-recruitment-actions"><button type="button" className="is-primary" disabled={busy === 'resume'} onClick={() => void importResume()}>{busy === 'resume' ? (resumeProgress || '全文分析中…') : '批量导入并智能分析简历'}</button></div>
                 </section>
-                {activeCandidate ? <section className="otto-recruitment-card">
-                  <header><div><strong>{activeCandidate.analysis.identity.name || '候选人'}</strong><span>身份信息已与能力分析隔离</span></div><span>{activeCandidate.analysis.skills.length} 项技能 · {activeCandidate.analysis.timeline.length} 段时间线</span></header>
-                  <div className="otto-recruitment-tags">{activeCandidate.analysis.skills.map((skill) => <span key={skill}>{skill}</span>)}</div>
-                  <h4>经历原文</h4>
-                  {activeCandidate.analysis.experiences.length ? <ul>{activeCandidate.analysis.experiences.map((experience, index) => <li key={`${experience}-${index}`}>{experience}</li>)}</ul> : <p>暂未提取到明确任职经历，建议人工查看原简历。</p>}
-                  <h4>项目原文</h4>
-                  {activeCandidate.analysis.projects.length ? <ul>{activeCandidate.analysis.projects.map((project, index) => <li key={`${project}-${index}`}>{project}</li>)}</ul> : <p>暂未提取到明确项目描述，建议人工查看原简历。</p>}
+                {activeCandidate ? <section className="otto-recruitment-card otto-recruitment-material-overview">
+                  <header><div><strong>{activeCandidate.analysis.identity.name || '候选人'}</strong><span>身份信息已与模型评价输入隔离</span></div><span>{activeCandidate.analysis.timeline.length} 段时间线 · {activeCandidate.analysis.projects.length} 条项目材料</span></header>
+                  {activeCandidate.semanticEvaluation ? <div className="otto-recruitment-inline-assessment"><b>{activeCandidate.semanticEvaluation.overallScore}</b><div><strong>{matchLevelLabel(activeCandidate.semanticEvaluation.matchLevel)}</strong><p>{activeCandidate.semanticEvaluation.summary}</p></div><button type="button" disabled={busy === 'reanalyze'} onClick={() => void reanalyzeCandidate()}>{busy === 'reanalyze' ? '分析中…' : '重新分析'}</button></div> : <div className="otto-recruitment-analysis-failed"><strong>尚未获得模型分析</strong><p>{activeCandidate.semanticError || '当前模型没有返回可验证的结构化结果。'}</p><button type="button" disabled={busy === 'reanalyze'} onClick={() => void reanalyzeCandidate()}>{busy === 'reanalyze' ? '分析中…' : '重试全文分析'}</button></div>}
+                  {(activeCandidate.jobTitleSnapshot !== jobTitle || activeCandidate.jobDescriptionSnapshot !== jobDescription) ? <p className="otto-recruitment-warning">岗位说明已变化，当前结果仍对应导入时的岗位版本。请重新分析后再比较。</p> : null}
                 </section> : null}
               </> : null}
 
               {activeTarget === 'candidate-screening' ? activeCandidate ? <>
-                <div className="otto-recruitment-safety"><strong>无自动淘汰</strong><span>以下是证据状态，不是录用概率或人格评分。点击原文即可回查。</span></div>
-                <section className="otto-recruitment-findings" aria-label="岗位证据分析">
-                  {activeCandidate.analysis.findings.map((finding) => <article key={finding.id} className={`is-${finding.status}`}>
-                    <header><div><span>{finding.requirement === 'required' ? '必须条件' : '优先条件'}</span><strong>{finding.criterion}</strong></div><b>{findingStatusLabel(finding.status)} · {Math.round(finding.confidence * 100)}% 规则可信度</b></header>
-                    <p>{finding.rule}</p>
-                    {finding.evidence.length ? <blockquote>{finding.evidence.map((evidence) => <span key={`${evidence.line}-${evidence.quote}`}>第 {evidence.line} 行：{evidence.quote}</span>)}</blockquote> : <small>没有找到可直接引用的简历原文。</small>}
-                  </article>)}
-                </section>
+                <div className="otto-recruitment-safety"><strong>全文综合判断</strong><span>模型阅读完整脱敏材料，结合职责、深度、结果和可迁移能力分析。匹配度不是录用概率，不会触发自动淘汰。</span></div>
+                {activeCandidate.semanticEvaluation ? <>
+                  <section className="otto-recruitment-semantic-hero">
+                    <div className="otto-recruitment-score"><strong>{activeCandidate.semanticEvaluation.overallScore}</strong><span>材料匹配度</span><small>{matchLevelLabel(activeCandidate.semanticEvaluation.matchLevel)}</small></div>
+                    <div><header><strong>综合结论</strong><span>证据覆盖 {activeCandidate.semanticEvaluation.evidenceCoverage}%</span></header><p>{activeCandidate.semanticEvaluation.summary}</p><small>{activeCandidate.semanticEvaluation.modelProvider} · {activeCandidate.semanticEvaluation.analysisVersion}</small></div>
+                  </section>
+                  <section className="otto-recruitment-dimensions" aria-label="全文语义分析维度">
+                    {activeCandidate.semanticEvaluation.dimensions.map((dimension) => <article key={dimension.id}>
+                      <header><div><strong>{dimension.label}</strong><span>{dimension.assessment}</span></div><b>{dimension.score}</b></header>
+                      <div className="otto-recruitment-meter"><i style={{ width: `${dimension.score}%` }} /></div>
+                      {dimension.evidence.length ? <blockquote>{dimension.evidence.map((evidence) => <span key={`${evidence.line}-${evidence.quote}`}>第 {evidence.line} 行：{evidence.quote}</span>)}</blockquote> : <p className="otto-recruitment-no-evidence">没有可回查的原文证据，本维度分数已受限。</p>}
+                      {dimension.uncertainties.length ? <ul>{dimension.uncertainties.map((item) => <li key={item}>待核实：{item}</li>)}</ul> : null}
+                    </article>)}
+                  </section>
+                  <section className="otto-recruitment-insight-grid">
+                    <article><header><strong>主要优势</strong><span>{activeCandidate.semanticEvaluation.strengths.length}</span></header><ul>{activeCandidate.semanticEvaluation.strengths.map((item) => <li key={item}>{item}</li>)}</ul></article>
+                    <article><header><strong>风险与边界</strong><span>{activeCandidate.semanticEvaluation.risks.length}</span></header><ul>{activeCandidate.semanticEvaluation.risks.map((item) => <li key={item}>{item}</li>)}</ul></article>
+                    <article><header><strong>需要补充的信息</strong><span>{activeCandidate.semanticEvaluation.missingInformation.length}</span></header><ul>{activeCandidate.semanticEvaluation.missingInformation.map((item) => <li key={item}>{item}</li>)}</ul></article>
+                  </section>
+                  <section className="otto-recruitment-card">
+                    <header><div><strong>硬性条件核实</strong><span>与综合匹配度分开显示；“全文尚未证明”不等于候选人不具备</span></div></header>
+                    <div className="otto-recruitment-hard-requirements">{activeCandidate.semanticEvaluation.hardRequirements.map((requirement, index) => <article key={`${requirement.requirement}-${index}`} className={`is-${requirement.status}`}><header><strong>{requirement.requirement}</strong><b>{hardRequirementLabel(requirement.status)}</b></header><p>{requirement.explanation}</p>{requirement.evidence.length ? <blockquote>{requirement.evidence.map((evidence) => <span key={`${evidence.line}-${evidence.quote}`}>第 {evidence.line} 行：{evidence.quote}</span>)}</blockquote> : null}</article>)}</div>
+                  </section>
+                </> : <section className="otto-recruitment-analysis-failed"><strong>全文智能分析尚未完成</strong><p>{activeCandidate.semanticError || '没有可展示的模型结果，系统不会退回关键词命中评分。'}</p><button type="button" disabled={busy === 'reanalyze'} onClick={() => void reanalyzeCandidate()}>{busy === 'reanalyze' ? '分析中…' : '重试全文分析'}</button></section>}
+                {candidates.length > 1 ? <section className="otto-recruitment-card otto-recruitment-comparison">
+                  <header><div><strong>候选人横向对比</strong><span>保持导入顺序，不自动排名</span></div><span>{candidates.length} 人</span></header>
+                  <div><table><thead><tr><th>候选人</th><th>综合</th><th>核心能力</th><th>经验深度</th><th>交付结果</th><th>证据覆盖</th></tr></thead><tbody>{candidates.map((candidate) => { const evaluation = candidate.semanticEvaluation; const dimensions = new Map(evaluation?.dimensions.map((item) => [item.id, item.score]) ?? []); return <tr key={candidate.id}><td>{candidate.analysis.identity.name || candidate.fileName}</td><td>{evaluation?.overallScore ?? '待分析'}</td><td>{dimensions.get('core_capability') ?? '—'}</td><td>{dimensions.get('experience_depth') ?? '—'}</td><td>{dimensions.get('delivery_impact') ?? '—'}</td><td>{evaluation ? `${evaluation.evidenceCoverage}%` : '—'}</td></tr>; })}</tbody></table></div>
+                </section> : null}
                 <section className="otto-recruitment-card otto-recruitment-decision">
                   <header><div><strong>招聘人员最终决定</strong><span>模型无权在此提交决定</span></div>{activeCandidate.decision ? <b>已记录：{activeCandidate.decision.decision}</b> : null}</header>
                   <div><select aria-label="人工决定" value={decision} onChange={(event) => setDecision(event.target.value as HiringDecisionAudit['decision'])}><option value="shortlist">进入下一轮</option><option value="hold">待补充材料</option><option value="reject">人工淘汰</option></select><textarea aria-label="人工判断依据" rows={3} value={decisionRationale} onChange={(event) => setDecisionRationale(event.target.value)} placeholder="写明依据的岗位条件和已复核证据" /></div>
@@ -375,14 +498,14 @@ export function RecruitmentWorkbenchDialog({
                 </section> : null}
               </> : renderEmpty('请先选择候选人，再导入面试录音。') : null}
 
-              {activeTarget === 'interview-kit' ? activeCandidate && interviewKit ? <>
+              {activeTarget === 'interview-kit' ? activeCandidate?.semanticEvaluation && interviewKit ? <>
                 <section className="otto-recruitment-card">
-                  <header><div><strong>{jobTitle || '当前岗位'}面试提纲</strong><span>从证据不足项生成，不虚构候选人经历</span></div><button type="button" disabled={busy === 'export'} onClick={() => void exportText(`${jobTitle || '岗位'}-${activeCandidate.analysis.identity.name || '候选人'}-面试提纲.md`, ['# 结构化面试提纲', '', ...interviewKit.questions.flatMap((question, index) => [`## ${index + 1}. ${question.question}`, '', `评价规则：${question.rubric}`, '', ...question.followUps.map((followUp) => `- 追问：${followUp}`), ''])].join('\n'), '导出结构化面试提纲')}>导出提纲</button></header>
-                  <div className="otto-recruitment-questions">{interviewKit.questions.map((question, index) => <article key={question.id}><span>{String(index + 1).padStart(2, '0')}</span><div><strong>{question.question}</strong><p>{question.rubric}</p>{question.followUps.map((followUp) => <small key={followUp}>追问：{followUp}</small>)}</div></article>)}</div>
+                  <header><div><strong>{jobTitle || '当前岗位'}面试提纲</strong><span>模型结合候选人全文的强项、风险和信息缺口生成</span></div><button type="button" disabled={busy === 'export'} onClick={() => void exportText(`${jobTitle || '岗位'}-${activeCandidate.analysis.identity.name || '候选人'}-面试提纲.md`, ['# 智能面试提纲', '', ...interviewKit.questions.flatMap((question, index) => [`## ${index + 1}. ${question.question}`, '', `提问原因：${question.rationale}`, '', `评价提示：${question.rubric}`, '', ...question.followUps.map((followUp) => `- 追问：${followUp}`), ...question.goodSignals.map((signal) => `- 积极信号：${signal}`), ...question.concernSignals.map((signal) => `- 关注信号：${signal}`), ''])].join('\n'), '导出全文语义面试提纲')}>导出提纲</button></header>
+                  <div className="otto-recruitment-questions">{interviewKit.questions.map((question, index) => <article key={question.id}><span>{String(index + 1).padStart(2, '0')}</span><div><strong>{question.question}</strong><p>为什么问：{question.rationale}</p>{question.followUps.map((followUp) => <small key={followUp}>追问：{followUp}</small>)}<details><summary>评价参考</summary>{question.goodSignals.map((signal) => <small key={signal}>积极信号：{signal}</small>)}{question.concernSignals.map((signal) => <small key={signal}>关注信号：{signal}</small>)}</details></div></article>)}</div>
                 </section>
                 <section className="otto-recruitment-card"><header><div><strong>面试记录</strong><span>汇总时间戳原文、岗位知识证据、STAR 和人工备注</span></div><button type="button" disabled={!activeCandidate.transcriptReport || busy === 'export'} onClick={() => { if (!activeCandidate.transcriptReport) return; void exportText(`${jobTitle || '岗位'}-${activeCandidate.analysis.identity.name || '候选人'}-面试记录.md`, buildInterviewRecord({ jobTitle, candidate: activeCandidate.analysis, transcript: activeCandidate.transcriptReport, reviewerNotes: interviewNotes }), '导出面试记录'); }}>导出面试记录</button></header><textarea aria-label="面试人员备注" rows={4} value={interviewNotes} onChange={(event) => setInterviewNotes(event.target.value)} placeholder="填写招聘人员观察、待核实事项和下一轮安排。没有完成录音转写前，面试记录不会导出。" /></section>
-                <section className="otto-recruitment-card"><header><div><strong>候选人对比报告</strong><span>只对比证据覆盖情况，不自动排名</span></div><button type="button" disabled={busy === 'export'} onClick={() => void exportText(`${jobTitle || '岗位'}-候选人证据对比.md`, buildCandidateComparisonReport(candidates.map((candidate) => candidate.analysis)), '导出候选人证据对比报告')}>导出对比报告</button></header><pre className="otto-recruitment-report-preview">{buildCandidateComparisonReport(candidates.map((candidate) => candidate.analysis))}</pre></section>
-              </> : renderEmpty('完成简历分析后，Otto 会根据弱项生成结构化问题和追问。') : null}
+                <section className="otto-recruitment-card"><header><div><strong>候选人对比报告</strong><span>对比全文语义维度和证据覆盖，不自动排名</span></div><button type="button" disabled={busy === 'export'} onClick={() => void exportText(`${jobTitle || '岗位'}-候选人全文语义对比.md`, buildCandidateComparisonReport(candidates.map((candidate) => ({ analysis: candidate.analysis, semanticEvaluation: candidate.semanticEvaluation }))), '导出候选人全文语义对比报告')}>导出对比报告</button></header><pre className="otto-recruitment-report-preview">{buildCandidateComparisonReport(candidates.map((candidate) => ({ analysis: candidate.analysis, semanticEvaluation: candidate.semanticEvaluation })))}</pre></section>
+              </> : renderEmpty('完成全文智能分析后，Otto 会针对该候选人的强项、风险和信息缺口生成问题。') : null}
 
               {activeTarget === 'privacy-audit' ? <>
                 <div className="otto-recruitment-safety"><strong>敏感属性不参与评价</strong><span>姓名、联系方式、年龄、性别和出生日期与证据分析分开保存，永不作为匹配规则。</span></div>

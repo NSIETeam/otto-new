@@ -13702,6 +13702,10 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-recruitment__candidates > button.is-active { background: var(--otto-task-row-hover); }
 .otto-recruitment__candidates > button.is-active { box-shadow: inset 3px 0 0 var(--otto-accent); }
 .otto-recruitment__candidates > button strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.otto-recruitment__candidates > button > span { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.otto-recruitment__candidates > button > span strong { min-width: 0; }
+.otto-recruitment__candidates > button > span b { min-width: 32px; padding: 3px 7px; border-radius: 999px; color: var(--otto-accent); background: color-mix(in srgb, var(--otto-accent) 10%, transparent); font-size: 11px; text-align: center; }
+.otto-recruitment__candidates > button > span b.is-pending { color: var(--otto-text-tertiary); background: color-mix(in srgb, var(--otto-text) 5%, transparent); font-weight: 500; }
 .otto-recruitment__candidates > button small { max-width: 100%; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--otto-text-tertiary); }
 .otto-recruitment__candidates > p { padding: 8px; color: var(--otto-text-tertiary); font-size: 12px; line-height: 1.6; }
 .otto-recruitment__main { position: relative; min-width: 0; min-height: 0; padding: 22px 24px 38px; overflow-y: auto; }
@@ -13733,6 +13737,18 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-recruitment-consent { margin-top: 13px; display: flex; align-items: flex-start; gap: 8px; color: var(--otto-text-secondary); font-size: 12px; line-height: 1.5; }
 .otto-recruitment-consent input { margin-top: 2px; accent-color: var(--otto-accent); }
 .otto-recruitment-actions { margin-top: 13px; display: flex; justify-content: flex-end; gap: 8px; }
+.otto-recruitment-import-note { margin-top: 14px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--otto-accent) 22%, var(--otto-border)); border-radius: 10px; background: color-mix(in srgb, var(--otto-accent) 5%, transparent); display: grid; grid-template-columns: auto 1fr; gap: 9px; align-items: start; }
+.otto-recruitment-import-note strong { color: var(--otto-accent); font-size: 12px; }
+.otto-recruitment-import-note span { color: var(--otto-text-secondary); font-size: 12px; line-height: 1.55; }
+.otto-recruitment-material-overview { border-color: color-mix(in srgb, var(--otto-accent) 20%, var(--otto-border)); }
+.otto-recruitment-inline-assessment { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; }
+.otto-recruitment-inline-assessment > b { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; color: #fff; background: var(--otto-accent); font-size: 20px; }
+.otto-recruitment-inline-assessment > div { min-width: 0; }
+.otto-recruitment-inline-assessment > div strong { font-size: 13px; }
+.otto-recruitment-inline-assessment p { margin: 4px 0 0; }
+.otto-recruitment-analysis-failed { margin-bottom: 14px; padding: 18px; border: 1px solid color-mix(in srgb, #c58a24 45%, var(--otto-border)); border-radius: 13px; background: color-mix(in srgb, #c58a24 7%, var(--otto-bg)); }
+.otto-recruitment-analysis-failed p { margin: 6px 0 12px; color: var(--otto-text-secondary); }
+.otto-recruitment-analysis-failed button { min-height: 34px; padding: 0 12px; border: 1px solid var(--otto-border); border-radius: 9px; color: var(--otto-text); background: var(--otto-surface); }
 .otto-recruitment-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .otto-recruitment-tags span { padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb, var(--otto-accent) 10%, transparent); color: var(--otto-accent); font-size: 11px; }
 .otto-recruitment-safety { margin-bottom: 14px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--otto-accent) 25%, var(--otto-border)); border-radius: 11px; background: color-mix(in srgb, var(--otto-accent) 7%, transparent); display: flex; align-items: center; gap: 10px; }
@@ -13751,6 +13767,52 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-recruitment-findings article p { margin: 9px 0 5px; }
 .otto-recruitment-findings blockquote { margin: 9px 0 0; padding: 9px 11px; border-left: 2px solid var(--otto-border-strong); background: color-mix(in srgb, var(--otto-text) 3%, transparent); display: grid; gap: 5px; }
 .otto-recruitment-findings blockquote span { color: var(--otto-text-secondary); font-size: 11px; line-height: 1.55; }
+.otto-recruitment-semantic-hero { margin-bottom: 14px; padding: 20px; border: 1px solid color-mix(in srgb, var(--otto-accent) 34%, var(--otto-border)); border-radius: 15px; background: linear-gradient(135deg, color-mix(in srgb, var(--otto-accent) 10%, var(--otto-bg)), var(--otto-bg)); display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 20px; }
+.otto-recruitment-score { border-right: 1px solid color-mix(in srgb, var(--otto-accent) 25%, var(--otto-border)); display: flex; flex-direction: column; justify-content: center; }
+.otto-recruitment-score strong { color: var(--otto-accent); font-size: 40px; line-height: 1; }
+.otto-recruitment-score span { margin-top: 7px; color: var(--otto-text-secondary); font-size: 11px; }
+.otto-recruitment-score small { margin-top: 3px; color: var(--otto-text); font-weight: 650; }
+.otto-recruitment-semantic-hero > div:last-child header { display: flex; justify-content: space-between; gap: 12px; }
+.otto-recruitment-semantic-hero > div:last-child header span { color: var(--otto-text-tertiary); font-size: 11px; }
+.otto-recruitment-semantic-hero p { margin: 8px 0; color: var(--otto-text-secondary); font-size: 13px; line-height: 1.7; }
+.otto-recruitment-semantic-hero small { color: var(--otto-text-tertiary); }
+.otto-recruitment-dimensions { margin-bottom: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.otto-recruitment-dimensions article { min-width: 0; padding: 15px 16px; border: 1px solid var(--otto-border); border-radius: 12px; background: var(--otto-bg); }
+.otto-recruitment-dimensions article:first-child { grid-column: 1 / -1; }
+.otto-recruitment-dimensions article > header { display: flex; justify-content: space-between; gap: 14px; }
+.otto-recruitment-dimensions article > header > div { min-width: 0; display: grid; gap: 4px; }
+.otto-recruitment-dimensions article > header span { color: var(--otto-text-secondary); font-size: 11px; line-height: 1.5; }
+.otto-recruitment-dimensions article > header b { color: var(--otto-accent); font-size: 21px; }
+.otto-recruitment-meter { height: 5px; margin: 11px 0; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--otto-text) 7%, transparent); }
+.otto-recruitment-meter i { display: block; height: 100%; border-radius: inherit; background: var(--otto-accent); }
+.otto-recruitment-dimensions blockquote,
+.otto-recruitment-hard-requirements blockquote { margin: 8px 0 0; padding: 8px 10px; border-left: 2px solid var(--otto-accent); background: color-mix(in srgb, var(--otto-accent) 4%, transparent); display: grid; gap: 4px; }
+.otto-recruitment-dimensions blockquote span,
+.otto-recruitment-hard-requirements blockquote span { color: var(--otto-text-secondary); font-size: 11px; line-height: 1.5; }
+.otto-recruitment-dimensions ul { margin: 8px 0 0; padding-left: 18px; }
+.otto-recruitment-dimensions li { color: #9a6717; font-size: 11px; }
+.otto-recruitment-no-evidence { margin: 8px 0 0; color: #9a6717 !important; font-size: 11px !important; }
+.otto-recruitment-insight-grid { margin-bottom: 14px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.otto-recruitment-insight-grid article { padding: 14px 15px; border: 1px solid var(--otto-border); border-radius: 12px; background: var(--otto-bg); }
+.otto-recruitment-insight-grid header { display: flex; justify-content: space-between; }
+.otto-recruitment-insight-grid header span { color: var(--otto-text-tertiary); font-size: 11px; }
+.otto-recruitment-insight-grid ul { margin: 9px 0 0; padding-left: 18px; }
+.otto-recruitment-insight-grid li { color: var(--otto-text-secondary); font-size: 11px; line-height: 1.55; }
+.otto-recruitment-hard-requirements { display: grid; gap: 8px; }
+.otto-recruitment-hard-requirements article { padding: 12px 13px; border: 1px solid var(--otto-border); border-left: 3px solid var(--otto-text-tertiary); border-radius: 9px; }
+.otto-recruitment-hard-requirements article.is-met { border-left-color: #27946b; }
+.otto-recruitment-hard-requirements article.is-partially_met { border-left-color: #c58a24; }
+.otto-recruitment-hard-requirements article.is-not_met { border-left-color: #b33333; }
+.otto-recruitment-hard-requirements article.is-not_demonstrated { border-left-color: #b06a39; }
+.otto-recruitment-hard-requirements article > header { display: flex; justify-content: space-between; gap: 12px; }
+.otto-recruitment-hard-requirements article > header b { color: var(--otto-text-secondary); font-size: 11px; white-space: nowrap; }
+.otto-recruitment-hard-requirements article p { margin: 6px 0 0; }
+.otto-recruitment-comparison > div { overflow-x: auto; }
+.otto-recruitment-comparison table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.otto-recruitment-comparison th,
+.otto-recruitment-comparison td { padding: 9px 10px; border-bottom: 1px solid var(--otto-border); text-align: right; white-space: nowrap; }
+.otto-recruitment-comparison th:first-child,
+.otto-recruitment-comparison td:first-child { position: sticky; left: 0; text-align: left; background: var(--otto-bg); }
 .otto-recruitment-decision > div { display: grid; gap: 9px; }
 .otto-recruitment-decision select { width: 180px; }
 .otto-recruitment-warning { padding: 9px 11px; border-radius: 9px; background: color-mix(in srgb, #c58a24 10%, transparent); color: #9a6717 !important; }
@@ -13765,6 +13827,9 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-recruitment-questions article > div { display: grid; gap: 4px; }
 .otto-recruitment-questions article p { margin: 2px 0; }
 .otto-recruitment-questions article small { color: var(--otto-text-tertiary); }
+.otto-recruitment-questions details { margin-top: 5px; }
+.otto-recruitment-questions summary { color: var(--otto-text-secondary); font-size: 11px; cursor: pointer; }
+.otto-recruitment-questions details small { display: block; margin-top: 4px; }
 .otto-recruitment-report-preview { max-height: 230px; margin: 0; padding: 12px; overflow: auto; border-radius: 9px; background: color-mix(in srgb, var(--otto-text) 4%, transparent); color: var(--otto-text-secondary); white-space: pre-wrap; font: 11px/1.6 ui-monospace, monospace; }
 .otto-recruitment-privacy dl { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .otto-recruitment-privacy dl > div { padding: 10px; border-radius: 9px; background: color-mix(in srgb, var(--otto-text) 3%, transparent); }
@@ -13790,6 +13855,13 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
   .otto-recruitment__candidates { min-height: auto; max-height: 120px; border-right: 0; border-bottom: 1px solid var(--otto-border); }
   .otto-recruitment-fields,
   .otto-recruitment-privacy dl { grid-template-columns: 1fr; }
+  .otto-recruitment-semantic-hero,
+  .otto-recruitment-dimensions,
+  .otto-recruitment-insight-grid { grid-template-columns: 1fr; }
+  .otto-recruitment-dimensions article:first-child { grid-column: auto; }
+  .otto-recruitment-score { padding-bottom: 12px; border-right: 0; border-bottom: 1px solid var(--otto-border); }
+  .otto-recruitment-inline-assessment { grid-template-columns: auto minmax(0, 1fr); }
+  .otto-recruitment-inline-assessment button { grid-column: 1 / -1; }
   .otto-recruitment-fields label.is-wide { grid-column: auto; }
 }
 

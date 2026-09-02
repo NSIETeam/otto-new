@@ -24,6 +24,22 @@ function harness() {
   const extractDocument = vi.fn(async () => ({
     filePath: 'D:\\resume\\liming.pdf', fileName: 'liming.pdf', sourceFormat: 'pdf', content: resume,
   }));
+  const analyzeResume = vi.fn(async () => ({
+    summary: '候选人有完整的企业前端与性能优化交付经验。',
+    overallScore: 84, matchLevel: 'good' as const, evidenceCoverage: 80,
+    dimensions: [
+      { id: 'core_capability' as const, label: '核心能力', score: 88, assessment: '核心技术与岗位匹配', evidence: [{ line: 5, quote: '使用 React 和 TypeScript 开发企业系统' }], uncertainties: [] },
+      { id: 'experience_depth' as const, label: '经验深度', score: 82, assessment: '连续相关经历', evidence: [{ line: 4, quote: '2022-2026 星河科技 前端工程师' }], uncertainties: [] },
+      { id: 'delivery_impact' as const, label: '交付与结果', score: 86, assessment: '有量化结果', evidence: [{ line: 6, quote: '最终首屏时间降低 30%' }], uncertainties: [] },
+      { id: 'role_scope' as const, label: '职责范围', score: 78, assessment: '负责性能优化', evidence: [{ line: 6, quote: '负责性能优化' }], uncertainties: ['团队范围待核实'] },
+      { id: 'transferability' as const, label: '可迁移能力', score: 82, assessment: '企业应用经验可迁移', evidence: [{ line: 5, quote: '开发企业系统' }], uncertainties: [] },
+    ],
+    hardRequirements: [{ requirement: 'React 和 TypeScript', status: 'met' as const, explanation: '有项目证据', evidence: [{ line: 5, quote: '使用 React 和 TypeScript 开发企业系统' }] }],
+    strengths: ['企业应用', '性能优化'], risks: ['团队范围未知'], missingInformation: ['团队规模'],
+    interviewQuestions: [{ criterion: '性能优化', question: '请说明性能优化的指标基线和关键取舍。', rationale: '核实能力深度', followUps: ['如何验证？'], goodSignals: ['有指标和方法'], concernSignals: ['仅复述结果'] }],
+    analysisVersion: 'otto-recruitment-semantic-v2.0', modelProvider: 'test-model',
+    inputTokens: 100, outputTokens: 80, createdAt: '2026-09-02T02:00:00.000Z',
+  }));
   const transcribe = vi.fn(async () => ({
     model: 'large-v3', warning: undefined,
     segments: [
@@ -32,10 +48,10 @@ function harness() {
     ],
   }));
   return {
-    store, registry, messages, selectFiles, extractDocument, transcribe,
+    store, registry, messages, selectFiles, extractDocument, analyzeResume, transcribe,
     common: {
       text: '', sessionId: 'session-1', accountId: 'hr-1', enabled: true,
-      store, registry, selectFiles, extractDocument, transcribe,
+      store, registry, selectFiles, extractDocument, analyzeResume, transcribe,
       postMessage: (role: 'user' | 'assistant', text: string) => messages.push({ role, text }),
       now: () => Date.parse('2026-09-02T10:00:00+08:00'),
     },

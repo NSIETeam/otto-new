@@ -10,7 +10,7 @@
     "forceConsistentCasingInFileNames": true,
     "sourceMap": true,
     "outDir": "dist/preload",
-    "rootDir": "src/preload",
+    "rootDir": "src",
     "types": ["node"]
   },
   "include": ["src/preload/**/*.ts"]

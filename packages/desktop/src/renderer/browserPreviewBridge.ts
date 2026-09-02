@@ -385,6 +385,27 @@ if (!previewWindow.otto) {
     recruitmentTranscribe: () => Promise.reject(
       new Error('浏览器预览不支持本地 WhisperX 面试转写'),
     ),
+    recruitmentAnalyzeResume: () => Promise.resolve({
+      summary: '候选人具备企业应用交付经验，核心技术与岗位较贴合；仍需核实复杂系统规模和个人决策边界。',
+      overallScore: 82,
+      matchLevel: 'good' as const,
+      evidenceCoverage: 80,
+      dimensions: [
+        { id: 'core_capability' as const, label: '核心能力', score: 86, assessment: '技术实践与岗位核心工作较贴合。', evidence: [{ line: 3, quote: '使用 React 和 TypeScript 开发企业系统' }], uncertainties: [] },
+        { id: 'experience_depth' as const, label: '经验深度', score: 80, assessment: '具备连续相关经历。', evidence: [{ line: 2, quote: '2022-2026 星河科技 前端工程师' }], uncertainties: ['复杂度待核实'] },
+        { id: 'delivery_impact' as const, label: '交付与结果', score: 84, assessment: '有量化交付结果。', evidence: [{ line: 4, quote: '最终首屏时间降低 30%' }], uncertainties: [] },
+        { id: 'role_scope' as const, label: '职责范围', score: 76, assessment: '能够说明本人负责事项。', evidence: [{ line: 4, quote: '负责性能优化' }], uncertainties: ['协作范围待核实'] },
+        { id: 'transferability' as const, label: '可迁移能力', score: 79, assessment: '性能和企业应用经验可迁移。', evidence: [{ line: 3, quote: '开发企业系统' }], uncertainties: [] },
+      ],
+      hardRequirements: [{ requirement: '掌握 React 与 TypeScript', status: 'met' as const, explanation: '有直接项目实践。', evidence: [{ line: 3, quote: '使用 React 和 TypeScript 开发企业系统' }] }],
+      strengths: ['企业应用交付', '性能优化'],
+      risks: ['系统规模尚不明确'],
+      missingInformation: ['团队规模和峰值用户量'],
+      interviewQuestions: [{ criterion: '性能优化深度', question: '请说明首屏优化前后的指标口径和你的关键决策。', rationale: '核实量化结果与个人贡献', followUps: ['如何建立基线？'], goodSignals: ['能说明指标、取舍和验证方法'], concernSignals: ['只能复述团队成果'] }],
+      analysisVersion: 'otto-recruitment-semantic-v2.0',
+      modelProvider: 'browser-preview-model', inputTokens: 0, outputTokens: 0,
+      createdAt: new Date().toISOString(),
+    }),
     openExternal: () => Promise.resolve(),
     openPath: () => Promise.resolve(),
     inspectLocalPath: () =>

@@ -140,7 +140,7 @@ describe('招聘共享桥隐私边界', () => {
     const handled = await handleRecruitmentConversation({
       text: '确认选择简历', sessionId: 's1', accountId: 'a1', enabled: true,
       store: new RecruitmentWorkspaceStore(), registry: new RecruitmentConversationDraftRegistry(),
-      selectFiles, extractDocument: vi.fn(), transcribe: vi.fn(), postMessage: vi.fn(), now: () => 1_000,
+      selectFiles, extractDocument: vi.fn(), analyzeResume: vi.fn(), transcribe: vi.fn(), postMessage: vi.fn(), now: () => 1_000,
     });
     expect(handled).toBe(false);
     expect(selectFiles).not.toHaveBeenCalled();
@@ -152,7 +152,7 @@ describe('招聘共享桥隐私边界', () => {
     expect(await handleRecruitmentConversation({
       text: '分析简历', sessionId: 's1', accountId: 'a1', enabled: false,
       store: new RecruitmentWorkspaceStore(), registry: new RecruitmentConversationDraftRegistry(),
-      selectFiles, extractDocument: vi.fn(), transcribe: vi.fn(), postMessage,
+      selectFiles, extractDocument: vi.fn(), analyzeResume: vi.fn(), transcribe: vi.fn(), postMessage,
     })).toBe(false);
     expect(selectFiles).not.toHaveBeenCalled();
     expect(postMessage).not.toHaveBeenCalled();

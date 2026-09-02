@@ -184,6 +184,8 @@ import {
 } from './voiceConfig.js';
 import { transcribeAudio } from './voiceService.js';
 import { transcribeRecruitmentInterview } from './recruitment-transcription.js';
+import { createRecruitmentIntelligenceAnalyzer } from './recruitmentIntelligenceModel.js';
+import type { RecruitmentSemanticAnalysisInput } from './recruitmentSemantic.js';
 import {
   EnterpriseSkillLibrary,
   type EnterpriseSkillScope,
@@ -674,6 +676,7 @@ const IPC = {
   selectWorkspaceDirectory: 'otto:select-workspace-directory',
   getWorkspaceDirectories: 'otto:get-workspace-directories',
   recruitmentTranscribe: 'otto:recruitment-transcribe',
+  recruitmentAnalyzeResume: 'otto:recruitment-analyze-resume',
   authorizeWorkspaceDirectory: 'otto:authorize-workspace-directory',
   grantBrowserFile: 'otto:grant-browser-file',
   authorizeMessageFiles: 'otto:authorize-message-files',
@@ -898,6 +901,7 @@ const IPC = {
 const customerModuleRunControllers = new Map<string, AbortController>();
 const customerModuleModelInvoke = createCustomerModuleModelInvoke();
 const generateCustomAgent = createCustomAgentGenerator();
+const analyzeRecruitmentResume = createRecruitmentIntelligenceAnalyzer();
 let policyIntelligenceService: PolicyIntelligenceService | undefined;
 
 function getPolicyIntelligenceService(): PolicyIntelligenceService {
@@ -6185,6 +6189,23 @@ function registerIpc(): void {
         2 * 1024 * 1024 * 1024,
       );
       return transcribeRecruitmentInterview(granted.filePath);
+    },
+  );
+
+  ipcMain.handle(
+    IPC.recruitmentAnalyzeResume,
+    async (_event, value: unknown) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('招聘分析参数无效');
+      }
+      const body = value as Record<string, unknown>;
+      if (
+        typeof body.candidateId !== 'string'
+        || typeof body.jobTitle !== 'string'
+        || typeof body.jobDescription !== 'string'
+        || typeof body.redactedResume !== 'string'
+      ) throw new Error('招聘分析缺少完整岗位或简历正文');
+      return analyzeRecruitmentResume(body as unknown as RecruitmentSemanticAnalysisInput);
     },
   );
 

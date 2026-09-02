@@ -179,15 +179,15 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
     availabilityRule: 'park',
   },
   {
-    id: 'recruitment-resume-analysis', label: '简历分析', category: 'recruitment',
-    description: '解析 PDF/DOCX，按岗位要求提取可核验的匹配与缺失证据。',
+    id: 'recruitment-resume-analysis', label: '批量简历分析', category: 'recruitment',
+    description: '批量读取 PDF/DOCX，调用当前模型结合岗位说明和脱敏简历全文综合分析。',
     icon: 'generated:agent-hr-recruiting',
     activation: { kind: 'dialog', dialog: 'recruitment', target: 'resume-analysis' },
     availabilityRule: 'recruitment',
   },
   {
-    id: 'recruitment-candidate-screening', label: '人员初步分析', category: 'recruitment',
-    description: '逐条展示简历原文、匹配规则和可信度，由招聘人员最终确认。',
+    id: 'recruitment-candidate-screening', label: '候选人综合评估', category: 'recruitment',
+    description: '比较核心能力、经验深度、交付结果、职责范围和可迁移能力，并回查原文证据。',
     icon: 'generated:agent-hr-recruiting',
     activation: { kind: 'dialog', dialog: 'recruitment', target: 'candidate-screening' },
     availabilityRule: 'recruitment',
@@ -201,7 +201,7 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
   },
   {
     id: 'recruitment-interview-kit', label: '面试材料', category: 'recruitment',
-    description: '根据缺失证据生成结构化问题、追问、记录和候选人对比报告。',
+    description: '根据候选人全文中的强项、风险和信息缺口生成针对性问题、追问与评价参考。',
     icon: 'generated:agent-hr-recruiting',
     activation: { kind: 'dialog', dialog: 'recruitment', target: 'interview-kit' },
     availabilityRule: 'recruitment',

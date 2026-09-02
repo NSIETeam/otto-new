@@ -98,7 +98,7 @@ export const OFFICIAL_MODULE_GROUP_TEMPLATES: readonly ModuleGroupTemplateDefini
     },
     groupId: 'smart-recruitment',
     name: '智能招聘',
-    description: '证据化简历初筛、音频面试分析、结构化面试材料以及隐私审计；所有筛选结论均需人工确认。',
+    description: '基于脱敏简历全文进行语义评估、批量横向比较和针对性面试设计，并保留音频分析与隐私审计；所有招聘决定均由人员复核确认。',
     icon: 'generated:agent-hr-recruiting',
     editions: ['enterprise'],
     rows: 2,

@@ -3,7 +3,6 @@
  */
 
 import {
-  RECRUITMENT_ANALYSIS_VERSION,
   analyzeCandidateResume,
   analyzeInterviewTranscript,
   generateInterviewKit,
@@ -14,6 +13,10 @@ import {
   type RecruitmentWorkspaceStore,
 } from './recruitmentWorkspaceStore.js';
 import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
+import type {
+  RecruitmentSemanticAnalysisInput,
+  RecruitmentSemanticEvaluation,
+} from '../main/recruitmentSemantic.js';
 
 const RECRUITMENT_DRAFT_TTL_MS = 30 * 60 * 1_000;
 const MAX_DRAFTS = 1_000;
@@ -56,6 +59,7 @@ export interface RecruitmentConversationInput {
   registry: RecruitmentConversationDraftRegistry;
   selectFiles(): Promise<string[]>;
   extractDocument(path: string): Promise<ExtractedDocument>;
+  analyzeResume(input: RecruitmentSemanticAnalysisInput): Promise<RecruitmentSemanticEvaluation>;
   transcribe(path: string): Promise<RecruitmentTranscription>;
   postMessage(role: 'user' | 'assistant', text: string): void;
   /** UI 草稿中心确认时必须绑定当前展示的草稿，拒绝串单或过期确认。 */
@@ -86,7 +90,7 @@ function detectIntent(text: string): RecruitmentIntent | null {
   if (/(?:删除|清除).{0,8}(?:当前)?候选人(?:材料|数据|简历)/u.test(text)) return 'purge-candidate';
   if (/(?:招聘)?隐私与审计|招聘审计|候选人材料保存期限/u.test(text)) return 'privacy-audit';
   if (/(?:生成|查看|准备).{0,8}(?:面试材料|面试提纲|面试问题)/u.test(text)) return 'interview-kit';
-  if (/(?:人员初步分析|候选人初步分析|简历匹配证据|候选人证据)/u.test(text)) return 'screening';
+  if (/(?:人员初步分析|候选人初步分析|候选人综合评估|简历匹配度|简历匹配证据|候选人证据)/u.test(text)) return 'screening';
   if (/(?:分析|处理|导入).{0,8}(?:面试录音|面试音频)|音频面试分析/u.test(text)) return 'audio-import';
   if (/(?:分析|导入|处理).{0,8}(?:简历)|简历分析/u.test(text)) return 'resume-import';
   return null;
@@ -123,23 +127,26 @@ function resumeMissing(store: RecruitmentWorkspaceStore): string[] {
 }
 
 function screeningMessage(candidate: CandidateWorkspace): string {
-  const findings = candidate.analysis.findings.slice(0, 8).map((finding, index) => {
-    const status = finding.status === 'supported' ? '有直接证据'
-      : finding.status === 'uncertain' ? '证据不足' : '未找到证据';
-    const evidence = finding.evidence.length
-      ? finding.evidence.map((entry) => `第 ${entry.line} 行：${clean(entry.quote, 300)}`).join('；')
-      : '无可引用原文';
-    return `${index + 1}. **${clean(finding.criterion, 300)}**：${status}\n   原文证据：${evidence}`;
+  const evaluation = candidate.semanticEvaluation;
+  if (!evaluation) {
+    return `这份简历尚未获得全文模型分析：${clean(candidate.semanticError) || '请在右侧招聘工作台重试。'}系统不会用关键词命中结果代替智能分析。`;
+  }
+  const dimensions = evaluation.dimensions.map((dimension, index) => {
+    const evidence = dimension.evidence.length
+      ? dimension.evidence.map((entry) => `第 ${entry.line} 行：${clean(entry.quote, 300)}`).join('；')
+      : '无可回查原文，本维度分数已受限';
+    return `${index + 1}. **${dimension.label} ${dimension.score}**：${clean(dimension.assessment, 500)}\n   原文证据：${evidence}`;
   });
-  if (findings.length === 0) return '当前岗位没有可分析的结构化要求，请先补充岗位要求。';
-  return `候选人岗位证据分析：\n\n${findings.join('\n\n')}\n\n以上只反映材料中的可核验证据；最终招聘决定必须由招聘人员作出。`;
+  return `候选人全文综合分析：**${evaluation.overallScore}/100**（证据覆盖 ${evaluation.evidenceCoverage}%）\n\n${clean(evaluation.summary, 800)}\n\n${dimensions.join('\n\n')}\n\n该分数是当前材料与当前岗位的贴合度，不是录用概率；最终招聘决定必须由招聘人员作出并复核原文。`;
 }
 
 function interviewKitMessage(candidate: CandidateWorkspace): string {
-  const kit = generateInterviewKit(candidate.analysis);
-  if (kit.questions.length === 0) return '当前没有可生成的面试问题，请先补充岗位要求。';
+  if (!candidate.semanticEvaluation) return '请先完成该候选人的全文智能分析，再生成针对性面试问题。';
+  const kit = generateInterviewKit(candidate.analysis, candidate.semanticEvaluation);
+  if (kit.questions.length === 0) return '模型没有返回可用的针对性问题，请在右侧工作台重新分析。';
   const questions = kit.questions.slice(0, 8).map((question, index) => [
     `${index + 1}. **${clean(question.question, 500)}**`,
+    `   - 提问原因：${clean(question.rationale, 500)}`,
     ...question.followUps.map((followUp) => `   - 追问：${clean(followUp, 300)}`),
     `   - 评价规则：${clean(question.rubric, 500)}`,
   ].join('\n'));
@@ -212,6 +219,12 @@ async function importResume(
     jobDescription: state.jobDescription,
     now: new Date(now).toISOString(),
   });
+  const semanticEvaluation = await input.analyzeResume({
+    candidateId,
+    jobTitle: state.jobTitle,
+    jobDescription: state.jobDescription,
+    redactedResume: analysis.redactedResume,
+  });
   const candidate: CandidateWorkspace = {
     id: candidateId,
     fileName: clean(extracted.fileName, 300),
@@ -219,6 +232,10 @@ async function importResume(
     retentionDays: state.retentionDays,
     expiresAt: new Date(now + state.retentionDays * 86_400_000).toISOString(),
     analysis,
+    semanticEvaluation,
+    semanticError: '',
+    jobTitleSnapshot: state.jobTitle,
+    jobDescriptionSnapshot: state.jobDescription,
     transcriptText: '',
     transcriptReport: null,
     transcriptWarning: '',
@@ -234,12 +251,10 @@ async function importResume(
     'resume_analyzed',
     `已解析 ${clean(extracted.sourceFormat, 20).toUpperCase()} 简历；身份字段与能力评价已分离，保存期限 ${state.retentionDays} 天。`,
     'system',
-    RECRUITMENT_ANALYSIS_VERSION,
+    `${semanticEvaluation.analysisVersion}/${semanticEvaluation.modelProvider}`,
   ), ...current]);
   input.registry.clear(draft.sessionId, draft.accountId);
-  const supported = analysis.findings.filter((finding) => finding.status === 'supported').length;
-  const pending = analysis.findings.length - supported;
-  input.postMessage('assistant', `简历分析完成并已同步到右侧智能招聘工作区：找到 ${supported} 项直接证据，${pending} 项需要补充或核实。手机号、邮箱等身份字段没有进入能力评价结果。`);
+  input.postMessage('assistant', `简历分析完成：全文智能结果已同步到右侧招聘工作区。当前材料匹配度 ${semanticEvaluation.overallScore}/100，证据覆盖 ${semanticEvaluation.evidenceCoverage}%。模型阅读了脱敏后的完整简历，而不是按关键词出现次数打分；手机号、邮箱等身份字段没有进入评价输入。`);
 }
 
 async function importAudio(

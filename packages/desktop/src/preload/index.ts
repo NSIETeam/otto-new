@@ -47,6 +47,10 @@ import {
   sendAuthorizedFileFrame,
 } from './outbound-file-authorization.js';
 import { ReconnectFrameQueue } from './outbound-frame-queue.js';
+import type {
+  RecruitmentSemanticAnalysisInput,
+  RecruitmentSemanticEvaluation,
+} from '../main/recruitmentSemantic.js';
 
 /**
  * 飞书守护状态（main 从 server /health 透传；renderer 徽标据此渲染）。
@@ -1407,6 +1411,7 @@ const IPC = {
   selectWorkspaceDirectory: 'otto:select-workspace-directory',
   getWorkspaceDirectories: 'otto:get-workspace-directories',
   recruitmentTranscribe: 'otto:recruitment-transcribe',
+  recruitmentAnalyzeResume: 'otto:recruitment-analyze-resume',
   authorizeWorkspaceDirectory: 'otto:authorize-workspace-directory',
   grantBrowserFile: 'otto:grant-browser-file',
   authorizeMessageFiles: 'otto:authorize-message-files',
@@ -1693,6 +1698,10 @@ export interface OttoBridge {
   selectWorkspaceDirectory(): Promise<string | null>;
   /** 使用本地 WhisperX 生成带时间戳的面试转写，并在可用时区分说话人。 */
   recruitmentTranscribe(filePath: string): Promise<RecruitmentTranscriptResult>;
+  /** 使用当前配置模型阅读脱敏后的完整简历，返回带原文证据的岗位语义分析。 */
+  recruitmentAnalyzeResume(
+    input: RecruitmentSemanticAnalysisInput,
+  ): Promise<RecruitmentSemanticEvaluation>;
   /**
    * Electron 32+ 不再提供 File.path；通过 webUtils 恢复用户拖入/浏览器选择文件的
    * 真实本地路径。只接受浏览器 File 对象，不能用任意字符串伪造路径。
@@ -2696,6 +2705,15 @@ const bridge: OttoBridge = {
 
   recruitmentTranscribe(filePath: string): Promise<RecruitmentTranscriptResult> {
     return ipcRenderer.invoke(IPC.recruitmentTranscribe, filePath) as Promise<RecruitmentTranscriptResult>;
+  },
+
+  recruitmentAnalyzeResume(
+    input: RecruitmentSemanticAnalysisInput,
+  ): Promise<RecruitmentSemanticEvaluation> {
+    return ipcRenderer.invoke(
+      IPC.recruitmentAnalyzeResume,
+      input,
+    ) as Promise<RecruitmentSemanticEvaluation>;
   },
 
   getPathForFile(file: File): string {

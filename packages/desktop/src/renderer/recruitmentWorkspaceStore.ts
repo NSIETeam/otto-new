@@ -7,6 +7,7 @@ import type {
   HiringDecisionAudit,
   InterviewTranscriptAnalysis,
 } from './recruitmentAnalysis.js';
+import type { RecruitmentSemanticEvaluation } from '../main/recruitmentSemantic.js';
 
 export interface RecruitmentAuditEvent {
   id: string;
@@ -25,6 +26,10 @@ export interface CandidateWorkspace {
   retentionDays: number;
   expiresAt: string;
   analysis: CandidateResumeAnalysis;
+  semanticEvaluation?: RecruitmentSemanticEvaluation | null;
+  semanticError?: string;
+  jobTitleSnapshot?: string;
+  jobDescriptionSnapshot?: string;
   transcriptText: string;
   transcriptReport: InterviewTranscriptAnalysis | null;
   transcriptWarning: string;

@@ -1537,6 +1537,7 @@ function OttoWorkspaceApp({
           registry: recruitmentActionDraftsRef.current,
           selectFiles: window.otto.selectFiles,
           extractDocument: window.otto.extractEditableDocument,
+          analyzeResume: window.otto.recruitmentAnalyzeResume,
           transcribe: window.otto.recruitmentTranscribe,
           postMessage: actions.postLocalChatMessage,
           expectedDraftId: targetDraft?.source === 'recruitment' ? targetDraft.id : undefined,

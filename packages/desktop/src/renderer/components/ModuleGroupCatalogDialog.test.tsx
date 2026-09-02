@@ -127,8 +127,8 @@ describe('ModuleGroupCatalogDialog', () => {
     const card = within(dialog).getByRole('heading', { name: '智能招聘' }).closest('article');
     if (!card) throw new Error('missing recruitment template card');
 
-    expect(within(card).getByText('简历分析')).toBeTruthy();
-    expect(within(card).getByText('人员初步分析')).toBeTruthy();
+    expect(within(card).getByText('批量简历分析')).toBeTruthy();
+    expect(within(card).getByText('候选人综合评估')).toBeTruthy();
     expect(within(card).getByText('音频面试分析')).toBeTruthy();
     expect(within(card).getByText('面试材料')).toBeTruthy();
     expect(within(card).getByText('隐私与审计')).toBeTruthy();

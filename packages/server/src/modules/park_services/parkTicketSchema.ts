@@ -73,6 +73,8 @@ function ensureTicketColumns(database: DatabaseHandle): void {
     'application_number',
     'creator_update_at',
     'creator_update_read_at',
+    'idempotency_key',
+    'idempotency_request_hash',
   ]) {
     if (!existing.has(name)) {
       database.exec(`ALTER TABLE it_tickets ADD COLUMN ${name} TEXT`);
@@ -376,6 +378,8 @@ export function createParkTicketSchemaContributor(input: {
           closed_at TEXT,
           creator_update_at TEXT,
           creator_update_read_at TEXT,
+          idempotency_key TEXT,
+          idempotency_request_hash TEXT,
           status TEXT NOT NULL DEFAULT '待接单',
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -480,6 +484,9 @@ export function createParkTicketSchemaContributor(input: {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_it_tickets_park_application_number
           ON it_tickets(park_id, application_number)
           WHERE park_id IS NOT NULL AND application_number IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_it_tickets_creator_idempotency
+          ON it_tickets(created_by_account_id, idempotency_key)
+          WHERE idempotency_key IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_ticket_notifications_recipient
           ON ticket_notifications(recipient_account_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_ticket_notification_tasks_due

@@ -24,6 +24,12 @@ import type {
   PostgresEnterpriseBusinessRepository,
 } from './postgresBusinessRepository.js';
 import type { OrganizationFeatureKey } from '../productModules.js';
+import { isCrossOriginBrowserRequest } from './enterpriseHttpSecurity.js';
+import {
+  readTicketIdempotencyHeader,
+  ticketIdempotencyResourceId,
+  ticketRequestFingerprint,
+} from './ticketIdempotency.js';
 import { inferParkPartnerships } from '../modules/park_services/parkPartnershipInference.js';
 import type {
   EnterprisePublicProfile,
@@ -2232,6 +2238,8 @@ async function handlePark(
 }
 
 type TicketPayload = {
+  idempotencyKey: string | null;
+  idempotencyRequestHash: string | null;
   createdByAccountId: string;
   createdByName: string;
   sourceOrganizationId: string;
@@ -2250,10 +2258,15 @@ type TicketPayload = {
 };
 
 function ticketView(record: PostgresBusinessRecord<TicketPayload>) {
+  const {
+    idempotencyKey: _idempotencyKey,
+    idempotencyRequestHash: _idempotencyRequestHash,
+    ...payload
+  } = record.payload;
   return {
     id: record.resourceId,
     organizationId: record.payload.sourceOrganizationId,
-    ...record.payload,
+    ...payload,
     status: record.status,
     version: record.version,
     createdAt: record.createdAt,
@@ -2284,9 +2297,23 @@ async function handleTickets(
   ) {
     return false;
   }
+  if (input.method === 'POST' && isCrossOriginBrowserRequest(input.req)) {
+    input.sendJson(input.res, 403, {
+      error: 'forbidden: cross-origin ticket request',
+    });
+    return true;
+  }
   const organizationId = input.member.organizationId;
 
   if (input.path === '/enterprise/tickets' && input.method === 'POST') {
+    const idempotency = readTicketIdempotencyHeader(input.req);
+    if (!idempotency.valid) {
+      input.sendJson(input.res, 400, {
+        error: 'invalid ticket idempotency key',
+        code: 'invalid_idempotency_key',
+      });
+      return true;
+    }
     const body = await input.readBody(input.req);
     const title = text(body.title, 'ticket title', 200)!;
     const description = text(body.description, 'ticket description', 2_000)!;
@@ -2346,30 +2373,99 @@ async function handleTickets(
               .map(([key, value]) => [key.slice(0, 80), value.slice(0, 2_000)]),
           )
         : {};
-    const record = await input.repository.createBusinessRecord<TicketPayload>({
-      organizationId,
-      domain: 'ticketing',
-      resourceType: 'ticket',
-      ownerAccountId: input.member.id,
-      status: 'open',
-      payload: {
-        createdByAccountId: input.member.id,
-        createdByName: input.member.name,
-        sourceOrganizationId: organizationId,
-        targetOrganizationId,
-        parkId: authority?.park?.resourceId ?? null,
-        serviceId,
-        title,
-        description,
-        targetTags,
-        formData,
-        assigneeAccountIds: assignees,
-        participantAccountIds: [input.member.id, ...assignees],
-        unreadAccountIds: assignees,
-        responseType: null,
-        responseText: null,
-      },
-    });
+    const idempotencyRequestHash = idempotency.key
+      ? ticketRequestFingerprint({
+          serviceId,
+          title,
+          description,
+          targetTags,
+          formData,
+        })
+      : null;
+    const payload: TicketPayload = {
+      idempotencyKey: idempotency.key,
+      idempotencyRequestHash,
+      createdByAccountId: input.member.id,
+      createdByName: input.member.name,
+      sourceOrganizationId: organizationId,
+      targetOrganizationId,
+      parkId: authority?.park?.resourceId ?? null,
+      serviceId,
+      title,
+      description,
+      targetTags,
+      formData,
+      assigneeAccountIds: assignees,
+      participantAccountIds: [input.member.id, ...assignees],
+      unreadAccountIds: assignees,
+      responseType: null,
+      responseText: null,
+    };
+    const resourceId = idempotency.key
+      ? ticketIdempotencyResourceId({
+          organizationId,
+          accountId: input.member.id,
+          key: idempotency.key,
+        })
+      : undefined;
+    const replay = resourceId
+      ? await input.repository.getBusinessRecord<TicketPayload>({
+          organizationId,
+          domain: 'ticketing',
+          resourceType: 'ticket',
+          resourceId,
+        })
+      : null;
+    if (replay) {
+      if (
+        replay.payload.idempotencyKey !== idempotency.key
+        || replay.payload.idempotencyRequestHash !== idempotencyRequestHash
+      ) {
+        input.sendJson(input.res, 409, {
+          error: 'idempotency key was already used for another ticket request',
+          code: 'idempotency_key_conflict',
+        });
+        return true;
+      }
+      input.sendJson(input.res, 200, {
+        ticket: ticketView(replay),
+        idempotentReplay: true,
+      });
+      return true;
+    }
+    let record: PostgresBusinessRecord<TicketPayload>;
+    try {
+      record = await input.repository.createBusinessRecord<TicketPayload>({
+        organizationId,
+        domain: 'ticketing',
+        resourceType: 'ticket',
+        resourceId,
+        ownerAccountId: input.member.id,
+        status: 'open',
+        payload,
+      });
+    } catch (error) {
+      const raced = resourceId
+        ? await input.repository.getBusinessRecord<TicketPayload>({
+            organizationId,
+            domain: 'ticketing',
+            resourceType: 'ticket',
+            resourceId,
+          })
+        : null;
+      if (
+        raced
+        && raced.payload.idempotencyKey === idempotency.key
+        && raced.payload.idempotencyRequestHash === idempotencyRequestHash
+      ) {
+        input.sendJson(input.res, 200, {
+          ticket: ticketView(raced),
+          idempotentReplay: true,
+        });
+        return true;
+      }
+      throw error;
+    }
     await input.repository.appendBusinessEvent({
       organizationId,
       domain: 'ticketing',

@@ -122,7 +122,7 @@ afterEach(() => {
   fs.rmSync(temporaryDirectory, { recursive: true, force: true });
 });
 
-describe('V1.9.13 schema 23 to V1.9.14 schema 24 acceptance', () => {
+describe('V1.9.13 schema 23 to V1.9.14 schema 25 acceptance', () => {
   it('locks the fixture to the real V1.9.13 source and its byte digest', () => {
     expect(FIXTURE_METADATA).toMatchObject({
       format: 'otto-enterprise-v1.9.13-schema23-fixture-v1',
@@ -170,8 +170,28 @@ describe('V1.9.13 schema 23 to V1.9.14 schema 24 acceptance', () => {
     try {
       expect(db.getDatabaseReadiness()).toEqual({
         ready: true,
-        schemaVersion: 24,
+        schemaVersion: 25,
       });
+      expect(
+        db
+          .getDB()
+          .prepare('PRAGMA table_info(it_tickets)')
+          .all()
+          .map((column) => (column as { name: string }).name),
+      ).toEqual(expect.arrayContaining([
+        'idempotency_key',
+        'idempotency_request_hash',
+      ]));
+      expect(
+        db
+          .getDB()
+          .prepare(
+            `SELECT name FROM sqlite_master
+             WHERE type = 'index'
+               AND name = 'idx_it_tickets_creator_idempotency'`,
+          )
+          .get(),
+      ).toEqual({ name: 'idx_it_tickets_creator_idempotency' });
       expect(tableCounts(db.getDB())).toEqual(countsBefore);
       expect(
         db
@@ -318,10 +338,10 @@ describe('V1.9.13 schema 23 to V1.9.14 schema 24 acceptance', () => {
     }
   }, 60_000);
 
-  it('fails closed on a future schema without rewriting data or creating schema-24 tables', async () => {
+  it('fails closed on a future schema without rewriting data or creating schema-25 tables', async () => {
     const databasePath = copyFixture();
     const future = new Database(databasePath);
-    future.exec('PRAGMA user_version = 25;');
+    future.exec('PRAGMA user_version = 26;');
     const protectedOrganization = future
       .prepare('SELECT id, name, slug FROM organizations WHERE id = ?')
       .get(FIXTURE_METADATA.tenantOrganizationId);
@@ -332,12 +352,12 @@ describe('V1.9.13 schema 23 to V1.9.14 schema 24 acceptance', () => {
 
     const db = await openCurrentDatabase();
     expect(() => db.getDB()).toThrow(
-      /schema version 25.*current version 24.*refusing downgrade/i,
+      /schema version 26.*current version 25.*refusing downgrade/i,
     );
 
     const unchanged = new Database(databasePath, { readonly: true });
     try {
-      expect(readSchemaVersion(unchanged)).toBe(25);
+      expect(readSchemaVersion(unchanged)).toBe(26);
       expect(
         unchanged
           .prepare('SELECT id, name, slug FROM organizations WHERE id = ?')
@@ -373,7 +393,7 @@ describe('V1.9.13 schema 23 to V1.9.14 schema 24 acceptance', () => {
     const candidateDatabase = path.join(candidateDirectory, 'data.db');
     fs.copyFileSync(liveDatabase, candidateDatabase);
     const candidate = new Database(candidateDatabase);
-    candidate.exec('PRAGMA user_version = 25;');
+    candidate.exec('PRAGMA user_version = 26;');
     candidate.close();
 
     process.env.OTTO_ENTERPRISE_DIR = candidateDirectory;

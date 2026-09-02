@@ -17,7 +17,7 @@ import {
 } from './signedEnvelope.js';
 
 function setup(options: {
-  deploymentGrantedFeatures?: readonly import('../../productModules.js').OrganizationFeatureKey[];
+  deploymentGrantedFeatures?: ReadonlyArray<import('../../productModules.js').OrganizationFeatureKey>;
 } = {}) {
   const pair = generateKeyPairSync('ed25519');
   const privateKey = pair.privateKey

@@ -2163,6 +2163,7 @@ export interface OttoBridge {
   enterpriseTicketInbox(): Promise<EnterpriseRepairTicket[]>;
   enterpriseTicketList(): Promise<EnterpriseRepairTicket[]>;
   enterpriseTicketSubmit(input: {
+    idempotencyKey?: string;
     serviceId?: string;
     title: string;
     description: string;
@@ -3832,6 +3833,7 @@ const bridge: OttoBridge = {
     >;
   },
   enterpriseTicketSubmit(input: {
+    idempotencyKey?: string;
     serviceId?: string;
     title: string;
     description: string;

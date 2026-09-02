@@ -137,6 +137,7 @@ try {
   });
   const alphaAdminSession = database.createAuthSession(alphaAdmin.id).token;
   const alphaMemberSession = database.createAuthSession(alphaMember.id).token;
+  const betaMemberSession = database.createAuthSession(betaMember.id).token;
 
   ({ server } = serverModule.createEnterpriseServer({
     host: '127.0.0.1',
@@ -169,6 +170,8 @@ try {
     '/enterprise/organization/view',
     '/enterprise/privacy/export',
     `/enterprise/messages/${alphaMember.id}`,
+    '/enterprise/tickets',
+    '/enterprise/tickets/inbox',
   ]) {
     await verify(`anonymous access denied: ${path}`, async () => {
       expectDenied(await request(baseUrl, path));
@@ -222,6 +225,228 @@ try {
     );
     assert.equal(result.response.status, 404);
     assert.doesNotMatch(result.text, /Beta Member|beta-member/);
+  });
+
+  await verify('anonymous ticket creation is denied', async () => {
+    const result = await request(baseUrl, '/enterprise/tickets', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        serviceId: 'it',
+        title: 'anonymous ticket',
+        description: 'must not be created',
+      }),
+    });
+    assert.equal(result.response.status, 401);
+  });
+
+  let alphaTicketId = '';
+  await verify('authenticated ticket creation accepts a bounded valid request', async () => {
+    const result = await request(baseUrl, '/enterprise/tickets', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${alphaAdminSession}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        serviceId: 'it',
+        title: 'Alpha security probe ticket',
+        description: 'isolated ticket used by authorization probes',
+      }),
+    });
+    assert.equal(result.response.status, 201);
+    alphaTicketId = result.body?.ticket?.id ?? '';
+    assert.ok(alphaTicketId);
+  });
+
+  await verify('ticket retries are persistently idempotent and content-bound', async () => {
+    const idempotencyKey = 'probe:12345678-1234-4234-9234-123456789abc';
+    const headers = {
+      authorization: `Bearer ${alphaAdminSession}`,
+      'content-type': 'application/json',
+      'x-otto-idempotency-key': idempotencyKey,
+    };
+    const body = {
+      serviceId: 'it',
+      title: 'Alpha idempotency probe ticket',
+      description: 'a simulated response-loss retry must create only one row',
+    };
+    const first = await request(baseUrl, '/enterprise/tickets', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    const replay = await request(baseUrl, '/enterprise/tickets', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    assert.equal(first.response.status, 201);
+    assert.equal(replay.response.status, 200);
+    assert.equal(replay.body.idempotentReplay, true);
+    assert.equal(replay.body.ticket.id, first.body.ticket.id);
+    assert.doesNotMatch(first.text, new RegExp(idempotencyKey));
+    assert.doesNotMatch(replay.text, new RegExp(idempotencyKey));
+    assert.equal(
+      database.listTicketsForAccount(alphaAdmin.id)
+        .filter((ticket) => ticket.title === body.title).length,
+      1,
+    );
+
+    const conflict = await request(baseUrl, '/enterprise/tickets', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ...body, description: 'changed request content' }),
+    });
+    assert.equal(conflict.response.status, 409);
+    assert.equal(conflict.body.code, 'idempotency_key_conflict');
+
+    const invalid = await request(baseUrl, '/enterprise/tickets', {
+      method: 'POST',
+      headers: { ...headers, 'x-otto-idempotency-key': 'short' },
+      body: JSON.stringify(body),
+    });
+    assert.equal(invalid.response.status, 400);
+    assert.equal(invalid.body.code, 'invalid_idempotency_key');
+
+    const otherAccount = await request(baseUrl, '/enterprise/tickets', {
+      method: 'POST',
+      headers: {
+        ...headers,
+        authorization: `Bearer ${betaMemberSession}`,
+      },
+      body: JSON.stringify(body),
+    });
+    assert.equal(otherAccount.response.status, 201);
+    assert.notEqual(otherAccount.body.ticket.id, first.body.ticket.id);
+  });
+
+  await verify('concurrent duplicate ticket submissions collapse to one record', async () => {
+    const idempotencyKey = 'probe:concurrent-1234-4234-9234-123456789abc';
+    const body = {
+      serviceId: 'it',
+      title: 'Alpha concurrent idempotency probe',
+      description: 'fifty concurrent retries must share one result',
+    };
+    const attempts = await Promise.all(
+      Array.from({ length: 50 }, () => request(baseUrl, '/enterprise/tickets', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${alphaAdminSession}`,
+          'content-type': 'application/json',
+          'x-otto-idempotency-key': idempotencyKey,
+        },
+        body: JSON.stringify(body),
+      })),
+    );
+    assert.equal(
+      attempts.filter((attempt) => attempt.response.status === 201).length,
+      1,
+    );
+    assert.equal(
+      attempts.filter((attempt) => attempt.response.status === 200).length,
+      49,
+    );
+    assert.equal(
+      new Set(attempts.map((attempt) => attempt.body.ticket.id)).size,
+      1,
+    );
+    assert.equal(
+      database.listTicketsForAccount(alphaAdmin.id)
+        .filter((ticket) => ticket.title === body.title).length,
+      1,
+    );
+  });
+
+  await verify('cross-tenant ticket listing does not disclose foreign tickets', async () => {
+    const result = await request(baseUrl, '/enterprise/tickets', {
+      headers: { authorization: `Bearer ${betaMemberSession}` },
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(
+      result.body.tickets.some((ticket) => ticket.id === alphaTicketId),
+      false,
+    );
+    assert.doesNotMatch(result.text, /Alpha security probe ticket/);
+  });
+
+  for (const action of ['read', 'action']) {
+    await verify(`cross-tenant ticket ${action} is denied`, async () => {
+      const result = await request(
+        baseUrl,
+        `/enterprise/tickets/${encodeURIComponent(alphaTicketId)}/${action}`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${betaMemberSession}`,
+            'content-type': 'application/json',
+          },
+          ...(action === 'action'
+            ? { body: JSON.stringify({ action: 'accept' }) }
+            : {}),
+        },
+      );
+      assert.equal(result.response.status, 404);
+      assert.doesNotMatch(result.text, /Alpha security probe ticket/);
+    });
+  }
+
+  await verify('cross-origin ticket mutation is rejected', async () => {
+    const result = await request(baseUrl, '/enterprise/tickets', {
+      method: 'POST',
+      headers: {
+        origin: 'https://attacker.invalid',
+        authorization: `Bearer ${alphaAdminSession}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        serviceId: 'it',
+        title: 'cross-origin injection',
+        description: 'must not be created',
+      }),
+    });
+    assert.equal(result.response.status, 403);
+  });
+
+  await verify('invalid ticket service and oversized fields fail closed', async () => {
+    const headers = {
+      authorization: `Bearer ${alphaAdminSession}`,
+      'content-type': 'application/json',
+    };
+    const invalidService = await request(baseUrl, '/enterprise/tickets', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        serviceId: '../../admin',
+        title: 'invalid service',
+        description: 'must be rejected',
+      }),
+    });
+    assert.equal(invalidService.response.status, 400);
+    const oversized = await request(baseUrl, '/enterprise/tickets', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        serviceId: 'it',
+        title: 'x'.repeat(201),
+        description: 'x'.repeat(2_001),
+      }),
+    });
+    assert.equal(oversized.response.status, 400);
+    assert.doesNotMatch(oversized.text, /(?:stack|node_modules|[A-Z]:\\)/i);
+  });
+
+  await verify('forged ticket id and SQL-shaped path do not disclose records', async () => {
+    const result = await request(
+      baseUrl,
+      '/enterprise/tickets/%27%20OR%201%3D1--/read',
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${alphaAdminSession}` },
+      },
+    );
+    assert.equal(result.response.status, 404);
+    assert.doesNotMatch(result.text, /Alpha security probe ticket|SELECT|sqlite/i);
   });
 
   await verify(

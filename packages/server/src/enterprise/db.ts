@@ -259,7 +259,7 @@ const PRIVACY_DELETION_LEDGER_KEY_PATH = path.join(
 );
 
 export const DEFAULT_ORGANIZATION_ID = 'org_default';
-export const ENTERPRISE_SCHEMA_VERSION = 24;
+export const ENTERPRISE_SCHEMA_VERSION = 25;
 export const ORGANIZATION_INVITE_VALIDITY_MS = 7 * 24 * 60 * 60 * 1000;
 const ORGANIZATION_INVITE_ALPHABET =
   'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
@@ -1124,6 +1124,7 @@ export const {
   getParkSettings,
   getParkTenantProfile,
   getTicketCreatorForAccount,
+  getTicketByIdempotencyKey,
   getTicketForAccount,
   getTicketNotificationRecipients,
   getTicketTransferredNotificationRecipients,

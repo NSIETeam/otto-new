@@ -24,6 +24,7 @@ const harness = vi.hoisted(() => ({
     launchAgentProfile: vi.fn(),
     launchAgentProfileWithPrompt: vi.fn(),
     cancelPendingAgentLaunches: vi.fn(),
+    postLocalChatMessage: vi.fn(),
     postSystemNote: vi.fn(),
     renameSession: vi.fn(),
     respondToolConfirmation: vi.fn(),
@@ -201,12 +202,14 @@ vi.mock('./components/ChatView.js', () => ({
     onToggleRightPanel,
     pendingAgent,
     onOpenSetup,
+    onSend,
     onRespondQuestion,
   }: {
     rightPanelCollapsed?: boolean;
     onToggleRightPanel?: () => void;
     pendingAgent?: { title: string } | null;
     onOpenSetup?: () => void;
+    onSend?: (text: string, source: 'local') => Promise<boolean>;
     onRespondQuestion?: (
       callId: string,
       outcome: 'approved',
@@ -227,6 +230,14 @@ vi.mock('./components/ChatView.js', () => ({
       ) : null}
       {onOpenSetup ? (
         <button type="button" onClick={onOpenSetup}>open-model-settings</button>
+      ) : null}
+      {onSend ? (
+        <>
+          <button type="button" onClick={() => void onSend('我要物业报修', 'local')}>start-repair-chat</button>
+          <button type="button" onClick={() => void onSend('会议室顶灯不亮，普通', 'local')}>complete-repair-chat</button>
+          <button type="button" onClick={() => void onSend('确认提交', 'local')}>confirm-repair-chat</button>
+          <button type="button" onClick={() => void onSend('查看最新园区公告', 'local')}>query-announcement-chat</button>
+        </>
       ) : null}
       {onRespondQuestion ? (
         <>
@@ -456,6 +467,7 @@ function configureEnterpriseWorkspace(
     accountType: 'enterprise',
     organizationId: 'organization-a',
     organizationName: '测试企业',
+    phone: '13800138000',
   }, 'signed-in');
   harness.centralIdentity.current = {
     edition: 'enterprise',
@@ -598,6 +610,71 @@ describe('App workspace UI integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'activate-skill-zone' }));
     expect(screen.getByTestId('skill-zone-page')).toBeTruthy();
+  });
+
+  it('connects the main conversation to property repair and submits only after confirmation', async () => {
+    configureEnterpriseWorkspace();
+    const enterpriseParkView = vi.fn(async () => ({ tenantRoomNumber: 'A座1203室' }));
+    const enterpriseTicketSubmit = vi.fn(async () => ({
+      id: 'ticket-1',
+      applicationNumber: 'BX-2026-0001',
+      status: '待接单',
+      recipients: [{ id: 'repairer-1', name: '李师傅' }],
+      recipientCount: 1,
+    }));
+    Object.assign(window.otto, { enterpriseParkView, enterpriseTicketSubmit });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'start-repair-chat' }));
+    await waitFor(() => expect(enterpriseParkView).toHaveBeenCalledOnce());
+    expect(harness.storeActions.postLocalChatMessage).toHaveBeenCalledWith('user', '我要物业报修');
+    expect(harness.storeActions.postLocalChatMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.stringContaining('请补充报修类别、故障描述、紧急程度'),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'complete-repair-chat' }));
+    await waitFor(() => expect(harness.storeActions.postLocalChatMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.stringContaining('回复“确认提交”'),
+    ));
+    expect(enterpriseTicketSubmit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'confirm-repair-chat' }));
+    await waitFor(() => expect(enterpriseTicketSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      serviceId: 'repair',
+      location: 'A座1203室',
+      category: '灯具维修',
+      urgency: '普通',
+    })));
+    expect(harness.storeActions.postLocalChatMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.stringContaining('BX-2026-0001'),
+    );
+  });
+
+  it('routes a park query through the main conversation without invoking the model', async () => {
+    configureEnterpriseWorkspace();
+    const enterpriseParkPublications = vi.fn(async () => [{
+      id: 'announcement-1',
+      kind: 'announcement' as const,
+      title: '园区停电通知',
+      body: '周五十八点后检修',
+      createdAt: '2026-09-02T09:00:00.000Z',
+      readAt: null,
+      submittedAt: null,
+    }]);
+    Object.assign(window.otto, { enterpriseParkPublications });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'query-announcement-chat' }));
+
+    await waitFor(() => expect(enterpriseParkPublications).toHaveBeenCalledOnce());
+    expect(harness.storeActions.postLocalChatMessage).toHaveBeenCalledWith(
+      'assistant',
+      expect.stringContaining('园区停电通知'),
+    );
+    expect(harness.storeActions.sendMessage).not.toHaveBeenCalled();
   });
 
   it('uses the next account right-panel preference on the account-switch render', () => {

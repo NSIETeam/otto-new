@@ -1306,6 +1306,7 @@ interface EnterpriseRequestBehavior {
   serverUrl?: string;
   authorizationToken?: string | null;
   timeoutMs?: number;
+  idempotencyKey?: string;
 }
 
 const ENTERPRISE_SERVER_UPGRADE_ERROR =
@@ -2341,7 +2342,10 @@ export class EnterpriseClient {
         ...(init.body ? { 'content-type': 'application/json' } : {}),
         ...((init.method ?? 'GET').toUpperCase() === 'GET'
           ? {}
-          : { 'x-otto-idempotency-key': `desktop:${randomUUID()}` }),
+          : {
+              'x-otto-idempotency-key':
+                behavior.idempotencyKey ?? `desktop:${randomUUID()}`,
+            }),
         ...(requestToken && !behavior.omitAuthorization
           ? { authorization: `Bearer ${requestToken}` }
           : {}),
@@ -5063,6 +5067,7 @@ export class EnterpriseClient {
   }
 
   async submitTicket(input: {
+    idempotencyKey?: string;
     serviceId?: string;
     title: string;
     description: string;
@@ -5074,13 +5079,21 @@ export class EnterpriseClient {
     contact?: string;
     contactPhone?: string;
   }): Promise<EnterpriseRepairTicket> {
+    const { idempotencyKey, ...ticketInput } = input;
+    if (
+      idempotencyKey !== undefined
+      && !/^[A-Za-z0-9._:-]{16,128}$/u.test(idempotencyKey)
+    ) {
+      throw new Error('工单幂等键格式不正确');
+    }
     return (
       await this.request<{ ticket: EnterpriseRepairTicket }>(
         '/enterprise/tickets',
         {
           method: 'POST',
-          body: JSON.stringify(input),
+          body: JSON.stringify(ticketInput),
         },
+        { idempotencyKey },
       )
     ).ticket;
   }

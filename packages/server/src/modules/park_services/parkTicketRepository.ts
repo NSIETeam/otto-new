@@ -562,8 +562,9 @@ export function createTicket<TAccount extends ParkTicketAccount>(
       `INSERT INTO it_tickets
        (id, organization_id, park_id, application_number, created_by_account_id, service_id, title, description, target_tags, form_data,
         category, location, urgency, contact, contact_phone, status,
-        creator_update_at, creator_update_read_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '待接单', NULL, datetime('now'))`,
+        creator_update_at, creator_update_read_at, idempotency_key,
+        idempotency_request_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '待接单', NULL, datetime('now'), ?, ?)`,
     ).run(
       id,
       creator.organizationId,
@@ -580,6 +581,8 @@ export function createTicket<TAccount extends ParkTicketAccount>(
       input.urgency?.trim() || null,
       input.contact?.trim() || null,
       input.contactPhone?.trim() || null,
+      input.idempotencyKey?.trim() || null,
+      input.idempotencyRequestHash?.trim() || null,
     );
     recordTicketEvent(store, {
       organizationId: creator.organizationId,
@@ -608,6 +611,30 @@ export function createTicket<TAccount extends ParkTicketAccount>(
     throw error;
   }
   return ticketView(store, id, creator.id);
+}
+
+export function getTicketByIdempotencyKey<
+  TAccount extends ParkTicketAccount,
+>(
+  store: ParkTicketRepositoryStore<TAccount>,
+  accountId: string,
+  idempotencyKey: string,
+): { ticket: TicketView; requestHash: string } | null {
+  const row = store.db()
+    .prepare(
+      `SELECT id, idempotency_request_hash
+       FROM it_tickets
+       WHERE created_by_account_id = ? AND idempotency_key = ?
+       LIMIT 1`,
+    )
+    .get(accountId, idempotencyKey) as
+      | { id: string; idempotency_request_hash: string | null }
+      | undefined;
+  if (!row?.idempotency_request_hash) return null;
+  const ticket = getTicketForAccount(store, row.id, accountId);
+  return ticket
+    ? { ticket, requestHash: row.idempotency_request_hash }
+    : null;
 }
 
 /** 通知只能在服务端使用完整账号资料，绝不把手机号或飞书 open_id 返回给普通客户端。 */

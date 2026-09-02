@@ -97,6 +97,8 @@ export interface ParkTicketSpecialist {
 
 export interface CreateTicketInput {
   createdByAccountId: string;
+  idempotencyKey?: string;
+  idempotencyRequestHash?: string;
   serviceId?: string;
   title: string;
   description: string;

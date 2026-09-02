@@ -3103,6 +3103,47 @@ describe('EnterpriseClient', () => {
     });
   });
 
+  it('forwards a caller-owned ticket idempotency key without putting it in JSON', async () => {
+    const idempotencyKey = 'repair:12345678-1234-4234-9234-123456789abc';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, API_V2_HEALTH))
+      .mockResolvedValueOnce(jsonResponse(200, {
+        account: ACCOUNT,
+        token: 'session-token',
+        expiresAt: '2099-01-01',
+      }))
+      .mockResolvedValueOnce(jsonResponse(201, {
+        ticket: { id: 'ticket-1' },
+      }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    await client.loginWithPassword(
+      'https://enterprise.otto.test',
+      'staff01',
+      'password',
+    );
+
+    await expect(client.submitTicket({
+      idempotencyKey,
+      serviceId: 'repair',
+      title: 'A座1203室 · 灯具维修',
+      description: '会议室顶灯不亮',
+    })).resolves.toMatchObject({ id: 'ticket-1' });
+
+    const request = fetchMock.mock.calls[2]?.[1] as RequestInit;
+    expect(request.headers).toMatchObject({
+      authorization: 'Bearer session-token',
+      'x-otto-idempotency-key': idempotencyKey,
+    });
+    expect(JSON.parse(String(request.body))).not.toHaveProperty('idempotencyKey');
+    await expect(client.submitTicket({
+      idempotencyKey: 'short',
+      title: 'invalid',
+      description: 'invalid',
+    })).rejects.toThrow('工单幂等键格式不正确');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('rejects an insecure managed model gateway even when the enterprise server returns it', async () => {
     const fetchMock = vi
       .fn()

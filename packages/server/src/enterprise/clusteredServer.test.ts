@@ -730,6 +730,133 @@ describe('clustered PostgreSQL enterprise server', () => {
     expect(repo.appendBusinessEvent).not.toHaveBeenCalled();
   });
 
+  it('rejects cross-origin ticket mutations in clustered mode before persistence', async () => {
+    const repo = repository();
+    const { baseUrl } = await listen(repo);
+    const response = await fetch(`${baseUrl}/enterprise/tickets`, {
+      method: 'POST',
+      headers: {
+        origin: 'https://attacker.invalid',
+        authorization: 'Bearer clustered-session-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        serviceId: 'it',
+        title: 'Cross-origin ticket',
+        description: 'This record must not be persisted.',
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'forbidden: cross-origin ticket request',
+    });
+    expect(repo.createBusinessRecord).not.toHaveBeenCalled();
+    expect(repo.appendBusinessEvent).not.toHaveBeenCalled();
+  });
+
+  it('persistently deduplicates clustered ticket retries and rejects key reuse with changed content', async () => {
+    let storedTicket: PostgresBusinessRecord<Record<string, unknown>> | null = null;
+    const baseRepo = repository();
+    const getBusinessRecord = vi.fn(async (input: {
+      organizationId: string;
+      domain: string;
+      resourceType: string;
+      resourceId: string;
+    }) => {
+      if (
+        input.domain === 'commercial_control'
+        && input.resourceType === 'license'
+        && input.resourceId === 'current'
+      ) {
+        return activeLicenseRecord();
+      }
+      if (
+        input.domain === 'ticketing'
+        && input.resourceType === 'ticket'
+        && storedTicket?.resourceId === input.resourceId
+      ) {
+        return storedTicket;
+      }
+      return null;
+    });
+    const createBusinessRecord = vi.fn(async (input: {
+      organizationId: string;
+      domain: 'ticketing';
+      resourceType: 'ticket';
+      resourceId?: string;
+      ownerAccountId?: string | null;
+      status?: string;
+      payload: Record<string, unknown>;
+    }) => {
+      storedTicket = {
+        organizationId: input.organizationId,
+        domain: input.domain,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId ?? 'unexpected-random-ticket',
+        ownerAccountId: input.ownerAccountId ?? null,
+        status: input.status ?? 'active',
+        version: 1,
+        payload: input.payload,
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+      };
+      return storedTicket;
+    });
+    const appendBusinessEvent = vi.fn(baseRepo.appendBusinessEvent);
+    const repo = {
+      ...baseRepo,
+      getBusinessRecord,
+      createBusinessRecord,
+      appendBusinessEvent,
+    } as unknown as PostgresEnterpriseCoreRepository;
+    const { baseUrl } = await listen(repo);
+    const idempotencyKey = 'repair:12345678-1234-4234-9234-123456789abc';
+    const ticketBody = {
+      serviceId: 'it',
+      title: 'Network repair',
+      description: 'Office network is unavailable.',
+    };
+    const request = (body: Record<string, unknown>, key = idempotencyKey) => fetch(
+      `${baseUrl}/enterprise/tickets`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer clustered-session-token',
+          'content-type': 'application/json',
+          'x-otto-idempotency-key': key,
+        },
+        body: JSON.stringify(body),
+      },
+    );
+
+    const created = await request(ticketBody);
+    const replay = await request(ticketBody);
+    expect(created.status).toBe(201);
+    expect(replay.status).toBe(200);
+    const createdBody = await created.json();
+    const replayBody = await replay.json();
+    expect(replayBody.ticket.id).toBe(createdBody.ticket.id);
+    expect(replayBody.idempotentReplay).toBe(true);
+    expect(JSON.stringify(createdBody)).not.toContain(idempotencyKey);
+    expect(JSON.stringify(replayBody)).not.toContain(idempotencyKey);
+    expect(createBusinessRecord).toHaveBeenCalledTimes(1);
+    expect(appendBusinessEvent).toHaveBeenCalledTimes(1);
+
+    const conflict = await request({ ...ticketBody, title: 'Changed title' });
+    expect(conflict.status).toBe(409);
+    await expect(conflict.json()).resolves.toMatchObject({
+      code: 'idempotency_key_conflict',
+    });
+    expect(createBusinessRecord).toHaveBeenCalledTimes(1);
+
+    const invalid = await request(ticketBody, 'short');
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({
+      code: 'invalid_idempotency_key',
+    });
+  });
+
   it('serves the desktop department-list contract only when enterprise_tree is effective', async () => {
     const repo = repository();
     const timestamp = '2026-08-01T00:00:00.000Z';

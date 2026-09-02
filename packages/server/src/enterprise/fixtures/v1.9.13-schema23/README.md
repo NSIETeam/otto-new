@@ -17,4 +17,4 @@ stored hash. `fixture-metadata.json` locks the source commit, record identifiers
 and SHA-256 of the database so an accidental fixture replacement fails closed.
 
 Do not regenerate this database from current source: doing so would only test a
-schema-24 database with a changed `user_version`, not a real V1.9.13 database.
+current-schema database with a changed `user_version`, not a real V1.9.13 database.

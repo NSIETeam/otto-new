@@ -5,6 +5,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import * as db from './db.js';
+import { isCrossOriginBrowserRequest } from './enterpriseHttpSecurity.js';
+import {
+  readTicketIdempotencyHeader,
+  ticketRequestFingerprint,
+} from './ticketIdempotency.js';
 import type { RepairNotificationSender } from '../modules/integration_adapters/index.js';
 import { isParkRequestServiceId } from '../modules/park_services/index.js';
 
@@ -115,10 +120,26 @@ export async function handleTicketRoute({
   readBody,
   sendJSON,
 }: TicketRouteDeps): Promise<boolean> {
+  if (
+    method === 'POST'
+    && (path === '/enterprise/tickets' || path.startsWith('/enterprise/tickets/'))
+    && isCrossOriginBrowserRequest(req)
+  ) {
+    sendJSON(res, 403, { error: 'forbidden: cross-origin ticket request' });
+    return true;
+  }
   if (path === '/enterprise/tickets' && method === 'POST') {
     const account = db.getAccountBySession(extractToken(req));
     if (!account) {
       sendJSON(res, 401, { error: '登录已失效，请重新登录' });
+      return true;
+    }
+    const idempotency = readTicketIdempotencyHeader(req);
+    if (!idempotency.valid) {
+      sendJSON(res, 400, {
+        error: 'invalid ticket idempotency key',
+        code: 'invalid_idempotency_key',
+      });
       return true;
     }
     const body = await readBody(req);
@@ -270,11 +291,43 @@ export async function handleTicketRoute({
         time: `${formData.startTime}-${formData.endTime}`,
       };
     }
+    const requestHash = ticketRequestFingerprint({
+      serviceId,
+      title: title.trim(),
+      description: description.trim(),
+      targetTags,
+      formData,
+      category: typeof body.category === 'string' ? body.category.trim() : null,
+      location: typeof body.location === 'string' ? body.location.trim() : null,
+      urgency: typeof body.urgency === 'string' ? body.urgency.trim() : null,
+      contact: typeof body.contact === 'string' ? body.contact.trim() : null,
+      contactPhone:
+        typeof body.contactPhone === 'string' ? body.contactPhone.trim() : null,
+    });
+    if (idempotency.key) {
+      const replay = db.getTicketByIdempotencyKey(account.id, idempotency.key);
+      if (replay) {
+        if (replay.requestHash !== requestHash) {
+          sendJSON(res, 409, {
+            error: 'idempotency key was already used for another ticket request',
+            code: 'idempotency_key_conflict',
+          });
+          return true;
+        }
+        sendJSON(res, 200, {
+          ticket: replay.ticket,
+          idempotentReplay: true,
+        });
+        return true;
+      }
+    }
     let ticket: ReturnType<typeof db.createTicket>;
     try {
       ticket = db.createTicketWithMeetingReservation({
         ticket: {
           createdByAccountId: account.id,
+          idempotencyKey: idempotency.key ?? undefined,
+          idempotencyRequestHash: idempotency.key ? requestHash : undefined,
           serviceId,
           title,
           description,
@@ -299,6 +352,23 @@ export async function handleTicketRoute({
           : undefined,
       });
     } catch (error) {
+      if (idempotency.key) {
+        const replay = db.getTicketByIdempotencyKey(account.id, idempotency.key);
+        if (replay?.requestHash === requestHash) {
+          sendJSON(res, 200, {
+            ticket: replay.ticket,
+            idempotentReplay: true,
+          });
+          return true;
+        }
+        if (replay) {
+          sendJSON(res, 409, {
+            error: 'idempotency key was already used for another ticket request',
+            code: 'idempotency_key_conflict',
+          });
+          return true;
+        }
+      }
       const message = error instanceof Error ? error.message : '会议室预约失败';
       if (
         serviceId === 'meeting-room'

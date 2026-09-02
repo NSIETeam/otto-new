@@ -4455,6 +4455,10 @@ function registerIpc(): void {
       throw new Error('工单标题和描述均为必填项');
     }
     return enterpriseClient.submitTicket({
+      idempotencyKey:
+        typeof body.idempotencyKey === 'string'
+          ? body.idempotencyKey
+          : undefined,
       serviceId:
         typeof body.serviceId === 'string' ? body.serviceId : undefined,
       title: body.title,

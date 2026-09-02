@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RecruitmentWorkbenchDialog } from './RecruitmentWorkbenchDialog.js';
+import { RecruitmentWorkspaceStore } from '../recruitmentWorkspaceStore.js';
 
 const resumeText = `李明
 电话：13900139000
@@ -43,6 +44,7 @@ function renderDialog(target: React.ComponentProps<typeof RecruitmentWorkbenchDi
       target={target}
       reviewerId="hr-1"
       organizationName="星河科技"
+      workspaceStore={new RecruitmentWorkspaceStore()}
       onClose={vi.fn()}
     />,
   );

@@ -1,6 +1,6 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { RecruitmentModuleTarget } from '../moduleCatalog.js';
@@ -14,31 +14,13 @@ import {
   generateInterviewKit,
   type CandidateResumeAnalysis,
   type HiringDecisionAudit,
-  type InterviewTranscriptAnalysis,
 } from '../recruitmentAnalysis.js';
-
-interface RecruitmentAuditEvent {
-  id: string;
-  candidateId: string;
-  action: string;
-  actorType: 'human' | 'system';
-  modelVersion: string | null;
-  detail: string;
-  createdAt: string;
-}
-
-interface CandidateWorkspace {
-  id: string;
-  fileName: string;
-  consentAt: string;
-  retentionDays: number;
-  expiresAt: string;
-  analysis: CandidateResumeAnalysis;
-  transcriptText: string;
-  transcriptReport: InterviewTranscriptAnalysis | null;
-  transcriptWarning: string;
-  decision: HiringDecisionAudit | null;
-}
+import {
+  makeRecruitmentAudit,
+  type CandidateWorkspace,
+  type RecruitmentAuditEvent,
+  type RecruitmentWorkspaceStore,
+} from '../recruitmentWorkspaceStore.js';
 
 const TARGET_LABELS: Readonly<Record<RecruitmentModuleTarget, string>> = {
   'resume-analysis': '简历分析',
@@ -72,15 +54,7 @@ function makeAudit(
   actorType: RecruitmentAuditEvent['actorType'] = 'system',
   modelVersion: string | null = RECRUITMENT_ANALYSIS_VERSION,
 ): RecruitmentAuditEvent {
-  return {
-    id: `recruitment-audit:${crypto.randomUUID()}`,
-    candidateId,
-    action,
-    actorType,
-    modelVersion,
-    detail,
-    createdAt: new Date().toISOString(),
-  };
+  return makeRecruitmentAudit(candidateId, action, detail, actorType, modelVersion);
 }
 
 function findingStatusLabel(status: CandidateResumeAnalysis['findings'][number]['status']): string {
@@ -94,24 +68,40 @@ export function RecruitmentWorkbenchDialog({
   target,
   reviewerId,
   organizationName,
+  workspaceStore,
   onClose,
 }: {
   open: boolean;
   target: RecruitmentModuleTarget;
   reviewerId: string;
   organizationName: string;
+  workspaceStore: RecruitmentWorkspaceStore;
   onClose(): void;
 }): React.JSX.Element | null {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [activeTarget, setActiveTarget] = useState<RecruitmentModuleTarget>(target);
-  const [jobTitle, setJobTitle] = useState('');
-  const [jobDescription, setJobDescription] = useState('');
-  const [consentConfirmed, setConsentConfirmed] = useState(false);
-  const [retentionDays, setRetentionDays] = useState(30);
-  const [candidates, setCandidates] = useState<CandidateWorkspace[]>([]);
-  const [activeCandidateId, setActiveCandidateId] = useState('');
-  const [audits, setAudits] = useState<RecruitmentAuditEvent[]>([]);
+  const workspace = useSyncExternalStore(
+    workspaceStore.subscribe,
+    workspaceStore.getSnapshot,
+    workspaceStore.getSnapshot,
+  );
+  const {
+    jobTitle,
+    jobDescription,
+    consentConfirmed,
+    retentionDays,
+    candidates,
+    activeCandidateId,
+    audits,
+  } = workspace;
+  const setJobTitle = (value: React.SetStateAction<string>): void => workspaceStore.setJobTitle(value);
+  const setJobDescription = (value: React.SetStateAction<string>): void => workspaceStore.setJobDescription(value);
+  const setConsentConfirmed = (value: React.SetStateAction<boolean>): void => workspaceStore.setConsentConfirmed(value);
+  const setRetentionDays = (value: React.SetStateAction<number>): void => workspaceStore.setRetentionDays(value);
+  const setCandidates = (value: React.SetStateAction<CandidateWorkspace[]>): void => workspaceStore.setCandidates(value);
+  const setActiveCandidateId = (value: React.SetStateAction<string>): void => workspaceStore.setActiveCandidateId(value);
+  const setAudits = (value: React.SetStateAction<RecruitmentAuditEvent[]>): void => workspaceStore.setAudits(value);
   const [busy, setBusy] = useState<'resume' | 'audio' | 'export' | ''>('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -135,22 +125,10 @@ export function RecruitmentWorkbenchDialog({
   useEffect(() => {
     if (!open || candidates.length === 0) return;
     const timer = window.setInterval(() => {
-      const now = Date.now();
-      const expired = candidates.filter((candidate) => Date.parse(candidate.expiresAt) <= now);
-      if (!expired.length) return;
-      const expiredIds = new Set(expired.map((candidate) => candidate.id));
-      setCandidates((current) => current.filter((candidate) => !expiredIds.has(candidate.id)));
-      setAudits((current) => [
-        ...expired.map((candidate) => makeAudit(
-          candidate.id,
-          'retention_expired',
-          `达到 ${candidate.retentionDays} 天保存期限，候选人材料已从当前工作台清除。`,
-        )),
-        ...current,
-      ]);
+      workspaceStore.purgeExpired(Date.now());
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [candidates, open]);
+  }, [candidates, open, workspaceStore]);
 
   if (!open) return null;
 

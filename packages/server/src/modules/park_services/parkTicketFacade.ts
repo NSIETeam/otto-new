@@ -6,6 +6,7 @@ import { normalizeParkServiceFormData } from './parkServiceFormRules.js';
 import {
   cancelPendingTicketNotificationTasks as cancelPendingTasksInRepository,
   createTicket as createTicketInRepository,
+  getTicketByIdempotencyKey as getTicketByIdempotencyKeyFromRepository,
   getTicketCreatorForAccount as getCreatorFromRepository,
   getTicketForAccount as getTicketFromRepository,
   getTicketNotificationRecipients as getNotificationRecipientsFromRepository,
@@ -36,6 +37,13 @@ export function createParkTicketFacade<TAccount extends ParkTicketAccount>(
   return {
     createTicket(input: CreateTicketInput) {
       return createTicketInRepository(store, input);
+    },
+    getTicketByIdempotencyKey(accountId: string, idempotencyKey: string) {
+      return getTicketByIdempotencyKeyFromRepository(
+        store,
+        accountId,
+        idempotencyKey,
+      );
     },
     getTicketCreatorForAccount(id: string, accountId: string) {
       return getCreatorFromRepository(store, id, accountId);

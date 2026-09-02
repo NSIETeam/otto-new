@@ -43,6 +43,8 @@ const profiles = Object.freeze({
       requests: 50,
     },
     { name: 'heartbeat-c5', route: 'heartbeat', concurrency: 5, requests: 50 },
+    { name: 'ticket-list-c5', route: 'ticket-list', concurrency: 5, requests: 50 },
+    { name: 'ticket-create-c2', route: 'ticket-create', concurrency: 2, requests: 20 },
   ]),
   quick: Object.freeze([
     { name: 'health-c20', route: 'health', concurrency: 20, requests: 2_000 },
@@ -71,6 +73,8 @@ const profiles = Object.freeze({
       concurrency: 50,
       requests: 2_000,
     },
+    { name: 'ticket-list-c20', route: 'ticket-list', concurrency: 20, requests: 2_000 },
+    { name: 'ticket-create-c10', route: 'ticket-create', concurrency: 10, requests: 500 },
   ]),
   high: Object.freeze([
     { name: 'health-c20', route: 'health', concurrency: 20, requests: 4_000 },
@@ -122,6 +126,8 @@ const profiles = Object.freeze({
       concurrency: 100,
       requests: 8_000,
     },
+    { name: 'ticket-list-c100', route: 'ticket-list', concurrency: 100, requests: 10_000 },
+    { name: 'ticket-create-c20', route: 'ticket-create', concurrency: 20, requests: 2_000 },
   ]),
 });
 
@@ -241,6 +247,29 @@ function requestFor(baseUrl, token, route, requestIndex) {
           'content-type': 'application/json',
         },
         body: JSON.stringify({ clientId: `load-client-${requestIndex % 32}` }),
+      },
+    ];
+  }
+  if (route === 'ticket-list') {
+    return [
+      `${baseUrl}/enterprise/tickets`,
+      { method: 'GET', headers: { authorization: `Bearer ${token}` } },
+    ];
+  }
+  if (route === 'ticket-create') {
+    return [
+      `${baseUrl}/enterprise/tickets`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          serviceId: 'it',
+          title: `Load ticket ${requestIndex}`,
+          description: `Concurrent ticket creation probe ${requestIndex}`,
+        }),
       },
     ];
   }

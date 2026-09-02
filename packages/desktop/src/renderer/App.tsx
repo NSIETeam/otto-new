@@ -116,6 +116,23 @@ import type {
 import { processEnterpriseAtoaRequest } from './enterpriseAtoaCoordinator.js';
 import { collectAuthorizedAtoaContext } from './a2aContext.js';
 import { buildEnterpriseKnowledgePromptContext } from './enterpriseKnowledgePromptContext.js';
+import {
+  ModuleActionDraftRegistry,
+  handleModuleActionConversation,
+} from './moduleActionBridge.js';
+import { handleParkQueryConversation } from './parkModuleConversationBridge.js';
+import {
+  ParkServiceActionDraftRegistry,
+  handleParkServiceActionConversation,
+} from './parkServiceActionBridge.js';
+import {
+  CustomerModuleConversationDraftRegistry,
+  handleCustomerModuleConversation,
+} from './customerModuleConversationBridge.js';
+import {
+  RecruitmentConversationDraftRegistry,
+  handleRecruitmentConversation,
+} from './recruitmentConversationBridge.js';
 import { AtoaConsultDialog } from './components/AtoaConsultDialog.js';
 import { executeEnterpriseCollaborationRelay } from './enterpriseCollaborationRelay.js';
 import {
@@ -159,6 +176,7 @@ import {
 } from './moduleWorkspace.js';
 import type { ModuleDefinition } from './moduleCatalog.js';
 import type { ModuleModalState } from './moduleModal.js';
+import { RecruitmentWorkspaceStore } from './recruitmentWorkspaceStore.js';
 
 /** 启动后静默检查更新的延迟：让 server 连接 / 首屏渲染先跑完，不抢启动窗口。 */
 const SILENT_UPDATE_CHECK_DELAY_MS = 15_000;
@@ -252,11 +270,20 @@ function OttoWorkspaceApp({
   const settingsData = useSettingsData(state.activeSessionId);
   const softwareUpdate = useSoftwareUpdate();
   const product = useProductWorkspace(state.activeSessionId);
+  const recruitmentWorkspaceScope = `${account.organizationId}:${account.id}`;
+  const recruitmentWorkspace = useMemo(
+    () => new RecruitmentWorkspaceStore(recruitmentWorkspaceScope),
+    [recruitmentWorkspaceScope],
+  );
   const [enterpriseUnreadCounts, setEnterpriseUnreadCounts] = useState<EnterpriseUnreadCounts>({});
   const [parkTicketUnreadCounts, setParkTicketUnreadCounts] = useState<ParkTicketUnreadCounts>({
     actionableCount: 0,
     creatorUpdateCount: 0,
   });
+  const moduleActionDraftsRef = useRef(new ModuleActionDraftRegistry());
+  const parkServiceActionDraftsRef = useRef(new ParkServiceActionDraftRegistry());
+  const customerModuleActionDraftsRef = useRef(new CustomerModuleConversationDraftRegistry());
+  const recruitmentActionDraftsRef = useRef(new RecruitmentConversationDraftRegistry());
   const enterpriseUnreadTrackerRef = useRef<EnterpriseUnreadNotificationTracker | null>(null);
   const centralIdentity = useMemo(
     () => resolveCentralEnterpriseIdentity(account),
@@ -1182,6 +1209,96 @@ function OttoWorkspaceApp({
     attachments?: Attachment[],
     authorization?: ComposerAuthorizationContext,
   ): Promise<boolean> => {
+      const sessionId = activeSession?.sessionId;
+      if (
+        effectiveParkService
+        && sessionId
+        && text.trim()
+        && (!attachments || attachments.length === 0)
+      ) {
+        const handled = await handleModuleActionConversation({
+          text,
+          sessionId,
+          accountId: account.id,
+          enabled: true,
+          registry: moduleActionDraftsRef.current,
+          loadDefaults: async () => {
+            const park = await window.otto.enterpriseParkView();
+            return {
+              company: account.organizationName,
+              roomNumber: park?.tenantRoomNumber?.trim() || '',
+              contact: account.name,
+              phone: account.phone?.replace(/^\+86/, '') || '',
+            };
+          },
+          submit: (input) => window.otto.enterpriseTicketSubmit(input),
+          postMessage: actions.postLocalChatMessage,
+        });
+        if (handled) return true;
+
+        const parkActionHandled = await handleParkServiceActionConversation({
+          text,
+          sessionId,
+          accountId: account.id,
+          enabled: true,
+          registry: parkServiceActionDraftsRef.current,
+          loadDefaults: async () => {
+            const park = await window.otto.enterpriseParkView();
+            return {
+              company: account.organizationName,
+              roomNumber: park?.tenantRoomNumber?.trim() || '',
+              contact: account.name,
+              phone: account.phone?.replace(/^\+86/, '') || '',
+            };
+          },
+          loadMeetingResources: window.otto.enterpriseParkResources,
+          listPublications: window.otto.enterpriseParkPublications,
+          submitTicket: window.otto.enterpriseTicketSubmit,
+          submitSurvey: window.otto.enterpriseParkSurveySubmit,
+          postMessage: actions.postLocalChatMessage,
+        });
+        if (parkActionHandled) return true;
+
+        const parkQueryHandled = await handleParkQueryConversation({
+          text,
+          enabled: true,
+          postMessage: actions.postLocalChatMessage,
+          listPublications: window.otto.enterpriseParkPublications,
+          loadStatistics: window.otto.enterpriseParkStatistics,
+          loadStarMap: window.otto.enterpriseParkStarMap,
+          listMyApplications: window.otto.enterpriseTicketList,
+          listStaffTasks: window.otto.enterpriseTicketInbox,
+        });
+        if (parkQueryHandled) return true;
+      }
+
+      if (sessionId && text.trim() && (!attachments || attachments.length === 0)) {
+        const customerModuleHandled = await handleCustomerModuleConversation({
+          text,
+          sessionId,
+          accountId: account.id,
+          enabled: true,
+          registry: customerModuleActionDraftsRef.current,
+          modules: installedCustomerModules,
+          runModule: window.otto.customerModuleRun,
+          postMessage: actions.postLocalChatMessage,
+        });
+        if (customerModuleHandled) return true;
+
+        const recruitmentHandled = await handleRecruitmentConversation({
+          text,
+          sessionId,
+          accountId: account.id,
+          enabled: edition === 'enterprise',
+          store: recruitmentWorkspace,
+          registry: recruitmentActionDraftsRef.current,
+          selectFiles: window.otto.selectFiles,
+          extractDocument: window.otto.extractEditableDocument,
+          transcribe: window.otto.recruitmentTranscribe,
+          postMessage: actions.postLocalChatMessage,
+        });
+        if (recruitmentHandled) return true;
+      }
       let authorizedContext = '';
       if (
         edition === 'enterprise' &&
@@ -1806,6 +1923,7 @@ function OttoWorkspaceApp({
         target={moduleModal?.kind === 'recruitment' ? moduleModal.target : 'resume-analysis'}
         reviewerId={account.id}
         organizationName={account.organizationName}
+        workspaceStore={recruitmentWorkspace}
         onClose={() => setModuleModal(null)}
       />
       <AutoSkillDialog

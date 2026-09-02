@@ -11,6 +11,9 @@
  */
 
 export * from './protocol.js';
+export * from './agentTurnTracker.js';
+export * from './turnControlPolicy.js';
+export * from './turnRecoveryStore.js';
 export * from './sessions.js';
 export * from './sessions-persistent.js';
 export { OttoServer } from './server.js';
@@ -29,10 +32,7 @@ export {
 export type { ClusteredEnterpriseServerOptions } from './enterprise/clusteredServer.js';
 export { createCoreConfig } from './coreConfig.js';
 export type { CreateCoreConfigOptions } from './coreConfig.js';
-export {
-  createCoreSessionRuntime,
-  CoreSessionRuntime,
-} from './runtime.js';
+export { createCoreSessionRuntime, CoreSessionRuntime } from './runtime.js';
 export {
   loadCustomModels,
   listModelInfos,

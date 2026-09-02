@@ -55,8 +55,16 @@ import type {
   FinishReason,
   Part,
 } from '@google/genai';
+import { randomUUID } from 'node:crypto';
 
 import type { SessionStore, SessionRuntime } from './sessions.js';
+import { AgentTurnTracker } from './agentTurnTracker.js';
+import {
+  deriveTurnControlPolicy,
+  formatTurnControlDirective,
+  isParallelSafeToolName,
+  isPolicySafeWithoutConfirmation,
+} from './turnControlPolicy.js';
 import {
   ToolCallStatus,
   type MessageContent,
@@ -66,11 +74,19 @@ import {
   type TokenUsage,
   type AskUserQuestion,
   type ToolConfirmationResponsePayload,
+  type TurnControlPolicy,
 } from './protocol.js';
 import {
   shouldRequestConfirmation,
   type RuntimeAuthorizationMode,
 } from './modules/authorization/index.js';
+import {
+  FileTurnRecoveryStore,
+  classifyRecoveryTool,
+  toolExecutionFingerprint,
+  turnIntentHash,
+  type TurnRecoveryRecord,
+} from './turnRecoveryStore.js';
 
 const MODEL_CONNECTION_ERROR =
   '当前模型请求的结果未知：请求可能已被供应商接收并计费。Otto 已停止自动重试和跨供应商切换。如果手动重试或切换模型，可能产生双重费用。';
@@ -87,8 +103,13 @@ class ModelOutcomeUnknownError extends Error {
   }
 
   safetyDetails() {
-    return { requestId: this.requestId, requestState: 'unknown_outcome' as const,
-      ...(this.providerRequestId ? { providerRequestId: this.providerRequestId } : {}) };
+    return {
+      requestId: this.requestId,
+      requestState: 'unknown_outcome' as const,
+      ...(this.providerRequestId
+        ? { providerRequestId: this.providerRequestId }
+        : {}),
+    };
   }
 }
 
@@ -125,7 +146,8 @@ function isAmbiguousModelTransportOutcome(error: unknown): boolean {
     };
     if (
       typeof details.status === 'number' &&
-      (details.status === 429 || (details.status >= 500 && details.status <= 599))
+      (details.status === 429 ||
+        (details.status >= 500 && details.status <= 599))
     ) {
       return true;
     }
@@ -159,7 +181,9 @@ function userFacingRuntimeError(error: unknown): string {
   if (error instanceof ModelOutcomeUnknownError) {
     return `${MODEL_CONNECTION_ERROR}\n\n请求编号：${error.requestId}${
       error.providerRequestId
-        ? `\n供应商请求编号：${error.providerRequestId}` : ''}`;
+        ? `\n供应商请求编号：${error.providerRequestId}`
+        : ''
+    }`;
   }
   if (isAmbiguousModelTransportOutcome(error)) return MODEL_CONNECTION_ERROR;
   return message;
@@ -395,6 +419,8 @@ interface ConfirmationResult {
 export interface CoreSessionRuntimeOptions {
   /** A2A 等不可信远端输入必须在运行时硬性禁止工具，而不是依赖提示词。 */
   toolFree?: boolean;
+  /** 注入持久恢复存储；false 明确关闭（测试或无状态嵌入场景）。 */
+  recoveryStore?: FileTurnRecoveryStore | false;
 }
 
 export class CoreSessionRuntime implements SessionRuntime {
@@ -402,6 +428,12 @@ export class CoreSessionRuntime implements SessionRuntime {
   private abort?: AbortController;
   private running = false;
   private authorizationMode: RuntimeAuthorizationMode = 'manual';
+  /** Active semantic turn; one runtime never runs two turns concurrently. */
+  private activeTurnTracker?: AgentTurnTracker;
+  private activeTurnControl?: TurnControlPolicy;
+  private readonly recoveryStore?: FileTurnRecoveryStore;
+  private pendingRecovery: TurnRecoveryRecord | null = null;
+  private activeRecovery?: TurnRecoveryRecord;
   /**
    * 挂起中的工具确认：callId → resolver。AskUserQuestion 弹卡后在此登记，
    * server 收到 tool_confirmation_response 调 resolveToolConfirmation 唤醒。
@@ -417,7 +449,15 @@ export class CoreSessionRuntime implements SessionRuntime {
     private readonly config: Config,
     private readonly workLogger: WorkResultLogger = getWorkLogger(),
     private readonly options: CoreSessionRuntimeOptions = {},
-  ) {}
+  ) {
+    this.recoveryStore =
+      options.recoveryStore === false
+        ? undefined
+        : (options.recoveryStore ??
+          (process.env.NODE_ENV === 'test'
+            ? undefined
+            : new FileTurnRecoveryStore()));
+  }
 
   /**
    * 初始化 core：config.initialize() + refreshAuth（USE_PROXY_AUTH，自定义模型走此鉴权）。
@@ -428,6 +468,11 @@ export class CoreSessionRuntime implements SessionRuntime {
     // 自定义模型（BYO-key）经 USE_PROXY_AUTH 鉴权，对齐 validateNonInteractiveAuth。
     await this.config.refreshAuth(AuthType.USE_PROXY_AUTH);
     this.toolRegistry = await this.config.getToolRegistry();
+    if (this.recoveryStore) {
+      this.pendingRecovery = await this.recoveryStore.recoverInterrupted(
+        this.sessionId,
+      );
+    }
     // 默认使用 coreConfig 的 YOLO 模式（自动执行），
     // 用户可通过 /confirm 命令切回手动确认模式。
     // this.config.setApprovalMode?.(ApprovalMode.DEFAULT);
@@ -459,12 +504,14 @@ export class CoreSessionRuntime implements SessionRuntime {
   }
 
   async generateTitle(firstUserMessage: string): Promise<string> {
-    const temporaryChat = await this.config.getOttoClient().createTemporaryChat(
-      SceneType.CONTENT_SUMMARY,
-      undefined,
-      { type: 'sub', agentId: 'SessionTitle' },
-      { emptySystemPrompt: true },
-    );
+    const temporaryChat = await this.config
+      .getOttoClient()
+      .createTemporaryChat(
+        SceneType.CONTENT_SUMMARY,
+        undefined,
+        { type: 'sub', agentId: 'SessionTitle' },
+        { emptySystemPrompt: true },
+      );
     const response = await temporaryChat.sendMessage(
       {
         message: [
@@ -503,12 +550,25 @@ export class CoreSessionRuntime implements SessionRuntime {
 
   private publishRuntimeActivity(
     kind: 'agent' | 'tool' | 'turn',
-    state: 'started' | 'streaming' | 'awaiting_confirmation' | 'completed' | 'cancelled' | 'failed',
+    state:
+      | 'started'
+      | 'streaming'
+      | 'awaiting_confirmation'
+      | 'completed'
+      | 'cancelled'
+      | 'failed',
     detail?: string,
   ): void {
     this.store.publish(this.sessionId, {
       type: 'runtime_activity',
-      payload: { contractVersion: 1, sessionId: this.sessionId, kind, state, detail, timestamp: Date.now() },
+      payload: {
+        contractVersion: 1,
+        sessionId: this.sessionId,
+        kind,
+        state,
+        detail,
+        timestamp: Date.now(),
+      },
     });
   }
 
@@ -540,7 +600,7 @@ export class CoreSessionRuntime implements SessionRuntime {
    * 跑一整轮对话（可能多回合工具往返）。
    * 期间所有流式/工具事件经 store.publish 广播；不写 stdout。
    */
-  async run(input: MessageContent, _source: MessageSource): Promise<void> {
+  async run(input: MessageContent, source: MessageSource): Promise<void> {
     if (this.running) {
       // 同一会话已有一轮在跑：拒绝并行（保护 core chat 历史一致性）。
       this.store.publish(this.sessionId, {
@@ -565,10 +625,53 @@ export class CoreSessionRuntime implements SessionRuntime {
       return;
     }
     const toolRegistry = this.toolRegistry;
+    const taskText = messageContentToText(input);
+    const intentHash = turnIntentHash(taskText);
+    let recovery = this.pendingRecovery;
+    if (recovery && recovery.intentHash !== intentHash) {
+      this.fail(
+        'recovery_reconciliation_required',
+        '上一项任务仍有执行结果需要核对。为避免重复产生外部操作，Otto 已暂停新任务。',
+      );
+      this.running = false;
+      this.abort = undefined;
+      return;
+    }
+    if (this.recoveryStore && !recovery) {
+      recovery = await this.recoveryStore.begin({
+        sessionId: this.sessionId,
+        turnId: randomUUID(),
+        intentHash,
+      });
+    }
+    this.pendingRecovery = null;
+    this.activeRecovery = recovery ?? undefined;
+    const turnControl = deriveTurnControlPolicy({
+      text: taskText,
+      source,
+      toolFree: Boolean(this.options.toolFree),
+    });
+    const turnTracker = new AgentTurnTracker(
+      this.store,
+      this.sessionId,
+      turnControl,
+      recovery
+        ? {
+            turnId: recovery.turnId,
+            attempt: recovery.attempt,
+          }
+        : undefined,
+    );
+    if (recovery?.status === 'reconciliation_required') {
+      turnTracker.markReconciliationRequired(
+        recovery.reconciliationReason || '上次执行结果未知，禁止自动重放',
+      );
+    }
+    this.activeTurnTracker = turnTracker;
+    this.activeTurnControl = turnControl;
 
     // 自然语言“做 PPT”与 /ppt、专家卡片走同一内置 Skill。直接更新 system
     // instruction，不把可靠性寄托在模型是否记得调用 use_skill。
-    const taskText = messageContentToText(input);
     if (messageNeedsBuiltinPptSkill(taskText)) {
       const currentRules = this.config.getUserRules();
       const marker = '<skill_loaded name="ppt-creator" source="otto-builtin">';
@@ -583,10 +686,14 @@ export class CoreSessionRuntime implements SessionRuntime {
               marker,
               skill,
               '</skill_loaded>',
-            ].filter(Boolean).join('\n\n'),
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
           );
           try {
-            await this.config.getOttoClient().updateSystemPromptWithMcpPrompts();
+            await this.config
+              .getOttoClient()
+              .updateSystemPromptWithMcpPrompts();
           } catch {
             // 动态刷新失败不让本轮对话直接报错；专家 profile 路径仍在初始化时注入。
           }
@@ -599,10 +706,14 @@ export class CoreSessionRuntime implements SessionRuntime {
     const caps = getModelCapabilities(modelName);
 
     // 首轮 user message：把协议 content 构造成 core Part[]（文本 + 图片 inlineData）。
+    const turnDirective = formatTurnControlDirective(turnControl);
     let currentMessages: Content[] = [
       {
         role: MESSAGE_ROLES.USER,
-        parts: messageContentToParts(input),
+        parts: [
+          ...(turnDirective ? [{ text: turnDirective }] : []),
+          ...messageContentToParts(input),
+        ],
       },
     ];
 
@@ -632,6 +743,7 @@ export class CoreSessionRuntime implements SessionRuntime {
         type: 'message_start',
         payload: { message: msg },
       });
+      turnTracker.attachAssistantMessage(msg.id);
       return msg.id;
     };
 
@@ -646,7 +758,9 @@ export class CoreSessionRuntime implements SessionRuntime {
       while (true) {
         turnCount++;
         if (maxTurns > 0 && turnCount > maxTurns) {
-          this.fail('max_turns', '已达到本会话最大回合数。');
+          const message = '已达到本会话最大回合数。';
+          this.fail('max_turns', message);
+          turnTracker.fail(message);
           break;
         }
         if (signal.aborted) {
@@ -674,10 +788,12 @@ export class CoreSessionRuntime implements SessionRuntime {
                   abortSignal: signal,
                   tools: this.options.toolFree
                     ? []
-                    : [{
-                        functionDeclarations:
-                          toolRegistry.getFunctionDeclarations(),
-                      }],
+                    : [
+                        {
+                          functionDeclarations:
+                            toolRegistry.getFunctionDeclarations(),
+                        },
+                      ],
                 },
               },
               promptId,
@@ -700,6 +816,7 @@ export class CoreSessionRuntime implements SessionRuntime {
                   assistantId = startAssistant();
                 }
                 assistantText += delta;
+                turnTracker.markStreaming();
                 // 每个 delta 都同步把累积文本落进 store：客户端切走（退订）再切回时
                 // get_history 才能拿到已生成的部分，而不是空占位（否则切走期间的
                 // delta 全部丢失、回复缺头）。不改 isStreaming——收口仍由 patch 定稿。
@@ -726,7 +843,9 @@ export class CoreSessionRuntime implements SessionRuntime {
             if (error instanceof ModelRequestSafetyError) {
               if (error.requestState === 'unknown_outcome') {
                 throw new ModelOutcomeUnknownError(
-                  error.requestId, error, error.providerRequestId,
+                  error.requestId,
+                  error,
+                  error.providerRequestId,
                 );
               }
               throw error;
@@ -757,6 +876,7 @@ export class CoreSessionRuntime implements SessionRuntime {
             'tool_free_violation',
             'A2A 安全会话拒绝了模型生成的工具调用。',
           );
+          turnTracker.fail('A2A 安全会话拒绝了模型生成的工具调用。');
           break;
         }
 
@@ -766,6 +886,7 @@ export class CoreSessionRuntime implements SessionRuntime {
             // 模型一句话都没出（极少见）：补一条空 assistant 以保 UI 一致。
             assistantId = startAssistant();
           }
+          turnTracker.completeAssistantMessage(Boolean(assistantText.trim()));
           this.store.patchMessage(this.sessionId, assistantId, {
             content: [{ type: 'text', value: assistantText }],
             isStreaming: false,
@@ -790,12 +911,14 @@ export class CoreSessionRuntime implements SessionRuntime {
           }
 
           this.store.setStatus(this.sessionId, 'idle');
+          turnTracker.complete();
           this.publishRuntimeActivity('turn', 'completed');
           break;
         }
 
         // 有工具调用：定稿当前 assistant 文本段（若有），再执行工具并回灌。
         if (assistantId !== null) {
+          turnTracker.completeAssistantMessage(Boolean(assistantText.trim()));
           this.store.patchMessage(this.sessionId, assistantId, {
             content: [{ type: 'text', value: assistantText }],
             isStreaming: false,
@@ -881,12 +1004,21 @@ export class CoreSessionRuntime implements SessionRuntime {
           message,
           e instanceof ModelOutcomeUnknownError ? e.safetyDetails() : undefined,
         );
+        if (e instanceof ModelOutcomeUnknownError) {
+          turnTracker.interruptUnknown(message);
+        } else {
+          turnTracker.fail(message);
+        }
         this.publishRuntimeActivity('turn', 'failed', message);
       }
     } finally {
+      await this.settleRecovery(turnTracker);
       signal.removeEventListener('abort', onAbort);
       this.running = false;
       this.abort = undefined;
+      this.activeTurnTracker = undefined;
+      this.activeTurnControl = undefined;
+      this.activeRecovery = undefined;
     }
   }
 
@@ -906,18 +1038,26 @@ export class CoreSessionRuntime implements SessionRuntime {
 
     // 某些 provider（尤其 Gemini 原生 functionCall）不提供 id。一次绑定后全程复用，
     // 避免建卡与执行各生成一个随机 id，导致 cards.get() 永远取不到同一张卡。
-    const callsWithIds = calls.map((fc) => ({
-      fc,
-      callId: this.callIdOf(fc),
-    }));
+    const callsWithIds = calls.map((fc) => {
+      const name = (fc.name as string) ?? 'unknown';
+      const parameters = (fc.args ?? {}) as Record<string, unknown>;
+      return {
+        fc,
+        callId: this.callIdOf(fc),
+        name,
+        parameters,
+        fingerprint: toolExecutionFingerprint(name, parameters),
+        replayClass: classifyRecoveryTool(name),
+      };
+    });
 
     // 先把所有工具卡以 Executing 状态广播一遍，让 UI 立即出现工具调用卡。
     const cards = new Map<string, ToolCall>();
-    for (const { fc, callId } of callsWithIds) {
+    for (const { callId, name, parameters } of callsWithIds) {
       const card: ToolCall = {
         id: callId,
-        toolName: (fc.name as string) ?? 'unknown',
-        parameters: (fc.args ?? {}) as Record<string, unknown>,
+        toolName: name,
+        parameters,
         status: ToolCallStatus.Executing,
         startTime: Date.now(),
       };
@@ -925,7 +1065,11 @@ export class CoreSessionRuntime implements SessionRuntime {
     }
     if (cards.size > 0) {
       this.publishToolCards(cards, messageId);
-      this.publishRuntimeActivity('tool', 'started', `${cards.size} 个工具调用`);
+      this.publishRuntimeActivity(
+        'tool',
+        'started',
+        `${cards.size} 个工具调用`,
+      );
     }
 
     // AbortSignal 只保证通知，不保证工具实现会配合退出。先把卡片与持久消息立即收口；
@@ -941,148 +1085,317 @@ export class CoreSessionRuntime implements SessionRuntime {
       }
       if (changed) this.publishToolCards(cards, messageId);
     };
+    const startedNeverReplay = new Set<string>();
+    let reconciliationPromise: Promise<void> | undefined;
+    const requireReconciliation = (reason: string): Promise<void> => {
+      reconciliationPromise ??= this.markRecoveryReconciliation(reason);
+      return reconciliationPromise;
+    };
     signal.addEventListener('abort', cancelActiveCards, { once: true });
     if (signal.aborted) cancelActiveCards();
 
-    // 分块并发执行（对齐 nonInteractiveCli 的并发上限）。
+    // 只有控制策略允许且名称已经过只读审查的工具才能并发。未知工具、写入、
+    // 外部操作和审批动作全部单独成块，避免模型把相邻调用误当成可安全并行。
     const chunks: Array<typeof callsWithIds> = [];
     const limit = Math.max(1, maxConcurrent || 1);
-    for (let i = 0; i < callsWithIds.length; i += limit) {
-      chunks.push(callsWithIds.slice(i, i + limit));
+    let parallelReads: typeof callsWithIds = [];
+    const flushParallelReads = (): void => {
+      if (parallelReads.length === 0) return;
+      chunks.push(parallelReads);
+      parallelReads = [];
+    };
+    for (const call of callsWithIds) {
+      const name = String(call.fc.name ?? '');
+      if (
+        this.activeTurnControl?.allowsParallelRead === true &&
+        isParallelSafeToolName(name)
+      ) {
+        parallelReads.push(call);
+        if (parallelReads.length >= limit) flushParallelReads();
+        continue;
+      }
+      flushParallelReads();
+      chunks.push([call]);
     }
+    flushParallelReads();
 
     try {
       for (const chunk of chunks) {
         if (signal.aborted) break;
         await Promise.all(
-          chunk.map(async ({ fc, callId }) => {
-            const card = cards.get(callId)!;
-            const requestInfo: ToolCallRequestInfo = {
+          chunk.map(
+            async ({
+              fc,
               callId,
-              name: (fc.name as string) ?? '',
-              args: (fc.args ?? {}) as Record<string, unknown>,
-              isClientInitiated: false,
-              prompt_id: promptId,
-            };
-
-            try {
-              // AskUserQuestion 交互闸门：headless 的 executeToolCall 不会弹确认框，
-              // 所以在此先弹问答卡、等用户答案写进工具的 pendingAnswers，再落入下面
-              // 统一的 executeToolCall —— 它内部 execute() 会读到答案并格式化结果。
-              // 用户跳过 / 会话取消时 answers 为空，execute() 自然回落到 "declined"。
-              let explicitlyApproved = false;
-              if ((fc.name as string) === 'ask_user_question') {
-                await this.gateAskUserQuestion(
-                  requestInfo,
-                  toolRegistry,
-                  cards,
-                  callId,
-                  signal,
-                  messageId,
-                );
-                explicitlyApproved = true;
-              } else {
-                explicitlyApproved = await this.gateToolConfirmation(
-                  requestInfo,
-                  toolRegistry,
-                  cards,
-                  callId,
-                  signal,
-                  messageId,
-                );
-              }
-
-              const toolResponse = await executeToolCall(
-                this.config,
-                requestInfo,
-                toolRegistry,
-                signal,
-                {
-                  explicitlyApproved,
-                  onOutput: (output) => {
-                    if (signal.aborted) return;
-                    const currentCard = cards.get(callId);
-                    if (!currentCard) return;
-                    cards.set(callId, { ...currentCard, liveOutput: output });
-                    this.publishToolCards(cards, messageId);
-                  },
-                },
-              );
-
-              if (signal.aborted) {
-                cards.set(callId, cancelToolCall(cards.get(callId) ?? card));
-                return;
-              }
-
-              const display = resultDisplayToString(toolResponse.resultDisplay);
-              const currentCard = cards.get(callId) ?? card;
-              const execResult: ToolExecutionResult = {
-                success: !toolResponse.error,
-                data: display || undefined,
-                error: toolResponse.error
-                  ? toolResponse.error.message
-                  : undefined,
-                executionTime: currentCard.startTime
-                  ? Date.now() - currentCard.startTime
-                  : 0,
-                toolName: currentCard.toolName,
+              name,
+              parameters,
+              fingerprint,
+              replayClass,
+            }) => {
+              const card = cards.get(callId)!;
+              const requestInfo: ToolCallRequestInfo = {
+                callId,
+                name,
+                args: parameters,
+                isClientInitiated: false,
+                prompt_id: promptId,
               };
-              cards.set(callId, {
-                ...currentCard,
-                status: toolResponse.error
-                  ? ToolCallStatus.Error
-                  : ToolCallStatus.Success,
-                result: execResult,
-                endTime: Date.now(),
-              });
 
-              // 工具响应 Part[] 回灌（executeToolCall 已构造 functionResponse）。
-              const parts = Array.isArray(toolResponse.responseParts)
-                ? toolResponse.responseParts
-                : [toolResponse.responseParts];
-              for (const p of parts) {
-                if (typeof p === 'string') {
-                  responseParts.push({ text: p });
-                } else if (p) {
-                  responseParts.push(p as Part);
+              let executionStarted = false;
+              try {
+                const decision =
+                  this.recoveryStore && this.activeRecovery
+                    ? this.recoveryStore.decisionForTool(this.activeRecovery, {
+                        name,
+                        fingerprint,
+                        replayClass,
+                      })
+                    : { action: 'execute' as const };
+                if (decision.action === 'reuse') {
+                  const currentCard = cards.get(callId) ?? card;
+                  cards.set(callId, {
+                    ...currentCard,
+                    status: ToolCallStatus.Success,
+                    result: {
+                      success: true,
+                      data: decision.resultSummary,
+                      executionTime: 0,
+                      toolName: name,
+                    },
+                    endTime: Date.now(),
+                  });
+                  responseParts.push({
+                    functionResponse: {
+                      id: callId,
+                      name,
+                      response: {
+                        recovered: true,
+                        result: decision.resultSummary,
+                      },
+                    },
+                  });
+                  return;
                 }
-              }
-            } catch (e) {
-              const message = e instanceof Error ? e.message : String(e);
-              const currentCard = cards.get(callId) ?? card;
-              if (signal.aborted) {
-                cards.set(callId, cancelToolCall(currentCard));
-                return;
-              }
-              cards.set(callId, {
-                ...currentCard,
-                status: ToolCallStatus.Error,
-                result: {
-                  success: false,
-                  error: message,
+                if (decision.action === 'reconcile') {
+                  await requireReconciliation(decision.reason);
+                  const currentCard = cards.get(callId) ?? card;
+                  cards.set(callId, {
+                    ...currentCard,
+                    status: ToolCallStatus.Error,
+                    result: {
+                      success: false,
+                      error: decision.reason,
+                      executionTime: 0,
+                      toolName: name,
+                    },
+                    endTime: Date.now(),
+                  });
+                  responseParts.push({
+                    functionResponse: {
+                      id: callId,
+                      name,
+                      response: {
+                        error: decision.reason,
+                        reconciliationRequired: true,
+                      },
+                    },
+                  });
+                  return;
+                }
+
+                // AskUserQuestion 交互闸门：headless 的 executeToolCall 不会弹确认框，
+                // 所以在此先弹问答卡、等用户答案写进工具的 pendingAnswers，再落入下面
+                // 统一的 executeToolCall —— 它内部 execute() 会读到答案并格式化结果。
+                // 用户跳过 / 会话取消时 answers 为空，execute() 自然回落到 "declined"。
+                let explicitlyApproved = false;
+                if ((fc.name as string) === 'ask_user_question') {
+                  await this.gateAskUserQuestion(
+                    requestInfo,
+                    toolRegistry,
+                    cards,
+                    callId,
+                    signal,
+                    messageId,
+                  );
+                  explicitlyApproved = true;
+                } else {
+                  explicitlyApproved = await this.gateToolConfirmation(
+                    requestInfo,
+                    toolRegistry,
+                    cards,
+                    callId,
+                    signal,
+                    messageId,
+                  );
+                }
+
+                if (this.recoveryStore && this.activeRecovery) {
+                  this.activeRecovery = await this.recoveryStore.recordStarted(
+                    this.activeRecovery,
+                    { callId, name, fingerprint, replayClass },
+                  );
+                  executionStarted = true;
+                  if (replayClass === 'never_replay') {
+                    startedNeverReplay.add(fingerprint);
+                  }
+                }
+
+                const toolResponse = await executeToolCall(
+                  this.config,
+                  requestInfo,
+                  toolRegistry,
+                  signal,
+                  {
+                    explicitlyApproved,
+                    onOutput: (output) => {
+                      if (signal.aborted) return;
+                      const currentCard = cards.get(callId);
+                      if (!currentCard) return;
+                      cards.set(callId, { ...currentCard, liveOutput: output });
+                      this.publishToolCards(cards, messageId);
+                    },
+                  },
+                );
+
+                if (signal.aborted) {
+                  cards.set(callId, cancelToolCall(cards.get(callId) ?? card));
+                  return;
+                }
+
+                const display = resultDisplayToString(
+                  toolResponse.resultDisplay,
+                );
+                const currentCard = cards.get(callId) ?? card;
+                const execResult: ToolExecutionResult = {
+                  success: !toolResponse.error,
+                  data: display || undefined,
+                  error: toolResponse.error
+                    ? toolResponse.error.message
+                    : undefined,
                   executionTime: currentCard.startTime
                     ? Date.now() - currentCard.startTime
                     : 0,
                   toolName: currentCard.toolName,
-                },
-                endTime: Date.now(),
-              });
-              // 把错误作为 functionResponse 回灌，让模型可见并自我纠正。
-              responseParts.push({
-                functionResponse: {
-                  id: callId,
-                  name: (fc.name as string) ?? '',
-                  response: { error: message },
-                },
-              });
-            }
-          }),
+                };
+                cards.set(callId, {
+                  ...currentCard,
+                  status: toolResponse.error
+                    ? ToolCallStatus.Error
+                    : ToolCallStatus.Success,
+                  result: execResult,
+                  endTime: Date.now(),
+                });
+
+                if (this.recoveryStore && this.activeRecovery) {
+                  if (toolResponse.error && replayClass === 'never_replay') {
+                    await requireReconciliation(
+                      `工具 ${name} 已返回错误，但外部副作用是否发生无法安全确认：${toolResponse.error.message}`,
+                    );
+                  } else {
+                    this.activeRecovery = toolResponse.error
+                      ? await this.recoveryStore.recordFailed(
+                          this.activeRecovery,
+                          {
+                            callId,
+                            name,
+                            fingerprint,
+                            replayClass,
+                            errorSummary: toolResponse.error.message,
+                          },
+                        )
+                      : await this.recoveryStore.recordSucceeded(
+                          this.activeRecovery,
+                          {
+                            callId,
+                            name,
+                            fingerprint,
+                            replayClass,
+                            resultSummary: display || '工具执行成功',
+                          },
+                        );
+                    startedNeverReplay.delete(fingerprint);
+                  }
+                }
+
+                // 工具响应 Part[] 回灌（executeToolCall 已构造 functionResponse）。
+                const parts = Array.isArray(toolResponse.responseParts)
+                  ? toolResponse.responseParts
+                  : [toolResponse.responseParts];
+                for (const p of parts) {
+                  if (typeof p === 'string') {
+                    responseParts.push({ text: p });
+                  } else if (p) {
+                    responseParts.push(p as Part);
+                  }
+                }
+              } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                const currentCard = cards.get(callId) ?? card;
+                if (
+                  executionStarted &&
+                  replayClass === 'never_replay' &&
+                  this.recoveryStore &&
+                  this.activeRecovery
+                ) {
+                  await requireReconciliation(
+                    `工具 ${name} 已开始执行，但未取得可信终态：${message}`,
+                  );
+                } else if (
+                  executionStarted &&
+                  this.recoveryStore &&
+                  this.activeRecovery
+                ) {
+                  this.activeRecovery = await this.recoveryStore.recordFailed(
+                    this.activeRecovery,
+                    {
+                      callId,
+                      name,
+                      fingerprint,
+                      replayClass,
+                      errorSummary: message,
+                    },
+                  );
+                }
+                if (signal.aborted) {
+                  cards.set(callId, cancelToolCall(currentCard));
+                  return;
+                }
+                cards.set(callId, {
+                  ...currentCard,
+                  status: ToolCallStatus.Error,
+                  result: {
+                    success: false,
+                    error: message,
+                    executionTime: currentCard.startTime
+                      ? Date.now() - currentCard.startTime
+                      : 0,
+                    toolName: currentCard.toolName,
+                  },
+                  endTime: Date.now(),
+                });
+                // 把错误作为 functionResponse 回灌，让模型可见并自我纠正。
+                responseParts.push({
+                  functionResponse: {
+                    id: callId,
+                    name: (fc.name as string) ?? '',
+                    response: { error: message },
+                  },
+                });
+              }
+            },
+          ),
         );
         // 每块执行完广播一次最新状态，同时写回消息持久态。
         this.publishToolCards(cards, messageId);
       }
     } finally {
       signal.removeEventListener('abort', cancelActiveCards);
+      if (signal.aborted && startedNeverReplay.size > 0) {
+        await requireReconciliation(
+          '不可安全重放的工具在取消时仍处于执行中，结果需要人工核对',
+        );
+      }
+      await reconciliationPromise;
       if (signal.aborted) cancelActiveCards();
     }
 
@@ -1101,9 +1414,22 @@ export class CoreSessionRuntime implements SessionRuntime {
     const tool = toolRegistry.getTool(requestInfo.name);
     if (!tool) return false;
     const details = await tool.shouldConfirmExecute(requestInfo.args, signal);
-    if (!details) return false;
+    if (!details) {
+      if (
+        this.activeTurnControl?.confirmationMode === 'always' &&
+        !isPolicySafeWithoutConfirmation(requestInfo.name)
+      ) {
+        throw new Error(
+          '当前任务涉及外部或破坏性操作，但该工具没有提供可审查的确认信息，Otto 已阻止执行。',
+        );
+      }
+      return false;
+    }
 
-    if (!shouldRequestConfirmation(this.authorizationMode, details))
+    if (
+      this.activeTurnControl?.confirmationMode !== 'always' &&
+      !shouldRequestConfirmation(this.authorizationMode, details)
+    )
       return false;
 
     const confirmation = this.waitForConfirmation(callId, signal);
@@ -1164,6 +1490,7 @@ export class CoreSessionRuntime implements SessionRuntime {
       isProcessingTools,
       toolsCompleted: !isProcessingTools,
     });
+    this.activeTurnTracker?.updateToolCalls(toolCalls);
     this.store.publish(this.sessionId, {
       type: 'tool_calls_update',
       payload: {
@@ -1227,7 +1554,11 @@ export class CoreSessionRuntime implements SessionRuntime {
       };
       cards.set(callId, awaitingCard);
       this.publishToolCards(cards, messageId);
-      this.publishRuntimeActivity('tool', 'awaiting_confirmation', awaitingCard.toolName);
+      this.publishRuntimeActivity(
+        'tool',
+        'awaiting_confirmation',
+        awaitingCard.toolName,
+      );
       this.store.publish(this.sessionId, {
         type: 'tool_confirmation_request',
         payload: {
@@ -1297,7 +1628,47 @@ export class CoreSessionRuntime implements SessionRuntime {
     );
   }
 
+  private async markRecoveryReconciliation(reason: string): Promise<void> {
+    if (!this.recoveryStore || !this.activeRecovery) return;
+    this.activeRecovery = await this.recoveryStore.markReconciliationRequired(
+      this.activeRecovery,
+      reason,
+    );
+    this.activeTurnTracker?.markReconciliationRequired(reason);
+  }
+
+  private async settleRecovery(tracker: AgentTurnTracker): Promise<void> {
+    if (!this.recoveryStore || !this.activeRecovery) return;
+    const latest =
+      (await this.recoveryStore.load(this.sessionId)) ?? this.activeRecovery;
+    const snapshot = tracker.snapshot();
+    const hasInFlightTool = latest.tools.some(
+      (tool) => tool.state === 'started',
+    );
+    if (
+      snapshot.status !== 'interrupted' &&
+      !hasInFlightTool &&
+      latest.status !== 'reconciliation_required'
+    ) {
+      await this.recoveryStore.clear(this.sessionId, latest.turnId);
+      this.pendingRecovery = null;
+      return;
+    }
+    this.pendingRecovery =
+      (await this.recoveryStore.recoverInterrupted(this.sessionId)) ?? latest;
+  }
+
   private onCancelled(assistantId: string | null, assistantText: string): void {
+    const unknownSideEffect = this.activeRecovery?.tools.some(
+      (tool) => tool.state === 'started' && tool.replayClass === 'never_replay',
+    );
+    if (unknownSideEffect) {
+      this.activeTurnTracker?.interruptUnknown(
+        '不可安全重放的工具在取消时仍处于执行中，结果需要人工核对',
+      );
+    } else {
+      this.activeTurnTracker?.cancel();
+    }
     if (assistantId !== null) {
       this.store.patchMessage(this.sessionId, assistantId, {
         content: [{ type: 'text', value: assistantText }],
@@ -1356,7 +1727,9 @@ export class CoreSessionRuntime implements SessionRuntime {
       });
       try {
         getRealtimeWatcher()?.record?.(taskTitle, userInput.slice(0, 500));
-      } catch { /* AutoSkill realtime signals are best-effort. */ }
+      } catch {
+        /* AutoSkill realtime signals are best-effort. */
+      }
       try {
         getHabitAnalyzer().feed({
           action: taskTitle,
@@ -1366,7 +1739,9 @@ export class CoreSessionRuntime implements SessionRuntime {
           timestamp: new Date().toISOString(),
           toolName: 'otto_work_result',
         });
-      } catch { /* Habit analysis must not affect chat completion. */ }
+      } catch {
+        /* Habit analysis must not affect chat completion. */
+      }
     } catch {
       // 工作日志不可用不应让已完成的对话变成失败。
     }
@@ -1376,12 +1751,19 @@ export class CoreSessionRuntime implements SessionRuntime {
     code: string,
     message: string,
     modelRequestSafety?: {
-      requestId: string; requestState: 'unknown_outcome'; providerRequestId?: string;
+      requestId: string;
+      requestState: 'unknown_outcome';
+      providerRequestId?: string;
     },
   ): void {
     this.store.publish(this.sessionId, {
       type: 'error',
-      payload: { sessionId: this.sessionId, code, message, ...(modelRequestSafety ? { modelRequestSafety } : {}) },
+      payload: {
+        sessionId: this.sessionId,
+        code,
+        message,
+        ...(modelRequestSafety ? { modelRequestSafety } : {}),
+      },
     });
     this.store.setStatus(this.sessionId, 'error');
   }

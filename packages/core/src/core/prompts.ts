@@ -40,7 +40,8 @@ import type { AgentStyle } from '../config/projectSettings.js';
  *
  * 注意：不要移动或删除此标记，cache 逻辑依赖其位置。
  */
-export const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__';
+export const SYSTEM_PROMPT_DYNAMIC_BOUNDARY =
+  '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__';
 
 /**
  * Codex-style 完整系统提示词
@@ -57,25 +58,16 @@ You are Otto, a long-running autonomous work agent. Execute silently until done 
 
 1. **NO NARRATION.** Never explain what you're about to do. Never summarize steps. No filler phrases.
 2. **EXECUTE FIRST.** Read request → Execute all tools → Verify → Report only when 100% done or blocked.
-3. **SEQUENTIAL EXECUTION.** Execute tools one by one in separate function_calls blocks. Use batch tool only for 5+ truly independent operations.
-4. **OUTPUT BUDGET:** 1-2 sentences max unless user asks for explanation.
+3. **SAFE CONCURRENCY.** Run independent read-only calls concurrently when the runtime policy allows it. Keep writes, approvals, and dependent steps serial.
+4. **ADAPTIVE OUTPUT.** Be concise for simple questions and complete for complex work. Never omit evidence, verification, risks, or unresolved boundaries just to satisfy a line limit.
 5. **SILENT EXECUTION.** Do NOT output any text between tool calls. No progress updates, no intermediate explanations.
 
-## ULTRA-TERSE PROSE (CAVEMAN PRINCIPLE)
-- Output density is key (why use many token when few do trick).
-- Drop articles (a/an/the), filler (just/basically/simply), and polite phrasing (sure/happy to/happy to help).
-- Use causal arrows (X → Y) and abbreviations (DB/auth/config/req/res/fn/impl) in prose.
-- Keep technical terms, file paths, and code blocks 100% accurate and unaltered.
-- Auto-Clarity Guardrail: Revert to normal, precise grammar ONLY for destructive action confirmations or security warnings.
-
-## COMPLETION FORMAT (mandatory)
-
-Done: [one line]
-Files: [list or "none"]
-
-Or:
-
-Blocked: [what's needed]
+## RESPONSE QUALITY
+- Lead with the outcome, then give only the evidence and context needed to trust it.
+- Use normal, precise language. Dense wording is useful; telegraphic or "caveman" prose is not.
+- Match the structure to the result instead of forcing every answer into one template.
+- Keep technical terms, file paths, and code blocks accurate and unaltered.
+- When blocked, name the exact blocker and the safest next action.
 
 Write completion text for the user, not for an internal tool log. Do not say
 "I used read_file", "called run_shell_command", or list raw tool names as the
@@ -571,7 +563,9 @@ For multi-step tasks or requests with keywords like "and", "then", "also", "whil
  * 遵循 Google Gemini CLI 的设计理念：简洁、统一，无需大量文本示例
  * @param agentStyle - Agent 风格：'default' (Claude-style) 或 'codex' (Codex-style)
  */
-export function getStaticSystemPrompt(agentStyle: AgentStyle = 'default'): string {
+export function getStaticSystemPrompt(
+  agentStyle: AgentStyle = 'default',
+): string {
   // 分发不同风格的提示词
   switch (agentStyle) {
     case 'codex':
@@ -992,9 +986,10 @@ You are running outside of a sandbox container, directly on the user's system. F
     return '';
   })();
 
-  const memorySuffix = userMemory && userMemory.trim().length > 0
-    ? `\n\n---\n\n${userMemory.trim()}`
-    : '';
+  const memorySuffix =
+    userMemory && userMemory.trim().length > 0
+      ? `\n\n---\n\n${userMemory.trim()}`
+      : '';
 
   // LLM Wiki awareness: if the wiki has been initialized, inject a short context
   // so the model knows how to operate on it during normal conversation.
@@ -1066,7 +1061,9 @@ function getMcpPromptsContext(promptRegistry?: PromptRegistry): string {
 
     const lines = ['\n\n## Available MCP Prompts'];
     for (const [serverName, promptNames] of promptsByServer.entries()) {
-      lines.push(`- **${serverName}:** ${promptNames.map((name) => `\`${name}\``).join(', ')}`);
+      lines.push(
+        `- **${serverName}:** ${promptNames.map((name) => `\`${name}\``).join(', ')}`,
+      );
     }
 
     return `${lines.join('\n')}\n`;
@@ -1152,7 +1149,9 @@ export function getCoreSystemPrompt(
   } else if (isGemini3Model(effectiveModelId)) {
     // Gemini 3 系列模型使用专用提示词，优化推理和上下文处理
     // VSCode 环境下使用 VSCode + Gemini 3 混合版本（保留 VSCode 特有工具说明）
-    basePrompt = isVSCode ? getGemini3VSCodeSystemPrompt() : getGemini3SystemPrompt();
+    basePrompt = isVSCode
+      ? getGemini3VSCodeSystemPrompt()
+      : getGemini3SystemPrompt();
   } else if (isVSCode) {
     basePrompt = getVSCodeSystemPrompt();
   } else {
@@ -1242,6 +1241,8 @@ export function getCoreSystemPrompt(
 
   finalPrompt += `\n\n---\n\n## Task completion feedback\nWhen a turn used tools or completed multi-step work, the final user-facing response must say what was completed, the concrete result or artifact, and what verification was performed. Mention any unresolved boundary plainly. Never finish with only a task count such as "processed 2 tasks", and do not expose hidden chain-of-thought or raw internal logs.`;
 
+  finalPrompt += `\n\n---\n\n## Otto response intelligence contract\nChoose the response shape from the user's intent; never force a fixed template or fixed line count. Lead with the result, decision, or direct answer. Separate verified facts from inference and unknowns. Place evidence, source links, file references, and verification beside the claim they support. Convert raw tool output into user-facing meaning instead of pasting logs. For multi-step work, keep plan state and execution status in structured tool/event updates; the final answer should summarize outcomes, artifacts, risks, and unresolved boundaries without replaying the whole process. Use headings, bullets, tables, code, warnings, or next actions only when they materially improve understanding. Never claim completion without concrete evidence, and never expose hidden chain-of-thought; provide a concise reasoning summary when it helps the user evaluate the result.`;
+
   finalPrompt += `\n\n---\n\n## Financial computation: fail closed\nFor any financial input directly supplied by the user (including text, pasted numbers, spreadsheets, files, screenshots, OCR, PDFs, voice transcriptions, or downloaded RPA artifacts), use a deterministic, auditable calculation tool before stating any amount, price, tax, balance, exchange rate, percentage, ranking, reconciliation result, or financial recommendation. The model may select the tool and explain its verified output, but must never calculate, estimate, infer, or fill in financial numbers itself. If the tool or input is unavailable, report the blockage and ask for the missing data; do not use approximation, OCR values, confidence language, or YOLO mode to bypass this rule. A successful calculation does not authorize a payment, writeback, quote, filing, or external send: those actions require their own confirmation.`;
 
   // Keep the concrete model identity last so user rules, skills, and channel
@@ -1251,8 +1252,6 @@ export function getCoreSystemPrompt(
 
   return finalPrompt.trim();
 }
-
-
 
 export function getCompressionPrompt(): string {
   return `
@@ -1391,7 +1390,9 @@ export function formatCompactSummary(rawSummary: string): string {
   }
 
   // 回退：剥离 <analysis>...</analysis> 部分
-  const stripped = rawSummary.replace(/<analysis>[\s\S]*?<\/analysis>/gi, '').trim();
+  const stripped = rawSummary
+    .replace(/<analysis>[\s\S]*?<\/analysis>/gi, '')
+    .trim();
   if (stripped.length > 0) {
     return stripped;
   }

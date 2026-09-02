@@ -1902,6 +1902,181 @@ h6.otto-prose__h {
   padding: 2px 12px 8px;
   white-space: pre-wrap;
 }
+.otto-turn-timeline {
+  display: grid;
+  gap: 8px;
+  margin: 2px 12px 10px;
+  padding: 0;
+  list-style: none;
+}
+.otto-turn-summary {
+  min-width: 0;
+}
+.otto-turn-references {
+  margin: 8px 12px 10px 29px;
+  padding: 9px 10px;
+  border: 1px solid var(--otto-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--otto-surface-raised) 72%, transparent);
+}
+.otto-turn-references h4 {
+  margin: 0 0 6px;
+  color: var(--otto-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+}
+.otto-turn-references ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.otto-turn-references li {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  font-size: 11.5px;
+}
+.otto-turn-references a,
+.otto-turn-references__label {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--otto-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.otto-turn-references a {
+  color: var(--otto-accent);
+  text-decoration: none;
+}
+.otto-turn-references a:hover {
+  text-decoration: underline;
+}
+.otto-turn-references__meta {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--otto-text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.otto-turn-references__state {
+  flex: 0 0 auto;
+  color: var(--otto-text-tertiary);
+}
+.otto-turn-references__state--verified {
+  color: var(--otto-success, #2e9b68);
+}
+.otto-turn-references__state--pending {
+  color: var(--otto-warning, #d68a12);
+}
+.otto-turn-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+}
+.otto-turn-item__dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  margin-top: 5px;
+  border: 2px solid var(--otto-border-strong);
+  border-radius: 999px;
+  background: var(--otto-surface-raised);
+}
+.otto-turn-item--in_progress .otto-turn-item__dot {
+  border-color: var(--otto-accent);
+  background: var(--otto-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--otto-accent) 14%, transparent);
+}
+.otto-turn-item--completed .otto-turn-item__dot {
+  border-color: var(--otto-success, #2e9b68);
+  background: var(--otto-success, #2e9b68);
+}
+.otto-turn-item--awaiting_confirmation .otto-turn-item__dot,
+.otto-turn-item--failed .otto-turn-item__dot {
+  border-color: var(--otto-warning, #d68a12);
+  background: var(--otto-warning, #d68a12);
+}
+.otto-turn-item__content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.otto-turn-item__line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.otto-turn-item__label {
+  color: var(--otto-text);
+  font-weight: 560;
+}
+.otto-turn-item__status {
+  color: var(--otto-text-tertiary);
+  font-size: 11px;
+}
+.otto-turn-item__detail {
+  margin-top: 2px;
+  color: var(--otto-text-tertiary);
+  font-size: 11.5px;
+}
+.otto-turn-plan {
+  display: grid;
+  gap: 5px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.otto-turn-plan__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: var(--otto-text-secondary);
+}
+.otto-turn-plan__mark {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: var(--otto-border-strong);
+}
+.otto-turn-plan__step--completed .otto-turn-plan__mark {
+  background: var(--otto-success, #2e9b68);
+}
+.otto-turn-plan__step--in_progress {
+  color: var(--otto-text);
+}
+.otto-turn-plan__step--in_progress .otto-turn-plan__mark {
+  background: var(--otto-accent);
+}
+.otto-turn-verification {
+  display: grid;
+  gap: 5px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.otto-turn-verification__check {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--otto-text-secondary);
+  font-size: 11.5px;
+}
+.otto-turn-verification__status {
+  flex: 0 0 auto;
+  color: var(--otto-text-tertiary);
+}
+.otto-turn-verification__check--passed .otto-turn-verification__status {
+  color: var(--otto-success, #2e9b68);
+}
+.otto-turn-verification__check--failed .otto-turn-verification__status,
+.otto-turn-verification__check--not_run .otto-turn-verification__status {
+  color: var(--otto-warning, #d68a12);
+}
 .otto-process-trace__body > .otto-tools {
   margin: 3px 10px 10px;
   background: transparent;

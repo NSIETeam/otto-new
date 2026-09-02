@@ -15,6 +15,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type { Config, CustomModelConfig } from 'otto-core';
 import {
   AskUserQuestionTool,
@@ -26,6 +29,11 @@ import {
 import { CoreSessionRuntime, messageNeedsBuiltinPptSkill } from './runtime.js';
 import { InMemorySessionStore } from './sessions.js';
 import { ToolCallStatus, type ServerToClient } from './protocol.js';
+import {
+  FileTurnRecoveryStore,
+  toolExecutionFingerprint,
+  turnIntentHash,
+} from './turnRecoveryStore.js';
 
 const noOpWorkLogger = { log: async () => undefined };
 
@@ -47,8 +55,9 @@ describe('CoreSessionRuntime 会话标题生成', () => {
       noOpWorkLogger,
     );
 
-    await expect(runtime.generateTitle('帮我分析登录接口为什么报错'))
-      .resolves.toBe('登录故障排查');
+    await expect(
+      runtime.generateTitle('帮我分析登录接口为什么报错'),
+    ).resolves.toBe('登录故障排查');
     expect(createTemporaryChat).toHaveBeenCalledWith(
       SceneType.CONTENT_SUMMARY,
       undefined,
@@ -58,7 +67,10 @@ describe('CoreSessionRuntime 会话标题生成', () => {
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message: expect.stringContaining('产品名、API 名、型号和版本号可保留'),
-        config: expect.objectContaining({ maxOutputTokens: 32, temperature: 0.2 }),
+        config: expect.objectContaining({
+          maxOutputTokens: 32,
+          temperature: 0.2,
+        }),
       }),
       expect.stringContaining(`session-title-${session.sessionId}-`),
       SceneType.CONTENT_SUMMARY,
@@ -96,18 +108,30 @@ describe('PPT 内置 Skill 自动路由', () => {
         getChat: async () => ({ sendMessageStream: async () => stream() }),
       }),
       getUserRules: () => rules,
-      setUserRules: (next: string) => { rules = next; },
+      setUserRules: (next: string) => {
+        rules = next;
+      },
       getModel: () => 'test-model',
       getMaxSessionTurns: () => 10,
     } as unknown as Config;
     const store = new InMemorySessionStore();
     const session = store.createSession({ title: '自然语言做 PPT' });
-    const runtime = new CoreSessionRuntime(store, session.sessionId, config, noOpWorkLogger);
+    const runtime = new CoreSessionRuntime(
+      store,
+      session.sessionId,
+      config,
+      noOpWorkLogger,
+    );
     await runtime.initialize();
 
-    await runtime.run([{ type: 'text', value: '帮我做一份发布会 PPT' }], 'local');
+    await runtime.run(
+      [{ type: 'text', value: '帮我做一份发布会 PPT' }],
+      'local',
+    );
 
-    expect(rules).toContain('<skill_loaded name="ppt-creator" source="otto-builtin">');
+    expect(rules).toContain(
+      '<skill_loaded name="ppt-creator" source="otto-builtin">',
+    );
     expect(rules).toContain('# 发布会级 PPT 视觉导演');
     expect(refreshSystem).toHaveBeenCalledTimes(1);
   });
@@ -202,6 +226,172 @@ function makeFakeConfig(stream: () => AsyncGenerator<unknown>): Config {
   return fake as unknown as Config;
 }
 
+describe('CoreSessionRuntime · 下一代任务控制层', () => {
+  it('复杂调研任务注入精简控制元数据，原始问题仍作为独立内容传递', async () => {
+    async function* stream(): AsyncGenerator<unknown> {
+      yield chunk('尚未完成来源检索。', 'STOP');
+    }
+    const sendMessageStream = vi.fn(async () => stream());
+    const config = {
+      initialize: async () => undefined,
+      refreshAuth: async () => undefined,
+      getToolRegistry: async () => ({
+        discoverMcpTools: async () => undefined,
+        getFunctionDeclarations: () => [],
+      }),
+      getOttoClient: () => ({
+        getChat: async () => ({ sendMessageStream }),
+      }),
+      getModel: () => 'test-model',
+      getMaxSessionTurns: () => 10,
+    } as unknown as Config;
+    const store = new InMemorySessionStore();
+    const session = store.createSession({ title: '调研' });
+    const runtime = new CoreSessionRuntime(
+      store,
+      session.sessionId,
+      config,
+      noOpWorkLogger,
+    );
+    const question = '搜索并核实 Otto 最新协议，秘密标记 secret-42';
+
+    await runtime.initialize();
+    await runtime.run([{ type: 'text', value: question }], 'local');
+
+    const request = sendMessageStream.mock.calls[0]?.[0];
+    const parts = request?.message as Array<{ text?: string }>;
+    expect(parts[0]?.text).toContain(
+      '<otto_turn_control contract_version="1">',
+    );
+    expect(parts[0]?.text).toContain('evidence_requirement=primary_sources');
+    expect(parts[0]?.text).not.toContain('secret-42');
+    expect(parts[1]?.text).toBe(question);
+
+    const assistant = store
+      .getHistory(session.sessionId)
+      .find((message) => message.role === 'assistant');
+    expect(assistant?.turn?.control?.intent).toBe('research');
+    expect(assistant?.turn?.status).toBe('incomplete');
+    expect(assistant?.turn?.verification?.status).not.toBe('passed');
+  });
+
+  it('外部写入工具没有可审查确认信息时失败关闭，不得执行或伪装完成', async () => {
+    const execute = vi.fn(async () => ({
+      llmContent: 'tool done',
+      returnDisplay: 'tool done',
+    }));
+    const config = makeFakeConfigWithTool(
+      [
+        () =>
+          (async function* () {
+            yield toolChunk('test_tool', 'deploy-without-review');
+          })(),
+        () =>
+          (async function* () {
+            yield chunk('操作未执行。', 'STOP');
+          })(),
+      ],
+      execute,
+    );
+    const store = new InMemorySessionStore();
+    const session = store.createSession({ title: '部署' });
+    const runtime = new CoreSessionRuntime(
+      store,
+      session.sessionId,
+      config,
+      noOpWorkLogger,
+    );
+
+    await runtime.initialize();
+    await runtime.run(
+      [{ type: 'text', value: '把新版本部署到生产服务器' }],
+      'local',
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    const assistants = store
+      .getHistory(session.sessionId)
+      .filter((message) => message.role === 'assistant');
+    expect(
+      assistants.some((message) =>
+        message.associatedToolCalls?.some(
+          (toolCall) =>
+            toolCall.status === ToolCallStatus.Error &&
+            toolCall.result?.error?.includes('没有提供可审查的确认信息'),
+        ),
+      ),
+    ).toBe(true);
+    expect(assistants[0]?.turn?.control?.riskLevel).toBe('external_write');
+    expect(assistants[0]?.turn?.status).toBe('incomplete');
+    expect(assistants[0]?.turn?.outcome?.type).toBe('incomplete');
+  });
+
+  it('即使是自动授权模式，外部写入仍必须显式确认', async () => {
+    const execute = vi.fn(async () => ({
+      llmContent: 'deployed',
+      returnDisplay: 'deployed',
+    }));
+    const onConfirm = vi.fn(async () => undefined);
+    const config = makeFakeConfigWithTool(
+      [
+        () =>
+          (async function* () {
+            yield toolChunk('test_tool', 'deploy-confirmed');
+          })(),
+        () =>
+          (async function* () {
+            yield chunk('已收到部署回执。', 'STOP');
+          })(),
+      ],
+      execute,
+      async () => ({
+        type: 'exec',
+        title: '部署生产服务',
+        command: 'deploy production',
+        warning: '将更改外部环境',
+        onConfirm,
+      }),
+    );
+    const store = new InMemorySessionStore();
+    const session = store.createSession({ title: '自动授权部署' });
+    let resolveRequest!: () => void;
+    const requested = new Promise<void>((resolve) => {
+      resolveRequest = resolve;
+    });
+    store.subscribe(session.sessionId, (frame) => {
+      if (frame.type === 'tool_confirmation_request') resolveRequest();
+    });
+    const runtime = new CoreSessionRuntime(
+      store,
+      session.sessionId,
+      config,
+      noOpWorkLogger,
+    );
+    runtime.setAuthorizationMode('auto');
+
+    await runtime.initialize();
+    const running = runtime.run(
+      [{ type: 'text', value: '发布并部署到生产环境' }],
+      'local',
+    );
+    await requested;
+    expect(execute).not.toHaveBeenCalled();
+    runtime.resolveToolConfirmation('deploy-confirmed', 'approved');
+    await running;
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      ToolConfirmationOutcome.ProceedOnce,
+      undefined,
+    );
+    expect(execute).toHaveBeenCalledTimes(1);
+    const assistant = store
+      .getHistory(session.sessionId)
+      .find((message) => message.turn);
+    expect(assistant?.turn?.verification?.status).toBe('passed');
+    expect(assistant?.turn?.status).toBe('completed');
+  });
+});
+
 describe('CoreSessionRuntime tool-free 安全边界', () => {
   it('不发现 MCP，并在模型请求层发送空工具列表', async () => {
     async function* stream(): AsyncGenerator<unknown> {
@@ -239,7 +429,9 @@ describe('CoreSessionRuntime tool-free 安全边界', () => {
     expect(discoverMcpTools).not.toHaveBeenCalled();
     expect(logWorkResult).not.toHaveBeenCalled();
     expect(sendMessageStream).toHaveBeenCalledWith(
-      expect.objectContaining({ config: expect.objectContaining({ tools: [] }) }),
+      expect.objectContaining({
+        config: expect.objectContaining({ tools: [] }),
+      }),
       expect.any(String),
       expect.anything(),
     );
@@ -247,7 +439,9 @@ describe('CoreSessionRuntime tool-free 安全边界', () => {
 
   it('provider 越界返回 functionCall 时在执行前 fail closed', async () => {
     async function* stream(): AsyncGenerator<unknown> {
-      yield { functionCalls: [{ name: 'read_file', args: { path: '/secret' } }] };
+      yield {
+        functionCalls: [{ name: 'read_file', args: { path: '/secret' } }],
+      };
     }
     const store = new InMemorySessionStore();
     const session = store.createSession({ title: 'A2A' });
@@ -272,7 +466,9 @@ describe('CoreSessionRuntime tool-free 安全边界', () => {
         message: 'A2A 安全会话拒绝了模型生成的工具调用。',
       },
     });
-    expect(frames.some((frame) => frame.type === 'tool_calls_update')).toBe(false);
+    expect(frames.some((frame) => frame.type === 'tool_calls_update')).toBe(
+      false,
+    );
     expect(frames.some((frame) => frame.type === 'chat_complete')).toBe(false);
   });
 
@@ -309,13 +505,16 @@ describe('CoreSessionRuntime tool-free 安全边界', () => {
         getFunctionDeclarations: () => [],
       }),
       getOttoClient: () => ({
-        getChat: async () => ({ sendMessageStream: async () => failingStream() }),
+        getChat: async () => ({
+          sendMessageStream: async () => failingStream(),
+        }),
         switchModel,
       }),
       getModel: () => primaryId,
       getMaxSessionTurns: () => 10,
       getCustomModels: () => [primary, fallback],
-      getCustomModelConfig: (model: string) => model === primaryId ? primary : fallback,
+      getCustomModelConfig: (model: string) =>
+        model === primaryId ? primary : fallback,
     } as unknown as Config;
     const store = new InMemorySessionStore();
     const session = store.createSession({ title: 'A2A', model: primaryId });
@@ -338,7 +537,9 @@ describe('CoreSessionRuntime tool-free 安全边界', () => {
 describe('CoreSessionRuntime 流式落库与收口对账', () => {
   it('模型请求在首个 token 前失败时返回可读错误，不残留空白 assistant', async () => {
     async function* stream(): AsyncGenerator<unknown> {
-      yield await Promise.reject(new TypeError('Failed to parse URL from /v1/chat/stream'));
+      yield await Promise.reject(
+        new TypeError('Failed to parse URL from /v1/chat/stream'),
+      );
     }
     const store = new InMemorySessionStore();
     const session = store.createSession({ title: '个人模型' });
@@ -399,7 +600,9 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
     expect(assistant?.content).toEqual([{ type: 'text', value: message }]);
     expect(message).toContain('当前模型请求的结果未知');
     expect(message).toContain('请求编号：');
-    expect(error?.type === 'error' && error.payload.code).toBe('model_outcome_unknown');
+    expect(error?.type === 'error' && error.payload.code).toBe(
+      'model_outcome_unknown',
+    );
     expect(JSON.stringify(frames)).not.toContain('fetch failed');
   });
 
@@ -407,9 +610,11 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
     '结构化 HTTP %i 在 runtime 归类为结果未知且不重放',
     async (status) => {
       async function* stream(): AsyncGenerator<unknown> {
-        yield await Promise.reject(Object.assign(new Error('opaque provider failure'), {
-          status,
-        }));
+        yield await Promise.reject(
+          Object.assign(new Error('opaque provider failure'), {
+            status,
+          }),
+        );
       }
       const store = new InMemorySessionStore();
       const session = store.createSession({ title: `HTTP ${status}` });
@@ -426,16 +631,20 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
       await runtime.run([{ type: 'text', value: '你好' }], 'local');
 
       const error = frames.find((frame) => frame.type === 'error');
-      expect(error?.type === 'error' && error.payload.code)
-        .toBe('model_outcome_unknown');
-      expect(error?.type === 'error' && error.payload.message)
-        .not.toContain('opaque provider failure');
+      expect(error?.type === 'error' && error.payload.code).toBe(
+        'model_outcome_unknown',
+      );
+      expect(error?.type === 'error' && error.payload.message).not.toContain(
+        'opaque provider failure',
+      );
     },
   );
 
   it.each([
     Object.assign(new Error('opaque timeout'), { name: 'TimeoutError' }),
-    Object.assign(new Error('opaque stream disconnect'), { isStreamInterrupt: true }),
+    Object.assign(new Error('opaque stream disconnect'), {
+      isStreamInterrupt: true,
+    }),
     Object.assign(new Error('opaque socket failure'), { code: 'ECONNRESET' }),
   ])('结构化超时/断流在 runtime 归类为结果未知', async (transportError) => {
     async function* stream(): AsyncGenerator<unknown> {
@@ -456,13 +665,16 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
     await runtime.run([{ type: 'text', value: '你好' }], 'local');
 
     const error = frames.find((frame) => frame.type === 'error');
-    expect(error?.type === 'error' && error.payload.code)
-      .toBe('model_outcome_unknown');
+    expect(error?.type === 'error' && error.payload.code).toBe(
+      'model_outcome_unknown',
+    );
   });
 
   it('普通 HTTP 4xx 不误报为结果未知', async () => {
     async function* stream(): AsyncGenerator<unknown> {
-      yield await Promise.reject(Object.assign(new Error('bad request'), { status: 400 }));
+      yield await Promise.reject(
+        Object.assign(new Error('bad request'), { status: 400 }),
+      );
     }
     const store = new InMemorySessionStore();
     const session = store.createSession({ title: 'HTTP 400' });
@@ -480,7 +692,9 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
 
     const error = frames.find((frame) => frame.type === 'error');
     expect(error?.type === 'error' && error.payload.code).toBe('core_error');
-    expect(error?.type === 'error' && error.payload.message).toBe('bad request');
+    expect(error?.type === 'error' && error.payload.message).toBe(
+      'bad request',
+    );
   });
 
   it('首个 token 前结果未知时也不自动切到备用模型', async () => {
@@ -556,19 +770,22 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
       .find((message) => message.role === 'assistant');
     expect(JSON.stringify(assistant?.content)).not.toContain('FALLBACK_OK');
     const error = frames.find((frame) => frame.type === 'error');
-    expect(error?.type === 'error' && error.payload.code)
-      .toBe('model_outcome_unknown');
+    expect(error?.type === 'error' && error.payload.code).toBe(
+      'model_outcome_unknown',
+    );
   });
   it('透传 Edge 请求编号，同时允许用户显式切换后续模型', async () => {
     const requestId = 'otto-model-00000000-0000-4000-8000-000000000001';
     const providerRequestId = 'provider-request-123';
     async function* stream(): AsyncGenerator<unknown> {
-      yield await Promise.reject(new ModelRequestSafetyError({
-        message: 'edge request outcome unknown',
-        requestId,
-        requestState: 'unknown_outcome',
-        providerRequestId,
-      }));
+      yield await Promise.reject(
+        new ModelRequestSafetyError({
+          message: 'edge request outcome unknown',
+          requestId,
+          requestState: 'unknown_outcome',
+          providerRequestId,
+        }),
+      );
     }
     const switchModel = vi.fn(async (model: string) => ({
       success: true,
@@ -589,26 +806,36 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
       getMaxSessionTurns: () => 10,
     } as unknown as Config;
     const store = new InMemorySessionStore();
-    const session = store.createSession({ title: '结果未知', model: 'primary-model' });
+    const session = store.createSession({
+      title: '结果未知',
+      model: 'primary-model',
+    });
     const frames: ServerToClient[] = [];
     store.subscribe(session.sessionId, (frame) => frames.push(frame));
     const runtime = new CoreSessionRuntime(
-      store, session.sessionId, config, noOpWorkLogger,
+      store,
+      session.sessionId,
+      config,
+      noOpWorkLogger,
     );
     await runtime.initialize();
 
     await runtime.run([{ type: 'text', value: '你好' }], 'local');
 
     const error = frames.find((frame) => frame.type === 'error');
-    expect(error?.type === 'error' && error.payload.modelRequestSafety).toEqual({
-      requestId,
-      requestState: 'unknown_outcome',
-      providerRequestId,
-    });
+    expect(error?.type === 'error' && error.payload.modelRequestSafety).toEqual(
+      {
+        requestId,
+        requestState: 'unknown_outcome',
+        providerRequestId,
+      },
+    );
     await expect(runtime.setModel('secondary-model')).resolves.toBeUndefined();
-    expect(switchModel).toHaveBeenCalledWith('secondary-model', expect.any(AbortSignal));
+    expect(switchModel).toHaveBeenCalledWith(
+      'secondary-model',
+      expect.any(AbortSignal),
+    );
   });
-
 
   it('流式中途增量落库（getHistory 有已累积文本）+ chat_complete 带定稿全文', async () => {
     const store = new InMemorySessionStore();
@@ -659,14 +886,36 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
     if (complete?.type === 'chat_complete') {
       expect(complete.payload.text).toBe('你好，世界');
     }
-    expect(frames).toContainEqual(expect.objectContaining({
-      type: 'runtime_activity',
-      payload: expect.objectContaining({ contractVersion: 1, kind: 'turn', state: 'started' }),
-    }));
-    expect(frames).toContainEqual(expect.objectContaining({
-      type: 'runtime_activity',
-      payload: expect.objectContaining({ contractVersion: 1, kind: 'turn', state: 'completed' }),
-    }));
+    expect(frames).toContainEqual(
+      expect.objectContaining({
+        type: 'runtime_activity',
+        payload: expect.objectContaining({
+          contractVersion: 1,
+          kind: 'turn',
+          state: 'started',
+        }),
+      }),
+    );
+    expect(frames).toContainEqual(
+      expect.objectContaining({
+        type: 'runtime_activity',
+        payload: expect.objectContaining({
+          contractVersion: 1,
+          kind: 'turn',
+          state: 'completed',
+        }),
+      }),
+    );
+    const turnEvents = frames.filter(
+      (frame): frame is Extract<ServerToClient, { type: 'turn_event' }> =>
+        frame.type === 'turn_event',
+    );
+    expect(turnEvents[0]?.payload.event).toBe('turn_started');
+    expect(turnEvents.at(-1)?.payload.event).toBe('turn_completed');
+    expect(turnEvents.at(-1)?.payload.snapshot.status).toBe('completed');
+    expect(turnEvents.map((event) => event.payload.sequence)).toEqual(
+      turnEvents.map((_, index) => index + 1),
+    );
 
     // ③ 定稿后 store 里正文完整、isStreaming=false。
     const finalAssistant = store
@@ -676,6 +925,7 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
       { type: 'text', value: '你好，世界' },
     ]);
     expect(finalAssistant!.isStreaming).toBe(false);
+    expect(finalAssistant!.turn?.status).toBe('completed');
   });
 
   it('终轮完成后记录用户任务与最终工作结果', async () => {
@@ -1018,6 +1268,166 @@ describe('CoreSessionRuntime · AskUserQuestion 交互闸门', () => {
 });
 
 describe('CoreSessionRuntime · 工具状态收口', () => {
+  it('崩溃前已启动的未知副作用不会重放，而是进入待核对终态', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'otto-runtime-recovery-'),
+    );
+    try {
+      const recoveryStore = new FileTurnRecoveryStore(root);
+      const store = new InMemorySessionStore();
+      const session = store.createSession({ title: '恢复测试' });
+      let recovery = await recoveryStore.begin({
+        sessionId: session.sessionId,
+        turnId: 'turn-before-crash',
+        intentHash: turnIntentHash('run tool'),
+      });
+      recovery = await recoveryStore.recordStarted(recovery, {
+        callId: 'before-crash',
+        name: 'test_tool',
+        fingerprint: toolExecutionFingerprint('test_tool', {}),
+        replayClass: 'never_replay',
+      });
+      expect(recovery.tools[0]?.state).toBe('started');
+
+      const execute = vi.fn(async () => ({
+        llmContent: 'must not run',
+        returnDisplay: 'must not run',
+      }));
+      const config = makeFakeConfigWithTool(
+        [
+          () =>
+            (async function* () {
+              yield toolChunk('test_tool', 'after-restart');
+            })(),
+          () =>
+            (async function* () {
+              yield chunk('已停止重复执行，请核对结果。', 'STOP');
+            })(),
+        ],
+        execute,
+      );
+      const runtime = new CoreSessionRuntime(
+        store,
+        session.sessionId,
+        config,
+        noOpWorkLogger,
+        { recoveryStore },
+      );
+      await runtime.initialize();
+      await runtime.run([{ type: 'text', value: 'run tool' }], 'local');
+
+      expect(execute).not.toHaveBeenCalled();
+      expect((await recoveryStore.load(session.sessionId))?.status).toBe(
+        'reconciliation_required',
+      );
+      expect(
+        store.getHistory(session.sessionId).find((message) => message.turn)
+          ?.turn,
+      ).toMatchObject({
+        status: 'interrupted',
+        lineage: { runId: 'turn-before-crash', attempt: 2 },
+        outcome: {
+          type: 'unknown_outcome',
+          requiresReconciliation: true,
+        },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('恢复时复用已成功副作用的脱敏结果，正常收口后清理恢复点', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-runtime-reuse-'));
+    try {
+      const recoveryStore = new FileTurnRecoveryStore(root);
+      const store = new InMemorySessionStore();
+      const session = store.createSession({ title: '防重复测试' });
+      let recovery = await recoveryStore.begin({
+        sessionId: session.sessionId,
+        turnId: 'turn-completed-tool',
+        intentHash: turnIntentHash('run tool'),
+      });
+      const input = {
+        callId: 'completed-before-crash',
+        name: 'test_tool',
+        fingerprint: toolExecutionFingerprint('test_tool', {}),
+        replayClass: 'never_replay' as const,
+      };
+      recovery = await recoveryStore.recordStarted(recovery, input);
+      await recoveryStore.recordSucceeded(recovery, {
+        ...input,
+        resultSummary: '外部操作已成功；token=secret-value',
+      });
+
+      const execute = vi.fn(async () => ({
+        llmContent: 'duplicate',
+        returnDisplay: 'duplicate',
+      }));
+      const config = makeFakeConfigWithTool(
+        [
+          () =>
+            (async function* () {
+              yield toolChunk('test_tool', 'retry-call');
+            })(),
+          () =>
+            (async function* () {
+              yield chunk('已使用上次成功结果。', 'STOP');
+            })(),
+        ],
+        execute,
+      );
+      const runtime = new CoreSessionRuntime(
+        store,
+        session.sessionId,
+        config,
+        noOpWorkLogger,
+        { recoveryStore },
+      );
+      await runtime.initialize();
+      await runtime.run([{ type: 'text', value: 'run tool' }], 'local');
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(await recoveryStore.load(session.sessionId)).toBeNull();
+      const cards = store
+        .getHistory(session.sessionId)
+        .flatMap((message) => message.associatedToolCalls ?? []);
+      expect(cards).toContainEqual(
+        expect.objectContaining({
+          status: ToolCallStatus.Success,
+          result: expect.objectContaining({
+            data: expect.stringContaining('[REDACTED]'),
+          }),
+        }),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('无工具的正常终态不会遗留恢复文件', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-runtime-clean-'));
+    try {
+      const recoveryStore = new FileTurnRecoveryStore(root);
+      const store = new InMemorySessionStore();
+      const session = store.createSession({ title: '正常任务' });
+      const stream = async function* () {
+        yield chunk('正常完成', 'STOP');
+      };
+      const runtime = new CoreSessionRuntime(
+        store,
+        session.sessionId,
+        makeFakeConfig(stream),
+        noOpWorkLogger,
+        { recoveryStore },
+      );
+      await runtime.initialize();
+      await runtime.run([{ type: 'text', value: '普通问题' }], 'local');
+      expect(await recoveryStore.load(session.sessionId)).toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('飞书适配器发起的高风险工具必须由原请求确认后执行', async () => {
     let markProgress!: () => void;
     const progress = new Promise<void>((resolve) => {
@@ -1288,5 +1698,63 @@ describe('CoreSessionRuntime · 工具状态收口', () => {
 
     expect(cancelledBeforeToolReturned).toBe(true);
     expect(cardCancelledBeforeToolReturned).toBe(true);
+  });
+
+  it('取消正在执行的未知副作用时显示待核对，并保留可恢复检查点', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-runtime-cancel-recovery-'));
+    try {
+      let releaseTool!: () => void;
+      const toolGate = new Promise<void>((resolve) => (releaseTool = resolve));
+      let markToolStarted!: () => void;
+      const toolStarted = new Promise<void>(
+        (resolve) => (markToolStarted = resolve),
+      );
+      const config = makeFakeConfigWithTool(
+        [
+          () =>
+            (async function* () {
+              yield toolChunk('test_tool', 'unknown-on-cancel');
+            })(),
+        ],
+        async () => {
+          markToolStarted();
+          await toolGate;
+          return { llmContent: 'late', returnDisplay: 'late' };
+        },
+      );
+      const recoveryStore = new FileTurnRecoveryStore(root);
+      const store = new InMemorySessionStore();
+      const session = store.createSession({ title: '取消恢复' });
+      const runtime = new CoreSessionRuntime(
+        store,
+        session.sessionId,
+        config,
+        noOpWorkLogger,
+        { recoveryStore },
+      );
+      await runtime.initialize();
+
+      const running = runtime.run([{ type: 'text', value: 'run tool' }], 'local');
+      await toolStarted;
+      runtime.cancel();
+      releaseTool();
+      await running;
+
+      expect(
+        store.getHistory(session.sessionId).find((message) => message.turn)?.turn,
+      ).toMatchObject({
+        status: 'interrupted',
+        outcome: {
+          type: 'unknown_outcome',
+          requiresReconciliation: true,
+        },
+      });
+      expect(await recoveryStore.load(session.sessionId)).toMatchObject({
+        status: 'reconciliation_required',
+        attempt: 2,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

@@ -27,20 +27,30 @@ describe('prompts', () => {
 
   describe('getCoreSystemPrompt - Environment Differences', () => {
     it('按会话工作目录判断 Git 上下文，不使用进程启动目录', () => {
-      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-prompt-non-git-'));
+      const workspace = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'otto-prompt-non-git-'),
+      );
       const prompt = getDynamicSystemPrompt(undefined, workspace);
       expect(prompt).not.toContain('# Git Repository');
       fs.rmSync(workspace, { recursive: true, force: true });
     });
 
     it('按会话工作目录发现 LLM Wiki，不使用进程启动目录', () => {
-      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-prompt-wiki-'));
+      const workspace = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'otto-prompt-wiki-'),
+      );
       fs.mkdirSync(path.join(workspace, '.llm-wiki'));
       fs.writeFileSync(path.join(workspace, '.llm-wiki', 'index.md'), '# Wiki');
-      const withoutWiki = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-prompt-no-wiki-'));
+      const withoutWiki = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'otto-prompt-no-wiki-'),
+      );
 
-      expect(getDynamicSystemPrompt(undefined, workspace)).toContain('# LLM Wiki');
-      expect(getDynamicSystemPrompt(undefined, withoutWiki)).not.toContain('# LLM Wiki');
+      expect(getDynamicSystemPrompt(undefined, workspace)).toContain(
+        '# LLM Wiki',
+      );
+      expect(getDynamicSystemPrompt(undefined, withoutWiki)).not.toContain(
+        '# LLM Wiki',
+      );
 
       fs.rmSync(workspace, { recursive: true, force: true });
       fs.rmSync(withoutWiki, { recursive: true, force: true });
@@ -54,11 +64,42 @@ describe('prompts', () => {
       expect(prompt).toContain('Never finish with only a task count');
     });
 
+    it('uses one model-agnostic response intelligence contract in every work mode', () => {
+      for (const style of [
+        'default',
+        'codex',
+        'cursor',
+        'augment',
+        'claude-code',
+      ] as const) {
+        const prompt = getCoreSystemPrompt(undefined, false, undefined, style);
+        expect(prompt).toContain('Otto response intelligence contract');
+        expect(prompt).toContain(
+          'Separate verified facts from inference and unknowns',
+        );
+        expect(prompt).toContain(
+          'never force a fixed template or fixed line count',
+        );
+        expect(prompt).toContain(
+          'Never claim completion without concrete evidence',
+        );
+      }
+    });
+
+    it('does not force telegraphic prose in codex-compatible work mode', () => {
+      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'codex');
+      expect(prompt).toContain('Use normal, precise language');
+      expect(prompt).not.toContain('CAVEMAN PRINCIPLE');
+      expect(prompt).not.toContain('1-2 sentences max');
+    });
+
     it('makes financial computation fail closed', () => {
       const prompt = getCoreSystemPrompt(undefined, false);
       expect(prompt).toContain('Financial computation: fail closed');
       expect(prompt).toContain('deterministic, auditable calculation tool');
-      expect(prompt).toContain('must never calculate, estimate, infer, or fill in financial numbers itself');
+      expect(prompt).toContain(
+        'must never calculate, estimate, infer, or fill in financial numbers itself',
+      );
     });
 
     it('should include VSCode-specific instructions when isVSCode is true', () => {
@@ -74,7 +115,16 @@ describe('prompts', () => {
     });
 
     it('should include Feishu-specific instructions when isFeishu is true', () => {
-      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'default', undefined, undefined, undefined, true);
+      const prompt = getCoreSystemPrompt(
+        undefined,
+        false,
+        undefined,
+        'default',
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
       expect(prompt).toContain('Feishu/Lark Chat Gateway');
       expect(prompt).toContain('Mobile-Friendly Layout Guidelines');
       expect(prompt).toContain('Strict Guidelines for Sending Files & Media');
@@ -84,13 +134,27 @@ describe('prompts', () => {
 
   describe('getCoreSystemPrompt - Model Differences', () => {
     it('should use Gemini 3 specific instructions for Gemini 3 models', () => {
-      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'default', 'gemini-3-flash');
-      expect(prompt).toContain('strictly grounded to the information provided in context');
+      const prompt = getCoreSystemPrompt(
+        undefined,
+        false,
+        undefined,
+        'default',
+        'gemini-3-flash',
+      );
+      expect(prompt).toContain(
+        'strictly grounded to the information provided in context',
+      );
       expect(prompt).toContain('Context is Truth');
     });
 
     it('should use standard instructions for other models', () => {
-      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'default', 'gemini-1.5-pro');
+      const prompt = getCoreSystemPrompt(
+        undefined,
+        false,
+        undefined,
+        'default',
+        'gemini-1.5-pro',
+      );
       expect(prompt).not.toContain('Context is Truth');
     });
   });
@@ -109,7 +173,12 @@ describe('prompts', () => {
     });
 
     it('should use collaborative-progress instructions for the legacy windsurf style id', () => {
-      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'windsurf');
+      const prompt = getCoreSystemPrompt(
+        undefined,
+        false,
+        undefined,
+        'windsurf',
+      );
       expect(prompt).toContain('COLLABORATIVE PROGRESS MODE');
       expect(prompt).toContain('Work independently and collaboratively');
     });
@@ -121,15 +190,18 @@ describe('prompts', () => {
       ['claude-code', 'DIRECT DEVELOPMENT MODE'],
       ['antigravity', 'ENTERPRISE OFFICE MODE'],
       ['windsurf', 'COLLABORATIVE PROGRESS MODE'],
-    ] as const)('keeps legacy style id %s while presenting an Otto work mode', (style, heading) => {
-      const prompt = getCoreSystemPrompt(undefined, false, undefined, style);
+    ] as const)(
+      'keeps legacy style id %s while presenting an Otto work mode',
+      (style, heading) => {
+        const prompt = getCoreSystemPrompt(undefined, false, undefined, style);
 
-      expect(prompt).toContain(heading);
-      expect(prompt).toContain('Otto');
-      expect(prompt).not.toMatch(
-        /CODEX MODE|CURSOR MODE|AUGMENT MODE|ANTIGRAVITY MODE|WINDSURF MODE|powered by GPT-5|You are Augment Agent|You are Antigravity|You are Cascade|augment_code_snippet|AI Flow/i,
-      );
-    });
+        expect(prompt).toContain(heading);
+        expect(prompt).toContain('Otto');
+        expect(prompt).not.toMatch(
+          /CODEX MODE|CURSOR MODE|AUGMENT MODE|ANTIGRAVITY MODE|WINDSURF MODE|powered by GPT-5|You are Augment Agent|You are Antigravity|You are Cascade|augment_code_snippet|AI Flow/i,
+        );
+      },
+    );
 
     it('keeps the selected enterprise-office mode when the active model is Gemini 3', () => {
       const prompt = getCoreSystemPrompt(
@@ -142,16 +214,27 @@ describe('prompts', () => {
 
       expect(prompt).toContain('ENTERPRISE OFFICE MODE');
       expect(prompt).toContain('Context is Truth');
-      expect(prompt).toMatch(/documents.*meetings.*schedules.*spreadsheets.*research/is);
+      expect(prompt).toMatch(
+        /documents.*meetings.*schedules.*spreadsheets.*research/is,
+      );
       expect(prompt).toContain('wait for approval before executing it');
     });
   });
 
   describe('getCoreSystemPrompt - Language Preference', () => {
     it('should append language preference at the end', () => {
-      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'default', undefined, '简体中文');
+      const prompt = getCoreSystemPrompt(
+        undefined,
+        false,
+        undefined,
+        'default',
+        undefined,
+        '简体中文',
+      );
       // 检查加粗格式
-      expect(prompt).toContain('**Language Preference:** Please always use "简体中文" to reply to the user.');
+      expect(prompt).toContain(
+        '**Language Preference:** Please always use "简体中文" to reply to the user.',
+      );
     });
   });
 
@@ -160,12 +243,22 @@ describe('prompts', () => {
       const customModel = {
         provider: 'openai',
         modelId: 'gpt-4o',
-        baseUrl: 'https://api.openai.com/v1'
+        baseUrl: 'https://api.openai.com/v1',
       };
-      const prompt = getCoreSystemPrompt(undefined, false, undefined, 'default', undefined, undefined, customModel);
+      const prompt = getCoreSystemPrompt(
+        undefined,
+        false,
+        undefined,
+        'default',
+        undefined,
+        undefined,
+        customModel,
+      );
       // 检查 Markdown 行内代码格式
       expect(prompt).toContain('**Current Model:** `gpt-4o`');
-      expect(prompt).toContain('served by user-configured endpoint `https://api.openai.com/v1`');
+      expect(prompt).toContain(
+        'served by user-configured endpoint `https://api.openai.com/v1`',
+      );
     });
 
     it('labels OpenAI Responses endpoints correctly', () => {
@@ -204,9 +297,9 @@ describe('prompts', () => {
         },
       );
 
-      expect(prompt.lastIndexOf('**Current Model:** `glm-5-turbo`')).toBeGreaterThan(
-        prompt.lastIndexOf('## User Rules'),
-      );
+      expect(
+        prompt.lastIndexOf('**Current Model:** `glm-5-turbo`'),
+      ).toBeGreaterThan(prompt.lastIndexOf('## User Rules'));
       expect(prompt).toContain(
         'Auxiliary models used inside tools do not change your identity',
       );
@@ -223,7 +316,9 @@ describe('prompts', () => {
         'default',
         'gemini-2.5-pro',
       );
-      const identityAnchor = prompt.slice(prompt.lastIndexOf('**Current Model:**'));
+      const identityAnchor = prompt.slice(
+        prompt.lastIndexOf('**Current Model:**'),
+      );
 
       expect(identityAnchor).toContain(
         'If the model shown here is Gemini or from Google, say so accurately',
@@ -235,7 +330,8 @@ describe('prompts', () => {
   describe('getCoreSystemPrompt - Skills Context', () => {
     it('injects initialized Skills context into the final system prompt', async () => {
       const skillsIntegration = await import('../skills/skills-integration.js');
-      vi.spyOn(skillsIntegration, 'getSkillsContext').mockReturnValue(`# Available Skills
+      vi.spyOn(skillsIntegration, 'getSkillsContext')
+        .mockReturnValue(`# Available Skills
 
 <available_skills>
 <skill>
@@ -321,16 +417,22 @@ describe('prompts', () => {
 
   describe('formatCompactSummary', () => {
     it('should extract content from <summary> tags', () => {
-      const raw = '<analysis>Some analysis here...</analysis>\n<summary>\n<state_snapshot>Important content</state_snapshot>\n</summary>';
+      const raw =
+        '<analysis>Some analysis here...</analysis>\n<summary>\n<state_snapshot>Important content</state_snapshot>\n</summary>';
       const result = formatCompactSummary(raw);
-      expect(result).toContain('<state_snapshot>Important content</state_snapshot>');
+      expect(result).toContain(
+        '<state_snapshot>Important content</state_snapshot>',
+      );
       expect(result).not.toContain('<analysis>');
     });
 
     it('should strip <analysis> tags when no <summary> tag exists', () => {
-      const raw = '<analysis>Thinking process...</analysis>\n<state_snapshot>Direct content</state_snapshot>';
+      const raw =
+        '<analysis>Thinking process...</analysis>\n<state_snapshot>Direct content</state_snapshot>';
       const result = formatCompactSummary(raw);
-      expect(result).toContain('<state_snapshot>Direct content</state_snapshot>');
+      expect(result).toContain(
+        '<state_snapshot>Direct content</state_snapshot>',
+      );
       expect(result).not.toContain('<analysis>');
       expect(result).not.toContain('Thinking process');
     });
@@ -347,7 +449,8 @@ describe('prompts', () => {
     });
 
     it('should handle multiple <analysis> blocks', () => {
-      const raw = '<analysis>First analysis</analysis>\nMiddle text\n<analysis>Second analysis</analysis>\n<summary>Final result</summary>';
+      const raw =
+        '<analysis>First analysis</analysis>\nMiddle text\n<analysis>Second analysis</analysis>\n<summary>Final result</summary>';
       const result = formatCompactSummary(raw);
       expect(result).toBe('Final result');
     });

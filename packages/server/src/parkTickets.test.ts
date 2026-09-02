@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { Database } from './modules/data_platform/index.js';
 import {
+  createParkTicketSchemaContributor,
   createParkTicketFacade,
   normalizeParkServiceFormData,
   type ParkTicketAccount,
@@ -170,6 +171,12 @@ function createDatabase(): Database {
     INSERT INTO park_service_specialists (park_id, service_id, account_id) VALUES
       ('park-a', 'repair', 'park-worker');
   `);
+  // Keep the focused repository fixture on the same migration path as the
+  // production database. This deliberately starts from the legacy table
+  // above so newly added columns and indexes cannot silently drift here.
+  createParkTicketSchemaContributor({
+    defaultOrganizationId: 'tenant-a',
+  }).apply(database);
   return database;
 }
 

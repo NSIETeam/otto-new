@@ -23,6 +23,7 @@ import {
   type RespondQuestionFn,
 } from './ToolCalls.js';
 import { OttoSecondaryMark } from './OttoSecondaryMark.js';
+import { AgentTurnTimeline } from './AgentTurnTimeline.js';
 import {
   IconCheckCheck,
   IconCheck,
@@ -76,7 +77,11 @@ export function Message({
 }
 
 /** 系统消息（命令回执）：居中窄卡，markdown 正文（Prose），弱化视觉不抢对话主线。 */
-function SystemMessage({ message }: { message: OttoMessage }): React.JSX.Element {
+function SystemMessage({
+  message,
+}: {
+  message: OttoMessage;
+}): React.JSX.Element {
   return (
     <div className="otto-msg-system" role="note">
       <div className="otto-msg-system__card">
@@ -205,7 +210,10 @@ function BotMessage({
   const text = contentToText(message.content);
   const tools = message.associatedToolCalls ?? [];
   const responding = Boolean(
-    message.isStreaming || message.isReasoning || message.isProcessingTools,
+    message.isStreaming ||
+    message.isReasoning ||
+    message.isProcessingTools ||
+    message.turn?.status === 'in_progress',
   );
   const fallbackSummary =
     !text && !responding && tools.length > 0
@@ -224,8 +232,9 @@ function BotMessage({
           </span>
         </div>
 
-        {message.reasoning || tools.length > 0 ? (
+        {message.turn || message.reasoning || tools.length > 0 ? (
           <ProcessTrace
+            turn={message.turn}
             reasoning={message.reasoning}
             reasoningActive={Boolean(message.isReasoning)}
             tools={tools}
@@ -268,22 +277,31 @@ function TypingIndicator(): React.JSX.Element {
  *   - 完成后仍可点箭头查看完整过程。
  */
 function ProcessTrace({
+  turn,
   reasoning,
   reasoningActive,
   tools,
   toolsActive,
   onRespondQuestion,
 }: {
+  turn?: OttoMessage['turn'];
   reasoning?: string;
   reasoningActive: boolean;
   tools: NonNullable<OttoMessage['associatedToolCalls']>;
   toolsActive: boolean;
   onRespondQuestion?: RespondQuestionFn;
 }): React.JSX.Element {
-  const requiresAttention = tools.some(
-    (tool) => tool.status === 'awaiting_approval',
-  );
-  const active = reasoningActive || toolsActive;
+  const requiresAttention =
+    tools.some((tool) => tool.status === 'awaiting_approval') ||
+    Boolean(
+      turn?.items.some((item) => item.status === 'awaiting_confirmation'),
+    );
+  const active =
+    reasoningActive || toolsActive || turn?.status === 'in_progress';
+  const turnFailed = turn?.status === 'failed';
+  const turnIncomplete = turn?.status === 'incomplete';
+  const turnInterrupted = turn?.status === 'interrupted';
+  const turnCancelled = turn?.status === 'cancelled';
   const automaticOpen = active || requiresAttention;
   const [open, setOpen] = useState(automaticOpen);
   const prevAutomaticOpenRef = useRef(automaticOpen);
@@ -306,7 +324,19 @@ function ProcessTrace({
         aria-expanded={open}
       >
         <span className="otto-reasoning__title">
-          {active ? '正在处理…' : requiresAttention ? '等待确认' : '处理记录'}
+          {active
+            ? '正在处理…'
+            : requiresAttention
+              ? '等待确认'
+              : turnFailed
+                ? '需要处理'
+                : turnIncomplete
+                  ? '尚未完整完成'
+                  : turnInterrupted
+                    ? '需要核对执行结果'
+                    : turnCancelled
+                      ? '已停止'
+                      : '处理记录'}
         </span>
         {tools.length > 0 ? (
           <span className="otto-process-trace__count">
@@ -323,6 +353,7 @@ function ProcessTrace({
       <div className={`otto-collapse${open ? ' otto-collapse--open' : ''}`}>
         <div className="otto-collapse__inner">
           <div className="otto-process-trace__body">
+            {turn ? <AgentTurnTimeline turn={turn} /> : null}
             {reasoning ? (
               <div className="otto-reasoning__body">{reasoning}</div>
             ) : null}

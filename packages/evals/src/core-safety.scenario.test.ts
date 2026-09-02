@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   captureFinancialComputationEvidence,
   classifyFinancialInput,
@@ -12,6 +13,15 @@ import {
   TurnCheckpointManager,
   type TurnCheckpoint,
 } from 'otto-core';
+import {
+  AgentTurnTracker,
+  FileTurnRecoveryStore,
+  InMemorySessionStore,
+  ToolCallStatus,
+  deriveTurnControlPolicy,
+  toolExecutionFingerprint,
+  turnIntentHash,
+} from '../../server/src/index.js';
 import { RpaRunner } from '../../rpa/src/runner.js';
 import { FileRpaRunStore } from '../../rpa/src/file-run-store.js';
 import { FileRpaArtifactStore } from '../../rpa/src/file-artifact-store.js';
@@ -159,16 +169,132 @@ const scenarios: readonly DeterministicScenario[] = [
       };
     },
   },
+  {
+    id: 'agent-structured-control-citations-and-artifacts',
+    lane: 'agent',
+    description: 'A research-and-artifact turn exposes control policy, sanitized citations, artifact state and explicit verification.',
+    requiredEvidence: ['tool_trace', 'citation', 'artifact', 'verification', 'assertion'],
+    async execute() {
+      const store = new InMemorySessionStore();
+      const session = store.createSession({ title: 'agent eval' });
+      const message = store.appendMessage(session.sessionId, {
+        role: 'assistant', content: [], source: 'local',
+      });
+      const policy = deriveTurnControlPolicy({
+        text: '查找官方资料，生成 PDF 报告并验证结果', source: 'local', toolFree: false,
+      });
+      const tracker = new AgentTurnTracker(store, session.sessionId, policy);
+      tracker.attachAssistantMessage(message.id);
+      tracker.markStreaming();
+      tracker.updateToolCalls([
+        {
+          id: 'source', toolName: 'web_search', parameters: { query: 'official source' },
+          status: ToolCallStatus.Success,
+          result: {
+            success: true, data: 'https://example.com/source?token=private',
+            executionTime: 1, toolName: 'web_search',
+          },
+        },
+        {
+          id: 'artifact', toolName: 'write_document',
+          parameters: { path: 'D:\\reports\\agent-eval.pdf' },
+          status: ToolCallStatus.Success,
+          result: {
+            success: true, data: 'D:\\reports\\agent-eval.pdf',
+            executionTime: 1, toolName: 'write_document',
+          },
+        },
+        {
+          id: 'verification', toolName: 'verify_output',
+          parameters: { path: 'D:\\reports\\agent-eval.pdf' },
+          status: ToolCallStatus.Success,
+          result: {
+            success: true, data: 'PDF readable', executionTime: 1,
+            toolName: 'verify_output',
+          },
+        },
+      ]);
+      tracker.completeAssistantMessage(true);
+      tracker.complete();
+      const snapshot = tracker.snapshot();
+      const citations = JSON.stringify(snapshot.citations);
+      return {
+        passed: policy.allowsParallelRead
+          && snapshot.status === 'completed'
+          && snapshot.citations?.length === 1
+          && !citations.includes('private')
+          && snapshot.artifacts?.length === 1
+          && snapshot.artifacts[0]?.verified === true
+          && snapshot.verification?.status === 'passed',
+        evidence: [
+          { kind: 'tool_trace', summary: 'typed turn records source, write and verification tools' },
+          { kind: 'citation', summary: 'source URL is registered with sensitive query values removed' },
+          { kind: 'artifact', summary: 'generated PDF is registered by deterministic path identity' },
+          { kind: 'verification', summary: 'artifact is verified only after a successful verification tool' },
+          { kind: 'assertion', summary: 'research turn completed with parallel-read policy and complete evidence' },
+        ],
+      };
+    },
+  },
+  {
+    id: 'agent-file-recovery-stops-unknown-side-effects',
+    lane: 'recovery',
+    description: 'The file recovery store persists a fingerprint and requires reconciliation after an interrupted unknown tool.',
+    requiredEvidence: ['tool_trace', 'recovery_checkpoint', 'artifact', 'assertion'],
+    async execute() {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'otto-evals-agent-recovery-'));
+      try {
+        const store = new FileTurnRecoveryStore(root);
+        let record = await store.begin({
+          sessionId: 'agent-recovery-session', turnId: 'agent-recovery-turn',
+          intentHash: turnIntentHash('send external message'),
+        });
+        const fingerprint = toolExecutionFingerprint('mcp_send_message', {
+          recipient: 'candidate', token: 'must-not-persist',
+        });
+        record = await store.recordStarted(record, {
+          callId: 'send-1', name: 'mcp_send_message', fingerprint,
+          replayClass: 'never_replay',
+        });
+        const recovered = await store.recoverInterrupted(record.sessionId);
+        const decision = store.decisionForTool(recovered!, {
+          name: 'mcp_send_message', fingerprint, replayClass: 'never_replay',
+        });
+        const persisted = await readFile(store.pathForSession(record.sessionId), 'utf8');
+        return {
+          passed: recovered?.status === 'reconciliation_required'
+            && recovered.attempt === 2
+            && decision.action === 'reconcile'
+            && !persisted.includes('must-not-persist'),
+          evidence: [
+            { kind: 'tool_trace', summary: 'unknown MCP side effect is classified never_replay' },
+            { kind: 'recovery_checkpoint', summary: 'atomic checkpoint advances to attempt two' },
+            { kind: 'artifact', summary: 'recovery record contains only an argument fingerprint' },
+            { kind: 'assertion', summary: 'recovery requires reconciliation and excludes raw secrets' },
+          ],
+        };
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  },
 ];
 
 let report: EvaluationReport;
-const artifactDirectory = path.resolve(process.cwd(), 'packages/evals/artifacts');
+const artifactDirectory = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)), '../artifacts',
+);
 
 describe('deterministic core safety scenarios', () => {
   it('passes every required safety scenario with complete evidence', async () => {
     report = await runDeterministicScenarios(scenarios);
     expect(report.scenarios).toHaveLength(scenarios.length);
     expect(report.scenarios.every((scenario) => scenario.passed)).toBe(true);
+    expect(report.summary.passRate).toBe(1);
+    expect(report.summary.evidenceCoverage).toBe(1);
+    expect(Object.values(report.summary.averageScores).every((score) => score === 1)).toBe(true);
+    expect(report.summary.lanes.agent?.passed).toBe(1);
+    expect(report.scenarios.every((scenario) => scenario.durationMs >= 0)).toBe(true);
     expect(() => assertReleaseGate(report)).not.toThrow();
     await writeEvaluationReport(report, artifactDirectory);
     const persisted = JSON.parse(await readFile(path.join(artifactDirectory, 'latest.json'), 'utf8')) as EvaluationReport;

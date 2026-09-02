@@ -29,6 +29,7 @@ import type {
   ToolConfirmationResponsePayload,
 } from 'otto-server';
 import { getEnterpriseOrganizationFeatures } from './enterpriseOrganizationFeatures.js';
+import { applyAgentTurnEvent } from './agentTurnState.js';
 
 // ── 状态形状 ──────────────────────────────────────────────────────────────
 
@@ -131,6 +132,7 @@ type Action =
   | { kind: 'frame'; frame: ServerToClient }
   | { kind: 'select'; sessionId: string }
   | { kind: 'optimistic_user'; message: OttoMessage }
+  | { kind: 'local_chat_message'; role: 'user' | 'assistant'; markdown: string }
   | { kind: 'system_note'; markdown: string }
   | { kind: 'local_error'; message: string }
   | { kind: 'clear_error' }
@@ -391,6 +393,20 @@ function reducer(state: OttoState, action: Action): OttoState {
     case 'optimistic_user':
       return appendMessage(state, action.message);
 
+    case 'local_chat_message': {
+      // 模块动作桥的对话消息：只在当前会话展示，不发给大模型，
+      // 也不绕过后端去执行外部动作。真实提交仍由企业工单接口完成。
+      if (!state.activeSessionId || !action.markdown.trim()) return state;
+      return appendMessage(state, {
+        id: `module-action-${Date.now()}-${clientMsgSeq++}`,
+        sessionId: state.activeSessionId,
+        role: action.role,
+        content: [{ type: 'text', value: action.markdown }],
+        timestamp: Date.now(),
+        source: 'local',
+      });
+    }
+
     case 'system_note': {
       // 本地系统提示气泡（/help 等）：ephemeral，不发帧不落库，刷新后消失是设计行为。
       if (!state.activeSessionId) return state;
@@ -611,6 +627,11 @@ function applyFrame(state: OttoState, frame: ServerToClient): OttoState {
     case 'runtime_activity':
       return { ...state, runtimeActivity: frame.payload };
 
+    case 'turn_event': {
+      const messages = applyAgentTurnEvent(state.messages, frame.payload);
+      return messages === state.messages ? state : { ...state, messages };
+    }
+
     case 'models_list': {
       const pending = state.pendingModelSwitch;
       if (pending) {
@@ -795,6 +816,8 @@ export interface OttoActions {
    * 纯前端、不发帧不落库——与 slash_command_result 同样的 ephemeral 语义。
    */
   postSystemNote(markdown: string): void;
+  /** 在当前会话插入模块桥产生的用户/助手气泡，不发给模型。 */
+  postLocalChatMessage(role: 'user' | 'assistant', markdown: string): void;
   /** 清掉末次错误（toast 关闭 / 自动消失用）。 */
   clearError(): void;
 }
@@ -1392,6 +1415,11 @@ export function useOttoStore(
     dispatch({ kind: 'system_note', markdown });
   }, []);
 
+  const postLocalChatMessage = useCallback((role: 'user' | 'assistant', markdown: string) => {
+    if (!markdown.trim()) return;
+    dispatch({ kind: 'local_chat_message', role, markdown });
+  }, []);
+
   const clearError = useCallback(() => {
     dispatch({ kind: 'clear_error' });
   }, []);
@@ -1414,6 +1442,7 @@ export function useOttoStore(
       respondToolConfirmation,
       runSlashCommand,
       postSystemNote,
+      postLocalChatMessage,
       clearError,
     },
   };

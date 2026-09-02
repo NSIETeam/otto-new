@@ -197,6 +197,200 @@ export interface TokenUsage {
   model?: string;
 }
 
+/** Codex/AG-UI inspired, Otto-owned turn lifecycle. Kept transport-agnostic. */
+export type AgentTurnStatus =
+  | 'in_progress'
+  | 'completed'
+  | 'incomplete'
+  | 'cancelled'
+  | 'interrupted'
+  | 'failed';
+
+export type AgentTurnItemStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'awaiting_confirmation'
+  | 'completed'
+  | 'cancelled'
+  | 'failed';
+
+export interface AgentTurnPlanStep {
+  id: string;
+  label: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+  dependsOn?: string[];
+  attempt?: number;
+}
+
+export type TurnIntent =
+  | 'answer'
+  | 'research'
+  | 'diagnose'
+  | 'change'
+  | 'create_artifact'
+  | 'enterprise_action';
+
+export type TurnExecutionMode =
+  'direct' | 'tool_assisted' | 'parallel_read' | 'planned' | 'restricted';
+
+export type TurnRiskLevel =
+  'read_only' | 'local_write' | 'external_write' | 'destructive';
+
+export type TurnEvidenceRequirement =
+  'none' | 'local_verification' | 'primary_sources' | 'deterministic_receipt';
+
+export type TurnSuccessCriterionKind =
+  'answer' | 'evidence' | 'change' | 'artifact' | 'verification' | 'receipt';
+
+export interface TurnSuccessCriterion {
+  id: string;
+  kind: TurnSuccessCriterionKind;
+  label: string;
+}
+
+export interface TurnControlPolicy {
+  contractVersion: 1;
+  intent: TurnIntent;
+  executionMode: TurnExecutionMode;
+  riskLevel: TurnRiskLevel;
+  evidenceRequirement: TurnEvidenceRequirement;
+  requiresPlan: boolean;
+  requiresVerification: boolean;
+  allowsParallelRead: boolean;
+  confirmationMode: 'none' | 'policy' | 'always';
+  successCriteria: TurnSuccessCriterion[];
+}
+
+export interface TurnVerificationCheck {
+  id: string;
+  label: string;
+  status: 'pending' | 'passed' | 'failed' | 'not_run';
+  evidence?: string[];
+}
+
+export interface TurnVerification {
+  status:
+    'not_required' | 'pending' | 'passed' | 'partial' | 'failed' | 'not_run';
+  checks: TurnVerificationCheck[];
+}
+
+export interface TurnRunLineage {
+  runId: string;
+  attempt: number;
+  parentRunId?: string;
+  resumedFromSequence?: number;
+}
+
+export interface AgentRetryRecord {
+  attempt: number;
+  reason: string;
+  timestamp: number;
+  outcome: 'retrying' | 'succeeded' | 'failed' | 'unknown_outcome';
+}
+
+export interface AgentArtifactReference {
+  id: string;
+  label: string;
+  path?: string;
+  mimeType?: string;
+  verified: boolean;
+}
+
+export interface AgentCitationReference {
+  id: string;
+  label: string;
+  uri?: string;
+  sourceType: 'local' | 'web' | 'enterprise' | 'tool';
+  verified: boolean;
+}
+
+export type AgentTurnOutcome =
+  | { type: 'success' }
+  | { type: 'incomplete'; reason: string }
+  | { type: 'cancelled'; reason?: string }
+  | { type: 'failed'; reason: string }
+  | { type: 'interrupt'; reason: string; resumable: boolean }
+  | { type: 'unknown_outcome'; reason: string; requiresReconciliation: true };
+
+/** User-visible semantic units inside one turn. */
+export type AgentTurnItem =
+  | {
+      id: string;
+      type: 'control';
+      status: AgentTurnItemStatus;
+      label: string;
+      intent: TurnIntent;
+      executionMode: TurnExecutionMode;
+      riskLevel: TurnRiskLevel;
+      evidenceRequirement: TurnEvidenceRequirement;
+    }
+  | {
+      id: string;
+      type: 'stage';
+      status: AgentTurnItemStatus;
+      label: string;
+      detail?: string;
+    }
+  | {
+      id: string;
+      type: 'plan';
+      status: AgentTurnItemStatus;
+      label: string;
+      steps: AgentTurnPlanStep[];
+    }
+  | {
+      id: string;
+      type: 'tool_group';
+      status: AgentTurnItemStatus;
+      label: string;
+      total: number;
+      completed: number;
+      failed: number;
+      awaitingConfirmation: number;
+    }
+  | {
+      id: string;
+      type: 'artifact';
+      status: AgentTurnItemStatus;
+      label: string;
+      path?: string;
+      mimeType?: string;
+    }
+  | {
+      id: string;
+      type: 'notice';
+      status: AgentTurnItemStatus;
+      label: string;
+      detail?: string;
+      level: 'info' | 'warning' | 'error';
+    }
+  | {
+      id: string;
+      type: 'verification';
+      status: AgentTurnItemStatus;
+      label: string;
+      verification: TurnVerification;
+    };
+
+/** Authoritative snapshot persisted with the root assistant message. */
+export interface AgentTurnSnapshot {
+  contractVersion: 1;
+  turnId: string;
+  sequence: number;
+  status: AgentTurnStatus;
+  items: AgentTurnItem[];
+  startedAt: number;
+  updatedAt: number;
+  completedAt?: number;
+  control?: TurnControlPolicy;
+  verification?: TurnVerification;
+  lineage?: TurnRunLineage;
+  retries?: AgentRetryRecord[];
+  artifacts?: AgentArtifactReference[];
+  citations?: AgentCitationReference[];
+  outcome?: AgentTurnOutcome;
+}
+
 /**
  * 一条会话消息（server 持久化的会话条目，渲染层直接映射成 ChatMessage）。
  * 与 webview ChatMessage 兼容，但加了 `source` 与 `sessionId` 归属。
@@ -217,6 +411,8 @@ export interface OttoMessage {
   toolsCompleted?: boolean;
   tokenUsage?: TokenUsage;
   modelName?: string;
+  /** Structured lifecycle for this user turn; absent on legacy messages. */
+  turn?: AgentTurnSnapshot;
 }
 
 // ============================================================================
@@ -282,7 +478,12 @@ export type UnsubscribeMsg = Envelope<'unsubscribe', { sessionId: string }>;
 /** 新建会话。 */
 export type CreateSessionMsg = Envelope<
   'create_session',
-  { title?: string; model?: string; agentProfileId?: string; clientRequestId?: string }
+  {
+    title?: string;
+    model?: string;
+    agentProfileId?: string;
+    clientRequestId?: string;
+  }
 >;
 
 /**
@@ -543,7 +744,10 @@ export type GetTodosMsg = Envelope<'get_todos', Record<string, never>>;
 export type GetMemoryMsg = Envelope<'get_memory', { sessionId?: string }>;
 
 /** 追加一条记忆事实（对齐 save_memory 工具 / CLI /memory add），写入项目级 OTTO.md。 */
-export type AddMemoryMsg = Envelope<'add_memory', { sessionId?: string; fact: string }>;
+export type AddMemoryMsg = Envelope<
+  'add_memory',
+  { sessionId?: string; fact: string }
+>;
 
 /** 拉取已装技能列表（对齐 CLI /skill list）。 */
 export type GetSkillsMsg = Envelope<'get_skills', { sessionId?: string }>;
@@ -967,10 +1171,7 @@ export type MessageQueuedMsg = Envelope<
  * 排队已清空通知：客户端取消排队（cancel with clearQueue）或
  * 队列被 drain 后发送。
  */
-export type QueueDrainedMsg = Envelope<
-  'queue_drained',
-  { sessionId: string }
->;
+export type QueueDrainedMsg = Envelope<'queue_drained', { sessionId: string }>;
 
 /** 历史回包（恢复 UI）。 */
 export type HistoryMsg = Envelope<
@@ -1060,9 +1261,39 @@ export type RuntimeActivityMsg = Envelope<
     contractVersion: 1;
     sessionId: string;
     kind: 'agent' | 'tool' | 'turn';
-    state: 'started' | 'streaming' | 'awaiting_confirmation' | 'completed' | 'cancelled' | 'failed';
+    state:
+      | 'started'
+      | 'streaming'
+      | 'awaiting_confirmation'
+      | 'completed'
+      | 'cancelled'
+      | 'failed';
     detail?: string;
     timestamp: number;
+  }
+>;
+
+/**
+ * Lossless structured turn update. A full snapshot accompanies every event so
+ * clients can recover after unsubscribe/reconnect without replaying deltas.
+ */
+export type AgentTurnEventMsg = Envelope<
+  'turn_event',
+  {
+    contractVersion: 1;
+    sessionId: string;
+    messageId: string;
+    turnId: string;
+    sequence: number;
+    timestamp: number;
+    event:
+      | 'turn_started'
+      | 'item_started'
+      | 'item_updated'
+      | 'item_completed'
+      | 'turn_completed';
+    itemId?: string;
+    snapshot: AgentTurnSnapshot;
   }
 >;
 
@@ -1386,7 +1617,8 @@ export type ExportResultMsg = Envelope<
 
 // ── P2：Workflow 面板 / 扩展列表 / IDE 伴生状态 回包 ───────────────────────
 
-export type WorkflowStatusValue = 'running' | 'completed' | 'failed' | 'cancelled';
+export type WorkflowStatusValue =
+  'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface WorkflowAgentSummary {
   agentId: string;
@@ -1449,10 +1681,7 @@ export type ExtensionsListMsg = Envelope<
 
 /** IDE 伴生连接状态（对齐 CLI /ide status）。desktop 独立应用不跑该协议，恒为 not_applicable。 */
 export type IdeConnectionStatusValue =
-  | 'connected'
-  | 'connecting'
-  | 'disconnected'
-  | 'not_applicable';
+  'connected' | 'connecting' | 'disconnected' | 'not_applicable';
 
 export type IdeStatusMsg = Envelope<
   'ide_status',
@@ -1490,11 +1719,17 @@ export type ProactiveAlertMsg = Envelope<
 /** 实时模式触发（操作重复达阈值，建议生成Skill） */
 /** 习惯分析洞察（HabitAnalyzer定期产出） */
 export type HabitInsightMsg = Envelope<
-  "habit_insight",
+  'habit_insight',
   {
     insights: Array<{
       id: string;
-      type: "workflow" | "bottleneck" | "suggestion" | "peak_hour" | "tool_chain" | "summary";
+      type:
+        | 'workflow'
+        | 'bottleneck'
+        | 'suggestion'
+        | 'peak_hour'
+        | 'tool_chain'
+        | 'summary';
       title: string;
       description: string;
       evidence: string[];
@@ -1507,7 +1742,7 @@ export type HabitInsightMsg = Envelope<
 >;
 
 export type RealtimePatternMsg = Envelope<
-  "realtime_pattern",
+  'realtime_pattern',
   {
     pattern: string;
     count: number;
@@ -1543,6 +1778,7 @@ export type ServerToClient =
   | ToolConfirmationRequestMsg
   | SessionStatusMsg
   | RuntimeActivityMsg
+  | AgentTurnEventMsg
   | ErrorMsg
   | IncrementalUpdateAvailableMsg
   | ModelsListMsg
@@ -1573,7 +1809,6 @@ export type ServerToClient =
   | KnowledgeActivityMsg
   | SlashCommandsListMsg
   | SlashCommandResultMsg
-
   | ProductWorkspaceMsg
   | EnterpriseInviteCreatedMsg
   | SchedulesListMsg
@@ -1583,7 +1818,6 @@ export type ServerToClient =
   | PendingAutoSkillsMsg
   | MessageQueuedMsg
   | QueueDrainedMsg;
-
 
 export type ServerToClientType = ServerToClient['type'];
 
@@ -1804,7 +2038,13 @@ function isNonEmptyString(v: unknown): v is string {
 }
 
 function isMessageSourceValue(v: unknown): v is MessageSource {
-  return v === 'local' || v === 'feishu' || v === 'atoa' || v === 'enterprise' || v === 'park';
+  return (
+    v === 'local' ||
+    v === 'feishu' ||
+    v === 'atoa' ||
+    v === 'enterprise' ||
+    v === 'park'
+  );
 }
 
 /** 校验单个 MessageContentPart 的形状（按判别 type 查各自 value 必备字段）。 */
@@ -1913,10 +2153,8 @@ export function validateClientPayload(msg: {
         return 'agentProfileId 必须是非空字符串';
       if (
         p['clientRequestId'] !== undefined &&
-        (
-          !isNonEmptyString(p['clientRequestId']) ||
-          p['clientRequestId'].trim().length === 0
-        )
+        (!isNonEmptyString(p['clientRequestId']) ||
+          p['clientRequestId'].trim().length === 0)
       )
         return 'clientRequestId 必须是非空字符串';
       return null;
@@ -1939,10 +2177,11 @@ export function validateClientPayload(msg: {
       )
         return 'clientMessageId 必须是字符串';
       if (
-        p['authorizedContext'] !== undefined
-        && (typeof p['authorizedContext'] !== 'string'
-          || p['authorizedContext'].length > 12_000)
-      ) return 'authorizedContext 必须是不超过 12000 字符的字符串';
+        p['authorizedContext'] !== undefined &&
+        (typeof p['authorizedContext'] !== 'string' ||
+          p['authorizedContext'].length > 12_000)
+      )
+        return 'authorizedContext 必须是不超过 12000 字符的字符串';
       return null;
     }
     case 'tool_confirmation_response': {
@@ -2250,7 +2489,8 @@ export function validateClientPayload(msg: {
     }
     case 'mcp_candidate_audit': {
       if (!isPlainObject(p)) return 'mcp_candidate_audit payload 必须是对象';
-      return isNonEmptyString(p['candidateId']) && p['candidateId'].length <= 512
+      return isNonEmptyString(p['candidateId']) &&
+        p['candidateId'].length <= 512
         ? null
         : 'candidateId 必须是长度不超过 512 的非空字符串';
     }
@@ -2258,32 +2498,43 @@ export function validateClientPayload(msg: {
     case 'mcp_install_reviewed': {
       if (!isPlainObject(p)) return `${msg.type} payload 必须是对象`;
       if (
-        !isNonEmptyString(p['auditId'])
-        || !/^mcp-audit-[a-zA-Z0-9-]{1,128}$/.test(p['auditId'])
-      ) return 'auditId 格式无效';
+        !isNonEmptyString(p['auditId']) ||
+        !/^mcp-audit-[a-zA-Z0-9-]{1,128}$/.test(p['auditId'])
+      )
+        return 'auditId 格式无效';
       return p['confirmed'] === true ? null : `${msg.type} 前必须明确确认`;
     }
     case 'mcp_creator_preview': {
       if (!isPlainObject(p)) return 'mcp_creator_preview payload 必须是对象';
       if (!isNonEmptyString(p['name'])) return 'name 必须是非空字符串';
-      if (!isNonEmptyString(p['description'])) return 'description 必须是非空字符串';
-      if (!isNonEmptyString(p['sourceText'])) return 'sourceText 必须是非空字符串';
+      if (!isNonEmptyString(p['description']))
+        return 'description 必须是非空字符串';
+      if (!isNonEmptyString(p['sourceText']))
+        return 'sourceText 必须是非空字符串';
       if (p['name'].length > 100) return 'name 不能超过 100 个字符';
-      if (p['description'].length > 2_000) return 'description 不能超过 2000 个字符';
-      if (Buffer.byteLength(p['sourceText'], 'utf8') > 2_000_000) return 'sourceText 不能超过 2MB';
-      if (!['natural_language', 'openapi', 'api_docs', 'curl'].includes(String(p['inputKind']))) {
+      if (p['description'].length > 2_000)
+        return 'description 不能超过 2000 个字符';
+      if (Buffer.byteLength(p['sourceText'], 'utf8') > 2_000_000)
+        return 'sourceText 不能超过 2MB';
+      if (
+        !['natural_language', 'openapi', 'api_docs', 'curl'].includes(
+          String(p['inputKind']),
+        )
+      ) {
         return 'inputKind 不受支持';
       }
       if (p['transport'] !== 'stdio' && p['transport'] !== 'streamable_http') {
         return 'transport 必须是 stdio | streamable_http';
       }
       if (
-        p['environmentVariables'] !== undefined
-        && (!Array.isArray(p['environmentVariables'])
-          || p['environmentVariables'].length > 64
-          || !p['environmentVariables'].every((value) => (
-            typeof value === 'string' && /^[A-Z_][A-Z0-9_]{0,127}$/.test(value)
-          )))
+        p['environmentVariables'] !== undefined &&
+        (!Array.isArray(p['environmentVariables']) ||
+          p['environmentVariables'].length > 64 ||
+          !p['environmentVariables'].every(
+            (value) =>
+              typeof value === 'string' &&
+              /^[A-Z_][A-Z0-9_]{0,127}$/.test(value),
+          ))
       ) {
         return 'environmentVariables 必须是最多 64 个合法环境变量名';
       }
@@ -2292,9 +2543,10 @@ export function validateClientPayload(msg: {
     case 'mcp_creator_save_draft': {
       if (!isPlainObject(p)) return 'mcp_creator_save_draft payload 必须是对象';
       if (
-        !isNonEmptyString(p['draftId'])
-        || !/^mcp-draft-[a-zA-Z0-9-]{1,128}$/.test(p['draftId'])
-      ) return 'draftId 格式无效';
+        !isNonEmptyString(p['draftId']) ||
+        !/^mcp-draft-[a-zA-Z0-9-]{1,128}$/.test(p['draftId'])
+      )
+        return 'draftId 格式无效';
       return p['confirmed'] === true ? null : '保存 MCP 草稿前必须明确确认';
     }
     case 'mcp_remove': {

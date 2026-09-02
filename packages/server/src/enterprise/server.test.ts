@@ -164,6 +164,7 @@ const ENV_KEYS = [
   'OTTO_LICENSE_PUBLIC_KEY',
   'OTTO_LICENSE_PUBLIC_KEYS',
   'OTTO_LICENSE_REVOKED_KEY_IDS',
+  'OTTO_ENTERPRISE_DEPLOYMENT_GRANTS',
   'OTTO_TELEMETRY_ENDPOINT',
   'OTTO_DATA_CONTROLLER_NAME',
   'OTTO_PRIVACY_CONTACT',
@@ -1100,6 +1101,11 @@ describe('受保护 vs 公开路由边界', () => {
   it('signed private deployment license reopens business routes and limits server-side modules', async () => {
     process.env.OTTO_LICENSE_ENFORCE = 'true';
     process.env.OTTO_LICENSE_PUBLIC_KEY = LICENSE_PUBLIC_KEY;
+    // This case exercises deployment-wide grants for multiple tenant
+    // organizations. The signed License remains the trust anchor; the grant
+    // list only expands the explicitly named features across this deployment.
+    process.env.OTTO_ENTERPRISE_DEPLOYMENT_GRANTS =
+      'enterprise_tree,direct_messages,knowledge';
     const { base } = await startIsolated(ADMIN_TOKEN);
     const headers = { 'x-otto-admin-token': ADMIN_TOKEN };
 
@@ -1347,12 +1353,7 @@ describe('受保护 vs 公开路由边界', () => {
       `${base}/enterprise/organization/departments`,
       { headers: baselineAdminHeaders },
     );
-    expect(advancedOrganizationStructure.status).toBe(402);
-    await expect(advancedOrganizationStructure.json()).resolves.toEqual({
-      error: 'commercial module is not entitled',
-      code: 'commercial_module_not_entitled',
-      feature: 'enterprise_tree',
-    });
+    expect(advancedOrganizationStructure.status).toBe(200);
 
     db.updateOrganizationFeatures('org_default', { direct_messages: true });
     const baselineMessages = await fetch(`${base}/enterprise/messages/unread`, {
@@ -1364,11 +1365,11 @@ describe('受保护 vs 公开路由边界', () => {
       `${base}/enterprise/organization/view?organizationId=${encodeURIComponent(org.id)}`,
       { headers: memberHeaders },
     );
-    expect(crossOrganizationView.status).toBe(402);
+    // Entitlement and authorization are separate: the deployment grant opens
+    // the module, but an ordinary member still cannot inspect another tenant.
+    expect(crossOrganizationView.status).toBe(403);
     await expect(crossOrganizationView.json()).resolves.toEqual({
-      error: 'commercial module is not entitled',
-      code: 'commercial_module_not_entitled',
-      feature: 'enterprise_tree',
+      error: '无权查看该企业组织架构',
     });
   }, 60_000);
 

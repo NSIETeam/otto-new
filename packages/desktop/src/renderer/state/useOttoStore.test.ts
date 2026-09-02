@@ -142,6 +142,31 @@ describe('applyFrame 各帧分支', () => {
     expect(view.result.current.state.activeSessionId).toBe('a');
   });
 
+  it('模块动作桥可在当前会话插入本地用户和助手消息，且不会发给模型', () => {
+    const { view, push } = setup();
+    push({ type: 'sessions_list', payload: { sessions: [makeSession()] } });
+    sendSpy.mockClear();
+
+    act(() => {
+      view.result.current.actions.postLocalChatMessage('user', '我要物业报修');
+      view.result.current.actions.postLocalChatMessage('assistant', '请补充故障描述。');
+    });
+
+    expect(view.result.current.state.messages.s1).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        source: 'local',
+        content: [{ type: 'text', value: '我要物业报修' }],
+      }),
+      expect.objectContaining({
+        role: 'assistant',
+        source: 'local',
+        content: [{ type: 'text', value: '请补充故障描述。' }],
+      }),
+    ]);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it('sessions_list：选中仍在快照里则保持不动', () => {
     const { view, push } = setup();
     push({

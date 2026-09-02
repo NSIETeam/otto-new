@@ -5,6 +5,8 @@
  * 普通查询和路由不调用模型；组织写入和 Skill 安装/拒绝必须强确认。
  */
 
+import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
+
 export interface ConversationalKnowledgeItem {
   id: string;
   title?: string;
@@ -60,6 +62,7 @@ interface KnowledgeDraft {
 
 interface AutoSkillDraft {
   kind: 'auto_skill';
+  draftId?: string;
   candidateId: string;
   candidateName: string;
   action: 'install' | 'reject';
@@ -140,6 +143,145 @@ export class WorkspaceCapabilityDraftRegistry {
     return this.drafts.size;
   }
 
+  summary(accountId: string, sessionId: string): ConversationActionDraftSummary | null {
+    const key = draftKey(accountId, sessionId);
+    const stored = this.drafts.get(key);
+    if (!stored || stored.expiresAt <= this.now()) {
+      this.drafts.delete(key);
+      this.inFlight.delete(key);
+      return null;
+    }
+    const claimed = this.inFlight.has(key);
+    if (stored.draft.kind === 'knowledge') {
+      const draft = stored.draft;
+      const missing = [
+        ...(!draft.title ? ['知识标题'] : []),
+        ...(!draft.content ? ['知识内容'] : []),
+      ];
+      return {
+        id: draft.sourceId,
+        source: 'enterprise-knowledge',
+        title: draft.title || '发布企业知识',
+        phase: claimed ? 'submitting' : draft.phase === 'failed'
+          ? 'failed' : missing.length ? 'collecting' : 'awaiting_confirmation',
+        updatedAt: stored.touchedAt,
+        expiresAt: stored.expiresAt,
+        missingFields: missing,
+        ...(!claimed && missing.length === 0 ? {
+          confirmationText: draft.phase === 'failed' ? '重新发布企业知识' : '确认发布企业知识',
+        } : {}),
+      };
+    }
+    const draft = stored.draft;
+    return {
+      id: draft.draftId || `${draft.action}:${draft.candidateId}`,
+      source: 'auto-skill',
+      title: `${draft.action === 'install' ? '安装' : '拒绝'} ${draft.candidateName}`,
+      phase: claimed ? 'submitting' : 'awaiting_confirmation',
+      updatedAt: stored.touchedAt,
+      expiresAt: stored.expiresAt,
+      missingFields: [],
+      ...(!claimed ? {
+        confirmationText: draft.action === 'install' ? '确认安装 Skill' : '确认拒绝 Skill',
+      } : {}),
+    };
+  }
+
+  discard(id: string, accountId: string, sessionId: string): boolean {
+    const summary = this.summary(accountId, sessionId);
+    const key = draftKey(accountId, sessionId);
+    if (!summary || summary.id !== id || this.inFlight.has(key)) return false;
+    this.drafts.delete(key);
+    return true;
+  }
+
+  snapshot(accountId: string): Array<{
+    accountId: string;
+    sessionId: string;
+    draft: CapabilityDraft;
+    touchedAt: number;
+    expiresAt: number;
+  }> {
+    const now = this.now();
+    const result: Array<{
+      accountId: string;
+      sessionId: string;
+      draft: CapabilityDraft;
+      touchedAt: number;
+      expiresAt: number;
+    }> = [];
+    for (const [key, stored] of this.drafts) {
+      if (stored.expiresAt <= now) {
+        this.drafts.delete(key);
+        this.inFlight.delete(key);
+        continue;
+      }
+      const separator = key.indexOf('\u0000');
+      if (separator < 0 || key.slice(0, separator) !== accountId) continue;
+      result.push({
+        accountId,
+        sessionId: key.slice(separator + 1),
+        draft: stored.draft,
+        touchedAt: stored.touchedAt,
+        expiresAt: stored.expiresAt,
+      });
+    }
+    return result;
+  }
+
+  restore(accountId: string, payload: unknown): number {
+    if (!Array.isArray(payload)) return 0;
+    const now = this.now();
+    let restored = 0;
+    for (const raw of payload.slice(0, MAX_DRAFTS)) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const stored = raw as {
+        accountId?: unknown;
+        sessionId?: unknown;
+        draft?: unknown;
+        touchedAt?: unknown;
+        expiresAt?: unknown;
+      };
+      if (
+        stored.accountId !== accountId
+        || typeof stored.sessionId !== 'string'
+        || !stored.sessionId
+        || stored.sessionId.length > 500
+        || typeof stored.touchedAt !== 'number'
+        || typeof stored.expiresAt !== 'number'
+        || stored.expiresAt <= now
+        || !stored.draft
+        || typeof stored.draft !== 'object'
+        || Array.isArray(stored.draft)
+      ) continue;
+      const draft = stored.draft as Partial<CapabilityDraft>;
+      if (draft.kind === 'knowledge') {
+        if (
+          typeof draft.sourceId !== 'string'
+          || typeof draft.title !== 'string'
+          || typeof draft.category !== 'string'
+          || typeof draft.content !== 'string'
+          || !['collecting', 'ready', 'failed'].includes(String(draft.phase))
+        ) continue;
+      } else if (draft.kind === 'auto_skill') {
+        if (
+          typeof draft.candidateId !== 'string'
+          || typeof draft.candidateName !== 'string'
+          || (draft.action !== 'install' && draft.action !== 'reject')
+          || (draft.draftId !== undefined && typeof draft.draftId !== 'string')
+        ) continue;
+      } else continue;
+      this.drafts.set(draftKey(accountId, stored.sessionId), {
+        draft: draft as CapabilityDraft,
+        touchedAt: stored.touchedAt,
+        expiresAt: stored.expiresAt,
+      });
+      restored += 1;
+    }
+    this.enforceCapacity();
+    return restored;
+  }
+
   private enforceCapacity(): void {
     if (this.drafts.size <= MAX_DRAFTS) return;
     const ordered = [...this.drafts.entries()].sort((left, right) => left[1].touchedAt - right[1].touchedAt);
@@ -172,6 +314,8 @@ export interface WorkspaceCapabilityConversationInput {
   confirmAutoSkill(candidateId: string): void | Promise<void>;
   rejectAutoSkill(candidateId: string): void | Promise<void>;
   postMessage(role: 'user' | 'assistant', text: string): void;
+  /** UI 草稿中心确认时必须绑定当前展示的草稿，拒绝串单或过期确认。 */
+  expectedDraftId?: string;
 }
 
 function isIntroOrNegative(text: string): boolean {
@@ -429,6 +573,13 @@ export async function handleWorkspaceCapabilityConversation(
   if (!text) return false;
 
   const existing = input.registry.get(input.accountId, input.sessionId);
+  if (input.expectedDraftId) {
+    const current = input.registry.summary(input.accountId, input.sessionId);
+    if (current?.id !== input.expectedDraftId) {
+      input.postMessage('assistant', '该工作区草稿已变化或过期，本次没有执行。请检查当前草稿后重新确认。');
+      return true;
+    }
+  }
   if (existing) return handleExistingDraft(input, text, existing);
   if (isIntroOrNegative(text)) return false;
 
@@ -514,6 +665,7 @@ export async function handleWorkspaceCapabilityConversation(
     }
     const draft: AutoSkillDraft = {
       kind: 'auto_skill',
+      draftId: `auto-skill:${crypto.randomUUID()}`,
       candidateId: candidate.id,
       candidateName: candidate.name,
       action: autoSkillAction,

@@ -3,7 +3,10 @@
 export type ConversationActionDraftSource =
   | 'repair'
   | 'park-service'
-  | 'customer-module';
+  | 'customer-module'
+  | 'recruitment'
+  | 'enterprise-knowledge'
+  | 'auto-skill';
 
 export interface ConversationActionDraftSummary {
   id: string;

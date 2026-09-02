@@ -146,4 +146,20 @@ describe('客户模块通用 Schema 对话桥', () => {
       phase: 'failed', confirmationText: '重新运行并同意费用',
     });
   });
+
+  it('旧模块卡片的确认不会运行当前草稿', async () => {
+    const { common, registry, runModule, messages } = harness();
+    await handleCustomerModuleConversation({
+      ...common, text: '运行合同审查器，合同内容：测试，风险等级：低',
+    });
+    const currentId = registry.get('session-1', 'account-1', 1_000)!.id;
+    await handleCustomerModuleConversation({
+      ...common,
+      text: '确认运行并同意费用',
+      expectedDraftId: `${currentId}:stale`,
+    });
+    expect(runModule).not.toHaveBeenCalled();
+    expect(registry.get('session-1', 'account-1', 1_000)?.id).toBe(currentId);
+    expect(messages.at(-1)?.text).toContain('已变化或过期');
+  });
 });

@@ -13,6 +13,7 @@ import {
   type CandidateWorkspace,
   type RecruitmentWorkspaceStore,
 } from './recruitmentWorkspaceStore.js';
+import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
 
 const RECRUITMENT_DRAFT_TTL_MS = 30 * 60 * 1_000;
 const MAX_DRAFTS = 1_000;
@@ -57,6 +58,8 @@ export interface RecruitmentConversationInput {
   extractDocument(path: string): Promise<ExtractedDocument>;
   transcribe(path: string): Promise<RecruitmentTranscription>;
   postMessage(role: 'user' | 'assistant', text: string): void;
+  /** UI 草稿中心确认时必须绑定当前展示的草稿，拒绝串单或过期确认。 */
+  expectedDraftId?: string;
   now?: () => number;
 }
 
@@ -161,7 +164,7 @@ function createDraft(
   candidateId?: string,
 ): RecruitmentConversationDraft {
   return {
-    id: `recruitment:${kind}:${input.accountId}:${input.sessionId}:${now}`,
+    id: `recruitment:${kind}:${crypto.randomUUID()}`,
     kind,
     sessionId: input.sessionId,
     accountId: input.accountId,
@@ -280,6 +283,7 @@ async function importAudio(
 
 export class RecruitmentConversationDraftRegistry {
   private readonly drafts = new Map<string, RecruitmentConversationDraft>();
+  private readonly running = new Set<string>();
 
   private key(sessionId: string, accountId: string): string {
     return `${accountId}:${sessionId}`;
@@ -291,6 +295,7 @@ export class RecruitmentConversationDraftRegistry {
     if (!draft) return null;
     if (draft.sessionId !== sessionId || draft.accountId !== accountId || draft.expiresAt <= now) {
       this.drafts.delete(key);
+      this.running.delete(key);
       return null;
     }
     return draft;
@@ -304,11 +309,96 @@ export class RecruitmentConversationDraftRegistry {
       const oldest = this.drafts.keys().next().value as string | undefined;
       if (!oldest) break;
       this.drafts.delete(oldest);
+      this.running.delete(oldest);
     }
   }
 
   clear(sessionId: string, accountId: string): void {
-    this.drafts.delete(this.key(sessionId, accountId));
+    const key = this.key(sessionId, accountId);
+    this.drafts.delete(key);
+    this.running.delete(key);
+  }
+
+  summary(
+    sessionId: string,
+    accountId: string,
+    store: RecruitmentWorkspaceStore,
+    now: number = Date.now(),
+  ): ConversationActionDraftSummary | null {
+    const draft = this.get(sessionId, accountId, now);
+    if (!draft) return null;
+    const key = this.key(sessionId, accountId);
+    const running = this.running.has(key);
+    const missing = draft.kind === 'resume-import' ? resumeMissing(store) : [];
+    const title = draft.kind === 'resume-import'
+      ? '简历分析'
+      : draft.kind === 'audio-import' ? '面试录音分析' : '清除候选人材料';
+    const confirmationText = draft.kind === 'resume-import'
+      ? '确认选择简历'
+      : draft.kind === 'audio-import' ? '确认选择面试录音' : '确认删除候选人材料';
+    return {
+      id: draft.id,
+      source: 'recruitment',
+      title,
+      phase: running ? 'submitting' : missing.length ? 'collecting' : 'awaiting_confirmation',
+      updatedAt: draft.updatedAt,
+      expiresAt: draft.expiresAt,
+      missingFields: missing,
+      ...(!running && missing.length === 0 ? { confirmationText } : {}),
+    };
+  }
+
+  discard(id: string, sessionId: string, accountId: string, now: number = Date.now()): boolean {
+    const draft = this.get(sessionId, accountId, now);
+    const key = this.key(sessionId, accountId);
+    if (!draft || draft.id !== id || this.running.has(key)) return false;
+    this.clear(sessionId, accountId);
+    return true;
+  }
+
+  begin(sessionId: string, accountId: string): boolean {
+    const key = this.key(sessionId, accountId);
+    if (this.running.has(key)) return false;
+    this.running.add(key);
+    return true;
+  }
+
+  finish(sessionId: string, accountId: string): void {
+    this.running.delete(this.key(sessionId, accountId));
+  }
+
+  snapshot(accountId: string, now: number = Date.now()): RecruitmentConversationDraft[] {
+    return [...this.drafts.values()].filter((draft) => {
+      if (draft.expiresAt <= now) {
+        this.clear(draft.sessionId, draft.accountId);
+        return false;
+      }
+      return draft.accountId === accountId;
+    });
+  }
+
+  restore(accountId: string, payload: unknown, now: number = Date.now()): number {
+    if (!Array.isArray(payload)) return 0;
+    let restored = 0;
+    for (const raw of payload.slice(0, MAX_DRAFTS)) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const draft = raw as Partial<RecruitmentConversationDraft>;
+      if (
+        typeof draft.id !== 'string'
+        || !['resume-import', 'audio-import', 'purge-candidate'].includes(String(draft.kind))
+        || typeof draft.sessionId !== 'string'
+        || draft.sessionId.length > 500
+        || draft.accountId !== accountId
+        || typeof draft.createdAt !== 'number'
+        || typeof draft.updatedAt !== 'number'
+        || typeof draft.expiresAt !== 'number'
+        || draft.expiresAt <= now
+        || (draft.candidateId !== undefined && typeof draft.candidateId !== 'string')
+      ) continue;
+      this.save(draft as RecruitmentConversationDraft);
+      restored += 1;
+    }
+    return restored;
   }
 }
 
@@ -318,6 +408,10 @@ export async function handleRecruitmentConversation(
   if (!input.enabled || !input.text.trim()) return false;
   const now = input.now?.() ?? Date.now();
   let draft = input.registry.get(input.sessionId, input.accountId, now);
+  if (input.expectedDraftId && draft?.id !== input.expectedDraftId) {
+    input.postMessage('assistant', '该招聘操作草稿已变化或过期，本次没有执行。请检查当前草稿后重新确认。');
+    return true;
+  }
   const intent = draft ? null : detectIntent(input.text);
   if (!draft && !intent) return false;
   input.postMessage('user', input.text.trim());
@@ -381,7 +475,15 @@ export async function handleRecruitmentConversation(
         input.postMessage('assistant', `岗位“${state.jobTitle}”的信息和候选人授权已确认，材料保存 ${state.retentionDays} 天。回复“确认选择简历”后由你亲自选择本机文件。`);
         return true;
       }
-      await importResume(input, draft, now);
+      if (!input.registry.begin(input.sessionId, input.accountId)) {
+        input.postMessage('assistant', '简历选择或分析正在进行，请勿重复操作。');
+        return true;
+      }
+      try {
+        await importResume(input, draft, now);
+      } finally {
+        input.registry.finish(input.sessionId, input.accountId);
+      }
       return true;
     }
     if (draft.kind === 'audio-import') {
@@ -389,26 +491,42 @@ export async function handleRecruitmentConversation(
         input.postMessage('assistant', '回复“确认选择面试录音”后由你亲自选择文件。Otto只分析回答文字，不使用口音、音高、表情或情绪作招聘判断。');
         return true;
       }
-      await importAudio(input, draft);
+      if (!input.registry.begin(input.sessionId, input.accountId)) {
+        input.postMessage('assistant', '面试录音选择或分析正在进行，请勿重复操作。');
+        return true;
+      }
+      try {
+        await importAudio(input, draft);
+      } finally {
+        input.registry.finish(input.sessionId, input.accountId);
+      }
       return true;
     }
     if (!purgeConfirm(input.text)) {
       input.postMessage('assistant', '这会清除当前候选人的简历、转写和分析结果，仅保留不含原始材料的审计事件。若确定，请回复“确认删除候选人材料”。');
       return true;
     }
-    const candidate = input.store.getSnapshot().candidates.find((item) => item.id === draft.candidateId);
-    if (!candidate) throw new Error('候选人已切换或材料已被清除');
-    input.store.setCandidates((current) => current.filter((item) => item.id !== candidate.id));
-    input.store.setActiveCandidateId((current) => current === candidate.id ? '' : current);
-    input.store.setAudits((current) => [makeRecruitmentAudit(
-      candidate.id,
-      'candidate_purged',
-      '招聘人员通过对话强确认清除候选人简历、转写和分析结果。',
-      'human',
-      null,
-    ), ...current]);
-    input.registry.clear(draft.sessionId, draft.accountId);
-    input.postMessage('assistant', '当前候选人材料已清除；仅保留不含简历和录音原文的审计事件。');
+    if (!input.registry.begin(input.sessionId, input.accountId)) {
+      input.postMessage('assistant', '候选人材料正在清除，请勿重复操作。');
+      return true;
+    }
+    try {
+      const candidate = input.store.getSnapshot().candidates.find((item) => item.id === draft.candidateId);
+      if (!candidate) throw new Error('候选人已切换或材料已被清除');
+      input.store.setCandidates((current) => current.filter((item) => item.id !== candidate.id));
+      input.store.setActiveCandidateId((current) => current === candidate.id ? '' : current);
+      input.store.setAudits((current) => [makeRecruitmentAudit(
+        candidate.id,
+        'candidate_purged',
+        '招聘人员通过对话强确认清除候选人简历、转写和分析结果。',
+        'human',
+        null,
+      ), ...current]);
+      input.registry.clear(draft.sessionId, draft.accountId);
+      input.postMessage('assistant', '当前候选人材料已清除；仅保留不含简历和录音原文的审计事件。');
+    } finally {
+      input.registry.finish(input.sessionId, input.accountId);
+    }
   } catch (error) {
     input.postMessage('assistant', `招聘操作未完成：${error instanceof Error ? error.message : String(error)}。草稿已保留，可修正后重试或回复“取消”。`);
   }

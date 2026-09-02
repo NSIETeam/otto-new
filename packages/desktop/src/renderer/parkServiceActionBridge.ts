@@ -118,8 +118,11 @@ export interface ParkServiceActionConversationInput {
   loadMeetingResources(): Promise<ParkMeetingResources>;
   listPublications(): Promise<SurveyPublication[]>;
   submitTicket(input: ParkServiceTicketSubmitInput): Promise<ParkServiceTicketSubmitResult>;
+  onTicketSubmitted?(ticket: ParkServiceTicketSubmitResult, draft: ParkTicketActionDraft): void;
   submitSurvey(id: string, responseData: Record<string, string>): Promise<{ id: string; submittedAt: string | null }>;
   postMessage(role: 'user' | 'assistant', text: string): void;
+  /** UI 草稿中心确认时必须绑定当前展示的草稿，拒绝串单或过期确认。 */
+  expectedDraftId?: string;
   now?: () => number;
 }
 
@@ -584,6 +587,58 @@ export class ParkServiceActionDraftRegistry {
   finishSubmission(sessionId: string, accountId: string): void {
     this.submitting.delete(this.key(sessionId, accountId));
   }
+
+  snapshot(accountId: string, now: number = Date.now()): ParkServiceActionDraft[] {
+    return [...this.drafts.values()].filter((draft) => {
+      if (draft.expiresAt <= now) {
+        this.clear(draft.sessionId, draft.accountId);
+        return false;
+      }
+      return draft.accountId === accountId;
+    });
+  }
+
+  restore(accountId: string, payload: unknown, now: number = Date.now()): number {
+    if (!Array.isArray(payload)) return 0;
+    let restored = 0;
+    for (const raw of payload.slice(0, MAX_DRAFTS)) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const draft = raw as Partial<ParkServiceActionDraft>;
+      if (
+        typeof draft.id !== 'string'
+        || typeof draft.sessionId !== 'string'
+        || draft.sessionId.length > 500
+        || draft.accountId !== accountId
+        || typeof draft.createdAt !== 'number'
+        || typeof draft.updatedAt !== 'number'
+        || typeof draft.expiresAt !== 'number'
+        || draft.expiresAt <= now
+        || !['collecting', 'awaiting_confirmation'].includes(String(draft.phase))
+        || (draft.kind !== 'ticket' && draft.kind !== 'survey')
+        || !draft.fields
+        || typeof draft.fields !== 'object'
+        || Array.isArray(draft.fields)
+        || Object.values(draft.fields).some((value) => typeof value !== 'string')
+      ) continue;
+      if (draft.kind === 'ticket') {
+        if (
+          !draft.serviceId
+          || !Object.hasOwn(SERVICE_NAMES, draft.serviceId)
+          || typeof draft.idempotencyKey !== 'string'
+        ) continue;
+      } else {
+        const survey = draft as Partial<ParkSurveyActionDraft>;
+        if (
+          typeof survey.surveyId !== 'string'
+          || typeof survey.surveyTitle !== 'string'
+          || typeof survey.surveyBody !== 'string'
+        ) continue;
+      }
+      this.save(draft as ParkServiceActionDraft);
+      restored += 1;
+    }
+    return restored;
+  }
 }
 
 async function createDraft(
@@ -650,6 +705,10 @@ export async function handleParkServiceActionConversation(
   if (!input.enabled || !input.text.trim()) return false;
   const now = input.now?.() ?? Date.now();
   let draft = input.registry.get(input.sessionId, input.accountId, now);
+  if (input.expectedDraftId && draft?.id !== input.expectedDraftId) {
+    input.postMessage('assistant', '该园区服务草稿已变化或过期，本次没有提交。请检查当前草稿后重新确认。');
+    return true;
+  }
   const intent = draft ? null : parkIntent(input.text);
   if (!draft && !intent) return false;
   input.postMessage('user', input.text.trim());
@@ -704,6 +763,11 @@ export async function handleParkServiceActionConversation(
     } else {
       const ticket = await input.submitTicket(ticketInput(draft));
       input.registry.clear(input.sessionId, input.accountId);
+      try {
+        input.onTicketSubmitted?.(ticket, draft);
+      } catch {
+        // 会话进展关联是本地辅助能力，失败不能把已成功创建的申请误报为失败并诱发重提。
+      }
       input.postMessage('assistant', successMessage(ticket, draft.serviceId));
     }
   } catch (error) {

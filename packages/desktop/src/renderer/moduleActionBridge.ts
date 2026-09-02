@@ -98,7 +98,10 @@ export interface HandleModuleActionConversationInput {
   registry: ModuleActionDraftRegistry;
   loadDefaults(): Promise<RepairModuleDefaults>;
   submit(input: RepairTicketSubmitInput): Promise<RepairTicketSubmitResult>;
+  onSubmitted?(ticket: RepairTicketSubmitResult, draft: ModuleActionDraft): void;
   postMessage(role: 'user' | 'assistant', text: string): void;
+  /** UI 草稿中心确认时必须绑定当前展示的草稿，拒绝串单或过期确认。 */
+  expectedDraftId?: string;
   now?: () => number;
 }
 
@@ -483,6 +486,41 @@ export class ModuleActionDraftRegistry {
     return this.drafts.size;
   }
 
+  snapshot(accountId: string, now: number = Date.now()): ModuleActionDraft[] {
+    this.pruneExpired(now);
+    return [...this.drafts.values()].filter((draft) => draft.accountId === accountId);
+  }
+
+  restore(accountId: string, payload: unknown, now: number = Date.now()): number {
+    if (!Array.isArray(payload)) return 0;
+    let restored = 0;
+    for (const raw of payload.slice(0, MAX_MODULE_ACTION_DRAFTS)) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const draft = raw as Partial<ModuleActionDraft>;
+      if (
+        typeof draft.id !== 'string'
+        || draft.moduleId !== 'park-repair'
+        || typeof draft.sessionId !== 'string'
+        || draft.sessionId.length > 500
+        || draft.accountId !== accountId
+        || typeof draft.createdAt !== 'number'
+        || typeof draft.updatedAt !== 'number'
+        || typeof draft.expiresAt !== 'number'
+        || draft.expiresAt <= now
+        || !['collecting', 'awaiting_confirmation'].includes(String(draft.phase))
+        || typeof draft.autoSubmit !== 'boolean'
+        || !draft.fields
+        || typeof draft.fields !== 'object'
+        || Array.isArray(draft.fields)
+      ) continue;
+      const fields = draft.fields as Partial<RepairModuleFields>;
+      if (REPAIR_REQUIRED_FIELDS.some((field) => typeof fields[field] !== 'string')) continue;
+      this.save(draft as ModuleActionDraft);
+      restored += 1;
+    }
+    return restored;
+  }
+
   private pruneExpired(now: number): void {
     for (const [key, draft] of this.drafts) {
       if (draft.expiresAt > now) continue;
@@ -498,6 +536,10 @@ export async function handleModuleActionConversation(
   if (!input.enabled || !input.text.trim()) return false;
   const now = input.now?.() ?? Date.now();
   const existing = input.registry.get(input.sessionId, input.accountId, now);
+  if (input.expectedDraftId && existing?.id !== input.expectedDraftId) {
+    input.postMessage('assistant', '该物业报修草稿已变化或过期，本次没有提交。请检查当前草稿后重新确认。');
+    return true;
+  }
   if (!existing && !repairIntent(input.text)) return false;
 
   input.postMessage('user', input.text.trim());
@@ -541,6 +583,11 @@ export async function handleModuleActionConversation(
   try {
     const submitted = await submitModuleAction(transition.draft, input.submit);
     input.registry.clear(input.sessionId, input.accountId);
+    try {
+      input.onSubmitted?.(submitted.ticket, transition.draft);
+    } catch {
+      // 会话进展关联是本地辅助能力，失败不能把已成功创建的工单误报为失败并诱发重提。
+    }
     input.postMessage('assistant', submitted.assistantMessage);
   } catch (error) {
     const message = error instanceof Error ? error.message : '未知错误';

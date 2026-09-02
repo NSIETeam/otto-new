@@ -1306,6 +1306,9 @@ const IPC = {
   mcpCredentialList: 'otto:mcp-credential-list',
   mcpCredentialSet: 'otto:mcp-credential-set',
   mcpCredentialRemove: 'otto:mcp-credential-remove',
+  conversationDraftLoad: 'otto:conversation-draft-load',
+  conversationDraftSave: 'otto:conversation-draft-save',
+  conversationDraftRemove: 'otto:conversation-draft-remove',
   voiceGetConfig: 'otto:voice-get-config',
   voiceSaveConfig: 'otto:voice-save-config',
   voiceTranscribe: 'otto:voice-transcribe',
@@ -1662,6 +1665,10 @@ export interface OttoBridge {
   mcpCredentialList(): Promise<McpCredentialSummary[]>;
   mcpCredentialSet(input: { serverName: string; variableName: string; value: string }): Promise<McpCredentialSummary>;
   mcpCredentialRemove(input: { serverName: string; variableName: string }): Promise<void>;
+  /** safeStorage 加密的对话动作草稿；scope 由服务器、组织和账号共同组成。 */
+  conversationDraftLoad(scope: string): Promise<unknown | null>;
+  conversationDraftSave(scope: string, payload: unknown): Promise<void>;
+  conversationDraftRemove(scope: string): Promise<void>;
   /** 显示或隐藏可在桌面任意拖动的小宠物窗口。 */
   desktopPetSetEnabled(enabled: boolean): Promise<boolean>;
   /** 把当前对话工作状态同步到独立小宠物窗口。 */
@@ -2735,6 +2742,15 @@ const bridge: OttoBridge = {
   },
   mcpCredentialRemove(input: { serverName: string; variableName: string }): Promise<void> {
     return ipcRenderer.invoke(IPC.mcpCredentialRemove, input) as Promise<void>;
+  },
+  conversationDraftLoad(scope: string): Promise<unknown | null> {
+    return ipcRenderer.invoke(IPC.conversationDraftLoad, scope) as Promise<unknown | null>;
+  },
+  conversationDraftSave(scope: string, payload: unknown): Promise<void> {
+    return ipcRenderer.invoke(IPC.conversationDraftSave, scope, payload) as Promise<void>;
+  },
+  conversationDraftRemove(scope: string): Promise<void> {
+    return ipcRenderer.invoke(IPC.conversationDraftRemove, scope) as Promise<void>;
   },
   desktopPetSetEnabled(enabled: boolean): Promise<boolean> {
     return ipcRenderer.invoke(IPC.desktopPetSetEnabled, enabled) as Promise<boolean>;

@@ -52,6 +52,40 @@ async function importResume(h: ReturnType<typeof harness>): Promise<void> {
 }
 
 describe('招聘对话共享桥', () => {
+  it('在统一草稿中心展示招聘确认并拒绝过期卡片', async () => {
+    const h = harness();
+    await handleRecruitmentConversation({ ...h.common, text: '帮我分析一份简历' });
+    expect(h.registry.summary('session-1', 'hr-1', h.store, h.common.now())).toMatchObject({
+      source: 'recruitment', title: '简历分析', phase: 'collecting',
+      missingFields: ['岗位名称', '岗位要求', '明确确认已取得候选人授权'],
+    });
+    const currentId = h.registry.get('session-1', 'hr-1', h.common.now())!.id;
+    await handleRecruitmentConversation({
+      ...h.common, text: '确认选择简历', expectedDraftId: `${currentId}:stale`,
+    });
+    expect(h.selectFiles).not.toHaveBeenCalled();
+    expect(h.messages.at(-1)?.text).toContain('已变化或过期');
+  });
+
+  it('文件选择在途时重复确认不会解除首个操作的并发锁', async () => {
+    const h = harness();
+    let finishSelection: ((paths: string[]) => void) | undefined;
+    const selectFiles = vi.fn(() => new Promise<string[]>((resolve) => { finishSelection = resolve; }));
+    const common = { ...h.common, selectFiles };
+    await handleRecruitmentConversation({ ...common, text: '帮我分析一份简历' });
+    await handleRecruitmentConversation({
+      ...common,
+      text: '岗位名称：高级前端工程师；岗位要求：熟练 React；保存期限：30天；我确认已取得候选人授权',
+    });
+    const first = handleRecruitmentConversation({ ...common, text: '确认选择简历' });
+    await Promise.resolve();
+    await handleRecruitmentConversation({ ...common, text: '确认选择简历' });
+    expect(selectFiles).toHaveBeenCalledTimes(1);
+    expect(h.messages.at(-1)?.text).toContain('正在进行');
+    finishSelection?.([]);
+    await first;
+  });
+
   it('收集岗位、保存期限和明确授权后才允许选择简历', async () => {
     const h = harness();
     expect(await handleRecruitmentConversation({ ...h.common, text: '帮我分析一份简历' })).toBe(true);

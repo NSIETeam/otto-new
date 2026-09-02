@@ -77,6 +77,8 @@ export interface CustomerModuleConversationInput {
     formInput: Record<string, unknown>;
   }): Promise<CustomerModuleRunResult>;
   postMessage(role: 'user' | 'assistant', text: string): void;
+  /** UI 草稿中心确认时必须绑定当前展示的草稿，拒绝串单或过期确认。 */
+  expectedDraftId?: string;
   now?: () => number;
 }
 
@@ -396,6 +398,51 @@ export class CustomerModuleConversationDraftRegistry {
   finishRun(sessionId: string, accountId: string): void {
     this.running.delete(this.key(sessionId, accountId));
   }
+
+  snapshot(accountId: string, now: number = Date.now()): CustomerModuleConversationDraft[] {
+    return [...this.drafts.values()].filter((draft) => {
+      if (draft.expiresAt <= now) {
+        this.clear(draft.sessionId, draft.accountId);
+        return false;
+      }
+      return draft.accountId === accountId;
+    });
+  }
+
+  restore(accountId: string, payload: unknown, now: number = Date.now()): number {
+    if (!Array.isArray(payload)) return 0;
+    let restored = 0;
+    for (const raw of payload.slice(0, MAX_DRAFTS)) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const draft = raw as Partial<CustomerModuleConversationDraft>;
+      if (
+        typeof draft.id !== 'string'
+        || typeof draft.moduleId !== 'string'
+        || typeof draft.version !== 'string'
+        || typeof draft.moduleName !== 'string'
+        || typeof draft.sessionId !== 'string'
+        || draft.sessionId.length > 500
+        || draft.accountId !== accountId
+        || typeof draft.createdAt !== 'number'
+        || typeof draft.updatedAt !== 'number'
+        || typeof draft.expiresAt !== 'number'
+        || draft.expiresAt <= now
+        || !['collecting', 'awaiting_confirmation', 'run_failed'].includes(String(draft.phase))
+        || !draft.inputSchema
+        || draft.inputSchema.type !== 'object'
+        || !draft.inputSchema.properties
+        || typeof draft.inputSchema.properties !== 'object'
+        || Array.isArray(draft.inputSchema.properties)
+        || !Array.isArray(draft.permissions)
+        || !draft.values
+        || typeof draft.values !== 'object'
+        || Array.isArray(draft.values)
+      ) continue;
+      this.save(draft as CustomerModuleConversationDraft);
+      restored += 1;
+    }
+    return restored;
+  }
 }
 
 export async function handleCustomerModuleConversation(
@@ -404,6 +451,10 @@ export async function handleCustomerModuleConversation(
   if (!input.enabled || !input.text.trim()) return false;
   const now = input.now?.() ?? Date.now();
   let draft = input.registry.get(input.sessionId, input.accountId, now);
+  if (input.expectedDraftId && draft?.id !== input.expectedDraftId) {
+    input.postMessage('assistant', '该模块运行草稿已变化或过期，本次没有运行。请检查当前草稿后重新确认。');
+    return true;
+  }
   const module = draft ? null : detectModule(input.text, input.modules);
   if (!draft && !module) return false;
   input.postMessage('user', input.text.trim());

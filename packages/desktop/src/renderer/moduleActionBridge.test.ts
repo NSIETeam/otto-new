@@ -280,4 +280,45 @@ describe('物业报修对话模块桥', () => {
     expect(registry.discard(transition!.draft!.id, 'session-1', 'account-1', 1_000)).toBe(true);
     expect(registry.get('session-1', 'account-1', 1_000)).toBeNull();
   });
+
+  it('草稿中心确认必须匹配精确草稿 ID，旧卡片不能提交新草稿', async () => {
+    const registry = new ModuleActionDraftRegistry();
+    const submit = vi.fn();
+    const messages: Array<{ role: 'user' | 'assistant'; text: string }> = [];
+    const common = {
+      sessionId: 'session-1', accountId: 'account-1', enabled: true, registry,
+      loadDefaults: async () => defaults, submit,
+      postMessage: (role: 'user' | 'assistant', text: string) => messages.push({ role, text }),
+      now: () => 1_000,
+    };
+    await handleModuleActionConversation({ ...common, text: '我要报修，会议室顶灯不亮，普通' });
+    const currentId = registry.get('session-1', 'account-1', 1_000)!.id;
+
+    await handleModuleActionConversation({
+      ...common, text: '确认提交', expectedDraftId: `${currentId}:stale`,
+    });
+    expect(submit).not.toHaveBeenCalled();
+    expect(registry.get('session-1', 'account-1', 1_000)?.id).toBe(currentId);
+    expect(messages.at(-1)?.text).toContain('已变化或过期');
+  });
+
+  it('本地进展关联失败不会把已创建工单误报为提交失败', async () => {
+    const registry = new ModuleActionDraftRegistry();
+    const messages: Array<{ role: 'user' | 'assistant'; text: string }> = [];
+    const common = {
+      sessionId: 'session-1', accountId: 'account-1', enabled: true, registry,
+      loadDefaults: async () => defaults,
+      submit: async () => ({
+        id: 'ticket-1', applicationNumber: 'BX-1', status: '待接单', recipients: [], recipientCount: 1,
+      }),
+      onSubmitted: () => { throw new Error('local link unavailable'); },
+      postMessage: (role: 'user' | 'assistant', text: string) => messages.push({ role, text }),
+      now: () => 1_000,
+    };
+    await handleModuleActionConversation({ ...common, text: '我要报修，会议室顶灯不亮，普通' });
+    await handleModuleActionConversation({ ...common, text: '确认提交' });
+    expect(messages.at(-1)?.text).toContain('BX-1');
+    expect(messages.at(-1)?.text).not.toContain('暂未提交成功');
+    expect(registry.get('session-1', 'account-1', 1_000)).toBeNull();
+  });
 });

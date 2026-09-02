@@ -362,6 +362,9 @@ if (!previewWindow.otto) {
     notificationShow: () => Promise.resolve(),
     notificationMarkRead: () => Promise.resolve(),
     notificationGetUnread: () => Promise.resolve([]),
+    conversationDraftLoad: () => Promise.resolve(null),
+    conversationDraftSave: () => Promise.resolve(),
+    conversationDraftRemove: () => Promise.resolve(),
     appVersion: () => Promise.resolve('1.9.14-browser-preview'),
     getWorkspaceDirectories: () => Promise.resolve({
       defaultPath: '/Users/demo',

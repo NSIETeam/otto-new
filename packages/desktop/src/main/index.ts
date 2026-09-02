@@ -90,6 +90,7 @@ import {
 import { cancelDurableWorkflowsForQuit } from './durable-workflow-quit.js';
 import { migrateDesktopRenderCachesForUpgrade } from './render-cache-migration.js';
 import { McpCredentialVault } from './mcpCredentialVault.js';
+import { ConversationDraftVault } from './conversationDraftVault.js';
 
 function ignoreBrokenPipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
@@ -496,13 +497,17 @@ const desktopRecurringTasks = new RecurringTaskRegistry({
     console.warn(`[otto-desktop] 后台任务 ${taskName} 失败:`, error);
   },
 });
-function assertMcpSecureStorage(): void {
+function assertSecureStorage(purpose: string): void {
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error('系统加密凭据库不可用，不能保存 MCP 密钥');
+    throw new Error(`系统加密凭据库不可用，不能保存${purpose}`);
   }
   if (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text') {
-    throw new Error('Linux 系统密钥库未解锁，拒绝使用 basic_text 保存 MCP 密钥');
+    throw new Error(`Linux 系统密钥库未解锁，拒绝使用 basic_text 保存${purpose}`);
   }
+}
+
+function assertMcpSecureStorage(): void {
+  assertSecureStorage(' MCP 密钥');
 }
 
 const mcpCredentialVault = new McpCredentialVault({
@@ -513,6 +518,18 @@ const mcpCredentialVault = new McpCredentialVault({
   },
   unprotect(value) {
     assertMcpSecureStorage();
+    return safeStorage.decryptString(Buffer.from(value, 'base64'));
+  },
+});
+
+const conversationDraftVault = new ConversationDraftVault({
+  directory: path.join(app.getPath('userData'), 'conversation-drafts'),
+  protect(value) {
+    assertSecureStorage('操作草稿');
+    return safeStorage.encryptString(value).toString('base64');
+  },
+  unprotect(value) {
+    assertSecureStorage('操作草稿');
     return safeStorage.decryptString(Buffer.from(value, 'base64'));
   },
 });
@@ -679,6 +696,9 @@ const IPC = {
   mcpCredentialList: 'otto:mcp-credential-list',
   mcpCredentialSet: 'otto:mcp-credential-set',
   mcpCredentialRemove: 'otto:mcp-credential-remove',
+  conversationDraftLoad: 'otto:conversation-draft-load',
+  conversationDraftSave: 'otto:conversation-draft-save',
+  conversationDraftRemove: 'otto:conversation-draft-remove',
   desktopPetSetEnabled: 'otto:desktop-pet-set-enabled',
   desktopPetUpdateState: 'otto:desktop-pet-update-state',
   desktopPetGetState: 'otto:desktop-pet-get-state',
@@ -4916,6 +4936,18 @@ function registerIpc(): void {
     );
     await mcpCredentialVault.remove(body.serverName, body.variableName);
     if (summary) delete process.env[summary.environmentAlias];
+  });
+  ipcMain.handle(IPC.conversationDraftLoad, (_event, scope: unknown) => {
+    if (typeof scope !== 'string') throw new Error('invalid conversation draft scope');
+    return conversationDraftVault.load(scope);
+  });
+  ipcMain.handle(IPC.conversationDraftSave, (_event, scope: unknown, payload: unknown) => {
+    if (typeof scope !== 'string') throw new Error('invalid conversation draft scope');
+    return conversationDraftVault.save(scope, payload);
+  });
+  ipcMain.handle(IPC.conversationDraftRemove, (_event, scope: unknown) => {
+    if (typeof scope !== 'string') throw new Error('invalid conversation draft scope');
+    return conversationDraftVault.remove(scope);
   });
   ipcMain.handle(IPC.desktopPetSetEnabled, (_event, enabled: unknown) =>
     setDesktopPetEnabled(enabled === true),

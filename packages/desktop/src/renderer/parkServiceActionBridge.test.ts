@@ -183,4 +183,19 @@ describe('园区申请表对话桥', () => {
     expect(registry.discard(id, 'session-1', 'account-1', 1_000)).toBe(false);
     registry.finishSubmission('session-1', 'account-1');
   });
+
+  it('拒绝使用过期草稿卡片确认另一份园区申请', async () => {
+    const { common, registry, submitTicket, messages } = harness();
+    await handleParkServiceActionConversation({
+      ...common,
+      text: '申请停车位，申请内容：地下固定停车位，申请数量：1',
+    });
+    const currentId = registry.get('session-1', 'account-1', 1_000)!.id;
+    await handleParkServiceActionConversation({
+      ...common, text: '确认提交', expectedDraftId: `${currentId}:stale`,
+    });
+    expect(submitTicket).not.toHaveBeenCalled();
+    expect(registry.get('session-1', 'account-1', 1_000)?.id).toBe(currentId);
+    expect(messages.at(-1)?.text).toContain('已变化或过期');
+  });
 });

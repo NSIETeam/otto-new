@@ -56,6 +56,27 @@ function harness(overrides: Record<string, unknown> = {}) {
 }
 
 describe('剩余工作区能力对话桥', () => {
+  it('统一草稿中心展示企业知识并使用 ID 阻止旧卡片发布', async () => {
+    const state = harness();
+    await handleWorkspaceCapabilityConversation({
+      ...state.input,
+      text: '把员工出差必须提前申请记入企业知识',
+    });
+    await handleWorkspaceCapabilityConversation({ ...state.input, text: '出差申请制度' });
+    const summary = state.input.registry.summary('account-a', 'session-a');
+    expect(summary).toMatchObject({
+      source: 'enterprise-knowledge', title: '出差申请制度',
+      phase: 'awaiting_confirmation', confirmationText: '确认发布企业知识',
+    });
+    await handleWorkspaceCapabilityConversation({
+      ...state.input,
+      text: '确认发布企业知识',
+      expectedDraftId: `${summary!.id}:stale`,
+    });
+    expect(state.input.recordKnowledge).not.toHaveBeenCalled();
+    expect(state.messages.at(-1)?.text).toContain('已变化或过期');
+  });
+
   it('查询企业记忆时只返回已发布且未过期的结果', async () => {
     const listKnowledge = vi.fn(async () => [{
       id: 'knowledge-1', title: '请假制度', category: '制度流程', content: '员工请假应提前提交审批。',

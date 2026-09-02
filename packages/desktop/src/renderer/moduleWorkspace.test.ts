@@ -87,7 +87,7 @@ describe('module workspace defaults', () => {
             source: 'official',
             packageId: 'otto.group.daily-office',
             publisherId: 'otto.official',
-            version: '1.1.0',
+            version: '1.2.0',
           },
         },
       ],
@@ -154,11 +154,32 @@ describe('module workspace parsing and normalization', () => {
     }), enterpriseCapabilities);
 
     expect(parsed.groups[0].moduleIds).toContain('policy-intelligence');
-    expect(parsed.groups[0].package?.version).toBe('1.1.0');
+    expect(parsed.groups[0].package?.version).toBe('1.2.0');
     expect(parseModuleWorkspace(JSON.stringify({
       ...parsed,
       groups: parsed.groups.map((group) => ({ ...group, moduleIds: group.moduleIds.filter((id) => id !== 'policy-intelligence') })),
     }), enterpriseCapabilities).groups[0].moduleIds).not.toContain('policy-intelligence');
+  });
+
+  it('upgrades an installed enterprise-memory experience without restoring a removed module', () => {
+    const upgraded = parseModuleWorkspace(JSON.stringify({
+      version: 1,
+      groups: [{
+        id: 'daily-office', name: '日常办公', rows: 2,
+        moduleIds: ['agent-ppt', 'enterprise-memory'],
+        package: { source: 'official', packageId: 'otto.group.daily-office', publisherId: 'otto.official', version: '1.1.0' },
+      }],
+    }), enterpriseCapabilities);
+    expect(upgraded.groups[0].package?.version).toBe('1.2.0');
+
+    const removed = parseModuleWorkspace(JSON.stringify({
+      ...upgraded,
+      groups: upgraded.groups.map((group) => ({
+        ...group,
+        moduleIds: group.moduleIds.filter((id) => id !== 'enterprise-memory'),
+      })),
+    }), enterpriseCapabilities);
+    expect(removed.groups[0].moduleIds).not.toContain('enterprise-memory');
   });
 
   it('migrates an installed Hongchuang group once to add carpool without restoring it after removal', () => {

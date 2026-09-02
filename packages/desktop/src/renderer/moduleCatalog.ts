@@ -49,8 +49,11 @@ export type ParkModuleTarget =
 export type RecruitmentModuleTarget =
   | 'resume-analysis'
   | 'candidate-screening'
+  | 'evidence-graph'
   | 'interview-audio'
   | 'interview-kit'
+  | 'interview-copilot'
+  | 'work-sample'
   | 'privacy-audit';
 
 export type ModuleActivation =
@@ -193,6 +196,13 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
     availabilityRule: 'recruitment',
   },
   {
+    id: 'recruitment-evidence-graph', label: '岗位证据图谱', category: 'recruitment',
+    description: '按企业真实岗位标准，把简历、面试和实战成果整理成已验证、矛盾与待核实证据链。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'evidence-graph' },
+    availabilityRule: 'recruitment',
+  },
+  {
     id: 'recruitment-interview-audio', label: '加入面试材料', category: 'recruitment',
     description: '把录音或视频加入当前候选人档案，与简历全文联合分析并核对差异。',
     icon: 'generated:agent-hr-recruiting',
@@ -204,6 +214,20 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
     description: '生成针对性面试问题，并按同一岗位口径横向比较多位候选人。',
     icon: 'generated:agent-hr-recruiting',
     activation: { kind: 'dialog', dialog: 'recruitment', target: 'interview-kit' },
+    availabilityRule: 'recruitment',
+  },
+  {
+    id: 'recruitment-interview-copilot', label: '动态面试追问', category: 'recruitment',
+    description: '根据当前证据缺口给出最值得问的下一题，并随面试材料补充自动更新。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'interview-copilot' },
+    availabilityRule: 'recruitment',
+  },
+  {
+    id: 'recruitment-work-sample', label: '岗位实战验证', category: 'recruitment',
+    description: '生成贴近企业实际工作的任务和证据化评分规则，并把候选人成果回流到同一档案。',
+    icon: 'generated:agent-hr-recruiting',
+    activation: { kind: 'dialog', dialog: 'recruitment', target: 'work-sample' },
     availabilityRule: 'recruitment',
   },
   {
@@ -221,7 +245,7 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
   },
   {
     id: 'enterprise-memory', label: '企业记忆', category: 'capability', icon: 'enterprise-memory',
-    description: '自动学习企业制度、偏好、决定和解决方法，在相关工作中自动调用，并由管理员审核、深化或删除。',
+    description: '自动学习并调用企业制度、偏好、决定和解决方法，用证据地图识别冲突、过期与缺口，动态提示管理员下一步确认。',
     activation: { kind: 'dialog', dialog: 'enterprise-memory' },
     availabilityRule: 'enterprise-memory',
   },

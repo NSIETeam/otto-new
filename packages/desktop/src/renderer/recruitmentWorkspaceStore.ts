@@ -34,6 +34,8 @@ export interface CandidateWorkspace {
   transcriptText: string;
   transcriptReport: InterviewTranscriptAnalysis | null;
   transcriptWarning: string;
+  workSampleText?: string;
+  workSampleFileName?: string;
   decision: HiringDecisionAudit | null;
 }
 

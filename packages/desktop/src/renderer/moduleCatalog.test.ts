@@ -60,14 +60,17 @@ describe('static module catalog', () => {
     ))).toBe(true);
   });
 
-  it('publishes five enterprise recruitment modules and hides them from personal workspaces', () => {
+  it('publishes the evidence-driven enterprise recruitment group and hides it from personal workspaces', () => {
     const enterprise = buildModuleCatalog(enterpriseContext());
     const recruitment = enterprise.filter((module) => module.category === 'recruitment');
     expect(recruitment.map((module) => module.id)).toEqual([
       'recruitment-resume-analysis',
       'recruitment-candidate-screening',
+      'recruitment-evidence-graph',
       'recruitment-interview-audio',
       'recruitment-interview-kit',
+      'recruitment-interview-copilot',
+      'recruitment-work-sample',
       'recruitment-privacy-audit',
     ]);
     expect(recruitment.every((module) => module.availability === 'available')).toBe(true);

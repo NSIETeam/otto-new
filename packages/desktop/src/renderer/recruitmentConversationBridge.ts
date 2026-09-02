@@ -14,6 +14,7 @@ import {
 } from './recruitmentWorkspaceStore.js';
 import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
 import type {
+  RecruitmentEvidenceGraphNode,
   RecruitmentSemanticAnalysisInput,
   RecruitmentSemanticEvaluation,
 } from '../main/recruitmentSemantic.js';
@@ -62,13 +63,20 @@ export interface RecruitmentConversationInput {
   extractDocument(path: string): Promise<ExtractedDocument>;
   analyzeResume(input: RecruitmentSemanticAnalysisInput): Promise<RecruitmentSemanticEvaluation>;
   transcribe(path: string): Promise<RecruitmentTranscription>;
+  loadEnterpriseContext?(query: string): Promise<string>;
   postMessage(role: 'user' | 'assistant', text: string): void;
   /** UI 草稿中心确认时必须绑定当前展示的草稿，拒绝串单或过期确认。 */
   expectedDraftId?: string;
   now?: () => number;
 }
 
-type RecruitmentIntent = RecruitmentActionKind | 'screening' | 'interview-kit' | 'privacy-audit';
+type RecruitmentIntent = RecruitmentActionKind
+  | 'screening'
+  | 'evidence-graph'
+  | 'interview-kit'
+  | 'interview-copilot'
+  | 'work-sample'
+  | 'privacy-audit';
 
 function clean(value: unknown, limit = MAX_CHAT_TEXT): string {
   return typeof value === 'string'
@@ -90,6 +98,9 @@ function detectIntent(text: string): RecruitmentIntent | null {
   if (/(?:介绍|解释|是什么|怎么用|如何使用|功能)/u.test(text)) return null;
   if (/(?:删除|清除).{0,8}(?:当前)?候选人(?:材料|数据|简历)/u.test(text)) return 'purge-candidate';
   if (/(?:招聘)?隐私与审计|招聘审计|候选人材料保存期限/u.test(text)) return 'privacy-audit';
+  if (/(?:岗位|候选人)?证据图谱|证据链|哪些能力.{0,8}(?:已验证|未验证)/u.test(text)) return 'evidence-graph';
+  if (/(?:下一题|下一步).{0,8}(?:问什么|怎么问)|(?:动态|智能).{0,6}(?:追问|面试)|最值得问/u.test(text)) return 'interview-copilot';
+  if (/(?:生成|查看|准备|设计).{0,8}(?:岗位实战|实战任务|工作样本|实操任务)/u.test(text)) return 'work-sample';
   if (/(?:生成|查看|准备).{0,8}(?:面试材料|面试提纲|面试问题)/u.test(text)) return 'interview-kit';
   if (/(?:人员初步分析|候选人初步分析|候选人综合评估|简历匹配度|简历匹配证据|候选人证据)/u.test(text)) return 'screening';
   if (/(?:分析|处理|导入).{0,8}(?:面试录音|面试音频)|音频面试分析/u.test(text)) return 'audio-import';
@@ -156,6 +167,72 @@ function interviewKitMessage(candidate: CandidateWorkspace): string {
     `   - 评价规则：${clean(question.rubric, 500)}`,
   ].join('\n'));
   return `结构化面试问题：\n\n${questions.join('\n\n')}\n\n问题来自证据不足项，不代表候选人已经具备或缺少相关能力。`;
+}
+
+function evidenceGraphMessage(candidate: CandidateWorkspace): string {
+  const evaluation = candidate.semanticEvaluation;
+  if (!evaluation) return '请先完成该候选人的全文智能分析，再查看岗位证据图谱。';
+  const graph: RecruitmentEvidenceGraphNode[] = evaluation.evidenceGraph?.length
+    ? evaluation.evidenceGraph
+    : evaluation.hardRequirements.map((item) => ({
+      criterion: item.requirement,
+      status: item.status === 'met' ? 'verified' : item.status === 'partially_met'
+        ? 'partially_verified' : item.status === 'not_met' ? 'contradicted'
+          : item.status === 'not_demonstrated' ? 'untested' : 'unclear',
+      assessment: item.explanation,
+      evidence: item.evidence,
+      gaps: item.status === 'met' ? [] : [item.explanation],
+      nextQuestion: '',
+    }));
+  const labels = {
+    verified: '已验证', partially_verified: '部分验证', contradicted: '存在矛盾',
+    untested: '尚未验证', unclear: '材料不清楚',
+  } as const;
+  const lines = graph.map((item, index) => {
+    const evidence = item.evidence.length
+      ? item.evidence.map((entry) => `${entry.source === 'interview' ? '面试' : entry.source === 'work_sample' ? '实战' : '简历'}第 ${entry.line} 行：${clean(entry.quote, 240)}`).join('；')
+      : '暂无可回查证据';
+    return `${index + 1}. **${clean(item.criterion, 300)}｜${labels[item.status]}**\n   ${clean(item.assessment, 400)}\n   证据：${evidence}${item.nextQuestion ? `\n   下一步核验：${clean(item.nextQuestion, 400)}` : ''}`;
+  });
+  return `岗位—候选人证据图谱${evaluation.enterpriseContextUsed ? '（已结合已发布企业记忆）' : ''}：\n\n${lines.join('\n\n')}\n\nOtto 只整理证据状态，不自动作出录用或淘汰决定。`;
+}
+
+function interviewCopilotMessage(candidate: CandidateWorkspace): string {
+  const evaluation = candidate.semanticEvaluation;
+  if (!evaluation) return '请先完成该候选人的全文智能分析，再生成动态追问。';
+  const unresolved = evaluation.evidenceGraph?.find((item) => (
+    item.status !== 'verified' && item.nextQuestion
+  ));
+  const fallback = evaluation.interviewQuestions[0];
+  const question = unresolved?.nextQuestion || fallback?.question;
+  if (!question) return '当前没有可用的证据缺口追问，请由招聘人员复核原始材料。';
+  return [
+    '**现在最值得问：**',
+    question,
+    '',
+    `对应标准：${unresolved?.criterion || fallback?.criterion || '综合能力核实'}`,
+    `提问原因：${unresolved?.gaps[0] || unresolved?.assessment || fallback?.rationale || '补足当前证据缺口'}`,
+    '',
+    '加入新的面试录音或校对转写后，Otto 会重新计算下一题。',
+  ].join('\n');
+}
+
+function workSampleMessage(candidate: CandidateWorkspace): string {
+  const workSample = candidate.semanticEvaluation?.workSample;
+  if (!workSample) return '当前候选人还没有岗位实战任务。请按当前岗位目标重新分析，或打开右侧“岗位实战验证”生成。';
+  return [
+    `**${clean(workSample.title, 300)}**（建议 ${workSample.timeboxMinutes} 分钟）`,
+    '',
+    clean(workSample.scenario, 1_000),
+    '',
+    '**交付物：**',
+    ...workSample.deliverables.map((item) => `- ${clean(item, 400)}`),
+    '',
+    '**证据化评价规则：**',
+    ...workSample.rubric.map((item) => `- ${clean(item.criterion, 300)}（${item.weight}%）：${item.observableSignals.map((signal) => clean(signal, 200)).join('；')}`),
+    '',
+    '可在右侧“岗位实战验证”导出任务，并把候选人成果回流到同一份证据图谱。',
+  ].join('\n');
 }
 
 function privacyMessage(store: RecruitmentWorkspaceStore): string {
@@ -270,6 +347,9 @@ async function importResume(
       ? analysis.redactedResume
       : '当前候选人未提供简历，请只根据面试转写判断，并将缺少的履历信息列为待核实事项。',
     ...(transcriptText ? { interviewTranscript: transcriptText } : {}),
+    ...(input.loadEnterpriseContext
+      ? { enterpriseContext: await input.loadEnterpriseContext(`${state.jobTitle} ${state.jobDescription}`) }
+      : {}),
   });
   const candidate: CandidateWorkspace = {
     id: candidateId,
@@ -336,6 +416,12 @@ async function importAudio(
     jobDescription: state.jobDescription,
     redactedResume: candidate.analysis.redactedResume,
     interviewTranscript: transcriptText,
+    ...(candidate.workSampleText?.trim()
+      ? { workSampleArtifact: candidate.workSampleText }
+      : {}),
+    ...(input.loadEnterpriseContext
+      ? { enterpriseContext: await input.loadEnterpriseContext(`${state.jobTitle} ${state.jobDescription}`) }
+      : {}),
   });
   input.store.setCandidates((current) => current.map((item) => item.id === candidate.id ? {
     ...item,
@@ -503,9 +589,24 @@ export async function handleRecruitmentConversation(
     input.postMessage('assistant', candidate ? screeningMessage(candidate) : '请先导入并选择一份候选人简历。');
     return true;
   }
+  if (!draft && intent === 'evidence-graph') {
+    const candidate = input.store.activeCandidate();
+    input.postMessage('assistant', candidate ? evidenceGraphMessage(candidate) : '请先导入并选择一份候选人材料。');
+    return true;
+  }
   if (!draft && intent === 'interview-kit') {
     const candidate = input.store.activeCandidate();
     input.postMessage('assistant', candidate ? interviewKitMessage(candidate) : '请先导入并选择一份候选人简历。');
+    return true;
+  }
+  if (!draft && intent === 'interview-copilot') {
+    const candidate = input.store.activeCandidate();
+    input.postMessage('assistant', candidate ? interviewCopilotMessage(candidate) : '请先导入并选择一份候选人材料。');
+    return true;
+  }
+  if (!draft && intent === 'work-sample') {
+    const candidate = input.store.activeCandidate();
+    input.postMessage('assistant', candidate ? workSampleMessage(candidate) : '请先导入并选择一份候选人材料。');
     return true;
   }
   if (!draft && intent === 'privacy-audit') {

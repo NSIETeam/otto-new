@@ -33,6 +33,12 @@ beforeEach(() => {
         { speaker: '候选人', startSeconds: 5, endSeconds: 16, text: '当时系统很慢，我负责优化，最终首屏降低 30%。' },
       ],
     })),
+    enterpriseKnowledgeList: vi.fn(async () => [{
+      id: 'knowledge-1', organizationId: 'org-1', sourceId: 'manual-1',
+      title: '前端交付规范', department: '研发部', category: '工程规范',
+      content: '桌面端功能必须说明异常恢复和测试方法。', contributor: 'admin',
+      confidence: 0.95, status: 'active' as const, createdAt: '2026-09-01T00:00:00.000Z',
+    }]),
     recruitmentAnalyzeResume: vi.fn(async () => ({
       summary: '候选人具备企业前端和性能优化经验，技术背景与岗位较为贴合。',
       overallScore: 84, matchLevel: 'good' as const, evidenceCoverage: 80,
@@ -49,7 +55,18 @@ beforeEach(() => {
       ],
       strengths: ['企业应用交付', '性能优化'], risks: ['团队范围未知'], missingInformation: ['复杂系统规模'],
       interviewQuestions: [{ criterion: '性能优化', question: '请说明性能指标基线与关键取舍。', rationale: '核实能力深度', followUps: ['如何验证结果？'], goodSignals: ['能说明指标与方法'], concernSignals: ['只复述团队结果'] }],
-      analysisVersion: 'otto-recruitment-semantic-v2.0', modelProvider: 'test-model',
+      evidenceGraph: [
+        { criterion: 'React 与 TypeScript 交付', status: 'verified' as const, assessment: '简历有直接交付证据', evidence: [{ line: 5, quote: '使用 React 和 TypeScript 开发企业系统', source: 'resume' as const }], gaps: [], nextQuestion: '' },
+        { criterion: '性能优化方法', status: 'partially_verified' as const, assessment: '有结果但缺少基线和验证方法', evidence: [{ line: 6, quote: '最终首屏时间降低 30%', source: 'resume' as const }], gaps: ['性能基线和验证方式'], nextQuestion: '请说明性能指标基线与关键取舍。' },
+      ],
+      workSample: {
+        title: '企业桌面端性能诊断任务', scenario: '分析一个首屏加载缓慢的桌面端页面，并给出可验证改进。',
+        timeboxMinutes: 90, deliverables: ['诊断说明', '改进方案'], constraints: ['不使用真实客户数据'],
+        rubric: [{ criterion: '问题定位', weight: 50, observableSignals: ['建立可复现基线'] }],
+        followUpQuestions: ['为什么优先处理这个瓶颈？'],
+      },
+      enterpriseContextUsed: true,
+      analysisVersion: 'otto-recruitment-semantic-v3.0', modelProvider: 'test-model',
       inputTokens: 100, outputTokens: 80, createdAt: '2026-09-02T02:00:00.000Z',
     })),
     saveTextFile: vi.fn(async () => 'D:\\reports\\report.md'),
@@ -63,6 +80,7 @@ function renderDialog(target: React.ComponentProps<typeof RecruitmentWorkbenchDi
       target={target}
       reviewerId="hr-1"
       organizationName="星河科技"
+      enterpriseMemoryEnabled
       workspaceStore={new RecruitmentWorkspaceStore()}
       onClose={vi.fn()}
     />,
@@ -179,7 +197,7 @@ describe('RecruitmentWorkbenchDialog', () => {
       interviewTranscript: expect.stringContaining('[00:05] 候选人'),
     }));
     expect(screen.getByText('简历 + 面试联合结论')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '面试方案' }));
+    fireEvent.click(screen.getByRole('button', { name: '完整面试方案' }));
     expect((screen.getByRole('textbox', { name: '面试转写' }) as HTMLTextAreaElement).value)
       .toContain('[00:05] 候选人');
     expect(screen.getByText('面试已与简历联合分析')).toBeTruthy();
@@ -197,6 +215,40 @@ describe('RecruitmentWorkbenchDialog', () => {
     expect(screen.getByText('敏感属性不参与评价')).toBeTruthy();
     expect(screen.getByText(/WhisperX 完成/)).toBeTruthy();
     expect(screen.getByText(/模型已阅读脱敏简历全文/)).toBeTruthy();
+  });
+
+  it('connects enterprise evidence, dynamic follow-up and work-sample results in one dossier', async () => {
+    renderDialog('evidence-graph');
+    await importResume();
+
+    fireEvent.click(screen.getByRole('button', { name: '岗位证据图谱' }));
+    expect(screen.getByText('岗位—候选人证据图谱')).toBeTruthy();
+    expect(screen.getByText(/已结合企业记忆/)).toBeTruthy();
+    expect(screen.getByText('性能优化方法')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '动态面试追问' }));
+    expect(screen.getByText('现在最值得问')).toBeTruthy();
+    expect(screen.getAllByText('请说明性能指标基线与关键取舍。').length).toBeGreaterThanOrEqual(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '岗位实战验证' }));
+    expect(screen.getByText('企业桌面端性能诊断任务')).toBeTruthy();
+    expect(screen.getByText('建立可复现基线')).toBeTruthy();
+
+    Object.assign(window.otto, {
+      selectFiles: vi.fn(async () => ['D:\\work-sample\\submission.md']),
+      extractEditableDocument: vi.fn(async () => ({
+        filePath: 'D:\\work-sample\\submission.md', fileName: 'submission.md',
+        sourceFormat: 'markdown' as const, editableFormat: 'markdown' as const,
+        content: '先记录首屏性能基线，再逐项验证资源加载和渲染耗时。',
+        readonly: false, message: '已提取',
+      })),
+    });
+    fireEvent.click(screen.getByRole('button', { name: '加入候选人实战成果' }));
+    await screen.findByText(/岗位实战成果已加入候选人证据图谱/);
+    expect(window.otto.recruitmentAnalyzeResume).toHaveBeenLastCalledWith(expect.objectContaining({
+      workSampleArtifact: expect.stringContaining('记录首屏性能基线'),
+      enterpriseContext: expect.stringContaining('桌面端功能必须说明异常恢复'),
+    }));
   });
 
   it('can create a candidate dossier directly from an interview video without a resume', async () => {

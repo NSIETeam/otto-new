@@ -31,6 +31,10 @@ beforeEach(() => {
       changes: [],
       uncertainties: [],
       usedEvidenceIds: [],
+      evidenceGraph: [],
+      applicableScenarios: [],
+      riskIfWrong: '',
+      nextQuestion: '',
       analysisVersion: 'test',
       modelProvider: 'test-model',
       inputTokens: 0,
@@ -82,6 +86,35 @@ describe('WorkspaceDialogs', () => {
     expect(window.otto.workLogRecent).not.toHaveBeenCalled();
   });
 
+  it('默认用记忆地图解释可信度、调用场景和下一条最值得确认的问题', async () => {
+    Object.assign(window.otto, {
+      enterpriseKnowledgeList: vi.fn(async () => [{
+        id: 'knowledge-conflict', organizationId: 'org-a', sourceId: 'auto-1',
+        sourceLabel: '自动提炼 · 证据存在冲突', sourceType: 'auto_capture',
+        title: '退款审批规则', department: '财务部', category: '制度',
+        content: '退款审批口径存在冲突。', contributor: null, confidence: 0.7,
+        status: 'pending_review', evidenceCount: 2, version: 1,
+        createdAt: '2026-09-01T00:00:00.000Z',
+      }, {
+        id: 'knowledge-trusted', organizationId: 'org-a', sourceId: 'auto-2',
+        sourceType: 'auto_capture', title: '客户验收流程', department: '交付部',
+        category: '流程', content: '验收前完成安全扫描。', contributor: null,
+        confidence: 0.94, status: 'active', verifiedEvidenceCount: 2,
+        distinctSessionCount: 3, distinctContributorCount: 2, version: 2,
+        createdAt: '2026-08-20T00:00:00.000Z',
+      }]),
+    });
+    render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
+
+    await screen.findByText('企业记忆治理完成度');
+    expect(screen.getAllByText('证据充分').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('存在冲突').length).toBeGreaterThan(0);
+    expect(screen.getByText(/哪一条正式制度/)).toBeTruthy();
+    expect(screen.getByText('生成检查清单和复盘')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: '下一步确认' }));
+    expect(screen.getByText(/只处理最影响后续工作的记忆缺口/)).toBeTruthy();
+  });
+
   it('企业知识保留部门、证据、来源和完整记忆沿革', async () => {
     Object.assign(window.otto, {
       enterpriseKnowledgeList: vi.fn(async () => [{
@@ -101,9 +134,11 @@ describe('WorkspaceDialogs', () => {
     render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
 
     await screen.findByText('交付规范');
+    fireEvent.click(screen.getByRole('tab', { name: '已掌握与待确认' }));
     expect(screen.getByText('客户成功部')).toBeTruthy();
     expect(screen.getByText('已被 3 次工作验证')).toBeTruthy();
-    expect(screen.getByText(/遇到相关问题时，Otto 会自动参考/)).toBeTruthy();
+    expect(screen.getByText('Otto 会自动用于')).toBeTruthy();
+    expect(screen.getByText('生成检查清单和复盘')).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: '如何变得更准确' }));
     await screen.findByText('初版流程');
     expect(screen.getByText(/管理员 · 形成知识/)).toBeTruthy();
@@ -123,6 +158,7 @@ describe('WorkspaceDialogs', () => {
     render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
 
     await screen.findByText('合同审批规则');
+    fireEvent.click(screen.getByRole('tab', { name: '已掌握与待确认' }));
     expect(screen.getByText(/复核日期/)).toBeTruthy();
     expect(screen.getByText(/有效期至/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '仍然有效' }));
@@ -165,6 +201,14 @@ describe('WorkspaceDialogs', () => {
         changes: ['明确安全扫描', '补充报告留存'],
         uncertainties: ['未明确报告保管期限'],
         usedEvidenceIds: ['evidence-ai'],
+        evidenceGraph: [{
+          claim: '验收前必须完成安全扫描', status: 'supported',
+          evidenceIds: ['evidence-ai'], explanation: '已有明确项目证据。',
+          gaps: ['未明确保管期限'], nextQuestion: '扫描报告需要保留多久？',
+        }],
+        applicableScenarios: ['生成客户验收清单'],
+        riskIfWrong: '可能遗漏验收前置检查。',
+        nextQuestion: '扫描报告需要保留多久？',
         analysisVersion: 'test',
         modelProvider: 'test-model',
         inputTokens: 30,
@@ -174,8 +218,12 @@ describe('WorkspaceDialogs', () => {
     render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
 
     await screen.findByText('客户交付规则');
+    fireEvent.click(screen.getByRole('tab', { name: '已掌握与待确认' }));
     fireEvent.click(screen.getByRole('button', { name: 'AI 深化' }));
     await screen.findByText('新增证据补全了检查项目和留痕要求。');
+    expect(screen.getByText('主张—证据图谱')).toBeTruthy();
+    expect(screen.getByText('生成客户验收清单')).toBeTruthy();
+    expect(screen.getAllByText('扫描报告需要保留多久？').length).toBeGreaterThan(0);
     expect(screen.getByDisplayValue('客户验收前必须完成安全扫描，并留存扫描报告。')).toBeTruthy();
     expect(window.otto.enterpriseKnowledgeRevise).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '应用并形成新版本' }));
@@ -205,6 +253,7 @@ describe('WorkspaceDialogs', () => {
     render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
 
     await screen.findByText('已废止制度');
+    fireEvent.click(screen.getByRole('tab', { name: '已掌握与待确认' }));
     fireEvent.click(screen.getByRole('button', { name: '永久删除' }));
 
     await waitFor(() => expect(window.otto.enterpriseKnowledgeDelete).toHaveBeenCalledWith('knowledge-delete'));
@@ -236,6 +285,7 @@ describe('WorkspaceDialogs', () => {
     render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
 
     await screen.findByText('退款审批规则');
+    fireEvent.click(screen.getByRole('tab', { name: '已掌握与待确认' }));
     expect((screen.getByRole('button', { name: '先裁决冲突' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: '查看学习依据' }));
     await screen.findByText('最新版制度要求财务经理审批。');
@@ -267,7 +317,7 @@ describe('WorkspaceDialogs', () => {
     vi.mocked(window.confirm).mockReturnValue(false);
     const onClose = vi.fn();
     render(<EnterpriseMemoryDialog open role="company_admin" onClose={onClose} />);
-    await screen.findByText('暂无企业知识。');
+    await screen.findByText(/暂无企业知识/);
     fireEvent.click(screen.getByRole('button', { name: '手动补充' }));
     fireEvent.change(screen.getByRole('textbox', { name: '知识标题' }), {
       target: { value: '尚未保存的制度' },

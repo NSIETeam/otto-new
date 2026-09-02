@@ -97,6 +97,46 @@ describe('剩余工作区能力对话桥', () => {
     expect(messages.at(-1)?.text).not.toContain('待审核');
   });
 
+  it('管理员可以在对话中查看零模型消耗的记忆健康图谱和下一条确认问题', async () => {
+    const listKnowledge = vi.fn(async () => [{
+      id: 'knowledge-conflict', title: '退款审批规则', category: '制度',
+      content: '存在两种审批口径。', confidence: 0.7, status: 'pending_review' as const,
+      sourceLabel: '自动提炼 · 证据存在冲突', evidenceCount: 2,
+      createdAt: '2026-09-01T00:00:00.000Z',
+    }, {
+      id: 'knowledge-trusted', title: '交付安全扫描', category: '流程',
+      content: '验收前完成扫描。', confidence: 0.94, status: 'active' as const,
+      verifiedEvidenceCount: 2, distinctSessionCount: 3, distinctContributorCount: 2,
+      createdAt: '2026-09-01T00:00:00.000Z',
+    }]);
+    const health = harness({ listKnowledge });
+
+    expect(await handleWorkspaceCapabilityConversation({
+      ...health.input, text: '查看企业记忆健康图谱',
+    })).toBe(true);
+    expect(listKnowledge).toHaveBeenCalledWith({ includeReview: true });
+    expect(health.messages.at(-1)?.text).toContain('治理完成度');
+    expect(health.messages.at(-1)?.text).toContain('存在冲突：1');
+
+    const next = harness({ listKnowledge });
+    expect(await handleWorkspaceCapabilityConversation({
+      ...next.input, text: '企业记忆下一步需要确认什么',
+    })).toBe(true);
+    expect(next.messages.at(-1)?.text).toContain('哪一条正式制度');
+    expect(next.messages.at(-1)?.text).toContain('右侧“企业记忆”');
+  });
+
+  it('普通成员不能通过对话读取企业记忆治理队列', async () => {
+    const listKnowledge = vi.fn(async () => []);
+    const state = harness({ role: 'member', listKnowledge });
+
+    expect(await handleWorkspaceCapabilityConversation({
+      ...state.input, text: '企业记忆还有什么需要确认',
+    })).toBe(true);
+    expect(listKnowledge).not.toHaveBeenCalled();
+    expect(state.messages.at(-1)?.text).toContain('只向企业管理员开放');
+  });
+
   it('管理员可通过草稿和强确认发布企业知识，失败后使用同一来源编号重试', async () => {
     const recordKnowledge = vi
       .fn()

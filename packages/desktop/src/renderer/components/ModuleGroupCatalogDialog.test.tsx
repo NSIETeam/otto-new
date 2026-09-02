@@ -129,8 +129,11 @@ describe('ModuleGroupCatalogDialog', () => {
 
     expect(within(card).getByText('开始智能招聘')).toBeTruthy();
     expect(within(card).getByText('候选人档案')).toBeTruthy();
+    expect(within(card).getByText('岗位证据图谱')).toBeTruthy();
     expect(within(card).getByText('加入面试材料')).toBeTruthy();
     expect(within(card).getByText('面试与比较')).toBeTruthy();
+    expect(within(card).getByText('动态面试追问')).toBeTruthy();
+    expect(within(card).getByText('岗位实战验证')).toBeTruthy();
     expect(within(card).getByText('资料与隐私')).toBeTruthy();
     fireEvent.click(within(card).getByRole('button', { name: '添加功能组' }));
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
@@ -139,8 +142,11 @@ describe('ModuleGroupCatalogDialog', () => {
         moduleIds: [
           'recruitment-resume-analysis',
           'recruitment-candidate-screening',
+          'recruitment-evidence-graph',
           'recruitment-interview-audio',
           'recruitment-interview-kit',
+          'recruitment-interview-copilot',
+          'recruitment-work-sample',
           'recruitment-privacy-audit',
         ],
       })]),

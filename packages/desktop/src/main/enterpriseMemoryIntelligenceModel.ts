@@ -2,7 +2,22 @@
 
 import { AuthType, SceneType } from 'otto-core';
 
-export const ENTERPRISE_MEMORY_INTELLIGENCE_VERSION = 'otto-enterprise-memory-v1.0';
+export const ENTERPRISE_MEMORY_INTELLIGENCE_VERSION = 'otto-enterprise-memory-v2.0';
+
+export type EnterpriseMemoryClaimStatus =
+  | 'supported'
+  | 'partially_supported'
+  | 'contested'
+  | 'unverified';
+
+export interface EnterpriseMemoryEvidenceGraphNode {
+  claim: string;
+  status: EnterpriseMemoryClaimStatus;
+  evidenceIds: string[];
+  explanation: string;
+  gaps: string[];
+  nextQuestion: string;
+}
 
 export interface EnterpriseMemoryIntelligenceEvidence {
   id: string;
@@ -32,6 +47,10 @@ export interface EnterpriseMemoryIntelligenceResult {
   changes: string[];
   uncertainties: string[];
   usedEvidenceIds: string[];
+  evidenceGraph: EnterpriseMemoryEvidenceGraphNode[];
+  applicableScenarios: string[];
+  riskIfWrong: string;
+  nextQuestion: string;
   analysisVersion: string;
   modelProvider: string;
   inputTokens: number;
@@ -113,6 +132,53 @@ export function parseEnterpriseMemoryIntelligence(
   if (!rationale) throw new Error('企业记忆分析缺少改进说明');
   const requestedUpdate = parsed.shouldUpdate === true;
   const actuallyChanged = title !== input.title || category !== input.category || content !== input.content;
+  const validStatuses = new Set<EnterpriseMemoryClaimStatus>([
+    'supported', 'partially_supported', 'contested', 'unverified',
+  ]);
+  const parsedGraph = Array.isArray(parsed.evidenceGraph)
+    ? parsed.evidenceGraph.slice(0, 12).flatMap((rawNode) => {
+      if (!rawNode || typeof rawNode !== 'object' || Array.isArray(rawNode)) return [];
+      const node = rawNode as Record<string, unknown>;
+      const claim = text(node.claim, 800);
+      if (!claim) return [];
+      const evidenceIds = list(node.evidenceIds, 50, 100)
+        .filter((id) => validEvidence.has(id));
+      const citedEvidence = input.evidence.filter((item) => evidenceIds.includes(item.id));
+      const requestedStatus = text(node.status, 40) as EnterpriseMemoryClaimStatus;
+      let status = validStatuses.has(requestedStatus) ? requestedStatus : 'unverified';
+      if ((status === 'supported' || status === 'contested') && evidenceIds.length === 0) {
+        status = 'unverified';
+      } else if (status === 'supported' && citedEvidence.some((item) => item.contested)) {
+        status = 'contested';
+      } else if (status === 'supported' && !citedEvidence.some((item) => item.verified)) {
+        status = 'partially_supported';
+      }
+      return [{
+        claim,
+        status,
+        evidenceIds,
+        explanation: text(node.explanation, 1_000),
+        gaps: list(node.gaps, 8, 400),
+        nextQuestion: text(node.nextQuestion, 600),
+      } satisfies EnterpriseMemoryEvidenceGraphNode];
+    })
+    : [];
+  const evidenceGraph = parsedGraph.length ? parsedGraph : [{
+    claim: input.content.slice(0, 800),
+    status: input.evidence.some((item) => item.contested)
+      ? 'contested' as const
+      : usedEvidenceIds.some((id) => input.evidence.find((item) => item.id === id)?.verified)
+        ? 'supported' as const
+        : usedEvidenceIds.length
+          ? 'partially_supported' as const
+          : 'unverified' as const,
+    evidenceIds: usedEvidenceIds,
+    explanation: usedEvidenceIds.length
+      ? '根据本次实际引用的企业证据形成。'
+      : '当前没有可追溯到本次分析的支持证据。',
+    gaps: usedEvidenceIds.length ? [] : ['需要正式文件、负责人确认或独立工作结果'],
+    nextQuestion: usedEvidenceIds.length ? '' : `谁能确认“${input.title}”当前仍然有效？`,
+  }];
   return {
     shouldUpdate: requestedUpdate && actuallyChanged
       && (input.evidence.length === 0 || usedEvidenceIds.length > 0),
@@ -124,6 +190,12 @@ export function parseEnterpriseMemoryIntelligence(
     changes: list(parsed.changes, 12, 500),
     uncertainties: list(parsed.uncertainties, 12, 500),
     usedEvidenceIds,
+    evidenceGraph,
+    applicableScenarios: list(parsed.applicableScenarios, 8, 300),
+    riskIfWrong: text(parsed.riskIfWrong, 1_000),
+    nextQuestion: text(parsed.nextQuestion, 600)
+      || evidenceGraph.find((node) => node.nextQuestion)?.nextQuestion
+      || '',
     analysisVersion: ENTERPRISE_MEMORY_INTELLIGENCE_VERSION,
     modelProvider: text(metadata.modelProvider, 200) || 'unknown-model',
     inputTokens: Math.max(0, Math.round(metadata.inputTokens || 0)),
@@ -152,8 +224,10 @@ function prompt(input: EnterpriseMemoryIntelligenceInput): string {
     '任务是判断新证据是否能让现有企业记忆更准确、完整、可执行。只能使用给定材料，不得补写常识、猜测、负责人、日期、金额或流程。',
     '优先合并多次重复验证的稳定结论；把相互矛盾、过期或未验证的内容列入 uncertainties，不得偷偷选边。',
     '如果证据不足以形成实质改进，shouldUpdate 必须为 false，并原样返回当前标题、分类和内容。',
-    '输出只能是 JSON 对象：shouldUpdate、title、category、content、confidence、rationale、changes、uncertainties、usedEvidenceIds。',
-    'confidence 为 0-1。usedEvidenceIds 只能使用所给证据 id。content 应是简洁、可直接供 Otto 后续工作引用的企业事实或流程，不写分析过程。',
+    '同时建立证据图谱：把记忆中的关键主张拆成 evidenceGraph 数组，每项只能包含 claim、status、evidenceIds、explanation、gaps、nextQuestion。status 只能是 supported、partially_supported、contested、unverified。',
+    '给出 applicableScenarios（Otto 会在哪些具体工作中调用）、riskIfWrong（如果记错可能造成什么业务影响）和 nextQuestion（当前最值得向企业确认的问题）。',
+    '输出只能是 JSON 对象：shouldUpdate、title、category、content、confidence、rationale、changes、uncertainties、usedEvidenceIds、evidenceGraph、applicableScenarios、riskIfWrong、nextQuestion。',
+    'confidence 为 0-1。usedEvidenceIds 和 evidenceGraph.evidenceIds 只能使用所给证据 id；没有证据不得标记 supported。content 应是简洁、可直接供 Otto 后续工作引用的企业事实或流程，不写分析过程。',
     `当前企业记忆 JSON：${JSON.stringify(current)}`,
     `支持证据 JSON：${JSON.stringify(evidence)}`,
   ].join('\n');
@@ -195,7 +269,7 @@ export function createEnterpriseMemoryIntelligenceAnalyzer(options: {
     );
     const response = await chat.sendMessage({
       message: prompt(input),
-      config: { maxOutputTokens: 2_048, temperature: 0.1, abortSignal: signal },
+      config: { maxOutputTokens: 4_096, temperature: 0.1, abortSignal: signal },
     }, `enterprise-memory-${input.id}-${Date.now()}`, SceneType.CHAT_CONVERSATION);
     const raw = response.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
     return parseEnterpriseMemoryIntelligence(raw, input, {

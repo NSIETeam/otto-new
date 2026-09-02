@@ -6,6 +6,7 @@
  */
 
 import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
+import { buildEnterpriseMemoryHealth } from './enterpriseMemoryHealth.js';
 
 export interface ConversationalKnowledgeItem {
   id: string;
@@ -15,6 +16,11 @@ export interface ConversationalKnowledgeItem {
   confidence: number;
   status?: 'pending_review' | 'active' | 'archived';
   sourceLabel?: string | null;
+  sourceType?: string;
+  evidenceCount?: number;
+  distinctSessionCount?: number;
+  distinctContributorCount?: number;
+  verifiedEvidenceCount?: number;
   expiresAt?: string | null;
   reviewDueAt?: string | null;
   createdAt: string;
@@ -298,7 +304,7 @@ export interface WorkspaceCapabilityConversationInput {
   experts: readonly ConversationalExpert[];
   autoSkillCandidates: readonly ConversationalAutoSkillCandidate[];
   registry: WorkspaceCapabilityDraftRegistry;
-  listKnowledge(input: { query?: string }): Promise<ConversationalKnowledgeItem[]>;
+  listKnowledge(input: { query?: string; includeReview?: boolean }): Promise<ConversationalKnowledgeItem[]>;
   recordKnowledge(input: {
     sourceId: string;
     title: string;
@@ -341,6 +347,16 @@ function memoryQueryIntent(text: string): boolean {
   return /(?:企业知识|企业记忆|公司知识|公司制度).{0,12}(?:查|查询|搜索|找|查看|有哪些|列出)/u.test(text)
     || /(?:查|查询|搜索|找|查看|列出).{0,12}(?:企业知识|企业记忆|公司知识|公司制度)/u.test(text)
     || /(?:企业知识|企业记忆)(?:里|中)(?:查|查询|搜索|找|查看)/u.test(text);
+}
+
+function memoryHealthIntent(text: string): boolean {
+  return /(?:企业知识|企业记忆|公司知识).{0,10}(?:健康|体检|地图|图谱|质量|可信|准确度)/u.test(text)
+    || /(?:健康|体检|地图|图谱|质量).{0,10}(?:企业知识|企业记忆|公司知识)/u.test(text);
+}
+
+function memoryNextQuestionIntent(text: string): boolean {
+  return /(?:企业知识|企业记忆|公司知识).{0,14}(?:还缺|缺什么|待确认|需要确认|下一步|先确认|有问题)/u.test(text)
+    || /(?:下一步|先|还有什么).{0,10}(?:确认|补充|完善).{0,8}(?:企业知识|企业记忆)/u.test(text);
 }
 
 function extractMemoryQuery(text: string): string {
@@ -418,6 +434,41 @@ function formatKnowledgeResults(items: readonly ConversationalKnowledgeItem[], n
       return `${index + 1}. ${boundedText(item.title || item.category, 120)}【${boundedText(item.category, 80)}】\n${boundedText(item.content, MAX_KNOWLEDGE_CONTENT)}\n置信度 ${Math.round(item.confidence * 100)}%${lifecycle}${source}`;
     }),
   ].join('\n\n');
+}
+
+function formatMemoryHealth(
+  items: readonly ConversationalKnowledgeItem[],
+  mode: 'overview' | 'next',
+  now = Date.now(),
+): string {
+  const health = buildEnterpriseMemoryHealth(items, now);
+  if (!health.nodes.length) {
+    return '当前还没有企业记忆。Otto 会在完成真实对话和工作后自动识别稳定规则，形成待管理员确认的候选。';
+  }
+  if (mode === 'next') {
+    const actionable = health.nodes.filter((item) => item.priority > 0).slice(0, 5);
+    if (!actionable.length) {
+      return '当前企业记忆没有必须人工处理的缺口。Otto 会继续在真实工作中收集证据，出现冲突、过期或新口径时再提醒。';
+    }
+    return [
+      `当前最值得确认的是：${actionable[0]!.question}`,
+      `原因：${actionable[0]!.reasons.join('；')}`,
+      '',
+      `后续还有 ${Math.max(0, actionable.length - 1)} 项：`,
+      ...actionable.slice(1).map((item, index) => `${index + 2}. ${item.title}：${item.question}`),
+      '',
+      '可以打开右侧“企业记忆”进入“下一步确认”，查看证据并由管理员处理。',
+    ].join('\n');
+  }
+  return [
+    `企业记忆治理完成度 ${health.governanceScore}/100（这是证据、有效期和人工确认的治理指标，不是模型概率）：`,
+    `- 证据充分：${health.counts.trusted}`,
+    `- 继续学习：${health.counts.learning}`,
+    `- 等待确认：${health.counts.needs_review}`,
+    `- 存在冲突：${health.counts.conflicted}`,
+    `- 已经过期：${health.counts.expired}`,
+    health.nextAction ? `\n下一步：${health.nextAction.question}` : '\n当前没有必须人工处理的记忆。',
+  ].join('\n');
 }
 
 function expertListIntent(text: string): boolean {
@@ -599,6 +650,24 @@ export async function handleWorkspaceCapabilityConversation(
     draft.phase = draft.title && draft.content ? 'ready' : 'collecting';
     input.registry.set(input.accountId, input.sessionId, draft);
     postHandled(input, text, missingKnowledgePrompt(draft));
+    return true;
+  }
+
+  if (input.enterpriseMemoryEnabled && (memoryHealthIntent(text) || memoryNextQuestionIntent(text))) {
+    input.postMessage('user', text);
+    if (input.role !== 'company_admin') {
+      input.postMessage('assistant', '企业记忆的健康图谱和待确认问题只向企业管理员开放；你仍可以查询已经发布且仍有效的企业知识。');
+      return true;
+    }
+    try {
+      const items = await input.listKnowledge({ includeReview: true });
+      input.postMessage('assistant', formatMemoryHealth(
+        items,
+        memoryNextQuestionIntent(text) ? 'next' : 'overview',
+      ));
+    } catch (error) {
+      input.postMessage('assistant', `企业记忆体检失败：${error instanceof Error ? error.message : String(error)}`);
+    }
     return true;
   }
 

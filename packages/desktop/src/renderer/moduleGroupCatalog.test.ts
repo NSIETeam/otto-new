@@ -16,6 +16,9 @@ const parkTemplate = listModuleGroupTemplates('enterprise').find((template) => (
 const recruitmentTemplate = listModuleGroupTemplates('enterprise').find((template) => (
   template.package.packageId === 'otto.group.smart-recruitment'
 ))!;
+const dailyOfficeTemplate = listModuleGroupTemplates('enterprise').find((template) => (
+  template.package.packageId === 'otto.group.daily-office'
+))!;
 const hongchuangAccess = {
   park: { name: '北控宏创科技园', slug: 'hongchuang-park', status: 'active' as const },
 };
@@ -52,20 +55,38 @@ describe('official module group catalog', () => {
     })).toMatchObject({ allowed: false });
   });
 
-  it('defines intelligent recruitment as one official five-function group', () => {
+  it('defines intelligent recruitment as one official evidence-driven group', () => {
     expect(recruitmentTemplate).toMatchObject({
       name: '智能招聘',
       groupId: 'smart-recruitment',
-      rows: 2,
+      rows: 3,
       autoInstall: false,
       package: {
         source: 'official',
         packageId: 'otto.group.smart-recruitment',
         publisherId: 'otto.official',
-        version: '1.0.0',
+        version: '2.0.0',
       },
     });
     expect(recruitmentTemplate.moduleIds).toEqual(SMART_RECRUITMENT_MODULE_IDS);
+    expect(recruitmentTemplate.moduleIds).toHaveLength(8);
+    expect(recruitmentTemplate.moduleIds).toContain('recruitment-evidence-graph');
+    expect(recruitmentTemplate.moduleIds).toContain('recruitment-interview-copilot');
+    expect(recruitmentTemplate.moduleIds).toContain('recruitment-work-sample');
+  });
+
+  it('upgrades daily office with the evidence-driven enterprise memory experience', () => {
+    expect(dailyOfficeTemplate).toMatchObject({
+      name: '日常办公',
+      description: expect.stringContaining('持续验证'),
+      package: {
+        source: 'official',
+        packageId: 'otto.group.daily-office',
+        publisherId: 'otto.official',
+        version: '1.2.0',
+      },
+    });
+    expect(dailyOfficeTemplate.moduleIds).toContain('enterprise-memory');
   });
 
   it('upgrades a legacy six-module park group in place and moves duplicates atomically', () => {

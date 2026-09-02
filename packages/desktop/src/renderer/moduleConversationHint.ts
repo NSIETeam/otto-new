@@ -21,8 +21,11 @@ const PARK_PROMPTS: Readonly<Record<ParkModuleTarget, string>> = {
 const RECRUITMENT_PROMPTS: Readonly<Record<RecruitmentModuleTarget, string>> = {
   'resume-analysis': '我要招一名员工，帮我分析候选人材料',
   'candidate-screening': '查看当前候选人档案和原文证据',
+  'evidence-graph': '查看当前候选人的岗位证据图谱',
   'interview-audio': '把面试录音或视频加入当前候选人分析',
   'interview-kit': '生成针对性面试问题并比较候选人',
+  'interview-copilot': '根据证据缺口告诉我下一题最值得问什么',
+  'work-sample': '为当前候选人生成岗位实战任务',
   'privacy-audit': '查看或清理候选人资料',
 };
 
@@ -34,7 +37,7 @@ export function moduleConversationPrompt(module: ModuleDefinition): string | nul
   if (activation.kind === 'route') return '打开 Skill 专区';
   if (activation.dialog === 'park') return PARK_PROMPTS[activation.target];
   if (activation.dialog === 'recruitment') return RECRUITMENT_PROMPTS[activation.target];
-  if (activation.dialog === 'enterprise-memory') return '查一下企业记忆';
+  if (activation.dialog === 'enterprise-memory') return '查看企业记忆健康图谱';
   if (activation.dialog === 'auto-skill') return '查看自动 Skill 候选';
   return null;
 }

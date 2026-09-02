@@ -1539,6 +1539,11 @@ function OttoWorkspaceApp({
           extractDocument: window.otto.extractEditableDocument,
           analyzeResume: window.otto.recruitmentAnalyzeResume,
           transcribe: window.otto.recruitmentTranscribe,
+          loadEnterpriseContext: moduleCapabilities.organizationFeatures?.knowledge === true
+            ? async (query) => buildEnterpriseKnowledgePromptContext(
+              await window.otto.enterpriseKnowledgeList({ query, status: 'active' }),
+            )
+            : undefined,
           postMessage: actions.postLocalChatMessage,
           expectedDraftId: targetDraft?.source === 'recruitment' ? targetDraft.id : undefined,
         });
@@ -2368,6 +2373,7 @@ function OttoWorkspaceApp({
         target={moduleModal?.kind === 'recruitment' ? moduleModal.target : 'resume-analysis'}
         reviewerId={account.id}
         organizationName={account.organizationName}
+        enterpriseMemoryEnabled={moduleCapabilities.organizationFeatures?.knowledge === true}
         workspaceStore={recruitmentWorkspace}
         onClose={() => setModuleModal(null)}
       />

@@ -37,7 +37,18 @@ function harness() {
     hardRequirements: [{ requirement: 'React 和 TypeScript', status: 'met' as const, explanation: '有项目证据', evidence: [{ line: 5, quote: '使用 React 和 TypeScript 开发企业系统' }] }],
     strengths: ['企业应用', '性能优化'], risks: ['团队范围未知'], missingInformation: ['团队规模'],
     interviewQuestions: [{ criterion: '性能优化', question: '请说明性能优化的指标基线和关键取舍。', rationale: '核实能力深度', followUps: ['如何验证？'], goodSignals: ['有指标和方法'], concernSignals: ['仅复述结果'] }],
-    analysisVersion: 'otto-recruitment-semantic-v2.0', modelProvider: 'test-model',
+    evidenceGraph: [
+      { criterion: '前端交付', status: 'verified' as const, assessment: '有直接交付证据', evidence: [{ line: 5, quote: '使用 React 和 TypeScript 开发企业系统', source: 'resume' as const }], gaps: [], nextQuestion: '' },
+      { criterion: '性能优化方法', status: 'partially_verified' as const, assessment: '缺少基线与验证方法', evidence: [{ line: 6, quote: '最终首屏时间降低 30%', source: 'resume' as const }], gaps: ['指标基线与验证方式'], nextQuestion: '请说明性能优化的指标基线和关键取舍。' },
+    ],
+    workSample: {
+      title: '桌面端性能诊断任务', scenario: '诊断一个加载缓慢的桌面端页面。',
+      timeboxMinutes: 90, deliverables: ['诊断说明'], constraints: ['不得使用客户数据'],
+      rubric: [{ criterion: '问题定位', weight: 100, observableSignals: ['建立基线并验证'] }],
+      followUpQuestions: ['为什么这样排序？'],
+    },
+    enterpriseContextUsed: true,
+    analysisVersion: 'otto-recruitment-semantic-v3.0', modelProvider: 'test-model',
     inputTokens: 100, outputTokens: 80, createdAt: '2026-09-02T02:00:00.000Z',
   }));
   const transcribe = vi.fn(async () => ({
@@ -47,11 +58,13 @@ function harness() {
       { speaker: '候选人', startSeconds: 5, text: '当时项目很慢，我负责优化，最终首屏降低30%' },
     ],
   }));
+  const loadEnterpriseContext = vi.fn(async () => '已发布企业记忆：桌面端改动必须说明异常恢复与测试方法。');
   return {
-    store, registry, messages, selectFiles, extractDocument, analyzeResume, transcribe,
+    store, registry, messages, selectFiles, extractDocument, analyzeResume, transcribe, loadEnterpriseContext,
     common: {
       text: '', sessionId: 'session-1', accountId: 'hr-1', enabled: true,
       store, registry, selectFiles, extractDocument, analyzeResume, transcribe,
+      loadEnterpriseContext,
       postMessage: (role: 'user' | 'assistant', text: string) => messages.push({ role, text }),
       now: () => Date.parse('2026-09-02T10:00:00+08:00'),
     },
@@ -149,6 +162,25 @@ describe('招聘对话共享桥', () => {
     await handleRecruitmentConversation({ ...h.common, text: '生成这个候选人的面试材料' });
     expect(h.messages.at(-1)?.text).toContain('结构化面试问题');
     expect(h.messages.at(-1)?.text).toContain('评价规则');
+  });
+
+  it('在对话中提供证据图谱、动态下一题和岗位实战任务', async () => {
+    const h = harness();
+    await importResume(h);
+    expect(h.analyzeResume).toHaveBeenCalledWith(expect.objectContaining({
+      enterpriseContext: expect.stringContaining('异常恢复与测试方法'),
+    }));
+
+    await handleRecruitmentConversation({ ...h.common, text: '查看候选人的岗位证据图谱' });
+    expect(h.messages.at(-1)?.text).toContain('性能优化方法｜部分验证');
+    expect(h.messages.at(-1)?.text).toContain('简历第 6 行');
+
+    await handleRecruitmentConversation({ ...h.common, text: '下一步最值得问什么' });
+    expect(h.messages.at(-1)?.text).toContain('请说明性能优化的指标基线和关键取舍');
+
+    await handleRecruitmentConversation({ ...h.common, text: '生成岗位实战任务' });
+    expect(h.messages.at(-1)?.text).toContain('桌面端性能诊断任务');
+    expect(h.messages.at(-1)?.text).toContain('建立基线并验证');
   });
 
   it('音频分析需确认选择文件，并只分析回答内容', async () => {

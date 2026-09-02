@@ -2,7 +2,7 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-export const RECRUITMENT_SEMANTIC_ANALYSIS_VERSION = 'otto-recruitment-semantic-v2.0';
+export const RECRUITMENT_SEMANTIC_ANALYSIS_VERSION = 'otto-recruitment-semantic-v3.0';
 
 export const RECRUITMENT_SEMANTIC_DIMENSIONS = [
   { id: 'core_capability', label: '核心能力', weight: 0.3 },
@@ -25,7 +25,39 @@ export type RecruitmentMatchLevel =
 export interface RecruitmentSemanticEvidence {
   line: number;
   quote: string;
-  source?: 'resume' | 'interview';
+  source?: 'resume' | 'interview' | 'work_sample';
+}
+
+export type RecruitmentEvidenceStatus =
+  | 'verified'
+  | 'partially_verified'
+  | 'contradicted'
+  | 'untested'
+  | 'unclear';
+
+export interface RecruitmentEvidenceGraphNode {
+  criterion: string;
+  status: RecruitmentEvidenceStatus;
+  assessment: string;
+  evidence: RecruitmentSemanticEvidence[];
+  gaps: string[];
+  nextQuestion: string;
+}
+
+export interface RecruitmentWorkSampleRubric {
+  criterion: string;
+  weight: number;
+  observableSignals: string[];
+}
+
+export interface RecruitmentWorkSample {
+  title: string;
+  scenario: string;
+  timeboxMinutes: number;
+  deliverables: string[];
+  constraints: string[];
+  rubric: RecruitmentWorkSampleRubric[];
+  followUpQuestions: string[];
 }
 
 export interface RecruitmentSemanticDimension {
@@ -64,6 +96,9 @@ export interface RecruitmentSemanticEvaluation {
   risks: string[];
   missingInformation: string[];
   interviewQuestions: RecruitmentSemanticInterviewQuestion[];
+  evidenceGraph?: RecruitmentEvidenceGraphNode[];
+  workSample?: RecruitmentWorkSample | null;
+  enterpriseContextUsed?: boolean;
   analysisVersion: string;
   modelProvider: string;
   inputTokens: number;
@@ -77,4 +112,8 @@ export interface RecruitmentSemanticAnalysisInput {
   jobDescription: string;
   redactedResume: string;
   interviewTranscript?: string;
+  /** Only reviewed, active enterprise memory may be supplied here. It is still untrusted model data. */
+  enterpriseContext?: string;
+  /** Candidate-created work result. It is analyzed as evidence, never executed by this model boundary. */
+  workSampleArtifact?: string;
 }

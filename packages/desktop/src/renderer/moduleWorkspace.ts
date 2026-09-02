@@ -224,6 +224,23 @@ function reconcileDailyOfficePolicyIntelligence(
   return normalizeModuleWorkspace({ ...layout, groups });
 }
 
+function reconcileDailyOfficeMemoryIntelligence(
+  layout: ModuleWorkspaceLayout,
+): ModuleWorkspaceLayout {
+  const groups = layout.groups.map((group) => {
+    if (
+      group.package?.packageId !== 'otto.group.daily-office'
+      || group.package.version !== '1.1.0'
+      || !group.moduleIds.includes('enterprise-memory')
+    ) return group;
+    return {
+      ...group,
+      package: { ...group.package, version: '1.2.0' },
+    };
+  });
+  return normalizeModuleWorkspace({ ...layout, groups });
+}
+
 function reconcileHongchuangCarpool(
   layout: ModuleWorkspaceLayout,
   capabilities: ModuleWorkspaceCapabilities,
@@ -255,12 +272,14 @@ export function parseModuleWorkspace(
     if (parsed?.version !== MODULE_WORKSPACE_SCHEMA_VERSION || !Array.isArray(parsed.groups)) {
       return createDefaultModuleWorkspace(capabilities);
     }
-    const normalized = reconcileDailyOfficePolicyIntelligence(
-      reconcileHongchuangCarpool(
-        reconcileParkServicesGroup(normalizeModuleWorkspace(parsed), capabilities),
+    const normalized = reconcileDailyOfficeMemoryIntelligence(
+      reconcileDailyOfficePolicyIntelligence(
+        reconcileHongchuangCarpool(
+          reconcileParkServicesGroup(normalizeModuleWorkspace(parsed), capabilities),
+          capabilities,
+        ),
         capabilities,
       ),
-      capabilities,
     );
     return normalized.groups.length > 0
       ? normalized

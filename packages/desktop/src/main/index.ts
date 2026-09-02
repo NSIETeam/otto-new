@@ -6300,6 +6300,8 @@ function registerIpc(): void {
         || typeof body.jobDescription !== 'string'
         || typeof body.redactedResume !== 'string'
         || (body.interviewTranscript !== undefined && typeof body.interviewTranscript !== 'string')
+        || (body.enterpriseContext !== undefined && typeof body.enterpriseContext !== 'string')
+        || (body.workSampleArtifact !== undefined && typeof body.workSampleArtifact !== 'string')
       ) throw new Error('招聘分析缺少完整岗位或简历正文');
       return analyzeRecruitmentResume(body as unknown as RecruitmentSemanticAnalysisInput);
     },

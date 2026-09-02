@@ -11,6 +11,7 @@ export type ModuleModalState =
   | { kind: 'recruitment'; target: RecruitmentModuleTarget }
   | { kind: 'enterprise-memory' }
   | { kind: 'auto-skill' }
+  | { kind: 'policy-intelligence' }
   | { kind: 'custom-expert'; expertId?: string }
   | { kind: 'customer-module'; moduleId: string; version: string }
   | null;

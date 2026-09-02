@@ -9,7 +9,7 @@ import type { CustomAgentDefinition, CustomAgentDraft } from '../customAgents.js
 import { CustomAgentIconPicker } from './CustomAgentIconPicker.js';
 import { ModuleIcon } from './ModuleIcon.js';
 
-function DialogFrame({ title, onClose, children }: {
+export function DialogFrame({ title, onClose, children }: {
   title: string; onClose(): void; children: React.ReactNode;
 }): React.JSX.Element {
   const ref = useRef<HTMLElement>(null);

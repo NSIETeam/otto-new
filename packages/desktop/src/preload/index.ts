@@ -291,6 +291,62 @@ export interface EnterpriseAccountUsage {
   lastUsedAt: string | null;
 }
 
+export interface PolicyEnterpriseProfile {
+  organizationName?: string;
+  registeredRegion?: string;
+  industry?: string;
+  establishedAt?: string;
+  employeeCount?: number;
+  annualRevenueCny?: number;
+  rdExpenseCny?: number;
+  qualifications?: string[];
+  productsServices?: string[];
+  capabilities?: string[];
+  notes?: string;
+}
+
+export interface OfficialPolicyDocument {
+  id: string;
+  title: string;
+  url: string;
+  sourceName: string;
+  issuer?: string;
+  publishedAt?: string;
+  deadline?: string;
+  fetchedAt: string;
+  contentHash: string;
+  bodyText: string;
+}
+
+export interface PolicyAssessment {
+  policyId: string;
+  status: 'likely_eligible' | 'has_gaps' | 'unlikely' | 'unknown';
+  score: number;
+  summary: string;
+  conditions: Array<{ label: string; result: 'met' | 'gap' | 'unknown'; evidence: string }>;
+  gaps: string[];
+  missingFields: string[];
+  resourceConnections: string[];
+  assessedAt: string;
+  profileFingerprint: string;
+  policyContentHash: string;
+  modelProvider?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  analysisError?: string;
+}
+
+export interface PolicyIntelligenceState {
+  enabled: boolean;
+  profile: PolicyEnterpriseProfile;
+  policies: OfficialPolicyDocument[];
+  assessments: PolicyAssessment[];
+  syncStatus: 'idle' | 'syncing' | 'error';
+  lastSyncAt?: string;
+  lastSyncReason?: 'startup' | 'shutdown' | 'manual' | 'profile_update';
+  lastError?: string;
+}
+
 export interface EnterpriseAccountCreateInput {
   username: string;
   password: string;
@@ -1477,6 +1533,10 @@ const IPC = {
   customerModuleRun: 'otto:customer-module-run',
   customerModuleCancel: 'otto:customer-module-cancel',
   generateCustomAgent: 'otto:generate-custom-agent',
+  policyIntelligenceGet: 'otto:policy-intelligence-get',
+  policyIntelligenceConfigure: 'otto:policy-intelligence-configure',
+  policyIntelligenceUpdateProfile: 'otto:policy-intelligence-update-profile',
+  policyIntelligenceSync: 'otto:policy-intelligence-sync',
   parkNativeNotify: 'otto:park-native-notify',
   writeClipboard: 'otto:write-clipboard',
 } as const;
@@ -1785,6 +1845,20 @@ export interface OttoBridge {
     name: string;
     instructions: string;
   }>;
+  policyIntelligenceGet(scopeId: string): Promise<PolicyIntelligenceState>;
+  policyIntelligenceConfigure(input: {
+    scopeId: string;
+    enabled: boolean;
+    profile?: PolicyEnterpriseProfile;
+  }): Promise<PolicyIntelligenceState>;
+  policyIntelligenceUpdateProfile(input: {
+    scopeId: string;
+    patch: PolicyEnterpriseProfile;
+  }): Promise<PolicyIntelligenceState>;
+  policyIntelligenceSync(input: {
+    scopeId: string;
+    reason: 'startup' | 'manual' | 'profile_update';
+  }): Promise<PolicyIntelligenceState>;
   customerModuleInstalledList(): Promise<InstalledCustomerModuleRecord[]>;
   customerModuleInstall(input: {
     moduleId: string;
@@ -2954,6 +3028,18 @@ const bridge: OttoBridge = {
   },
   generateCustomAgent(requirement) {
     return ipcRenderer.invoke(IPC.generateCustomAgent, requirement) as ReturnType<OttoBridge['generateCustomAgent']>;
+  },
+  policyIntelligenceGet(scopeId) {
+    return ipcRenderer.invoke(IPC.policyIntelligenceGet, scopeId) as ReturnType<OttoBridge['policyIntelligenceGet']>;
+  },
+  policyIntelligenceConfigure(input) {
+    return ipcRenderer.invoke(IPC.policyIntelligenceConfigure, input) as ReturnType<OttoBridge['policyIntelligenceConfigure']>;
+  },
+  policyIntelligenceUpdateProfile(input) {
+    return ipcRenderer.invoke(IPC.policyIntelligenceUpdateProfile, input) as ReturnType<OttoBridge['policyIntelligenceUpdateProfile']>;
+  },
+  policyIntelligenceSync(input) {
+    return ipcRenderer.invoke(IPC.policyIntelligenceSync, input) as ReturnType<OttoBridge['policyIntelligenceSync']>;
   },
   customerModuleInstalledList() {
     return ipcRenderer.invoke(IPC.customerModuleInstalledList) as Promise<InstalledCustomerModuleRecord[]>;

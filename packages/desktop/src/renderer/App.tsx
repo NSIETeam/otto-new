@@ -63,6 +63,7 @@ import { ModuleMarketplaceDialog } from './components/ModuleMarketplaceDialog.js
 import { CustomerModuleRunDialog } from './components/CustomerModuleRunDialog.js';
 import { ModuleGroupCatalogDialog } from './components/ModuleGroupCatalogDialog.js';
 import { RecruitmentWorkbenchDialog } from './components/RecruitmentWorkbenchDialog.js';
+import { PolicyIntelligenceDialog } from './components/PolicyIntelligenceDialog.js';
 import { ConfirmDialog } from './components/ConfirmDialog.js';
 import {
   AutoSkillDialog,
@@ -103,6 +104,7 @@ import type {
   EnterpriseFederationContact,
   EnterpriseOrganizationView,
   InstalledCustomerModuleRecord,
+  PolicyEnterpriseProfile,
 } from '../preload/index.js';
 import { askLocalPeerOtto } from './peerOttoRunner.js';
 import {
@@ -137,6 +139,10 @@ import {
   WorkspaceCapabilityDraftRegistry,
   handleWorkspaceCapabilityConversation,
 } from './workspaceCapabilityConversationBridge.js';
+import {
+  PolicyConversationRegistry,
+  handlePolicyIntelligenceConversation,
+} from './policyIntelligenceConversationBridge.js';
 import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
 import { ConversationTicketLinkRegistry } from './conversationTicketLinks.js';
 import { AtoaConsultDialog } from './components/AtoaConsultDialog.js';
@@ -291,6 +297,7 @@ function OttoWorkspaceApp({
   const customerModuleActionDraftsRef = useRef(new CustomerModuleConversationDraftRegistry());
   const recruitmentActionDraftsRef = useRef(new RecruitmentConversationDraftRegistry());
   const workspaceCapabilityDraftsRef = useRef(new WorkspaceCapabilityDraftRegistry());
+  const policyConversationRef = useRef(new PolicyConversationRegistry());
   const conversationTicketLinksRef = useRef(new ConversationTicketLinkRegistry());
   const [conversationDraftRevision, setConversationDraftRevision] = useState(0);
   const conversationDraftVaultScope = useMemo(
@@ -457,6 +464,12 @@ function OttoWorkspaceApp({
     () => getModuleWorkspaceStorageKey(moduleWorkspaceScope),
     [moduleWorkspaceScope],
   );
+  const policyScopeId = edition === 'enterprise'
+    ? `${account.organizationId}:${account.id}`
+    : account.id;
+  const policySeedProfile = useMemo<PolicyEnterpriseProfile>(() => ({
+    organizationName: account.organizationName,
+  }), [account.organizationName]);
   const moduleWorkspace = useModuleWorkspace({
     scope: moduleWorkspaceScope,
     capabilities: { edition, availableModuleIds },
@@ -489,6 +502,31 @@ function OttoWorkspaceApp({
     setUnavailableModule(null);
     setPendingAgent(null);
   }, [cancelPendingAgentLaunches, moduleWorkspaceScopeKey]);
+  useEffect(() => {
+    if (edition !== 'enterprise' || typeof window.otto.policyIntelligenceGet !== 'function') return;
+    let cancelled = false;
+    void window.otto.policyIntelligenceGet(policyScopeId).then(async (current) => {
+      if (cancelled || !current?.enabled) return;
+      let enriched = policySeedProfile;
+      try {
+        const publicProfile = await window.otto.enterprisePublicProfile();
+        enriched = {
+          ...enriched,
+          ...(publicProfile.industryTags[0] ? { industry: publicProfile.industryTags.join('、') } : {}),
+          ...(publicProfile.productsServices.length ? { productsServices: publicProfile.productsServices } : {}),
+          ...(publicProfile.capabilities.length ? { capabilities: publicProfile.capabilities } : {}),
+        };
+      } catch {
+        // Public park profile is optional and may not be entitled on this server.
+      }
+      if (cancelled) return;
+      await window.otto.policyIntelligenceConfigure({ scopeId: policyScopeId, enabled: true, profile: enriched });
+      if (!cancelled) await window.otto.policyIntelligenceSync({ scopeId: policyScopeId, reason: 'startup' });
+    }).catch(() => {
+      // Policy intelligence is optional; a failed startup refresh must not block Otto.
+    });
+    return () => { cancelled = true; };
+  }, [edition, policyScopeId, policySeedProfile]);
   useEffect(() => setPendingAgent(null), [state.activeSessionId]);
   const permissionResolver = useRef<((decision: AtoaPermissionDecision) => void) | null>(null);
   const [pendingAtoaPermission, setPendingAtoaPermission] = useState<AtoaPermissionRequest | null>(null);
@@ -1348,6 +1386,24 @@ function OttoWorkspaceApp({
     targetDraft?: ConversationActionDraftSummary,
   ): Promise<boolean> => {
       const sessionId = activeSession?.sessionId;
+      if (
+        edition === 'enterprise'
+        && sessionId
+        && text.trim()
+        && (!attachments || attachments.length === 0)
+      ) {
+        const policyHandled = await handlePolicyIntelligenceConversation({
+          text,
+          scopeId: policyScopeId,
+          sessionId,
+          registry: policyConversationRef.current,
+          getState: () => window.otto.policyIntelligenceGet(policyScopeId),
+          sync: () => window.otto.policyIntelligenceSync({ scopeId: policyScopeId, reason: 'manual' }),
+          updateProfile: (patch) => window.otto.policyIntelligenceUpdateProfile({ scopeId: policyScopeId, patch }),
+          postMessage: actions.postLocalChatMessage,
+        });
+        if (policyHandled) return true;
+      }
       if (
         effectiveParkService
         && sessionId
@@ -2260,6 +2316,13 @@ function OttoWorkspaceApp({
           setUnavailableModule(null);
           moduleCapabilities.retry();
         }}
+      />
+      <PolicyIntelligenceDialog
+        key={`${moduleWorkspaceScopeKey}:policy-intelligence`}
+        open={moduleModal?.kind === 'policy-intelligence'}
+        scopeId={policyScopeId}
+        seedProfile={policySeedProfile}
+        onClose={() => setModuleModal(null)}
       />
       <EnterpriseMemoryDialog
         key={`${moduleWorkspaceScopeKey}:enterprise-memory`}

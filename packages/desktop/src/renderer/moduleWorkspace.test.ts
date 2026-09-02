@@ -37,6 +37,7 @@ const enterpriseCapabilities: ModuleWorkspaceCapabilities = {
     'agent-word',
     'agent-excel',
     'enterprise-memory',
+    'policy-intelligence',
   ],
 };
 
@@ -79,12 +80,13 @@ describe('module workspace defaults', () => {
             'agent-word',
             'agent-excel',
             'enterprise-memory',
+            'policy-intelligence',
           ],
           package: {
             source: 'official',
             packageId: 'otto.group.daily-office',
             publisherId: 'otto.official',
-            version: '1.0.0',
+            version: '1.1.0',
           },
         },
       ],
@@ -138,6 +140,24 @@ describe('module workspace parsing and normalization', () => {
       'park-meeting-room',
       'park-repair',
     ]);
+  });
+
+  it('migrates the official daily-office group once to add policy intelligence', () => {
+    const parsed = parseModuleWorkspace(JSON.stringify({
+      version: 1,
+      groups: [{
+        id: 'daily-office', name: '日常办公', rows: 2,
+        moduleIds: ['agent-ppt', 'enterprise-memory'],
+        package: { source: 'official', packageId: 'otto.group.daily-office', publisherId: 'otto.official', version: '1.0.0' },
+      }],
+    }), enterpriseCapabilities);
+
+    expect(parsed.groups[0].moduleIds).toContain('policy-intelligence');
+    expect(parsed.groups[0].package?.version).toBe('1.1.0');
+    expect(parseModuleWorkspace(JSON.stringify({
+      ...parsed,
+      groups: parsed.groups.map((group) => ({ ...group, moduleIds: group.moduleIds.filter((id) => id !== 'policy-intelligence') })),
+    }), enterpriseCapabilities).groups[0].moduleIds).not.toContain('policy-intelligence');
   });
 
   it('deduplicates module IDs globally, repairs group IDs, clamps rows, and keeps unknown modules', () => {

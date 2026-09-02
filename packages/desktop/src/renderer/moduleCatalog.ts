@@ -56,7 +56,7 @@ export type RecruitmentModuleTarget =
 export type ModuleActivation =
   | { kind: 'dialog'; dialog: 'park'; target: ParkModuleTarget }
   | { kind: 'dialog'; dialog: 'recruitment'; target: RecruitmentModuleTarget }
-  | { kind: 'dialog'; dialog: 'enterprise-memory' | 'auto-skill' }
+  | { kind: 'dialog'; dialog: 'enterprise-memory' | 'auto-skill' | 'policy-intelligence' }
   | { kind: 'route'; route: 'skill-zone' }
   | { kind: 'agent'; profileId: string; customAgentId?: string }
   | { kind: 'customer-module'; moduleId: string; version: string };
@@ -96,6 +96,7 @@ type StaticAvailabilityRule =
   | 'recruitment'
   | 'enterprise-memory'
   | 'auto-skill'
+  | 'policy-intelligence'
   | 'skill-zone';
 
 interface StaticModuleSpec extends Omit<ModuleDefinition, 'availability' | 'disabledReason' | 'package'> {
@@ -205,6 +206,12 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
     availabilityRule: 'recruitment',
   },
   {
+    id: 'policy-intelligence', label: '政策智能服务', category: 'common', icon: 'generated:expert-research',
+    description: '汇总官方政策，结合企业资料分析可申报项目、条件缺口、政策原文和资源对接。',
+    activation: { kind: 'dialog', dialog: 'policy-intelligence' },
+    availabilityRule: 'policy-intelligence',
+  },
+  {
     id: 'enterprise-memory', label: '企业记忆', category: 'capability', icon: 'enterprise-memory',
     activation: { kind: 'dialog', dialog: 'enterprise-memory' },
     availabilityRule: 'enterprise-memory',
@@ -241,6 +248,8 @@ function staticAvailability(
 ): ModuleAvailability {
   if (rule === 'auto-skill') return 'available';
   if (context.edition !== 'enterprise') return 'hidden';
+
+  if (rule === 'policy-intelligence') return 'available';
 
   if (rule === 'recruitment') return 'available';
 

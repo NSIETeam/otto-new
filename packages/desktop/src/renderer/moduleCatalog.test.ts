@@ -83,6 +83,21 @@ describe('static module catalog', () => {
       .every((module) => module.availability === 'hidden')).toBe(true);
   });
 
+  it('publishes policy intelligence as an optional enterprise-only official module', () => {
+    const enterprise = buildModuleCatalog(enterpriseContext()).find((module) => module.id === 'policy-intelligence');
+    expect(enterprise).toMatchObject({
+      category: 'common', availability: 'available',
+      activation: { kind: 'dialog', dialog: 'policy-intelligence' },
+      package: { source: 'official', publisherId: 'otto.official' },
+    });
+    const personal = buildModuleCatalog({
+      edition: 'personal', profiles: BASE_AGENT_PROFILES, organizationFeatures: enabledFeatures,
+      parkAuthorization: { hasParkContext: false, canViewStatistics: false, canViewStaffTasks: false },
+      customAgents: [],
+    });
+    expect(personal.find((module) => module.id === 'policy-intelligence')?.availability).toBe('hidden');
+  });
+
   it('maps each fixed agent from its existing profile instead of duplicating profile data', () => {
     const catalog = buildModuleCatalog(enterpriseContext());
     const ppt = catalog.find((module) => module.id === 'agent-ppt');

@@ -6055,7 +6055,7 @@ body[data-otto-surface='desktop-pet'] #root {
 
 .otto-mcp__tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; border-bottom: 1px solid var(--otto-border); padding-bottom: 8px; }
 .otto-mcp__tabs button { border: 0; border-radius: 8px; padding: 7px 12px; background: transparent; color: var(--otto-text-secondary); cursor: pointer; font: inherit; }
-.otto-mcp__tabs button:hover { background: var(--otto-bg-hover); color: var(--otto-text); }
+.otto-mcp__tabs button:hover { background: var(--otto-surface-hover); color: var(--otto-text); }
 .otto-mcp__tabs button.is-active { background: var(--otto-accent-soft); color: var(--otto-accent); font-weight: 650; }
 .otto-mcp__stack { display: grid; gap: 12px; }
 .otto-mcp__cards { display: grid; gap: 10px; }
@@ -13593,6 +13593,20 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-workspace-dialog__list small { color: var(--otto-text-tertiary); }
 .otto-workspace-dialog__list footer { margin-top: 10px; }
 .otto-workspace-dialog__error { color: var(--otto-danger); }
+.otto-policy-intelligence__status { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; padding: 16px; border: 1px solid color-mix(in srgb, var(--otto-accent) 38%, var(--otto-border)); border-radius: 14px; background: color-mix(in srgb, var(--otto-accent) 8%, var(--otto-bg)); }
+.otto-policy-intelligence__status > div { display: grid; gap: 4px; margin-right: auto; }
+.otto-policy-intelligence__status span, .otto-policy-intelligence__profile > p, .otto-policy-intelligence__notice { color: var(--otto-text-secondary); font-size: 12px; }
+.otto-policy-intelligence__status button.is-on { color: var(--otto-danger); }
+.otto-policy-intelligence__profile { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.otto-policy-intelligence__profile h3, .otto-policy-intelligence__profile > p, .otto-policy-intelligence__profile .is-wide, .otto-policy-intelligence__profile > div { grid-column: 1 / -1; }
+.otto-policy-intelligence__profile h3, .otto-policy-intelligence__profile > p { margin: 0; }
+.otto-policy-intelligence__profile label { display: grid; gap: 5px; color: var(--otto-text-secondary); font-size: 12px; }
+.otto-policy-intelligence__list article > div strong { color: var(--otto-accent); }
+.otto-policy-intelligence__list ul { display: grid; gap: 7px; margin: 10px 0; padding: 0; list-style: none; }
+.otto-policy-intelligence__list li { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; padding: 8px 10px; border-radius: 9px; background: var(--otto-surface); font-size: 12px; }
+.otto-policy-intelligence__list li small { grid-column: 2; }
+.otto-policy-intelligence__list footer { align-items: center; justify-content: space-between !important; }
+@media (max-width: 720px) { .otto-policy-intelligence__profile { grid-template-columns: 1fr; } }
 
 /* ══════════════ Otto 官方智能招聘工作台 ══════════════ */
 .otto-recruitment-overlay { z-index: 1180; padding: 24px; }

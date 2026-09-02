@@ -203,6 +203,27 @@ function reconcileParkServicesGroup(
   return normalizeModuleWorkspace({ ...layout, groups });
 }
 
+function reconcileDailyOfficePolicyIntelligence(
+  layout: ModuleWorkspaceLayout,
+  capabilities: ModuleWorkspaceCapabilities,
+): ModuleWorkspaceLayout {
+  if (!capabilities.availableModuleIds.includes('policy-intelligence')) return layout;
+  const groups = layout.groups.map((group) => {
+    if (
+      group.package?.packageId !== 'otto.group.daily-office'
+      || group.package.version !== '1.0.0'
+    ) return group;
+    return {
+      ...group,
+      moduleIds: group.moduleIds.includes('policy-intelligence')
+        ? group.moduleIds
+        : [...group.moduleIds, 'policy-intelligence'],
+      package: { ...group.package, version: '1.1.0' },
+    };
+  });
+  return normalizeModuleWorkspace({ ...layout, groups });
+}
+
 export function parseModuleWorkspace(
   serialized: string | null | undefined,
   capabilities: ModuleWorkspaceCapabilities,
@@ -213,7 +234,10 @@ export function parseModuleWorkspace(
     if (parsed?.version !== MODULE_WORKSPACE_SCHEMA_VERSION || !Array.isArray(parsed.groups)) {
       return createDefaultModuleWorkspace(capabilities);
     }
-    const normalized = reconcileParkServicesGroup(normalizeModuleWorkspace(parsed), capabilities);
+    const normalized = reconcileDailyOfficePolicyIntelligence(
+      reconcileParkServicesGroup(normalizeModuleWorkspace(parsed), capabilities),
+      capabilities,
+    );
     return normalized.groups.length > 0
       ? normalized
       : createDefaultModuleWorkspace(capabilities);

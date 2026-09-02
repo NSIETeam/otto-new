@@ -59,6 +59,13 @@ if (!previewWindow.otto) {
     updatedAt: new Date().toISOString(),
   };
   let previewTickets: Array<Record<string, unknown>> = [];
+  let previewPolicyState = {
+    enabled: false,
+    profile: { organizationName: previewAccount.organizationName },
+    policies: [] as Array<Record<string, unknown>>,
+    assessments: [] as Array<Record<string, unknown>>,
+    syncStatus: 'idle',
+  };
   const previewParkPublications: Array<Record<string, unknown>> = [
     {
       id: 'preview-publication-announcement',
@@ -942,6 +949,16 @@ if (!previewWindow.otto) {
       Promise.reject(new Error('预览模式不支持知识修订')),
     enterpriseKnowledgeRevisions: () => Promise.resolve([]),
     enterpriseKnowledgeEvidence: () => Promise.resolve([]),
+    policyIntelligenceGet: () => Promise.resolve(structuredClone(previewPolicyState)),
+    policyIntelligenceConfigure: (input: { enabled: boolean; profile?: Record<string, unknown> }) => {
+      previewPolicyState = { ...previewPolicyState, enabled: input.enabled, profile: { ...previewPolicyState.profile, ...(input.profile ?? {}) } };
+      return Promise.resolve(structuredClone(previewPolicyState));
+    },
+    policyIntelligenceUpdateProfile: (input: { patch: Record<string, unknown> }) => {
+      previewPolicyState = { ...previewPolicyState, profile: { ...previewPolicyState.profile, ...input.patch } };
+      return Promise.resolve(structuredClone(previewPolicyState));
+    },
+    policyIntelligenceSync: () => Promise.resolve(structuredClone(previewPolicyState)),
   };
 
   previewWindow.otto = new Proxy(bridge, {

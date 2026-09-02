@@ -46,6 +46,7 @@ import { MCPOAuthTokenStorage } from '../mcp/oauth-token-storage.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { isSilentMode } from '../utils/logging.js';
 import { resolveSecret } from '../config/secretResolver.js';
+import { createMcpNetworkGuard, type McpNetworkGuard } from './mcp-network-security.js';
 
 export const MCP_DEFAULT_TIMEOUT_MSEC = 10 * 60 * 1000; // default to 10 minutes
 export const MCP_CONNECT_TIMEOUT_MSEC = 30 * 1000; // 30 seconds for connection attempts (increased from 10s)
@@ -62,6 +63,21 @@ export function resolveMcpServerEnv(
     resolved[name] = secret;
   }
   return resolved;
+}
+
+function attachMcpNetworkGuard<T extends Transport>(
+  transport: T,
+  guard: McpNetworkGuard,
+): T {
+  const originalClose = transport.close.bind(transport);
+  transport.close = async () => {
+    try {
+      await originalClose();
+    } finally {
+      await guard.close();
+    }
+  };
+  return transport;
 }
 
 /**
@@ -573,8 +589,10 @@ async function createTransportWithOAuth(
 ): Promise<StreamableHTTPClientTransport | SSEClientTransport | null> {
   try {
     if (mcpServerConfig.httpUrl) {
+      const networkGuard = createMcpNetworkGuard(mcpServerConfig.httpUrl);
       // Create HTTP transport with OAuth token
       const oauthTransportOptions: StreamableHTTPClientTransportOptions = {
+        fetch: networkGuard.fetch,
         requestInit: {
           headers: {
             ...mcpServerConfig.headers,
@@ -583,20 +601,32 @@ async function createTransportWithOAuth(
         },
       };
 
-      return new StreamableHTTPClientTransport(
-        new URL(mcpServerConfig.httpUrl),
-        oauthTransportOptions,
-      );
+      try {
+        return attachMcpNetworkGuard(new StreamableHTTPClientTransport(
+          new URL(mcpServerConfig.httpUrl),
+          oauthTransportOptions,
+        ), networkGuard);
+      } catch (error) {
+        await networkGuard.close();
+        throw error;
+      }
     } else if (mcpServerConfig.url) {
+      const networkGuard = createMcpNetworkGuard(mcpServerConfig.url);
       // Create SSE transport with OAuth token in Authorization header
-      return new SSEClientTransport(new URL(mcpServerConfig.url), {
-        requestInit: {
-          headers: {
-            ...mcpServerConfig.headers,
-            Authorization: `Bearer ${accessToken}`,
+      try {
+        return attachMcpNetworkGuard(new SSEClientTransport(new URL(mcpServerConfig.url), {
+          fetch: networkGuard.fetch,
+          requestInit: {
+            headers: {
+              ...mcpServerConfig.headers,
+              Authorization: `Bearer ${accessToken}`,
+            },
           },
-        },
-      });
+        }), networkGuard);
+      } catch (error) {
+        await networkGuard.close();
+        throw error;
+      }
     }
 
     return null;
@@ -1471,7 +1501,10 @@ export async function createTransport(
   }
 
   if (mcpServerConfig.httpUrl) {
-    const transportOptions: StreamableHTTPClientTransportOptions = {};
+    const networkGuard = createMcpNetworkGuard(mcpServerConfig.httpUrl);
+    const transportOptions: StreamableHTTPClientTransportOptions = {
+      fetch: networkGuard.fetch,
+    };
 
     // Set up headers with OAuth token if available
     if (hasOAuthConfig && accessToken) {
@@ -1487,14 +1520,22 @@ export async function createTransport(
       };
     }
 
-    return new StreamableHTTPClientTransport(
-      new URL(mcpServerConfig.httpUrl),
-      transportOptions,
-    );
+    try {
+      return attachMcpNetworkGuard(new StreamableHTTPClientTransport(
+        new URL(mcpServerConfig.httpUrl),
+        transportOptions,
+      ), networkGuard);
+    } catch (error) {
+      await networkGuard.close();
+      throw error;
+    }
   }
 
   if (mcpServerConfig.url) {
-    const transportOptions: SSEClientTransportOptions = {};
+    const networkGuard = createMcpNetworkGuard(mcpServerConfig.url);
+    const transportOptions: SSEClientTransportOptions = {
+      fetch: networkGuard.fetch,
+    };
 
     // Set up headers with OAuth token if available
     if (hasOAuthConfig && accessToken) {
@@ -1510,10 +1551,15 @@ export async function createTransport(
       };
     }
 
-    return new SSEClientTransport(
-      new URL(mcpServerConfig.url),
-      transportOptions,
-    );
+    try {
+      return attachMcpNetworkGuard(new SSEClientTransport(
+        new URL(mcpServerConfig.url),
+        transportOptions,
+      ), networkGuard);
+    } catch (error) {
+      await networkGuard.close();
+      throw error;
+    }
   }
 
   if (mcpServerConfig.command) {

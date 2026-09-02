@@ -110,6 +110,52 @@ describe('McpPanel 安全工作流', () => {
     }));
     expect(previewMcpCreation.mock.calls[0]?.[0]).not.toHaveProperty('trust');
   });
+
+  it('不允许用旧审计或其他候选的试运行结果点亮安装按钮', () => {
+    const installReviewedMcp = vi.fn();
+    const candidate = {
+      id: 'candidate-safe', name: 'safe', description: 'safe remote', source: 'official_registry',
+      version: '1.0.0', repositoryUrl: 'https://github.com/example/safe',
+      commitSha: 'a'.repeat(40), license: 'MIT', remoteUrl: 'https://mcp.example.com/mcp',
+      environmentVariables: [], permissions: ['network'], installed: false, trust: false,
+    };
+    const report = {
+      id: 'mcp-audit-current', candidateId: candidate.id, createdAt: new Date().toISOString(),
+      installable: true, riskLevel: 'low', checks: [], permissions: ['network'],
+      environmentVariables: [], trust: false, probeStatus: 'passed',
+    };
+    const actions = {
+      refreshMcpServers: vi.fn(), removeMcpServer: vi.fn(), searchMcpCatalog: vi.fn(),
+      auditMcpCandidate: vi.fn(), probeMcpCandidate: vi.fn(), installReviewedMcp,
+      previewMcpCreation: vi.fn(), saveMcpCreationDraft: vi.fn(),
+    };
+    const state = {
+      mcpServers: [], mcpSearchCandidates: [candidate], mcpSearchQuery: '',
+      mcpAuditReport: report,
+      mcpProbeResult: {
+        auditId: 'mcp-audit-old', candidateId: 'candidate-attacker', status: 'passed',
+        transport: 'streamable_http', tools: ['read'], detail: 'forged stale result',
+      },
+      mcpCreationDraft: null, mcpSavedDraftDirectory: null,
+    };
+    const { rerender } = render(<McpPanel data={{ state, actions } as unknown as UseSettingsData} />);
+    fireEvent.click(screen.getByRole('tab', { name: '搜索 MCP' }));
+    expect(screen.queryByRole('button', { name: '确认安装（trust=false）' })).toBeNull();
+
+    rerender(<McpPanel data={{
+      state: {
+        ...state,
+        mcpProbeResult: {
+          ...state.mcpProbeResult,
+          auditId: report.id,
+          candidateId: report.candidateId,
+        },
+      },
+      actions,
+    } as unknown as UseSettingsData} />);
+    fireEvent.click(screen.getByRole('button', { name: '确认安装（trust=false）' }));
+    expect(installReviewedMcp).toHaveBeenCalledWith(report.id);
+  });
 });
 
 describe('PrefsPanel 外观与回复', () => {

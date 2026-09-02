@@ -1221,7 +1221,7 @@ export type McpCatalogResultsMsg = Envelope<
   'mcp_catalog_results',
   {
     query: string;
-    candidates: import('./mcpManagement.js').McpSearchCandidate[];
+    candidates: Array<import('./mcpManagement.js').McpSearchCandidate>;
   }
 >;
 
@@ -2241,22 +2241,7 @@ export function validateClientPayload(msg: {
       return null;
     }
     case 'mcp_add': {
-      if (!isPlainObject(p)) return 'mcp_add payload 必须是对象';
-      if (!isNonEmptyString(p['name'])) return 'name 必须是非空字符串';
-      if (p['command'] !== undefined && typeof p['command'] !== 'string')
-        return 'command 必须是字符串';
-      if (p['url'] !== undefined && typeof p['url'] !== 'string')
-        return 'url 必须是字符串';
-      if (p['httpUrl'] !== undefined && typeof p['httpUrl'] !== 'string')
-        return 'httpUrl 必须是字符串';
-      if (
-        !isNonEmptyString(p['command']) &&
-        !isNonEmptyString(p['url']) &&
-        !isNonEmptyString(p['httpUrl'])
-      ) {
-        return '必须提供 command / url / httpUrl 之一';
-      }
-      return null;
+      return 'mcp_add 旧直连安装入口已停用，请使用搜索、审计、试运行和确认安装流程';
     }
     case 'mcp_catalog_search': {
       if (!isPlainObject(p)) return 'mcp_catalog_search payload 必须是对象';
@@ -2265,14 +2250,17 @@ export function validateClientPayload(msg: {
     }
     case 'mcp_candidate_audit': {
       if (!isPlainObject(p)) return 'mcp_candidate_audit payload 必须是对象';
-      return isNonEmptyString(p['candidateId'])
+      return isNonEmptyString(p['candidateId']) && p['candidateId'].length <= 512
         ? null
-        : 'candidateId 必须是非空字符串';
+        : 'candidateId 必须是长度不超过 512 的非空字符串';
     }
     case 'mcp_candidate_probe':
     case 'mcp_install_reviewed': {
       if (!isPlainObject(p)) return `${msg.type} payload 必须是对象`;
-      if (!isNonEmptyString(p['auditId'])) return 'auditId 必须是非空字符串';
+      if (
+        !isNonEmptyString(p['auditId'])
+        || !/^mcp-audit-[a-zA-Z0-9-]{1,128}$/.test(p['auditId'])
+      ) return 'auditId 格式无效';
       return p['confirmed'] === true ? null : `${msg.type} 前必须明确确认`;
     }
     case 'mcp_creator_preview': {
@@ -2282,7 +2270,7 @@ export function validateClientPayload(msg: {
       if (!isNonEmptyString(p['sourceText'])) return 'sourceText 必须是非空字符串';
       if (p['name'].length > 100) return 'name 不能超过 100 个字符';
       if (p['description'].length > 2_000) return 'description 不能超过 2000 个字符';
-      if (p['sourceText'].length > 2_000_000) return 'sourceText 不能超过 2MB';
+      if (Buffer.byteLength(p['sourceText'], 'utf8') > 2_000_000) return 'sourceText 不能超过 2MB';
       if (!['natural_language', 'openapi', 'api_docs', 'curl'].includes(String(p['inputKind']))) {
         return 'inputKind 不受支持';
       }
@@ -2292,15 +2280,21 @@ export function validateClientPayload(msg: {
       if (
         p['environmentVariables'] !== undefined
         && (!Array.isArray(p['environmentVariables'])
-          || !p['environmentVariables'].every((value) => typeof value === 'string'))
+          || p['environmentVariables'].length > 64
+          || !p['environmentVariables'].every((value) => (
+            typeof value === 'string' && /^[A-Z_][A-Z0-9_]{0,127}$/.test(value)
+          )))
       ) {
-        return 'environmentVariables 必须是字符串数组';
+        return 'environmentVariables 必须是最多 64 个合法环境变量名';
       }
       return null;
     }
     case 'mcp_creator_save_draft': {
       if (!isPlainObject(p)) return 'mcp_creator_save_draft payload 必须是对象';
-      if (!isNonEmptyString(p['draftId'])) return 'draftId 必须是非空字符串';
+      if (
+        !isNonEmptyString(p['draftId'])
+        || !/^mcp-draft-[a-zA-Z0-9-]{1,128}$/.test(p['draftId'])
+      ) return 'draftId 格式无效';
       return p['confirmed'] === true ? null : '保存 MCP 草稿前必须明确确认';
     }
     case 'mcp_remove': {

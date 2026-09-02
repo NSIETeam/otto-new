@@ -23,7 +23,7 @@ import {
   type Server as HttpServer,
   type ServerResponse,
 } from 'node:http';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { readdirSync, statSync } from 'node:fs';
 import * as path from 'node:path';
@@ -485,8 +485,15 @@ const defaultCredentialsStore: FeishuCredentialsStore = {
  * 断开时统一清理。
  */
 interface ClientConn {
+  id: string;
   socket: WebSocket;
   subscriptions: Map<string, Unsubscribe>;
+}
+
+const MCP_EPHEMERAL_STATE_TTL_MS = 15 * 60 * 1000;
+
+function mcpStateKey(ownerId: string, itemId: string): string {
+  return JSON.stringify([ownerId, itemId]);
 }
 
 /** 排队消息（PR 2：busy 时入队等待 drain） */
@@ -590,9 +597,19 @@ export class OttoServer {
   private readonly channelIdentityRegistry: ChannelIdentityRegistryV1;
   private readonly channelPairingProviders = new Map<string, ChannelProvider>();
   /** Inert catalogue records only; never persisted and never treated as trusted. */
-  private readonly mcpSearchCandidates = new Map<string, McpSearchCandidate>();
-  private readonly mcpCreationDrafts = new Map<string, McpCreationDraft>();
+  private readonly mcpSearchCandidates = new Map<string, {
+    ownerId: string;
+    createdAt: number;
+    candidate: McpSearchCandidate;
+  }>();
+  private readonly mcpCreationDrafts = new Map<string, {
+    ownerId: string;
+    createdAt: number;
+    draft: McpCreationDraft;
+  }>();
   private readonly mcpAudits = new Map<string, {
+    ownerId: string;
+    createdAt: number;
     candidate: McpSearchCandidate;
     report: McpAuditReport;
     probe?: McpProbeResult;
@@ -1827,6 +1844,40 @@ export class OttoServer {
     });
   }
 
+  private ownedMcpState<T extends { ownerId: string; createdAt: number }>(
+    map: Map<string, T>,
+    ownerId: string,
+    itemId: string,
+  ): T | undefined {
+    const key = mcpStateKey(ownerId, itemId);
+    const state = map.get(key);
+    if (!state) return undefined;
+    if (state.ownerId !== ownerId || Date.now() - state.createdAt > MCP_EPHEMERAL_STATE_TTL_MS) {
+      map.delete(key);
+      return undefined;
+    }
+    return state;
+  }
+
+  private clearMcpStateForConnection(ownerId: string): void {
+    for (const map of [this.mcpSearchCandidates, this.mcpAudits, this.mcpCreationDrafts]) {
+      for (const [key, state] of map) {
+        if (state.ownerId === ownerId) map.delete(key);
+      }
+    }
+  }
+
+  private limitMcpStateForOwner<T extends { ownerId: string; createdAt: number }>(
+    map: Map<string, T>,
+    ownerId: string,
+    maximum: number,
+  ): void {
+    const owned = [...map.entries()]
+      .filter(([, state]) => state.ownerId === ownerId)
+      .sort((left, right) => left[1].createdAt - right[1].createdAt);
+    for (const [key] of owned.slice(0, Math.max(0, owned.length - maximum))) map.delete(key);
+  }
+
   /** Search returns inert metadata only. No package is downloaded, installed or started. */
   private async handleMcpCatalogSearch(
     conn: ClientConn,
@@ -1854,8 +1905,17 @@ export class OttoServer {
           }
         }),
       );
-      this.mcpSearchCandidates.clear();
-      for (const candidate of candidates) this.mcpSearchCandidates.set(candidate.id, candidate);
+      for (const [key, state] of this.mcpSearchCandidates) {
+        if (state.ownerId === conn.id) this.mcpSearchCandidates.delete(key);
+      }
+      const createdAt = Date.now();
+      for (const candidate of candidates) {
+        this.mcpSearchCandidates.set(mcpStateKey(conn.id, candidate.id), {
+          ownerId: conn.id,
+          createdAt,
+          candidate,
+        });
+      }
       this.send(conn.socket, {
         type: 'mcp_catalog_results',
         payload: { query: msg.payload.query, candidates },
@@ -1875,19 +1935,25 @@ export class OttoServer {
     conn: ClientConn,
     msg: Extract<ClientToServer, { type: 'mcp_candidate_audit' }>,
   ): void {
-    const candidate = this.mcpSearchCandidates.get(msg.payload.candidateId);
-    if (!candidate) {
+    const candidateState = this.ownedMcpState(
+      this.mcpSearchCandidates,
+      conn.id,
+      msg.payload.candidateId,
+    );
+    if (!candidateState) {
       return this.send(conn.socket, {
         type: 'error',
         payload: { code: 'mcp_candidate_audit_failed', message: '候选已失效，请重新搜索。' },
       });
     }
-    const report = auditMcpCandidate(candidate);
-    this.mcpAudits.set(report.id, { candidate, report });
-    if (this.mcpAudits.size > 32) {
-      const oldest = this.mcpAudits.keys().next().value as string | undefined;
-      if (oldest) this.mcpAudits.delete(oldest);
-    }
+    const report = auditMcpCandidate(candidateState.candidate);
+    this.mcpAudits.set(mcpStateKey(conn.id, report.id), {
+      ownerId: conn.id,
+      createdAt: Date.now(),
+      candidate: candidateState.candidate,
+      report,
+    });
+    this.limitMcpStateForOwner(this.mcpAudits, conn.id, 8);
     this.send(conn.socket, {
       type: 'mcp_audit_result',
       payload: report,
@@ -1898,7 +1964,7 @@ export class OttoServer {
     conn: ClientConn,
     msg: Extract<ClientToServer, { type: 'mcp_candidate_probe' }>,
   ): Promise<void> {
-    const audit = this.mcpAudits.get(msg.payload.auditId);
+    const audit = this.ownedMcpState(this.mcpAudits, conn.id, msg.payload.auditId);
     if (!audit || !audit.report.installable) {
       return this.send(conn.socket, {
         type: 'error',
@@ -1932,7 +1998,7 @@ export class OttoServer {
     conn: ClientConn,
     msg: Extract<ClientToServer, { type: 'mcp_install_reviewed' }>,
   ): void {
-    const audit = this.mcpAudits.get(msg.payload.auditId);
+    const audit = this.ownedMcpState(this.mcpAudits, conn.id, msg.payload.auditId);
     if (
       !audit
       || !audit.report.installable
@@ -1975,7 +2041,7 @@ export class OttoServer {
           // Persisted config remains the source of truth; other live sessions continue.
         }
       }
-      this.mcpAudits.delete(audit.report.id);
+      this.mcpAudits.delete(mcpStateKey(conn.id, audit.report.id));
       this.broadcastAll({ type: 'mcp_servers', payload: { servers: this.mcpServerInfos() } });
     } catch (error) {
       this.send(conn.socket, {
@@ -1994,11 +2060,12 @@ export class OttoServer {
   ): void {
     try {
       const draft = generateTypeScriptMcpDraft(msg.payload);
-      this.mcpCreationDrafts.set(draft.id, draft);
-      if (this.mcpCreationDrafts.size > 16) {
-        const oldest = this.mcpCreationDrafts.keys().next().value as string | undefined;
-        if (oldest) this.mcpCreationDrafts.delete(oldest);
-      }
+      this.mcpCreationDrafts.set(mcpStateKey(conn.id, draft.id), {
+        ownerId: conn.id,
+        createdAt: Date.now(),
+        draft,
+      });
+      this.limitMcpStateForOwner(this.mcpCreationDrafts, conn.id, 8);
       this.send(conn.socket, {
         type: 'mcp_creation_draft',
         payload: draft,
@@ -2018,8 +2085,8 @@ export class OttoServer {
     conn: ClientConn,
     msg: Extract<ClientToServer, { type: 'mcp_creator_save_draft' }>,
   ): Promise<void> {
-    const draft = this.mcpCreationDrafts.get(msg.payload.draftId);
-    if (!draft) {
+    const draftState = this.ownedMcpState(this.mcpCreationDrafts, conn.id, msg.payload.draftId);
+    if (!draftState) {
       return this.send(conn.socket, {
         type: 'error',
         payload: { code: 'mcp_creator_save_failed', message: 'MCP 草稿已失效，请重新生成预览。' },
@@ -2027,10 +2094,10 @@ export class OttoServer {
     }
     try {
       const saved = await saveMcpCreationDraft(
-        draft,
+        draftState.draft,
         path.join(homedir(), '.otto-user', 'mcp-drafts'),
       );
-      this.mcpCreationDrafts.delete(draft.id);
+      this.mcpCreationDrafts.delete(mcpStateKey(conn.id, draftState.draft.id));
       this.send(conn.socket, { type: 'mcp_creation_saved', payload: saved });
     } catch (error) {
       this.send(conn.socket, {
@@ -2046,57 +2113,15 @@ export class OttoServer {
   /** 添加/更新一个 MCP 服务器：写盘 + 即时应用到所有存活会话的 Config。 */
   private handleMcpAdd(
     conn: ClientConn,
-    msg: Extract<ClientToServer, { type: 'mcp_add' }>,
+    _msg: Extract<ClientToServer, { type: 'mcp_add' }>,
   ): void {
-    const p = msg.payload;
-    try {
-      if (p.env && Object.keys(p.env).length > 0) {
-        throw new Error('禁止把 MCP 密钥或环境变量值写入普通 settings.json；请使用加密凭据库');
-      }
-      if (p.headers && Object.keys(p.headers).length > 0) {
-        throw new Error('禁止把 MCP 请求头或令牌写入普通 settings.json；请使用加密凭据库');
-      }
-      const servers = loadMcpServers();
-      const cfg = new MCPServerConfig(
-        p.command,
-        p.args,
-        p.env,
-        p.cwd,
-        p.url,
-        p.httpUrl,
-        p.headers,
-        undefined,
-        p.timeout,
-        false,
-        p.description,
-      );
-      servers[p.name] = cfg;
-      saveMcpServers(servers);
-      for (const liveCfg of this.liveConfigs()) {
-        try {
-          liveCfg.addMcpServer(p.name, cfg);
-          void liveCfg
-            .getToolRegistry()
-            .then((registry) => registry.discoverToolsForServer(p.name))
-            .catch(() => undefined);
-        } catch {
-          // 忽略单个会话应用失败。
-        }
-      }
-      this.broadcastAll({
-        type: 'mcp_servers',
-        payload: { servers: this.mcpServerInfos() },
-      });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      this.send(conn.socket, {
-        type: 'error',
-        payload: {
-          code: 'mcp_add_failed',
-          message: `添加 MCP 服务器失败：${message}`,
-        },
-      });
-    }
+    this.send(conn.socket, {
+      type: 'error',
+      payload: {
+        code: 'mcp_add_disabled',
+        message: '旧的 MCP 直连安装入口已停用；必须使用搜索、审计、无副作用试运行和用户确认流程。',
+      },
+    });
   }
 
   /** 移除一个 MCP 服务器：写盘 + 即时从所有存活会话的 Config 移除。 */
@@ -3458,7 +3483,7 @@ export class OttoServer {
   // ──────────────────────────────────────────────────────────────────────
 
   private handleConnection(socket: WebSocket): void {
-    const conn: ClientConn = { socket, subscriptions: new Map() };
+    const conn: ClientConn = { id: randomUUID(), socket, subscriptions: new Map() };
     this.conns.add(conn);
 
     this.send(socket, {
@@ -3508,6 +3533,7 @@ export class OttoServer {
       for (const unsub of conn.subscriptions.values()) unsub();
       conn.subscriptions.clear();
       this.conns.delete(conn);
+      this.clearMcpStateForConnection(conn.id);
       // 断开即止损：该连接订阅过的会话若已无其他存活连接在看，取消其正在跑的轮次
       // （否则关窗后 agent 继续烧 token；maxTurns=-1 不限回合）。
       for (const sessionId of subscribedIds) {

@@ -517,6 +517,77 @@ describe('validateClientPayload：MCP 候选与草稿', () => {
       payload: { draftId: 'mcp-draft-123', confirmed: false },
     })).not.toBeNull();
   });
+
+  it('拒绝旧直连安装入口、超长句柄和环境变量洪泛', () => {
+    expect(validateClientPayload({
+      type: 'mcp_add',
+      payload: { name: 'bypass', command: 'node', args: ['evil.js'] },
+    })).toContain('停用');
+    expect(validateClientPayload({
+      type: 'mcp_candidate_audit',
+      payload: { candidateId: 'x'.repeat(513) },
+    })).toContain('candidateId');
+    expect(validateClientPayload({
+      type: 'mcp_candidate_probe',
+      payload: { auditId: `mcp-audit-${'a'.repeat(500)}`, confirmed: true },
+    })).toContain('auditId');
+    expect(validateClientPayload({
+      type: 'mcp_creator_preview',
+      payload: {
+        name: 'orders', description: 'orders', inputKind: 'natural_language',
+        sourceText: 'create a server', transport: 'stdio',
+        environmentVariables: Array.from({ length: 65 }, (_, index) => `TOKEN_${index}`),
+      },
+    })).toContain('environmentVariables');
+    expect(validateClientPayload({
+      type: 'mcp_creator_preview',
+      payload: {
+        name: 'orders', description: 'orders', inputKind: 'natural_language',
+        sourceText: 'create a server', transport: 'stdio',
+        environmentVariables: ['PATH=attacker'],
+      },
+    })).toContain('environmentVariables');
+  });
+
+  it('只接受服务器生成格式的审计和草稿句柄', () => {
+    expect(validateClientPayload({
+      type: 'mcp_candidate_probe',
+      payload: { auditId: 'audit-from-other-system', confirmed: true },
+    })).toContain('auditId');
+    expect(validateClientPayload({
+      type: 'mcp_creator_save_draft',
+      payload: { draftId: '../../draft', confirmed: true },
+    })).toContain('draftId');
+  });
+
+  it('按 UTF-8 字节而不是 JavaScript 字符数限制 MCP 生成输入', () => {
+    expect(validateClientPayload({
+      type: 'mcp_creator_preview',
+      payload: {
+        name: 'orders', description: 'orders', inputKind: 'api_docs',
+        sourceText: '😀'.repeat(600_000), transport: 'stdio',
+      },
+    })).toContain('2MB');
+  });
+
+  it('对 1000 组确定性畸形 MCP payload fail closed 且验证器不崩溃', () => {
+    let seed = 0x5eed1234;
+    const next = () => {
+      seed = (seed * 1_664_525 + 1_013_904_223) >>> 0;
+      return seed;
+    };
+    const values: unknown[] = [null, false, true, -1, 0, Number.NaN, '', 'x', [], {}, { nested: [] }];
+    const types = [
+      'mcp_catalog_search', 'mcp_candidate_audit', 'mcp_candidate_probe',
+      'mcp_install_reviewed', 'mcp_creator_preview', 'mcp_creator_save_draft', 'mcp_add',
+    ] as const;
+    for (let index = 0; index < 1_000; index += 1) {
+      const type = types[next() % types.length]!;
+      const payload = values[next() % values.length];
+      expect(() => validateClientPayload({ type, payload } as never)).not.toThrow();
+      expect(validateClientPayload({ type, payload } as never)).not.toBeNull();
+    }
+  });
 });
 
 describe('validateClientPayload：工作目录', () => {

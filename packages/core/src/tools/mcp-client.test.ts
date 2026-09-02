@@ -125,7 +125,7 @@ describe('mcp-client', () => {
     });
 
     it('should connect via httpUrl > without headers', async () => {
-      const config = new MCPServerConfig(undefined, undefined, undefined, undefined, undefined, 'http://test-server');
+      const config = new MCPServerConfig(undefined, undefined, undefined, undefined, undefined, 'https://test-server.example');
       await createTransport('server1', config, false);
 
       expect(StreamableHTTPClientTransport).toHaveBeenCalled();
@@ -139,7 +139,7 @@ describe('mcp-client', () => {
         undefined,
         undefined,
         undefined,
-        'http://test-server',
+        'https://test-server.example',
         headers,
       );
       await createTransport('server1', config, false);
@@ -148,7 +148,7 @@ describe('mcp-client', () => {
     });
 
     it('should connect via url > without headers', async () => {
-      const config = new MCPServerConfig(undefined, undefined, undefined, undefined, 'http://test-server');
+      const config = new MCPServerConfig(undefined, undefined, undefined, undefined, 'https://test-server.example');
       await createTransport('server1', config, false);
 
       expect(SSEClientTransport).toHaveBeenCalled();
@@ -161,13 +161,20 @@ describe('mcp-client', () => {
         undefined,
         undefined,
         undefined,
-        'http://test-server',
+        'https://test-server.example',
         undefined,
         headers,
       );
       await createTransport('server1', config, false);
 
       expect(SSEClientTransport).toHaveBeenCalled();
+    });
+
+    it('rejects insecure or private remote transports before the SDK can connect', async () => {
+      const insecure = new MCPServerConfig(undefined, undefined, undefined, undefined, undefined, 'http://mcp.example.com');
+      const privateNetwork = new MCPServerConfig(undefined, undefined, undefined, undefined, undefined, 'https://127.0.0.1/mcp');
+      await expect(createTransport('insecure', insecure, false)).rejects.toThrow(/HTTPS/i);
+      await expect(createTransport('private', privateNetwork, false)).rejects.toThrow(/public|blocked/i);
     });
 
     it('should connect via command', async () => {

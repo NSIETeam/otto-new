@@ -11,6 +11,7 @@ import open from 'open';
 import { MCPOAuthToken, MCPOAuthTokenStorage } from './oauth-token-storage.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { OAuthUtils } from './oauth-utils.js';
+import { fetchMcpNetworkText } from '../tools/mcp-network-security.js';
 
 /**
  * OAuth configuration for an MCP server.
@@ -116,7 +117,7 @@ export class MCPOAuthProvider {
       scope: config.scopes?.join(' ') || '',
     };
 
-    const response = await fetch(registrationUrl, {
+    const response = await fetchMcpNetworkText(registrationUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -125,13 +126,12 @@ export class MCPOAuthProvider {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
       throw new Error(
-        `Client registration failed: ${response.status} ${response.statusText} - ${errorText}`,
+        `Client registration failed: ${response.status} ${response.statusText} - ${response.text}`,
       );
     }
 
-    return (await response.json()) as OAuthClientRegistrationResponse;
+    return JSON.parse(response.text) as OAuthClientRegistrationResponse;
   }
 
   /**
@@ -353,7 +353,7 @@ export class MCPOAuthProvider {
       OAuthUtils.buildResourceParameter(config.tokenUrl!),
     );
 
-    const response = await fetch(config.tokenUrl!, {
+    const response = await fetchMcpNetworkText(config.tokenUrl!, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -362,13 +362,12 @@ export class MCPOAuthProvider {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
       throw new Error(
-        `Token exchange failed: ${response.status} - ${errorText}`,
+        `Token exchange failed: ${response.status} - ${response.text}`,
       );
     }
 
-    return (await response.json()) as OAuthTokenResponse;
+    return JSON.parse(response.text) as OAuthTokenResponse;
   }
 
   /**
@@ -400,7 +399,7 @@ export class MCPOAuthProvider {
     // Add resource parameter for MCP OAuth spec compliance
     params.append('resource', OAuthUtils.buildResourceParameter(tokenUrl));
 
-    const response = await fetch(tokenUrl, {
+    const response = await fetchMcpNetworkText(tokenUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -409,13 +408,12 @@ export class MCPOAuthProvider {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
       throw new Error(
-        `Token refresh failed: ${response.status} - ${errorText}`,
+        `Token refresh failed: ${response.status} - ${response.text}`,
       );
     }
 
-    return (await response.json()) as OAuthTokenResponse;
+    return JSON.parse(response.text) as OAuthTokenResponse;
   }
 
   /**
@@ -441,7 +439,7 @@ export class MCPOAuthProvider {
       // For SSE URLs, first check if authentication is required
       if (OAuthUtils.isSSEEndpoint(mcpServerUrl)) {
         try {
-          const response = await fetch(mcpServerUrl, {
+          const response = await fetchMcpNetworkText(mcpServerUrl, {
             method: 'HEAD',
             headers: {
               Accept: 'text/event-stream',

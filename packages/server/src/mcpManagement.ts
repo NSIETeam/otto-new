@@ -7,10 +7,16 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
 import { isAbsolute, resolve, sep } from 'node:path';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { Agent } from 'undici';
+
+const MAX_CATALOG_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_PROBE_RESPONSE_BYTES = 1024 * 1024;
+const MAX_PROBE_TOOLS = 512;
+const MAX_TOOL_NAME_LENGTH = 128;
 
 export type McpRiskLevel = 'low' | 'medium' | 'high' | 'critical';
 export type McpPermission =
@@ -108,6 +114,15 @@ export interface McpCreationDraft {
 
 type JsonRecord = Record<string, unknown>;
 
+export interface PublicMcpEndpoint {
+  hostname: string;
+  addresses: Array<{ address: string; family: number }>;
+}
+
+type EndpointLookup = (
+  hostname: string,
+) => Promise<Array<{ address: string; family: number }>>;
+
 function record(value: unknown): JsonRecord | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as JsonRecord
@@ -120,6 +135,42 @@ function string(value: unknown): string | undefined {
 
 function array(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+async function readTextLimited(response: Response, maxBytes: number): Promise<string> {
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new Error(`untrusted response is too large (limit ${maxBytes} bytes)`);
+  }
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let output = '';
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel('response size limit exceeded');
+        throw new Error(`untrusted response is too large (limit ${maxBytes} bytes)`);
+      }
+      output += decoder.decode(chunk.value, { stream: true });
+    }
+    return output + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function readJsonLimited(response: Response, maxBytes: number): Promise<unknown> {
+  const text = await readTextLimited(response, maxBytes);
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error('untrusted endpoint returned invalid JSON');
+  }
 }
 
 function safeName(value: string): string {
@@ -194,7 +245,7 @@ export async function searchOfficialMcpRegistry(
     signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) throw new Error(`MCP Registry returned HTTP ${response.status}`);
-  return normalizeRegistryResponse(await response.json());
+  return normalizeRegistryResponse(await readJsonLimited(response, MAX_CATALOG_RESPONSE_BYTES));
 }
 
 export function normalizeGitHubSearchResponse(payload: unknown): McpSearchCandidate[] {
@@ -238,7 +289,7 @@ export async function searchGitHubMcpRepositories(
     signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) throw new Error(`GitHub search returned HTTP ${response.status}`);
-  return normalizeGitHubSearchResponse(await response.json());
+  return normalizeGitHubSearchResponse(await readJsonLimited(response, MAX_CATALOG_RESPONSE_BYTES));
 }
 
 /** Resolve immutable GitHub evidence without downloading or executing code. */
@@ -256,13 +307,15 @@ export async function enrichCandidateFromGitHub(
     signal: AbortSignal.timeout(12_000),
   });
   if (!repoResponse.ok) return candidate;
-  const repoMeta = record(await repoResponse.json());
+  const repoMeta = record(await readJsonLimited(repoResponse, MAX_CATALOG_RESPONSE_BYTES));
   const ref = candidate.version !== 'unknown' ? candidate.version : string(repoMeta?.['default_branch']) ?? 'HEAD';
   const commitResponse = await fetchImpl(
     `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}`,
     { headers, signal: AbortSignal.timeout(12_000) },
   );
-  const commitMeta = commitResponse.ok ? record(await commitResponse.json()) : undefined;
+  const commitMeta = commitResponse.ok
+    ? record(await readJsonLimited(commitResponse, MAX_CATALOG_RESPONSE_BYTES))
+    : undefined;
   const license = string(record(repoMeta?.['license'])?.['spdx_id']);
   return {
     ...candidate,
@@ -287,6 +340,18 @@ function inferPermissions(
   return [...permissions];
 }
 
+function verifiableLicense(value: string | undefined): value is string {
+  if (
+    !value
+    || value.length > 200
+    || value.includes('\r')
+    || value.includes('\n')
+    || value.includes('\0')
+  ) return false;
+  if (['NOASSERTION', 'UNKNOWN', 'OTHER', 'SEE LICENSE IN README'].includes(value.toUpperCase())) return false;
+  return /^[A-Za-z0-9][A-Za-z0-9.+-]*(?:\s+(?:AND|OR|WITH)\s+[A-Za-z0-9][A-Za-z0-9.+-]*)*$/.test(value);
+}
+
 export function auditMcpCandidate(candidate: McpSearchCandidate): McpAuditReport {
   const permissions = [...new Set([
     ...candidate.permissions,
@@ -299,9 +364,9 @@ export function auditMcpCandidate(candidate: McpSearchCandidate): McpAuditReport
     candidate.commitSha && /^[a-f0-9]{40}$/i.test(candidate.commitSha)
       ? { id: 'commit', label: '不可变提交', status: 'passed', detail: candidate.commitSha }
       : { id: 'commit', label: '不可变提交', status: 'blocked', detail: '尚未固定到 40 位 Git 提交哈希。' },
-    candidate.license
+    verifiableLicense(candidate.license)
       ? { id: 'license', label: '许可证', status: 'passed', detail: candidate.license }
-      : { id: 'license', label: '许可证', status: 'blocked', detail: '未获得可验证的 SPDX 许可证信息。' },
+      : { id: 'license', label: '许可证', status: 'blocked', detail: '未获得可验证的 SPDX 许可证标识或表达式。' },
     candidate.remoteUrl
       ? {
           id: 'dependencies',
@@ -349,36 +414,150 @@ export function auditMcpCandidate(candidate: McpSearchCandidate): McpAuditReport
   };
 }
 
-function privateIp(address: string): boolean {
-  if (address === '::1' || address === '0.0.0.0' || address === '::') return true;
-  if (address.startsWith('10.') || address.startsWith('127.') || address.startsWith('169.254.') || address.startsWith('192.168.')) return true;
-  const parts = address.split('.').map(Number);
-  if (parts.length === 4 && parts[0] === 172 && parts[1]! >= 16 && parts[1]! <= 31) return true;
-  return address.startsWith('fc') || address.startsWith('fd') || address.startsWith('fe80:');
+function ipv4Number(address: string): number | undefined {
+  const parts = address.split('.');
+  if (parts.length !== 4) return undefined;
+  const octets = parts.map((part) => Number(part));
+  if (octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return undefined;
+  return (((octets[0]! << 24) >>> 0) + (octets[1]! << 16) + (octets[2]! << 8) + octets[3]!) >>> 0;
 }
 
-async function assertPublicRemote(url: URL): Promise<void> {
+function inIpv4Cidr(value: number, base: number, prefix: number): boolean {
+  const mask = prefix === 0 ? 0 : (0xffff_ffff << (32 - prefix)) >>> 0;
+  return (value & mask) === (base & mask);
+}
+
+function ipv6Number(address: string): bigint | undefined {
+  const clean = address.toLowerCase().split('%')[0]!;
+  const mappedIpv4 = clean.match(/^(.*:)(\d+\.\d+\.\d+\.\d+)$/);
+  let expanded = clean;
+  if (mappedIpv4) {
+    const ipv4 = ipv4Number(mappedIpv4[2]!);
+    if (ipv4 === undefined) return undefined;
+    expanded = `${mappedIpv4[1]}${(ipv4 >>> 16).toString(16)}:${(ipv4 & 0xffff).toString(16)}`;
+  }
+  if ((expanded.match(/::/g) ?? []).length > 1) return undefined;
+  const [leftRaw, rightRaw] = expanded.split('::');
+  const left = leftRaw ? leftRaw.split(':') : [];
+  const right = rightRaw ? rightRaw.split(':') : [];
+  if (!expanded.includes('::') && left.length !== 8) return undefined;
+  const missing = 8 - left.length - right.length;
+  if (missing < 0 || (missing === 0 && expanded.includes('::'))) return undefined;
+  const parts = [...left, ...Array.from({ length: missing }, () => '0'), ...right];
+  if (parts.length !== 8 || parts.some((part) => !/^[0-9a-f]{1,4}$/.test(part))) return undefined;
+  return parts.reduce((value, part) => (value << 16n) | BigInt(`0x${part}`), 0n);
+}
+
+function inIpv6Cidr(value: bigint, base: bigint, prefix: number): boolean {
+  const shift = BigInt(128 - prefix);
+  return (value >> shift) === (base >> shift);
+}
+
+function nonPublicAddress(addressInput: string): boolean {
+  const address = addressInput.startsWith('[') && addressInput.endsWith(']')
+    ? addressInput.slice(1, -1)
+    : addressInput;
+  const family = isIP(address);
+  if (family === 4) {
+    const value = ipv4Number(address);
+    if (value === undefined) return true;
+    const blocked: Array<[string, number]> = [
+      ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
+      ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
+      ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],
+      ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
+    ];
+    return blocked.some(([base, prefix]) => inIpv4Cidr(value, ipv4Number(base)!, prefix));
+  }
+  if (family !== 6) return true;
+  const value = ipv6Number(address);
+  if (value === undefined) return true;
+  const mappedPrefix = ipv6Number('::ffff:0:0')!;
+  if (inIpv6Cidr(value, mappedPrefix, 96)) {
+    return nonPublicAddress(Number(value & 0xffff_ffffn)
+      .toString(16)
+      .padStart(8, '0')
+      .match(/.{2}/g)!
+      .map((part) => Number.parseInt(part, 16))
+      .join('.'));
+  }
+  const globallyRouted = inIpv6Cidr(value, ipv6Number('2000::')!, 3);
+  if (!globallyRouted) return true;
+  return [
+    ['2001:2::', 48],
+    ['2001:10::', 28],
+    ['2001:db8::', 32],
+  ].some(([base, prefix]) => inIpv6Cidr(value, ipv6Number(base as string)!, prefix as number));
+}
+
+/** Resolve and validate every DNS answer before an MCP request is allowed. */
+export async function resolvePublicMcpEndpoint(
+  url: URL,
+  lookupImpl: EndpointLookup = async (hostname) => lookup(hostname, { all: true, verbatim: true }),
+): Promise<PublicMcpEndpoint> {
   if (url.protocol !== 'https:') throw new Error('remote MCP probe requires HTTPS');
   if (url.username || url.password) throw new Error('credentials are forbidden in MCP URL');
-  if (url.hostname === 'localhost' || url.hostname.endsWith('.localhost')) throw new Error('localhost MCP probe is blocked');
-  const addresses = isIP(url.hostname)
-    ? [{ address: url.hostname }]
-    : await lookup(url.hostname, { all: true, verbatim: true });
-  if (addresses.length === 0 || addresses.some((entry) => privateIp(entry.address))) {
-    throw new Error('private or unresolved MCP endpoint is blocked');
+  const hostname = url.hostname.startsWith('[') && url.hostname.endsWith(']')
+    ? url.hostname.slice(1, -1)
+    : url.hostname;
+  if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost')) {
+    throw new Error('localhost MCP probe is blocked');
   }
+  const addresses = isIP(hostname)
+    ? [{ address: hostname, family: isIP(hostname) }]
+    : await lookupImpl(hostname);
+  if (addresses.length === 0 || addresses.some((entry) => nonPublicAddress(entry.address))) {
+    throw new Error('non-public or unresolved MCP endpoint is blocked');
+  }
+  return { hostname, addresses };
 }
 
-function jsonRpcPayload(text: string): JsonRecord {
+function pinnedEndpointDispatcher(endpoint: PublicMcpEndpoint): Agent {
+  const expectedHostname = endpoint.hostname.toLowerCase();
+  return new Agent({
+    connect: {
+      lookup(hostname, options, callback) {
+        if (hostname.toLowerCase() !== expectedHostname) {
+          if (options.all) callback(new Error('MCP DNS lookup escaped the audited hostname'), []);
+          else callback(new Error('MCP DNS lookup escaped the audited hostname'), '', 4);
+          return;
+        }
+        const requestedFamily = typeof options.family === 'number' ? options.family : 0;
+        const choices = requestedFamily === 4 || requestedFamily === 6
+          ? endpoint.addresses.filter((entry) => entry.family === requestedFamily)
+          : endpoint.addresses;
+        if (choices.length === 0) {
+          if (options.all) callback(new Error('MCP endpoint has no audited address for the requested family'), []);
+          else callback(new Error('MCP endpoint has no audited address for the requested family'), '', 4);
+          return;
+        }
+        if (options.all) {
+          callback(null, choices);
+          return;
+        }
+        const selected = choices[0]!;
+        callback(null, selected.address, selected.family);
+      },
+    },
+  });
+}
+
+function jsonRpcPayload(text: string, expectedId: number): JsonRecord {
   const trimmed = text.trim();
   if (!trimmed) throw new Error('empty MCP response');
-  if (trimmed.startsWith('{')) return record(JSON.parse(trimmed)) ?? {};
+  const candidates: JsonRecord[] = [];
+  if (trimmed.startsWith('{')) candidates.push(record(JSON.parse(trimmed)) ?? {});
   for (const line of trimmed.split(/\r?\n/)) {
     if (!line.startsWith('data:')) continue;
     const value = line.slice(5).trim();
-    if (value.startsWith('{')) return record(JSON.parse(value)) ?? {};
+    if (value.startsWith('{')) candidates.push(record(JSON.parse(value)) ?? {});
   }
-  throw new Error('unsupported MCP response format');
+  const payload = candidates.find((item) => item['id'] === expectedId);
+  if (!payload) throw new Error('MCP JSON-RPC response id does not match request');
+  if (payload['jsonrpc'] !== '2.0') throw new Error('invalid MCP JSON-RPC protocol version');
+  if (payload['error'] !== undefined) throw new Error('MCP JSON-RPC error response');
+  if (!record(payload['result'])) throw new Error('MCP JSON-RPC response has no result object');
+  return payload;
 }
 
 /**
@@ -388,21 +567,25 @@ function jsonRpcPayload(text: string): JsonRecord {
 export async function probeRemoteMcpCandidate(
   candidate: McpSearchCandidate,
   fetchImpl: typeof fetch = fetch,
-  publicEndpointCheck: (url: URL) => Promise<void> = assertPublicRemote,
+  publicEndpointCheck: (url: URL) => Promise<PublicMcpEndpoint> = resolvePublicMcpEndpoint,
 ): Promise<McpProbeResult> {
   if (!candidate.remoteUrl) throw new Error('candidate has no Streamable HTTP endpoint');
   if (candidate.environmentVariables.some((item) => item.required)) {
     throw new Error('probe with real credentials is forbidden');
   }
   const url = new URL(candidate.remoteUrl);
-  await publicEndpointCheck(url);
+  const publicEndpoint = await publicEndpointCheck(url);
+  const dispatcher = fetchImpl === fetch ? pinnedEndpointDispatcher(publicEndpoint) : undefined;
+  const guardedFetch: typeof fetch = dispatcher
+    ? ((input, init) => fetch(input, { ...init, dispatcher } as RequestInit))
+    : fetchImpl;
   const headers: Record<string, string> = {
     Accept: 'application/json, text/event-stream',
     'Content-Type': 'application/json',
     'MCP-Protocol-Version': '2025-06-18',
   };
   const send = async (method: string, id: number, params?: JsonRecord): Promise<{ payload: JsonRecord; response: Response }> => {
-    const response = await fetchImpl(url, {
+    const response = await guardedFetch(url, {
       method: 'POST',
       redirect: 'error',
       headers,
@@ -410,31 +593,45 @@ export async function probeRemoteMcpCandidate(
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`MCP ${method} returned HTTP ${response.status}`);
-    return { payload: jsonRpcPayload(await response.text()), response };
+    return {
+      payload: jsonRpcPayload(await readTextLimited(response, MAX_PROBE_RESPONSE_BYTES), id),
+      response,
+    };
   };
-  const initialized = await send('initialize', 1, {
-    protocolVersion: '2025-06-18',
-    capabilities: {},
-    clientInfo: { name: 'otto-mcp-audit-probe', version: '1.0.0' },
-  });
-  const sessionId = initialized.response.headers.get('mcp-session-id');
-  if (sessionId) headers['Mcp-Session-Id'] = sessionId;
-  const listed = await send('tools/list', 2, {});
-  const initResult = record(initialized.payload['result']);
-  const toolResult = record(listed.payload['result']);
-  const tools = array(toolResult?.['tools']).flatMap((value) => {
-    const name = string(record(value)?.['name']);
-    return name ? [name] : [];
-  });
-  return {
-    candidateId: candidate.id,
-    status: 'passed',
-    transport: 'streamable_http',
-    tools,
-    ...(string(record(initResult?.['serverInfo'])?.['name']) ? { serverName: string(record(initResult?.['serverInfo'])?.['name']) } : {}),
-    ...(string(record(initResult?.['serverInfo'])?.['version']) ? { serverVersion: string(record(initResult?.['serverInfo'])?.['version']) } : {}),
-    detail: `initialize 与 tools/list 通过；发现 ${tools.length} 个工具，未调用任何工具。`,
-  };
+  try {
+    const initialized = await send('initialize', 1, {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'otto-mcp-audit-probe', version: '1.0.0' },
+    });
+    const sessionId = initialized.response.headers.get('mcp-session-id');
+    if (sessionId) {
+      if (!/^[\x21-\x7e]{1,256}$/.test(sessionId)) throw new Error('invalid MCP session id');
+      headers['Mcp-Session-Id'] = sessionId;
+    }
+    const listed = await send('tools/list', 2, {});
+    const initResult = record(initialized.payload['result']);
+    const toolResult = record(listed.payload['result']);
+    const rawTools = array(toolResult?.['tools']);
+    if (rawTools.length > MAX_PROBE_TOOLS) throw new Error('MCP tools/list exceeded tool limit');
+    const tools = [...new Set(rawTools.flatMap((value) => {
+      const name = string(record(value)?.['name']);
+      if (!name) return [];
+      if (name.length > MAX_TOOL_NAME_LENGTH) throw new Error('MCP tool name exceeds length limit');
+      return [name];
+    }))];
+    return {
+      candidateId: candidate.id,
+      status: 'passed',
+      transport: 'streamable_http',
+      tools,
+      ...(string(record(initResult?.['serverInfo'])?.['name']) ? { serverName: string(record(initResult?.['serverInfo'])?.['name']) } : {}),
+      ...(string(record(initResult?.['serverInfo'])?.['version']) ? { serverVersion: string(record(initResult?.['serverInfo'])?.['version']) } : {}),
+      detail: `initialize 与 tools/list 通过；发现 ${tools.length} 个工具，未调用任何工具。`,
+    };
+  } finally {
+    if (dispatcher) await dispatcher.close();
+  }
 }
 
 function parseOpenApiOperations(sourceText: string): McpDraftOperation[] {
@@ -489,9 +686,18 @@ function sourceForDraft(
 
 /** Generate an inert preview; the caller decides whether to write the draft directory. */
 export function generateTypeScriptMcpDraft(input: McpCreatorInput): McpCreationDraft {
+  if (!input.name.trim() || input.name.length > 100) throw new Error('invalid MCP draft name');
+  if (!input.description.trim() || input.description.length > 2_000) throw new Error('invalid MCP draft description');
+  if (!input.sourceText.trim() || Buffer.byteLength(input.sourceText, 'utf8') > 2_000_000) {
+    throw new Error('MCP draft source is empty or exceeds 2MB');
+  }
+  if ((input.environmentVariables?.length ?? 0) > 64) {
+    throw new Error('MCP draft has too many environment variables');
+  }
   const name = safeName(input.name);
   const env = [...new Set((input.environmentVariables ?? []).map((item) => item.trim()).filter((item) => /^[A-Z][A-Z0-9_]*$/.test(item)))];
   const operations = input.inputKind === 'openapi' ? parseOpenApiOperations(input.sourceText) : [];
+  if (operations.length > 256) throw new Error('MCP draft operation limit exceeded');
   const sourceHash = createHash('sha256').update(input.sourceText).digest('hex');
   const files = [
     {
@@ -570,17 +776,45 @@ export async function saveMcpCreationDraft(
   draftRoot: string,
 ): Promise<{ draftId: string; directory: string }> {
   await mkdir(draftRoot, { recursive: true, mode: 0o700 });
+  const rootStat = await lstat(draftRoot);
+  if (rootStat.isSymbolicLink()) throw new Error('MCP draft root must not be a symbolic link');
+  const root = resolve(draftRoot);
+  const canonicalRoot = await realpath(draftRoot);
+  if (process.platform === 'win32'
+    ? canonicalRoot.toLowerCase() !== root.toLowerCase()
+    : canonicalRoot !== root) {
+    throw new Error('MCP draft root resolves through a link or alias');
+  }
   if (!/^mcp-draft-[0-9a-f-]{36}$/i.test(draft.id)) {
     throw new Error('invalid MCP draft id');
   }
+  if (draft.files.length === 0 || draft.files.length > 64) {
+    throw new Error('MCP draft has too many files or no files');
+  }
+  const draftPaths = new Set<string>();
+  let totalBytes = 0;
+  for (const file of draft.files) {
+    if (
+      !file.path
+      || file.path.length > 240
+      || isAbsolute(file.path)
+      || file.path.split(/[\\/]/).includes('..')
+      || file.path === 'draft-manifest.json'
+    ) {
+      throw new Error(`invalid MCP draft file path: ${file.path}`);
+    }
+    const normalizedPath = file.path.replace(/\\/g, '/').toLowerCase();
+    if (draftPaths.has(normalizedPath)) throw new Error(`duplicate MCP draft file path: ${file.path}`);
+    draftPaths.add(normalizedPath);
+    const bytes = Buffer.byteLength(file.content, 'utf8');
+    if (bytes > 2_000_000) throw new Error(`MCP draft file is too large: ${file.path}`);
+    totalBytes += bytes;
+    if (totalBytes > 10_000_000) throw new Error('MCP draft total file size limit exceeded');
+  }
   const directory = resolve(draftRoot, draft.id);
-  const root = resolve(draftRoot);
   if (!directory.startsWith(`${root}${sep}`)) throw new Error('MCP draft path escaped draft root');
   await mkdir(directory, { recursive: false, mode: 0o700 });
   for (const file of draft.files) {
-    if (!file.path || isAbsolute(file.path) || file.path.split(/[\\/]/).includes('..')) {
-      throw new Error(`invalid MCP draft file path: ${file.path}`);
-    }
     const target = resolve(directory, file.path);
     if (!target.startsWith(`${directory}${sep}`)) throw new Error('MCP draft file escaped draft directory');
     await mkdir(resolve(target, '..'), { recursive: true, mode: 0o700 });

@@ -261,19 +261,6 @@ export interface SettingsDataActions {
     environmentVariables?: string[];
   }): void;
   saveMcpCreationDraft(draftId: string): void;
-  addMcpServer(payload: {
-    name: string;
-    command?: string;
-    args?: string[];
-    env?: Record<string, string>;
-    cwd?: string;
-    url?: string;
-    httpUrl?: string;
-    headers?: Record<string, string>;
-    timeout?: number;
-    trust?: boolean;
-    description?: string;
-  }): void;
   removeMcpServer(name: string): void;
   refreshContextBreakdown(sessionId: string): void;
   runDoctor(): void;
@@ -387,10 +374,6 @@ export function useSettingsData(activeSessionId?: string | null): UseSettingsDat
     transport.send({ type: 'mcp_creator_save_draft', payload: { draftId, confirmed: true } });
   }, []);
 
-  const addMcpServer = useCallback<SettingsDataActions['addMcpServer']>((payload) => {
-    transport.send({ type: 'mcp_add', payload });
-  }, []);
-
   const removeMcpServer = useCallback((name: string) => {
     transport.send({ type: 'mcp_remove', payload: { name } });
   }, []);
@@ -495,7 +478,6 @@ export function useSettingsData(activeSessionId?: string | null): UseSettingsDat
       installReviewedMcp,
       previewMcpCreation,
       saveMcpCreationDraft,
-      addMcpServer,
       removeMcpServer,
       refreshContextBreakdown,
       runDoctor,

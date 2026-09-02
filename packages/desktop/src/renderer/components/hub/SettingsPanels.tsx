@@ -505,7 +505,9 @@ export function McpPanel({ data }: { data: UseSettingsData }): React.JSX.Element
               </button>
               {!auditedCandidate?.remoteUrl ? <p className="otto-mcp__notice">该候选没有公开 Streamable HTTP 入口；本机进程型 MCP 在具备真正 OS 沙箱前不会下载或运行。</p> : null}
               {auditedCandidate?.environmentVariables.some((item) => item.required) ? <p className="otto-mcp__notice">该候选需要凭据；在系统加密凭据库完成配置前，不会试运行或安装。</p> : null}
-              {state.mcpProbeResult ? (
+              {state.mcpProbeResult
+                && state.mcpProbeResult.auditId === state.mcpAuditReport.id
+                && state.mcpProbeResult.candidateId === state.mcpAuditReport.candidateId ? (
                 <div className="otto-mcp__probe">
                   <p><strong>隔离测试：</strong>{state.mcpProbeResult.detail}</p>
                   {state.mcpProbeResult.status === 'passed' ? (

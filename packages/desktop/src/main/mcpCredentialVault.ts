@@ -6,8 +6,13 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, open, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+
+const MAX_VAULT_BYTES = 1024 * 1024;
+const MAX_CREDENTIALS = 512;
+const MAX_SECRET_BYTES = 64 * 1024;
+const MAX_PROTECTED_VALUE_LENGTH = 256 * 1024;
 
 interface StoredCredential {
   serverName: string;
@@ -35,7 +40,8 @@ export interface McpCredentialVaultOptions {
 
 function validateServerName(value: string): string {
   const clean = value.trim();
-  if (!clean || clean.length > 200 || /[\u0000-\u001f]/.test(clean)) {
+  const hasControlCharacter = Array.from(clean).some((character) => character.charCodeAt(0) <= 0x1f);
+  if (!clean || clean.length > 200 || hasControlCharacter) {
     throw new Error('invalid MCP server name');
   }
   return clean;
@@ -66,13 +72,49 @@ export class McpCredentialVault {
   constructor(private readonly options: McpCredentialVaultOptions) {}
 
   private async read(): Promise<VaultFile> {
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
-      const parsed = JSON.parse(await readFile(this.options.filePath, 'utf8')) as Partial<VaultFile>;
+      handle = await open(this.options.filePath, 'r');
+      const fileStat = await handle.stat();
+      if (fileStat.size > MAX_VAULT_BYTES) throw new Error('MCP credential vault is too large');
+      const parsed = JSON.parse(await handle.readFile('utf8')) as Partial<VaultFile>;
       if (parsed.version !== 1 || !Array.isArray(parsed.credentials)) throw new Error('invalid vault');
-      return { version: 1, credentials: parsed.credentials };
+      if (parsed.credentials.length > MAX_CREDENTIALS) throw new Error('MCP credential vault has too many entries');
+      const credentials: StoredCredential[] = [];
+      const identities = new Set<string>();
+      for (const raw of parsed.credentials) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid MCP credential vault entry');
+        const entry = raw as Partial<StoredCredential>;
+        if (
+          typeof entry.serverName !== 'string'
+          || typeof entry.variableName !== 'string'
+          || typeof entry.environmentAlias !== 'string'
+          || typeof entry.protectedValue !== 'string'
+          || entry.protectedValue.length === 0
+          || entry.protectedValue.length > MAX_PROTECTED_VALUE_LENGTH
+        ) {
+          throw new Error('invalid MCP credential vault entry');
+        }
+        const serverName = validateServerName(entry.serverName);
+        const variableName = validateVariableName(entry.variableName);
+        if (serverName !== entry.serverName || variableName !== entry.variableName) {
+          throw new Error('MCP credential vault contains non-canonical identity data');
+        }
+        const expectedAlias = aliasFor(serverName, variableName);
+        if (entry.environmentAlias !== expectedAlias) {
+          throw new Error('MCP credential vault alias was tampered with');
+        }
+        const identity = `${serverName}\0${variableName}`;
+        if (identities.has(identity)) throw new Error('MCP credential vault contains duplicate credentials');
+        identities.add(identity);
+        credentials.push({ serverName, variableName, environmentAlias: expectedAlias, protectedValue: entry.protectedValue });
+      }
+      return { version: 1, credentials };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, credentials: [] };
       throw error;
+    } finally {
+      await handle?.close();
     }
   }
 
@@ -91,6 +133,9 @@ export class McpCredentialVault {
     const serverName = validateServerName(serverNameInput);
     const variableName = validateVariableName(variableNameInput);
     if (!secretValue) throw new Error('MCP credential value must not be empty');
+    if (Buffer.byteLength(secretValue, 'utf8') > MAX_SECRET_BYTES) {
+      throw new Error('MCP credential value is too large');
+    }
     const environmentAlias = aliasFor(serverName, variableName);
     const summary = { serverName, variableName, environmentAlias };
     const operation = this.tail.then(async () => {
@@ -98,7 +143,11 @@ export class McpCredentialVault {
       const credentials = vault.credentials.filter((item) =>
         item.serverName !== serverName || item.variableName !== variableName,
       );
-      credentials.push({ ...summary, protectedValue: this.options.protect(secretValue) });
+      const protectedValue = this.options.protect(secretValue);
+      if (!protectedValue || protectedValue.length > MAX_PROTECTED_VALUE_LENGTH) {
+        throw new Error('protected MCP credential value is invalid or too large');
+      }
+      credentials.push({ ...summary, protectedValue });
       await this.write({ version: 1, credentials });
     });
     this.tail = operation.catch(() => undefined);

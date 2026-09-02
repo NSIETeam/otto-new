@@ -6,6 +6,7 @@
 
 import { MCPOAuthConfig } from './oauth-provider.js';
 import { getErrorMessage } from '../utils/errors.js';
+import { fetchMcpNetworkText } from '../tools/mcp-network-security.js';
 
 /**
  * OAuth authorization server metadata as per RFC 8414.
@@ -70,11 +71,11 @@ export class OAuthUtils {
     resourceMetadataUrl: string,
   ): Promise<OAuthProtectedResourceMetadata | null> {
     try {
-      const response = await fetch(resourceMetadataUrl);
+      const response = await fetchMcpNetworkText(resourceMetadataUrl);
       if (!response.ok) {
         return null;
       }
-      return (await response.json()) as OAuthProtectedResourceMetadata;
+      return JSON.parse(response.text) as OAuthProtectedResourceMetadata;
     } catch (error) {
       console.debug(
         `Failed to fetch protected resource metadata from ${resourceMetadataUrl}: ${getErrorMessage(error)}`,
@@ -93,11 +94,11 @@ export class OAuthUtils {
     authServerMetadataUrl: string,
   ): Promise<OAuthAuthorizationServerMetadata | null> {
     try {
-      const response = await fetch(authServerMetadataUrl);
+      const response = await fetchMcpNetworkText(authServerMetadataUrl);
       if (!response.ok) {
         return null;
       }
-      return (await response.json()) as OAuthAuthorizationServerMetadata;
+      return JSON.parse(response.text) as OAuthAuthorizationServerMetadata;
     } catch (error) {
       console.debug(
         `Failed to fetch authorization server metadata from ${authServerMetadataUrl}: ${getErrorMessage(error)}`,

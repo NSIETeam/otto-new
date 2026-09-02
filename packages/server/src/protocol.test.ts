@@ -458,6 +458,67 @@ describe('validateClientPayload：执行授权', () => {
   });
 });
 
+describe('validateClientPayload：MCP 候选与草稿', () => {
+  it('只接受结构化搜索、审计和草稿预览请求', () => {
+    expect(validateClientPayload({
+      type: 'mcp_catalog_search',
+      payload: { query: 'github issues' },
+    })).toBeNull();
+    expect(validateClientPayload({
+      type: 'mcp_candidate_audit',
+      payload: { candidateId: 'io.example/test@1.0.0' },
+    })).toBeNull();
+    expect(validateClientPayload({
+      type: 'mcp_candidate_probe',
+      payload: { auditId: 'mcp-audit-1', confirmed: true },
+    })).toBeNull();
+    expect(validateClientPayload({
+      type: 'mcp_install_reviewed',
+      payload: { auditId: 'mcp-audit-1', confirmed: true },
+    })).toBeNull();
+    expect(validateClientPayload({
+      type: 'mcp_creator_preview',
+      payload: {
+        name: 'orders',
+        description: 'read orders',
+        inputKind: 'openapi',
+        sourceText: '{"openapi":"3.1.0"}',
+        transport: 'stdio',
+        environmentVariables: ['ORDERS_TOKEN'],
+      },
+    })).toBeNull();
+    expect(validateClientPayload({
+      type: 'mcp_creator_save_draft',
+      payload: { draftId: 'mcp-draft-123', confirmed: true },
+    })).toBeNull();
+  });
+
+  it('拒绝空搜索、伪造输入类型和无正文草稿', () => {
+    expect(validateClientPayload({
+      type: 'mcp_catalog_search',
+      payload: { query: '' },
+    })).not.toBeNull();
+    expect(validateClientPayload({
+      type: 'mcp_candidate_probe',
+      payload: { auditId: 'mcp-audit-1', confirmed: false },
+    })).not.toBeNull();
+    expect(validateClientPayload({
+      type: 'mcp_creator_preview',
+      payload: {
+        name: 'orders',
+        description: 'read orders',
+        inputKind: 'shell',
+        sourceText: '',
+        transport: 'stdio',
+      },
+    })).not.toBeNull();
+    expect(validateClientPayload({
+      type: 'mcp_creator_save_draft',
+      payload: { draftId: 'mcp-draft-123', confirmed: false },
+    })).not.toBeNull();
+  });
+});
+
 describe('validateClientPayload：工作目录', () => {
   it('只接受会话 id 与非空绝对目录字符串', () => {
     expect(validateClientPayload({

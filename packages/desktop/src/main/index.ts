@@ -89,6 +89,7 @@ import {
 } from './channel-identity-ipc.js';
 import { cancelDurableWorkflowsForQuit } from './durable-workflow-quit.js';
 import { migrateDesktopRenderCachesForUpgrade } from './render-cache-migration.js';
+import { McpCredentialVault } from './mcpCredentialVault.js';
 
 function ignoreBrokenPipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
@@ -495,6 +496,31 @@ const desktopRecurringTasks = new RecurringTaskRegistry({
     console.warn(`[otto-desktop] 后台任务 ${taskName} 失败:`, error);
   },
 });
+function assertMcpSecureStorage(): void {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('系统加密凭据库不可用，不能保存 MCP 密钥');
+  }
+  if (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text') {
+    throw new Error('Linux 系统密钥库未解锁，拒绝使用 basic_text 保存 MCP 密钥');
+  }
+}
+
+const mcpCredentialVault = new McpCredentialVault({
+  filePath: path.join(app.getPath('userData'), 'mcp-credentials.json'),
+  protect(value) {
+    assertMcpSecureStorage();
+    return safeStorage.encryptString(value).toString('base64');
+  },
+  unprotect(value) {
+    assertMcpSecureStorage();
+    return safeStorage.decryptString(Buffer.from(value, 'base64'));
+  },
+});
+
+async function hydrateMcpCredentialEnvironment(): Promise<void> {
+  const environment = await mcpCredentialVault.runtimeEnvironment();
+  for (const [name, value] of Object.entries(environment)) process.env[name] = value;
+}
 /** server 生命周期管理器（发现/拉起/探活/退出清理）。 */
 const serverManager = new ServerManager({
   enterpriseServerUrl: DEFAULT_ENTERPRISE_SERVER_URL,
@@ -650,6 +676,9 @@ const IPC = {
   parkConfig: 'otto:park-config',
   themeGet: 'otto:theme-get',
   themeSet: 'otto:theme-set',
+  mcpCredentialList: 'otto:mcp-credential-list',
+  mcpCredentialSet: 'otto:mcp-credential-set',
+  mcpCredentialRemove: 'otto:mcp-credential-remove',
   desktopPetSetEnabled: 'otto:desktop-pet-set-enabled',
   desktopPetUpdateState: 'otto:desktop-pet-update-state',
   desktopPetGetState: 'otto:desktop-pet-get-state',
@@ -4857,6 +4886,33 @@ function registerIpc(): void {
     }
     return nativeTheme.themeSource;
   });
+  ipcMain.handle(IPC.mcpCredentialList, () => mcpCredentialVault.list());
+  ipcMain.handle(IPC.mcpCredentialSet, async (_event, input: unknown) => {
+    if (!input || typeof input !== 'object') throw new Error('MCP 凭据参数不正确');
+    const body = input as Record<string, unknown>;
+    if (
+      typeof body.serverName !== 'string'
+      || typeof body.variableName !== 'string'
+      || typeof body.value !== 'string'
+    ) {
+      throw new Error('MCP 凭据字段不正确');
+    }
+    const summary = await mcpCredentialVault.set(body.serverName, body.variableName, body.value);
+    process.env[summary.environmentAlias] = body.value;
+    return summary;
+  });
+  ipcMain.handle(IPC.mcpCredentialRemove, async (_event, input: unknown) => {
+    if (!input || typeof input !== 'object') throw new Error('MCP 凭据参数不正确');
+    const body = input as Record<string, unknown>;
+    if (typeof body.serverName !== 'string' || typeof body.variableName !== 'string') {
+      throw new Error('MCP 凭据字段不正确');
+    }
+    const summary = (await mcpCredentialVault.list()).find((item) =>
+      item.serverName === body.serverName && item.variableName === body.variableName,
+    );
+    await mcpCredentialVault.remove(body.serverName, body.variableName);
+    if (summary) delete process.env[summary.environmentAlias];
+  });
   ipcMain.handle(IPC.desktopPetSetEnabled, (_event, enabled: unknown) =>
     setDesktopPetEnabled(enabled === true),
   );
@@ -6108,6 +6164,13 @@ if (!gotLock) {
     // 外观主题：默认跟随系统（'system' 让 renderer 的 prefers-color-scheme 生效）；
     // 用户在偏好里手动选过浅色/深色则恢复上次选择（userData/theme.json）。
     nativeTheme.themeSource = loadSavedThemeSource();
+
+    await hydrateMcpCredentialEnvironment().catch((error) => {
+      console.warn(
+        '[otto-desktop] MCP encrypted credentials are unavailable; credentialed MCP servers remain disabled:',
+        error instanceof Error ? error.message : String(error),
+      );
+    });
 
     registerIpc();
     installAppMenu(() => mainWindow);

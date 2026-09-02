@@ -470,6 +470,43 @@ export type SetSettingMsg = Envelope<
 
 export type McpListMsg = Envelope<'mcp_list', Record<string, never>>;
 
+export type McpCatalogSearchMsg = Envelope<
+  'mcp_catalog_search',
+  { query: string }
+>;
+
+export type McpCandidateAuditMsg = Envelope<
+  'mcp_candidate_audit',
+  { candidateId: string }
+>;
+
+export type McpCandidateProbeMsg = Envelope<
+  'mcp_candidate_probe',
+  { auditId: string; confirmed: true }
+>;
+
+export type McpInstallReviewedMsg = Envelope<
+  'mcp_install_reviewed',
+  { auditId: string; confirmed: true }
+>;
+
+export type McpCreatorPreviewMsg = Envelope<
+  'mcp_creator_preview',
+  {
+    name: string;
+    description: string;
+    inputKind: 'natural_language' | 'openapi' | 'api_docs' | 'curl';
+    sourceText: string;
+    transport: 'stdio' | 'streamable_http';
+    environmentVariables?: string[];
+  }
+>;
+
+export type McpCreatorSaveDraftMsg = Envelope<
+  'mcp_creator_save_draft',
+  { draftId: string; confirmed: true }
+>;
+
 export type McpAddMsg = Envelope<
   'mcp_add',
   {
@@ -736,6 +773,12 @@ export type ClientToServer =
   | GetSearchConfigMsg
   | SaveSearchConfigMsg
   | McpListMsg
+  | McpCatalogSearchMsg
+  | McpCandidateAuditMsg
+  | McpCandidateProbeMsg
+  | McpInstallReviewedMsg
+  | McpCreatorPreviewMsg
+  | McpCreatorSaveDraftMsg
   | McpAddMsg
   | McpRemoveMsg
   | GetContextBreakdownMsg
@@ -1157,11 +1200,49 @@ export interface McpServerInfo {
   url?: string;
   httpUrl?: string;
   description?: string;
+  trust: boolean;
 }
 
 export type McpServersMsg = Envelope<
   'mcp_servers',
   { servers: McpServerInfo[] }
+>;
+
+export type {
+  McpSearchCandidate,
+  McpAuditReport,
+  McpCreationDraft,
+  McpPermission,
+  McpRiskLevel,
+  McpProbeResult,
+} from './mcpManagement.js';
+
+export type McpCatalogResultsMsg = Envelope<
+  'mcp_catalog_results',
+  {
+    query: string;
+    candidates: import('./mcpManagement.js').McpSearchCandidate[];
+  }
+>;
+
+export type McpAuditResultMsg = Envelope<
+  'mcp_audit_result',
+  import('./mcpManagement.js').McpAuditReport
+>;
+
+export type McpProbeResultMsg = Envelope<
+  'mcp_probe_result',
+  import('./mcpManagement.js').McpProbeResult
+>;
+
+export type McpCreationDraftMsg = Envelope<
+  'mcp_creation_draft',
+  import('./mcpManagement.js').McpCreationDraft
+>;
+
+export type McpCreationSavedMsg = Envelope<
+  'mcp_creation_saved',
+  { draftId: string; directory: string }
 >;
 
 /** Context 用量分解（对齐 CLI /context 的口径）。 */
@@ -1469,6 +1550,11 @@ export type ServerToClient =
   | SettingsMsg
   | SearchConfigMsg
   | McpServersMsg
+  | McpCatalogResultsMsg
+  | McpAuditResultMsg
+  | McpProbeResultMsg
+  | McpCreationDraftMsg
+  | McpCreationSavedMsg
   | ContextBreakdownMsg
   | StatsSnapshotMsg
   | DoctorReportMsg
@@ -2171,6 +2257,51 @@ export function validateClientPayload(msg: {
         return '必须提供 command / url / httpUrl 之一';
       }
       return null;
+    }
+    case 'mcp_catalog_search': {
+      if (!isPlainObject(p)) return 'mcp_catalog_search payload 必须是对象';
+      if (!isNonEmptyString(p['query'])) return 'query 必须是非空字符串';
+      return p['query'].length <= 200 ? null : 'query 不能超过 200 个字符';
+    }
+    case 'mcp_candidate_audit': {
+      if (!isPlainObject(p)) return 'mcp_candidate_audit payload 必须是对象';
+      return isNonEmptyString(p['candidateId'])
+        ? null
+        : 'candidateId 必须是非空字符串';
+    }
+    case 'mcp_candidate_probe':
+    case 'mcp_install_reviewed': {
+      if (!isPlainObject(p)) return `${msg.type} payload 必须是对象`;
+      if (!isNonEmptyString(p['auditId'])) return 'auditId 必须是非空字符串';
+      return p['confirmed'] === true ? null : `${msg.type} 前必须明确确认`;
+    }
+    case 'mcp_creator_preview': {
+      if (!isPlainObject(p)) return 'mcp_creator_preview payload 必须是对象';
+      if (!isNonEmptyString(p['name'])) return 'name 必须是非空字符串';
+      if (!isNonEmptyString(p['description'])) return 'description 必须是非空字符串';
+      if (!isNonEmptyString(p['sourceText'])) return 'sourceText 必须是非空字符串';
+      if (p['name'].length > 100) return 'name 不能超过 100 个字符';
+      if (p['description'].length > 2_000) return 'description 不能超过 2000 个字符';
+      if (p['sourceText'].length > 2_000_000) return 'sourceText 不能超过 2MB';
+      if (!['natural_language', 'openapi', 'api_docs', 'curl'].includes(String(p['inputKind']))) {
+        return 'inputKind 不受支持';
+      }
+      if (p['transport'] !== 'stdio' && p['transport'] !== 'streamable_http') {
+        return 'transport 必须是 stdio | streamable_http';
+      }
+      if (
+        p['environmentVariables'] !== undefined
+        && (!Array.isArray(p['environmentVariables'])
+          || !p['environmentVariables'].every((value) => typeof value === 'string'))
+      ) {
+        return 'environmentVariables 必须是字符串数组';
+      }
+      return null;
+    }
+    case 'mcp_creator_save_draft': {
+      if (!isPlainObject(p)) return 'mcp_creator_save_draft payload 必须是对象';
+      if (!isNonEmptyString(p['draftId'])) return 'draftId 必须是非空字符串';
+      return p['confirmed'] === true ? null : '保存 MCP 草稿前必须明确确认';
     }
     case 'mcp_remove': {
       if (!isPlainObject(p)) return 'mcp_remove payload 必须是对象';

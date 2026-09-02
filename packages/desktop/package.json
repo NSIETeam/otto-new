@@ -101,7 +101,10 @@
         "from": "../core/skills-seed",
         "to": "node_modules/otto-core/skills-seed",
         "filter": [
-          "**/SKILL.md"
+          "**/SKILL.md",
+          "**/references/**/*",
+          "**/NOTICE.txt",
+          "**/LICENSE.txt"
         ]
       },
       "!**/*.ts",

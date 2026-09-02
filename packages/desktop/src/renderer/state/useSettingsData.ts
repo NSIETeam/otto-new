@@ -31,6 +31,10 @@ import type {
   SearchConfigSnapshot,
   SearchProvider,
   McpServerInfo,
+  McpSearchCandidate,
+  McpAuditReport,
+  McpCreationDraft,
+  McpProbeResult,
   ContextBreakdown,
   DoctorReportInfo,
   TodoItemInfo,
@@ -49,6 +53,12 @@ export interface SettingsDataState {
   settings: SettingsSnapshot | null;
   searchConfig: SearchConfigSnapshot | null;
   mcpServers: McpServerInfo[];
+  mcpSearchCandidates: McpSearchCandidate[];
+  mcpSearchQuery: string;
+  mcpAuditReport: McpAuditReport | null;
+  mcpProbeResult: McpProbeResult | null;
+  mcpCreationDraft: McpCreationDraft | null;
+  mcpSavedDraftDirectory: string | null;
   contextBreakdown: ContextBreakdown | null;
   doctorReport: DoctorReportInfo | null;
   doctorRunning: boolean;
@@ -72,6 +82,12 @@ const initialState: SettingsDataState = {
   settings: null,
   searchConfig: null,
   mcpServers: [],
+  mcpSearchCandidates: [],
+  mcpSearchQuery: '',
+  mcpAuditReport: null,
+  mcpProbeResult: null,
+  mcpCreationDraft: null,
+  mcpSavedDraftDirectory: null,
   contextBreakdown: null,
   doctorReport: null,
   doctorRunning: false,
@@ -116,6 +132,22 @@ function reducer(state: SettingsDataState, action: Action): SettingsDataState {
           return { ...state, searchConfig: frame.payload };
         case 'mcp_servers':
           return { ...state, mcpServers: frame.payload.servers };
+        case 'mcp_catalog_results':
+          return {
+            ...state,
+            mcpSearchQuery: frame.payload.query,
+            mcpSearchCandidates: frame.payload.candidates,
+            mcpAuditReport: null,
+            mcpProbeResult: null,
+          };
+        case 'mcp_audit_result':
+          return { ...state, mcpAuditReport: frame.payload, mcpProbeResult: null };
+        case 'mcp_probe_result':
+          return { ...state, mcpProbeResult: frame.payload };
+        case 'mcp_creation_draft':
+          return { ...state, mcpCreationDraft: frame.payload, mcpSavedDraftDirectory: null };
+        case 'mcp_creation_saved':
+          return { ...state, mcpSavedDraftDirectory: frame.payload.directory };
         case 'context_breakdown':
           return { ...state, contextBreakdown: frame.payload };
         case 'doctor_report':
@@ -166,6 +198,12 @@ function reducer(state: SettingsDataState, action: Action): SettingsDataState {
             frame.payload.code === 'save_search_config_failed' ||
             frame.payload.code === 'mcp_add_failed' ||
             frame.payload.code === 'mcp_remove_failed' ||
+            frame.payload.code === 'mcp_catalog_search_failed' ||
+            frame.payload.code === 'mcp_candidate_audit_failed' ||
+            frame.payload.code === 'mcp_candidate_probe_failed' ||
+            frame.payload.code === 'mcp_install_failed' ||
+            frame.payload.code === 'mcp_creator_preview_failed' ||
+            frame.payload.code === 'mcp_creator_save_failed' ||
             frame.payload.code === 'doctor_failed' ||
             frame.payload.code === 'get_memory_failed' ||
             frame.payload.code === 'add_memory_failed' ||
@@ -210,6 +248,19 @@ export interface SettingsDataActions {
     monthlyBudgetCny?: number;
   }): void;
   refreshMcpServers(): void;
+  searchMcpCatalog(query: string): void;
+  auditMcpCandidate(candidateId: string): void;
+  probeMcpCandidate(auditId: string): void;
+  installReviewedMcp(auditId: string): void;
+  previewMcpCreation(payload: {
+    name: string;
+    description: string;
+    inputKind: 'natural_language' | 'openapi' | 'api_docs' | 'curl';
+    sourceText: string;
+    transport: 'stdio' | 'streamable_http';
+    environmentVariables?: string[];
+  }): void;
+  saveMcpCreationDraft(draftId: string): void;
   addMcpServer(payload: {
     name: string;
     command?: string;
@@ -309,6 +360,31 @@ export function useSettingsData(activeSessionId?: string | null): UseSettingsDat
 
   const refreshMcpServers = useCallback(() => {
     transport.send({ type: 'mcp_list', payload: {} });
+  }, []);
+
+  const searchMcpCatalog = useCallback((query: string) => {
+    if (!query.trim()) return;
+    transport.send({ type: 'mcp_catalog_search', payload: { query: query.trim() } });
+  }, []);
+
+  const auditMcpCandidate = useCallback((candidateId: string) => {
+    transport.send({ type: 'mcp_candidate_audit', payload: { candidateId } });
+  }, []);
+
+  const probeMcpCandidate = useCallback((auditId: string) => {
+    transport.send({ type: 'mcp_candidate_probe', payload: { auditId, confirmed: true } });
+  }, []);
+
+  const installReviewedMcp = useCallback((auditId: string) => {
+    transport.send({ type: 'mcp_install_reviewed', payload: { auditId, confirmed: true } });
+  }, []);
+
+  const previewMcpCreation = useCallback<SettingsDataActions['previewMcpCreation']>((payload) => {
+    transport.send({ type: 'mcp_creator_preview', payload });
+  }, []);
+
+  const saveMcpCreationDraft = useCallback((draftId: string) => {
+    transport.send({ type: 'mcp_creator_save_draft', payload: { draftId, confirmed: true } });
   }, []);
 
   const addMcpServer = useCallback<SettingsDataActions['addMcpServer']>((payload) => {
@@ -413,6 +489,12 @@ export function useSettingsData(activeSessionId?: string | null): UseSettingsDat
       refreshSearchConfig,
       saveSearchConfig,
       refreshMcpServers,
+      searchMcpCatalog,
+      auditMcpCandidate,
+      probeMcpCandidate,
+      installReviewedMcp,
+      previewMcpCreation,
+      saveMcpCreationDraft,
       addMcpServer,
       removeMcpServer,
       refreshContextBreakdown,

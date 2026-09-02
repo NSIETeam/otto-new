@@ -9,6 +9,7 @@ import {
   discoverTools,
   discoverPrompts,
   createTransport,
+  resolveMcpServerEnv,
   isEnabled,
 } from './mcp-client.js';
 import { MCPServerConfig } from '../config/config.js';
@@ -110,6 +111,19 @@ describe('mcp-client', () => {
   });
 
   describe('createTransport', () => {
+    it('resolves encrypted-vault aliases from the process environment without persisting plaintext', () => {
+      process.env.OTTO_MCP_CREDENTIAL_TEST = 'resolved-secret';
+      try {
+        expect(resolveMcpServerEnv({ API_KEY: '$ENV:OTTO_MCP_CREDENTIAL_TEST' })).toEqual({
+          API_KEY: 'resolved-secret',
+        });
+        expect(() => resolveMcpServerEnv({ API_KEY: '$ENV:OTTO_MCP_CREDENTIAL_MISSING' }))
+          .toThrow(/could not be resolved/i);
+      } finally {
+        delete process.env.OTTO_MCP_CREDENTIAL_TEST;
+      }
+    });
+
     it('should connect via httpUrl > without headers', async () => {
       const config = new MCPServerConfig(undefined, undefined, undefined, undefined, undefined, 'http://test-server');
       await createTransport('server1', config, false);

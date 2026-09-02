@@ -135,6 +135,19 @@ import {
   saveSearchConfig,
 } from './searchConfig.js';
 import { mergePersistedSearchDiagnostics } from './searchObservability.js';
+import {
+  auditMcpCandidate,
+  enrichCandidateFromGitHub,
+  generateTypeScriptMcpDraft,
+  saveMcpCreationDraft,
+  probeRemoteMcpCandidate,
+  searchGitHubMcpRepositories,
+  searchOfficialMcpRegistry,
+  type McpSearchCandidate,
+  type McpCreationDraft,
+  type McpAuditReport,
+  type McpProbeResult,
+} from './mcpManagement.js';
 import { cacheChatFiles } from './chatFileCache.js';
 import {
   ProjectSettingsManager,
@@ -576,6 +589,14 @@ export class OttoServer {
   private stopChannelWorkflowMilestones?: () => void;
   private readonly channelIdentityRegistry: ChannelIdentityRegistryV1;
   private readonly channelPairingProviders = new Map<string, ChannelProvider>();
+  /** Inert catalogue records only; never persisted and never treated as trusted. */
+  private readonly mcpSearchCandidates = new Map<string, McpSearchCandidate>();
+  private readonly mcpCreationDrafts = new Map<string, McpCreationDraft>();
+  private readonly mcpAudits = new Map<string, {
+    candidate: McpSearchCandidate;
+    report: McpAuditReport;
+    probe?: McpProbeResult;
+  }>();
 
   constructor(opts: OttoServerOptions = {}) {
     this.host = opts.host ?? DEFAULT_HOST;
@@ -1801,8 +1822,225 @@ export class OttoServer {
         url: cfg.url,
         httpUrl: cfg.httpUrl,
         description: cfg.description,
+        trust: cfg.trust === true,
       };
     });
+  }
+
+  /** Search returns inert metadata only. No package is downloaded, installed or started. */
+  private async handleMcpCatalogSearch(
+    conn: ClientConn,
+    msg: Extract<ClientToServer, { type: 'mcp_catalog_search' }>,
+  ): Promise<void> {
+    try {
+      const searches = await Promise.allSettled([
+        searchOfficialMcpRegistry(msg.payload.query),
+        searchGitHubMcpRepositories(msg.payload.query),
+      ]);
+      const raw = searches.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+      if (raw.length === 0 && searches.every((result) => result.status === 'rejected')) {
+        throw new Error('官方 Registry 与 GitHub 均暂时不可用');
+      }
+      const unique = [...new Map(raw.map((candidate) => [
+        candidate.repositoryUrl?.toLowerCase() ?? candidate.id,
+        candidate,
+      ])).values()].slice(0, 20);
+      const candidates = await Promise.all(
+        unique.map(async (candidate) => {
+          try {
+            return await enrichCandidateFromGitHub(candidate);
+          } catch {
+            return candidate;
+          }
+        }),
+      );
+      this.mcpSearchCandidates.clear();
+      for (const candidate of candidates) this.mcpSearchCandidates.set(candidate.id, candidate);
+      this.send(conn.socket, {
+        type: 'mcp_catalog_results',
+        payload: { query: msg.payload.query, candidates },
+      });
+    } catch (error) {
+      this.send(conn.socket, {
+        type: 'error',
+        payload: {
+          code: 'mcp_catalog_search_failed',
+          message: `搜索 MCP Registry 失败：${error instanceof Error ? error.message : String(error)}`,
+        },
+      });
+    }
+  }
+
+  private handleMcpCandidateAudit(
+    conn: ClientConn,
+    msg: Extract<ClientToServer, { type: 'mcp_candidate_audit' }>,
+  ): void {
+    const candidate = this.mcpSearchCandidates.get(msg.payload.candidateId);
+    if (!candidate) {
+      return this.send(conn.socket, {
+        type: 'error',
+        payload: { code: 'mcp_candidate_audit_failed', message: '候选已失效，请重新搜索。' },
+      });
+    }
+    const report = auditMcpCandidate(candidate);
+    this.mcpAudits.set(report.id, { candidate, report });
+    if (this.mcpAudits.size > 32) {
+      const oldest = this.mcpAudits.keys().next().value as string | undefined;
+      if (oldest) this.mcpAudits.delete(oldest);
+    }
+    this.send(conn.socket, {
+      type: 'mcp_audit_result',
+      payload: report,
+    });
+  }
+
+  private async handleMcpCandidateProbe(
+    conn: ClientConn,
+    msg: Extract<ClientToServer, { type: 'mcp_candidate_probe' }>,
+  ): Promise<void> {
+    const audit = this.mcpAudits.get(msg.payload.auditId);
+    if (!audit || !audit.report.installable) {
+      return this.send(conn.socket, {
+        type: 'error',
+        payload: { code: 'mcp_candidate_probe_failed', message: '审计未通过或已失效，不能试运行。' },
+      });
+    }
+    try {
+      const result = {
+        ...await probeRemoteMcpCandidate(audit.candidate),
+        auditId: audit.report.id,
+      };
+      audit.report = { ...audit.report, probeStatus: 'passed' };
+      audit.probe = result;
+      this.send(conn.socket, { type: 'mcp_probe_result', payload: result });
+    } catch (error) {
+      audit.report = { ...audit.report, probeStatus: 'failed' };
+      const result: McpProbeResult = {
+        auditId: audit.report.id,
+        candidateId: audit.candidate.id,
+        status: 'failed',
+        transport: 'streamable_http',
+        tools: [],
+        detail: error instanceof Error ? error.message : String(error),
+      };
+      audit.probe = result;
+      this.send(conn.socket, { type: 'mcp_probe_result', payload: result });
+    }
+  }
+
+  private handleMcpInstallReviewed(
+    conn: ClientConn,
+    msg: Extract<ClientToServer, { type: 'mcp_install_reviewed' }>,
+  ): void {
+    const audit = this.mcpAudits.get(msg.payload.auditId);
+    if (
+      !audit
+      || !audit.report.installable
+      || audit.probe?.status !== 'passed'
+      || !audit.candidate.remoteUrl
+      || audit.candidate.environmentVariables.some((item) => item.required)
+    ) {
+      return this.send(conn.socket, {
+        type: 'error',
+        payload: {
+          code: 'mcp_install_failed',
+          message: '安装被阻止：必须先通过无凭据的 Streamable HTTP 隔离列表测试。',
+        },
+      });
+    }
+    try {
+      const servers = loadMcpServers();
+      const cfg = new MCPServerConfig(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        audit.candidate.remoteUrl,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        audit.candidate.description,
+      );
+      servers[audit.candidate.name] = cfg;
+      saveMcpServers(servers);
+      for (const liveCfg of this.liveConfigs()) {
+        try {
+          liveCfg.addMcpServer(audit.candidate.name, cfg);
+          void liveCfg.getToolRegistry()
+            .then((registry) => registry.discoverToolsForServer(audit.candidate.name))
+            .catch(() => undefined);
+        } catch {
+          // Persisted config remains the source of truth; other live sessions continue.
+        }
+      }
+      this.mcpAudits.delete(audit.report.id);
+      this.broadcastAll({ type: 'mcp_servers', payload: { servers: this.mcpServerInfos() } });
+    } catch (error) {
+      this.send(conn.socket, {
+        type: 'error',
+        payload: {
+          code: 'mcp_install_failed',
+          message: `安装 MCP 失败：${error instanceof Error ? error.message : String(error)}`,
+        },
+      });
+    }
+  }
+
+  private handleMcpCreatorPreview(
+    conn: ClientConn,
+    msg: Extract<ClientToServer, { type: 'mcp_creator_preview' }>,
+  ): void {
+    try {
+      const draft = generateTypeScriptMcpDraft(msg.payload);
+      this.mcpCreationDrafts.set(draft.id, draft);
+      if (this.mcpCreationDrafts.size > 16) {
+        const oldest = this.mcpCreationDrafts.keys().next().value as string | undefined;
+        if (oldest) this.mcpCreationDrafts.delete(oldest);
+      }
+      this.send(conn.socket, {
+        type: 'mcp_creation_draft',
+        payload: draft,
+      });
+    } catch (error) {
+      this.send(conn.socket, {
+        type: 'error',
+        payload: {
+          code: 'mcp_creator_preview_failed',
+          message: `生成 MCP 草稿失败：${error instanceof Error ? error.message : String(error)}`,
+        },
+      });
+    }
+  }
+
+  private async handleMcpCreatorSaveDraft(
+    conn: ClientConn,
+    msg: Extract<ClientToServer, { type: 'mcp_creator_save_draft' }>,
+  ): Promise<void> {
+    const draft = this.mcpCreationDrafts.get(msg.payload.draftId);
+    if (!draft) {
+      return this.send(conn.socket, {
+        type: 'error',
+        payload: { code: 'mcp_creator_save_failed', message: 'MCP 草稿已失效，请重新生成预览。' },
+      });
+    }
+    try {
+      const saved = await saveMcpCreationDraft(
+        draft,
+        path.join(homedir(), '.otto-user', 'mcp-drafts'),
+      );
+      this.mcpCreationDrafts.delete(draft.id);
+      this.send(conn.socket, { type: 'mcp_creation_saved', payload: saved });
+    } catch (error) {
+      this.send(conn.socket, {
+        type: 'error',
+        payload: {
+          code: 'mcp_creator_save_failed',
+          message: `保存 MCP 草稿失败：${error instanceof Error ? error.message : String(error)}`,
+        },
+      });
+    }
   }
 
   /** 添加/更新一个 MCP 服务器：写盘 + 即时应用到所有存活会话的 Config。 */
@@ -1812,6 +2050,12 @@ export class OttoServer {
   ): void {
     const p = msg.payload;
     try {
+      if (p.env && Object.keys(p.env).length > 0) {
+        throw new Error('禁止把 MCP 密钥或环境变量值写入普通 settings.json；请使用加密凭据库');
+      }
+      if (p.headers && Object.keys(p.headers).length > 0) {
+        throw new Error('禁止把 MCP 请求头或令牌写入普通 settings.json；请使用加密凭据库');
+      }
       const servers = loadMcpServers();
       const cfg = new MCPServerConfig(
         p.command,
@@ -1823,7 +2067,7 @@ export class OttoServer {
         p.headers,
         undefined,
         p.timeout,
-        p.trust,
+        false,
         p.description,
       );
       servers[p.name] = cfg;
@@ -3802,6 +4046,18 @@ export class OttoServer {
           type: 'mcp_servers',
           payload: { servers: this.mcpServerInfos() },
         });
+      case 'mcp_catalog_search':
+        return void this.handleMcpCatalogSearch(conn, msg);
+      case 'mcp_candidate_audit':
+        return this.handleMcpCandidateAudit(conn, msg);
+      case 'mcp_candidate_probe':
+        return void this.handleMcpCandidateProbe(conn, msg);
+      case 'mcp_install_reviewed':
+        return this.handleMcpInstallReviewed(conn, msg);
+      case 'mcp_creator_preview':
+        return this.handleMcpCreatorPreview(conn, msg);
+      case 'mcp_creator_save_draft':
+        return void this.handleMcpCreatorSaveDraft(conn, msg);
       case 'mcp_add':
         return this.handleMcpAdd(conn, msg);
       case 'mcp_remove':

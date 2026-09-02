@@ -45,9 +45,24 @@ import { OAuthUtils } from '../mcp/oauth-utils.js';
 import { MCPOAuthTokenStorage } from '../mcp/oauth-token-storage.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { isSilentMode } from '../utils/logging.js';
+import { resolveSecret } from '../config/secretResolver.js';
 
 export const MCP_DEFAULT_TIMEOUT_MSEC = 10 * 60 * 1000; // default to 10 minutes
 export const MCP_CONNECT_TIMEOUT_MSEC = 30 * 1000; // 30 seconds for connection attempts (increased from 10s)
+
+export function resolveMcpServerEnv(
+  values: Record<string, string> | undefined,
+): Record<string, string> {
+  const resolved: Record<string, string> = {};
+  for (const [name, value] of Object.entries(values ?? {})) {
+    const secret = resolveSecret(value);
+    if (secret === undefined) {
+      throw new Error(`MCP environment variable ${name} could not be resolved from the encrypted credential reference`);
+    }
+    resolved[name] = secret;
+  }
+  return resolved;
+}
 
 /**
  * 为连接操作添加超时机制
@@ -1507,7 +1522,7 @@ export async function createTransport(
       args: mcpServerConfig.args || [],
       env: {
         ...process.env,
-        ...(mcpServerConfig.env || {}),
+        ...resolveMcpServerEnv(mcpServerConfig.env),
       } as Record<string, string>,
       cwd: mcpServerConfig.cwd,
       stderr: 'pipe',

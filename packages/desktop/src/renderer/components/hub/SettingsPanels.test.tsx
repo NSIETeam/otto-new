@@ -5,7 +5,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UseSettingsData } from '../../state/useSettingsData.js';
-import { PrefsPanel } from './SettingsPanels.js';
+import { McpPanel, PrefsPanel } from './SettingsPanels.js';
 
 afterEach(cleanup);
 
@@ -56,6 +56,61 @@ function settingsData(
   } as unknown as UseSettingsData;
   return { value, setSetting };
 }
+
+describe('McpPanel 安全工作流', () => {
+  it('用四个入口替代直接添加，并只发送搜索或草稿预览请求', () => {
+    const searchMcpCatalog = vi.fn();
+    const previewMcpCreation = vi.fn();
+    const value = {
+      state: {
+        mcpServers: [],
+        mcpSearchCandidates: [],
+        mcpSearchQuery: '',
+        mcpAuditReport: null,
+        mcpProbeResult: null,
+        mcpCreationDraft: null,
+        mcpSavedDraftDirectory: null,
+      },
+      actions: {
+        refreshMcpServers: vi.fn(),
+        removeMcpServer: vi.fn(),
+        searchMcpCatalog,
+        auditMcpCandidate: vi.fn(),
+        probeMcpCandidate: vi.fn(),
+        installReviewedMcp: vi.fn(),
+        previewMcpCreation,
+        saveMcpCreationDraft: vi.fn(),
+      },
+    } as unknown as UseSettingsData;
+
+    render(<McpPanel data={value} />);
+
+    expect(screen.getByRole('tab', { name: '我的 MCP' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: '搜索 MCP' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: '创建 MCP' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: '安全与权限' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /添加服务器/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: '搜索 MCP' }));
+    fireEvent.change(screen.getByPlaceholderText('例如：只读查询 GitHub issue'), {
+      target: { value: 'github issues' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '搜索官方 Registry' }));
+    expect(searchMcpCatalog).toHaveBeenCalledWith('github issues');
+
+    fireEvent.click(screen.getByRole('tab', { name: '创建 MCP' }));
+    fireEvent.change(screen.getByPlaceholderText('MCP 名称'), { target: { value: 'Orders' } });
+    fireEvent.change(screen.getByPlaceholderText('功能与安全边界'), { target: { value: 'Read orders' } });
+    fireEvent.change(screen.getByPlaceholderText(/粘贴需求/), { target: { value: 'GET /orders' } });
+    fireEvent.click(screen.getByRole('button', { name: '生成草稿预览' }));
+    expect(previewMcpCreation).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Orders',
+      description: 'Read orders',
+      sourceText: 'GET /orders',
+    }));
+    expect(previewMcpCreation.mock.calls[0]?.[0]).not.toHaveProperty('trust');
+  });
+});
 
 describe('PrefsPanel 外观与回复', () => {
   it('面向普通用户展示工作场景，不暴露开发工具品牌名', () => {

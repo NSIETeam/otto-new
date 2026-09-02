@@ -1,0 +1,22 @@
+Otto MCP Creator
+Copyright 2026 NSIETeam and Otto contributors.
+
+This work is based on Anthropic's "mcp-builder" from
+https://github.com/anthropics/skills/tree/main/skills/mcp-builder,
+Copyright 2026 Anthropic, PBC, licensed under the Apache License 2.0.
+
+The work has been substantially modified for Otto, including a TypeScript-only
+draft workflow, Otto-native preview and audit APIs, immutable-source checks,
+encrypted credentials, trust=false installation, per-tool confirmations, and
+separate consent for saving, dependency installation, probing and installation.
+Anthropic does not endorse or sponsor Otto.
+
+Otto does not copy Anthropic's evaluation scripts. It also does not copy the
+archived create-typescript-server template; that repository is retained only as
+historical design reference. Generated drafts target the MCP TypeScript SDK and
+public server.json schema.
+
+References:
+- https://github.com/modelcontextprotocol/typescript-sdk
+- https://github.com/modelcontextprotocol/create-typescript-server
+- https://github.com/modelcontextprotocol/registry

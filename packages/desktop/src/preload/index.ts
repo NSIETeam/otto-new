@@ -77,6 +77,12 @@ export interface ChannelPairingActionResult<T = unknown> {
   error: string | null;
 }
 
+export interface McpCredentialSummary {
+  serverName: string;
+  variableName: string;
+  environmentAlias: string;
+}
+
 /**
  * 园区服务插件的企业定制配置（~/.otto-user/park-services.json）。
  * 仅供旧版 preload 兼容；新版企业账号以服务端园区配置为准。
@@ -1297,6 +1303,9 @@ const IPC = {
   notificationShow: 'otto:notification-show',
   notificationCheckPermission: 'otto:notification-check-permission',
   notificationSessionOpen: 'otto:notification-session-open',
+  mcpCredentialList: 'otto:mcp-credential-list',
+  mcpCredentialSet: 'otto:mcp-credential-set',
+  mcpCredentialRemove: 'otto:mcp-credential-remove',
   voiceGetConfig: 'otto:voice-get-config',
   voiceSaveConfig: 'otto:voice-save-config',
   voiceTranscribe: 'otto:voice-transcribe',
@@ -1650,6 +1659,9 @@ export interface OttoBridge {
   themeSet(
     v: 'system' | 'light' | 'dark',
   ): Promise<'system' | 'light' | 'dark'>;
+  mcpCredentialList(): Promise<McpCredentialSummary[]>;
+  mcpCredentialSet(input: { serverName: string; variableName: string; value: string }): Promise<McpCredentialSummary>;
+  mcpCredentialRemove(input: { serverName: string; variableName: string }): Promise<void>;
   /** 显示或隐藏可在桌面任意拖动的小宠物窗口。 */
   desktopPetSetEnabled(enabled: boolean): Promise<boolean>;
   /** 把当前对话工作状态同步到独立小宠物窗口。 */
@@ -2713,6 +2725,15 @@ const bridge: OttoBridge = {
     return ipcRenderer.invoke('otto:theme-set', v) as Promise<
       'system' | 'light' | 'dark'
     >;
+  },
+  mcpCredentialList(): Promise<McpCredentialSummary[]> {
+    return ipcRenderer.invoke(IPC.mcpCredentialList) as Promise<McpCredentialSummary[]>;
+  },
+  mcpCredentialSet(input: { serverName: string; variableName: string; value: string }): Promise<McpCredentialSummary> {
+    return ipcRenderer.invoke(IPC.mcpCredentialSet, input) as Promise<McpCredentialSummary>;
+  },
+  mcpCredentialRemove(input: { serverName: string; variableName: string }): Promise<void> {
+    return ipcRenderer.invoke(IPC.mcpCredentialRemove, input) as Promise<void>;
   },
   desktopPetSetEnabled(enabled: boolean): Promise<boolean> {
     return ipcRenderer.invoke(IPC.desktopPetSetEnabled, enabled) as Promise<boolean>;

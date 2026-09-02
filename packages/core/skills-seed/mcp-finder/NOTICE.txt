@@ -1,0 +1,10 @@
+Otto MCP Finder is original Otto workflow content authored by NSIETeam in 2026.
+
+It is designed against the public MCP Registry REST API and server.json schema,
+and the Model Context Protocol security model. No source code from registry
+servers is included in this Skill.
+
+References:
+- https://modelcontextprotocol.io/registry/about
+- https://registry.modelcontextprotocol.io/docs
+- https://github.com/modelcontextprotocol/registry

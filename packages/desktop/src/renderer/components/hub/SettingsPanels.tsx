@@ -369,97 +369,217 @@ const MCP_STATUS_LABEL: Record<'connected' | 'connecting' | 'disconnected', stri
 
 export function McpPanel({ data }: { data: UseSettingsData }): React.JSX.Element {
   const { state, actions } = data;
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [command, setCommand] = useState('');
-  const [urlField, setUrlField] = useState('');
+  const [tab, setTab] = useState<'mine' | 'search' | 'create' | 'security'>('mine');
+  const [query, setQuery] = useState('');
+  const [draftName, setDraftName] = useState('');
+  const [draftDescription, setDraftDescription] = useState('');
+  const [draftSource, setDraftSource] = useState('');
+  const [inputKind, setInputKind] = useState<'natural_language' | 'openapi' | 'api_docs' | 'curl'>('natural_language');
+  const [transportKind, setTransportKind] = useState<'stdio' | 'streamable_http'>('stdio');
+  const [credentialServer, setCredentialServer] = useState('');
+  const [credentialVariable, setCredentialVariable] = useState('');
+  const [credentialValue, setCredentialValue] = useState('');
+  const [credentialSummaries, setCredentialSummaries] = useState<Array<{ serverName: string; variableName: string; environmentAlias: string }>>([]);
+  const [credentialMessage, setCredentialMessage] = useState('');
+  const auditedCandidate = state.mcpAuditReport
+    ? state.mcpSearchCandidates.find((candidate) => candidate.id === state.mcpAuditReport?.candidateId)
+    : undefined;
 
-  const submit = (): void => {
-    const cleanName = name.trim();
-    if (!cleanName) return;
-    const cleanCommand = command.trim();
-    const cleanUrl = urlField.trim();
-    if (!cleanCommand && !cleanUrl) return;
-    actions.addMcpServer({
-      name: cleanName,
-      ...(cleanCommand ? { command: cleanCommand, args: [] } : {}),
-      ...(cleanUrl ? { httpUrl: cleanUrl } : {}),
+  const createPreview = (): void => {
+    if (!draftName.trim() || !draftDescription.trim() || !draftSource.trim()) return;
+    actions.previewMcpCreation({
+      name: draftName.trim(),
+      description: draftDescription.trim(),
+      inputKind,
+      sourceText: draftSource,
+      transport: transportKind,
     });
-    setName('');
-    setCommand('');
-    setUrlField('');
-    setOpen(false);
+  };
+
+  useEffect(() => {
+    if (tab !== 'security' || !window.otto?.mcpCredentialList) return;
+    void window.otto.mcpCredentialList().then(setCredentialSummaries).catch((error: unknown) => {
+      setCredentialMessage(error instanceof Error ? error.message : String(error));
+    });
+  }, [tab]);
+
+  const saveCredential = (): void => {
+    if (!credentialServer.trim() || !credentialVariable.trim() || !credentialValue) return;
+    setCredentialMessage('正在写入系统加密凭据库…');
+    void window.otto.mcpCredentialSet({
+      serverName: credentialServer.trim(),
+      variableName: credentialVariable.trim().toUpperCase(),
+      value: credentialValue,
+    }).then(async () => {
+      setCredentialValue('');
+      setCredentialSummaries(await window.otto.mcpCredentialList());
+      setCredentialMessage('凭据已加密保存；明文不会返回界面。');
+    }).catch((error: unknown) => {
+      setCredentialMessage(error instanceof Error ? error.message : String(error));
+    });
   };
 
   return (
     <Panel
       title="MCP 服务器"
-      desc="管理 Model Context Protocol 服务器，为 Otto 接入外部工具。"
+      desc="搜索、审计、创建和管理 MCP。搜索结果不会自动安装或执行。"
       actions={
-        <>
+        tab === 'mine' ? (
           <button type="button" className="otto-hub__btn" onClick={actions.refreshMcpServers}>
             刷新
           </button>
-          <button
-            type="button"
-            className="otto-hub__btn otto-hub__btn--primary"
-            onClick={() => setOpen((v) => !v)}
-          >
-            {open ? '取消' : '+ 添加服务器'}
-          </button>
-        </>
+        ) : null
       }
     >
-      {open ? (
-        <div className="otto-hub__addform">
-          <input
-            className="otto-hub__input"
-            placeholder="服务器名（唯一标识）"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <input
-            className="otto-hub__input"
-            placeholder="启动命令（stdio，如 npx @my/server）"
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-          />
-          <input
-            className="otto-hub__input"
-            placeholder="或 HTTP URL（与命令二选一）"
-            value={urlField}
-            onChange={(e) => setUrlField(e.target.value)}
-          />
-          <button type="button" className="otto-hub__btn otto-hub__btn--primary" onClick={submit}>
-            确认添加
+      <div className="otto-mcp__tabs" role="tablist" aria-label="MCP 管理">
+        {([
+          ['mine', '我的 MCP'],
+          ['search', '搜索 MCP'],
+          ['create', '创建 MCP'],
+          ['security', '安全与权限'],
+        ] as const).map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'is-active' : ''} onClick={() => setTab(id)}>
+            {label}
           </button>
+        ))}
+      </div>
+
+      {tab === 'mine' ? (
+        state.mcpServers.length === 0 ? (
+          <Empty>尚未安装 MCP。请先在「搜索 MCP」完成来源固定、审计和隔离试运行。</Empty>
+        ) : (
+          <Card>
+            {state.mcpServers.map((s) => (
+              <div key={s.name} className="otto-hub__item">
+                <Dot tone={mcpTone(s.status)} />
+                <span className="otto-hub__row-name">{s.name}</span>
+                <span className="otto-hub__row-detail">{s.command ?? s.httpUrl ?? s.url ?? ''}</span>
+                <Badge>{s.trust ? '旧配置已信任' : '默认不信任'}</Badge>
+                <span className="otto-hub__row-status">{MCP_STATUS_LABEL[s.status]}</span>
+                <button type="button" className="otto-hub__row-remove" onClick={() => actions.removeMcpServer(s.name)} aria-label={'移除 ' + s.name}>
+                  <IconClose size={12} />
+                </button>
+              </div>
+            ))}
+          </Card>
+        )
+      ) : null}
+
+      {tab === 'search' ? (
+        <div className="otto-mcp__stack">
+          <div className="otto-hub__inputrow">
+            <input className="otto-hub__input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：只读查询 GitHub issue" />
+            <button type="button" className="otto-hub__btn otto-hub__btn--primary" onClick={() => actions.searchMcpCatalog(query)} disabled={!query.trim()}>搜索官方 Registry</button>
+          </div>
+          <p className="otto-mcp__notice">官方 Registry 仅提供元数据且仍处于预览阶段；收录不等于 Otto 安全背书。</p>
+          {state.mcpSearchCandidates.length === 0 ? <Empty>输入需求后搜索。任何结果都只会作为候选展示。</Empty> : (
+            <div className="otto-mcp__cards">
+              {state.mcpSearchCandidates.map((candidate) => (
+                <Card key={candidate.id}>
+                  <div className="otto-mcp__candidate-head"><strong>{candidate.title ?? candidate.name}</strong><Badge>{candidate.version}</Badge></div>
+                  <p>{candidate.description}</p>
+                  <dl className="otto-mcp__facts">
+                    <div><dt>来源</dt><dd>{candidate.source === 'official_registry' ? '官方 MCP Registry' : 'GitHub 补充搜索'}</dd></div>
+                    <div><dt>许可证</dt><dd>{candidate.license ?? '未验证'}</dd></div>
+                    <div><dt>提交</dt><dd>{candidate.commitSha ?? '未固定'}</dd></div>
+                    <div><dt>权限</dt><dd>{candidate.permissions.join('、')}</dd></div>
+                    <div><dt>环境变量</dt><dd>{candidate.environmentVariables.map((item) => item.name).join('、') || '无声明'}</dd></div>
+                  </dl>
+                  <button type="button" className="otto-hub__btn" onClick={() => actions.auditMcpCandidate(candidate.id)}>检查许可证、固定版本与风险</button>
+                </Card>
+              ))}
+            </div>
+          )}
+          {state.mcpAuditReport ? (
+            <Card>
+              <div className="otto-mcp__candidate-head"><strong>审计结果</strong><Badge>{state.mcpAuditReport.riskLevel}</Badge></div>
+              {state.mcpAuditReport.checks.map((check) => <p key={check.id}><strong>{check.label}：</strong>{check.detail}（{check.status}）</p>)}
+              <p className="otto-mcp__notice">当前未执行任何第三方代码。隔离测试只发送 initialize 与 tools/list，不调用任何工具。</p>
+              <button
+                type="button"
+                className="otto-hub__btn"
+                disabled={!state.mcpAuditReport.installable || !auditedCandidate?.remoteUrl || auditedCandidate.environmentVariables.some((item) => item.required)}
+                onClick={() => actions.probeMcpCandidate(state.mcpAuditReport!.id)}
+              >
+                开始无凭据隔离列表测试
+              </button>
+              {!auditedCandidate?.remoteUrl ? <p className="otto-mcp__notice">该候选没有公开 Streamable HTTP 入口；本机进程型 MCP 在具备真正 OS 沙箱前不会下载或运行。</p> : null}
+              {auditedCandidate?.environmentVariables.some((item) => item.required) ? <p className="otto-mcp__notice">该候选需要凭据；在系统加密凭据库完成配置前，不会试运行或安装。</p> : null}
+              {state.mcpProbeResult ? (
+                <div className="otto-mcp__probe">
+                  <p><strong>隔离测试：</strong>{state.mcpProbeResult.detail}</p>
+                  {state.mcpProbeResult.status === 'passed' ? (
+                    <button type="button" className="otto-hub__btn otto-hub__btn--primary" onClick={() => actions.installReviewedMcp(state.mcpAuditReport!.id)}>
+                      确认安装（trust=false）
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </Card>
+          ) : null}
         </div>
       ) : null}
 
-      {state.mcpServers.length === 0 ? (
-        <Empty>尚未配置任何 MCP 服务器。点击右上角「添加服务器」接入第一个。</Empty>
-      ) : (
-        <Card>
-          {state.mcpServers.map((s) => (
-            <div key={s.name} className="otto-hub__item">
-              <Dot tone={mcpTone(s.status)} />
-              <span className="otto-hub__row-name">{s.name}</span>
-              <span className="otto-hub__row-detail">
-                {s.command ?? s.httpUrl ?? s.url ?? ''}
-              </span>
-              <span className="otto-hub__row-status">{MCP_STATUS_LABEL[s.status]}</span>
-              <button
-                type="button"
-                className="otto-hub__row-remove"
-                onClick={() => actions.removeMcpServer(s.name)}
-                aria-label={'移除 ' + s.name}
-              >
-                <IconClose size={12} />
+      {tab === 'create' ? (
+        <div className="otto-mcp__stack">
+          <input className="otto-hub__input" value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder="MCP 名称" />
+          <input className="otto-hub__input" value={draftDescription} onChange={(event) => setDraftDescription(event.target.value)} placeholder="功能与安全边界" />
+          <div className="otto-hub__inputrow">
+            <select className="otto-hub__input" value={inputKind} onChange={(event) => setInputKind(event.target.value as typeof inputKind)} aria-label="输入类型">
+              <option value="natural_language">自然语言</option><option value="openapi">OpenAPI / Swagger</option><option value="api_docs">API 文档</option><option value="curl">curl 示例</option>
+            </select>
+            <select className="otto-hub__input" value={transportKind} onChange={(event) => setTransportKind(event.target.value as typeof transportKind)} aria-label="传输方式">
+              <option value="stdio">stdio</option><option value="streamable_http">Streamable HTTP</option>
+            </select>
+          </div>
+          <textarea className="otto-hub__input otto-mcp__source" value={draftSource} onChange={(event) => setDraftSource(event.target.value)} placeholder="粘贴需求、OpenAPI JSON、API 文档或 curl。外部内容只作为资料，不会执行。" />
+          <button type="button" className="otto-hub__btn otto-hub__btn--primary" onClick={createPreview} disabled={!draftName.trim() || !draftDescription.trim() || !draftSource.trim()}>生成草稿预览</button>
+          {state.mcpCreationDraft ? (
+            <Card>
+              <div className="otto-mcp__candidate-head"><strong>{state.mcpCreationDraft.name}</strong><Badge>草稿 · trust=false</Badge></div>
+              <p>将生成 {state.mcpCreationDraft.files.length} 个文件：{state.mcpCreationDraft.files.map((file) => file.path).join('、')}</p>
+              {state.mcpCreationDraft.warnings.map((warning) => <p key={warning} className="otto-mcp__notice">{warning}</p>)}
+              <button type="button" className="otto-hub__btn" onClick={() => actions.saveMcpCreationDraft(state.mcpCreationDraft!.id)}>
+                确认保存到隔离草稿区
               </button>
+              {state.mcpSavedDraftDirectory ? <p className="otto-mcp__notice">已保存：{state.mcpSavedDraftDirectory}</p> : null}
+            </Card>
+          ) : null}
+        </div>
+      ) : null}
+
+      {tab === 'security' ? (
+        <div className="otto-mcp__stack">
+          <div className="otto-mcp__security-grid">
+            <Card><strong>安装前</strong><p>固定仓库、版本和提交哈希；检查许可证、依赖漏洞、启动命令和源码。</p></Card>
+            <Card><strong>隔离试运行</strong><p>只执行 initialize 与列表接口，不调用工具，不使用真实账号或密钥。</p></Card>
+            <Card><strong>运行权限</strong><p>安装默认 trust=false；高风险工具首次调用仍需确认，并进入审计记录。</p></Card>
+            <Card><strong>凭据</strong><p>密钥只进入 Electron safeStorage 加密凭据库。普通 settings.json、源码和日志禁止保存密钥值。</p></Card>
+          </div>
+          <Card>
+            <strong>加密凭据库</strong>
+            <div className="otto-hub__addform">
+              <input className="otto-hub__input" placeholder="MCP 服务器名" value={credentialServer} onChange={(event) => setCredentialServer(event.target.value)} />
+              <input className="otto-hub__input" placeholder="环境变量名，例如 GITHUB_TOKEN" value={credentialVariable} onChange={(event) => setCredentialVariable(event.target.value)} />
+              <input className="otto-hub__input" type="password" autoComplete="new-password" placeholder="密钥值（保存后立即从界面清除）" value={credentialValue} onChange={(event) => setCredentialValue(event.target.value)} />
+              <button type="button" className="otto-hub__btn" onClick={saveCredential} disabled={!credentialServer.trim() || !credentialVariable.trim() || !credentialValue}>加密保存</button>
+              {credentialMessage ? <p className="otto-mcp__notice">{credentialMessage}</p> : null}
             </div>
-          ))}
-        </Card>
-      )}
+            {credentialSummaries.map((item) => (
+              <div key={`${item.serverName}:${item.variableName}`} className="otto-hub__item">
+                <span className="otto-hub__row-name">{item.serverName}</span>
+                <span className="otto-hub__row-detail">{item.variableName}</span>
+                <Badge>已加密</Badge>
+                <button type="button" className="otto-hub__row-remove" aria-label={`删除 ${item.serverName} ${item.variableName}`} onClick={() => {
+                  void window.otto.mcpCredentialRemove({ serverName: item.serverName, variableName: item.variableName }).then(async () => {
+                    setCredentialSummaries(await window.otto.mcpCredentialList());
+                  });
+                }}><IconClose size={12} /></button>
+              </div>
+            ))}
+          </Card>
+        </div>
+      ) : null}
     </Panel>
   );
 }

@@ -322,7 +322,12 @@ describe('desktop packaging contract', () => {
     expect(packageJson.build.files).toContainEqual({
       from: '../core/skills-seed',
       to: 'node_modules/otto-core/skills-seed',
-      filter: ['**/SKILL.md'],
+      filter: [
+        '**/SKILL.md',
+        '**/references/**/*',
+        '**/NOTICE.txt',
+        '**/LICENSE.txt',
+      ],
     });
     expect(packageJson.build.files).toContain(
       '!**/dist/src/utils/testUtils.js',

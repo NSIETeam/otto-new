@@ -72,7 +72,7 @@ describe('招聘对话共享桥', () => {
     const h = harness();
     await handleRecruitmentConversation({ ...h.common, text: '帮我分析一份简历' });
     expect(h.registry.summary('session-1', 'hr-1', h.store, h.common.now())).toMatchObject({
-      source: 'recruitment', title: '简历分析', phase: 'collecting',
+      source: 'recruitment', title: '候选人材料分析', phase: 'collecting',
       missingFields: ['岗位名称', '岗位要求', '明确确认已取得候选人授权'],
     });
     const currentId = h.registry.get('session-1', 'hr-1', h.common.now())!.id;
@@ -117,7 +117,7 @@ describe('招聘对话共享桥', () => {
     expect(h.store.getSnapshot()).toMatchObject({
       jobTitle: '高级前端工程师', consentConfirmed: true, retentionDays: 30,
     });
-    expect(h.messages.at(-1)?.text).toContain('确认选择简历');
+    expect(h.messages.at(-1)?.text).toContain('确认候选人已授权并选择材料');
     expect(h.selectFiles).not.toHaveBeenCalled();
   });
 
@@ -128,7 +128,7 @@ describe('招聘对话共享桥', () => {
     expect(h.store.getSnapshot().candidates).toHaveLength(1);
     expect(h.store.activeCandidate()?.analysis.findings.length).toBeGreaterThan(0);
     const output = h.messages.at(-1)?.text ?? '';
-    expect(output).toContain('简历分析完成');
+    expect(output).toContain('候选人档案已生成');
     expect(output).not.toContain('13900139000');
     expect(output).not.toContain('liming@example.com');
   });
@@ -182,5 +182,44 @@ describe('招聘对话共享桥', () => {
       expect(await handleRecruitmentConversation({ ...h.common, text })).toBe(false);
     }
     expect(h.selectFiles).not.toHaveBeenCalled();
+  });
+
+  it('直接理解自然语言招聘目标，并能只用面试视频建立候选人档案', async () => {
+    const h = harness();
+    h.selectFiles.mockReset();
+    h.selectFiles.mockResolvedValue(['D:\\video\\frontend-candidate.mp4']);
+
+    await handleRecruitmentConversation({
+      ...h.common,
+      text: '我要招一名高级前端工程师，重点看复杂项目和性能优化能力，帮我分析这个视频',
+    });
+    expect(h.store.getSnapshot()).toMatchObject({
+      jobTitle: '高级前端工程师',
+      jobDescription: expect.stringContaining('复杂项目和性能优化能力'),
+      consentConfirmed: false,
+    });
+    expect(h.registry.summary('session-1', 'hr-1', h.store, h.common.now())).toMatchObject({
+      phase: 'collecting',
+      missingFields: ['明确确认已取得候选人授权'],
+    });
+    expect(h.messages.at(-1)?.text).toContain('只需补充：明确确认已取得候选人授权');
+
+    await handleRecruitmentConversation({
+      ...h.common,
+      text: '确认候选人已授权并选择材料',
+    });
+    expect(h.selectFiles).toHaveBeenCalledTimes(1);
+    expect(h.extractDocument).not.toHaveBeenCalled();
+    expect(h.analyzeResume).toHaveBeenCalledWith(expect.objectContaining({
+      jobTitle: '高级前端工程师',
+      redactedResume: expect.stringContaining('未提供简历'),
+      interviewTranscript: expect.stringContaining('[00:05] 候选人'),
+    }));
+    expect(h.store.activeCandidate()).toMatchObject({
+      semanticMaterials: 'interview',
+      transcriptText: expect.stringContaining('[00:05] 候选人'),
+    });
+    expect(h.messages.at(-1)?.text).toContain('候选人档案已生成');
+    expect(h.messages.at(-1)?.text).toContain('未提供的履历信息已标为待核实');
   });
 });

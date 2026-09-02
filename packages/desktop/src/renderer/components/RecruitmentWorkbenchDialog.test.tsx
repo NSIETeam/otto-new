@@ -70,40 +70,35 @@ function renderDialog(target: React.ComponentProps<typeof RecruitmentWorkbenchDi
 }
 
 async function importResume(): Promise<void> {
-  fireEvent.change(screen.getByRole('textbox', { name: '岗位名称' }), {
-    target: { value: '高级前端工程师' },
+  fireEvent.change(screen.getByRole('textbox', { name: '招聘目标' }), {
+    target: { value: '我要招一名高级前端工程师，必须熟练掌握 React 和 TypeScript，熟悉 Rust' },
   });
-  fireEvent.change(screen.getByRole('textbox', { name: '岗位要求' }), {
-    target: { value: '必须熟练掌握 React 和 TypeScript\n熟悉 Rust' },
-  });
-  fireEvent.click(screen.getByRole('checkbox', { name: /已取得候选人/ }));
-  fireEvent.click(screen.getByRole('button', { name: '批量导入并智能分析简历' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: /已取得本次所选候选人/ }));
+  fireEvent.click(screen.getByRole('button', { name: '选择简历或面试视频，开始分析' }));
   await screen.findByText(/已导入 \d+ 份简历/);
 }
 
 describe('RecruitmentWorkbenchDialog', () => {
   it('requires candidate consent, isolates PII and shows full-text semantic evidence', async () => {
     renderDialog();
-    fireEvent.change(screen.getByRole('textbox', { name: '岗位名称' }), {
-      target: { value: '高级前端工程师' },
+    expect(screen.getByText('一句话加一份材料就够了')).toBeTruthy();
+    expect(screen.queryByRole('navigation', { name: '智能招聘功能' })).toBeNull();
+    fireEvent.change(screen.getByRole('textbox', { name: '招聘目标' }), {
+      target: { value: '我要招一名高级前端工程师，必须熟练掌握 React 和 TypeScript，熟悉 Rust' },
     });
-    fireEvent.change(screen.getByRole('textbox', { name: '岗位要求' }), {
-      target: { value: '必须熟练掌握 React 和 TypeScript\n熟悉 Rust' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '批量导入并智能分析简历' }));
+    fireEvent.click(screen.getByRole('button', { name: '选择简历或面试视频，开始分析' }));
     expect(screen.getByRole('alert').textContent).toContain('候选人');
     expect(window.otto.selectFiles).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /已取得候选人/ }));
-    fireEvent.click(screen.getByRole('button', { name: '批量导入并智能分析简历' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /已取得本次所选候选人/ }));
+    fireEvent.click(screen.getByRole('button', { name: '选择简历或面试视频，开始分析' }));
     await screen.findByText(/已导入 1 份简历/);
-    expect(screen.getByText('身份信息已与模型评价输入隔离')).toBeTruthy();
     expect(document.body.textContent).not.toContain('13900139000');
     expect(document.body.textContent).not.toContain('liming@example.com');
 
-    fireEvent.click(screen.getByRole('button', { name: '综合评估' }));
-    expect(screen.getByText('全文综合判断')).toBeTruthy();
+    expect(screen.getByText('简历全文结论')).toBeTruthy();
     expect(screen.getAllByText('84').length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getByRole('button', { name: '查看原文证据' }));
     expect(screen.getAllByText(/第 5 行：使用 React 和 TypeScript/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('全文尚未证明')).toBeTruthy();
   });
@@ -111,7 +106,7 @@ describe('RecruitmentWorkbenchDialog', () => {
   it('requires explicit recruiter confirmation for a final decision', async () => {
     renderDialog();
     await importResume();
-    fireEvent.click(screen.getByRole('button', { name: '综合评估' }));
+    fireEvent.click(screen.getByRole('button', { name: '记录人工结论' }));
     fireEvent.change(screen.getByRole('textbox', { name: '人工判断依据' }), {
       target: { value: '关键岗位证据需要下一轮继续核实' },
     });
@@ -148,10 +143,9 @@ describe('RecruitmentWorkbenchDialog', () => {
     for (const [input] of vi.mocked(window.otto.recruitmentAnalyzeResume).mock.calls) {
       expect(input.redactedResume).not.toMatch(/13900139000|13800138000|liming@example\.com|wangfang@example\.com/);
     }
-    fireEvent.click(screen.getByRole('button', { name: '综合评估' }));
-    expect(screen.getByText('候选人横向对比')).toBeTruthy();
-    expect(screen.getByText('2 人')).toBeTruthy();
-    expect(screen.getByText('保持导入顺序，不自动排名')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '比较 2 位候选人' }));
+    expect(screen.getByText('候选人横向比较')).toBeTruthy();
+    expect(screen.getByText('统一岗位口径，保持导入顺序，不自动排名')).toBeTruthy();
   });
 
   it('keeps a failed resume available for retry and never substitutes keyword scoring', async () => {
@@ -162,12 +156,11 @@ describe('RecruitmentWorkbenchDialog', () => {
     });
     renderDialog();
     await importResume();
-    expect(screen.getByText(/1 份可稍后重试/)).toBeTruthy();
+    expect(screen.getByText(/1 份可重试/)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '综合评估' }));
-    expect(screen.getByText('全文智能分析尚未完成')).toBeTruthy();
+    expect(screen.getByText('Otto 暂时没有完成这份材料的智能分析')).toBeTruthy();
     expect(screen.getByText('模型服务暂不可用')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '重试全文分析' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '重新分析' })).toBeTruthy();
     expect(document.body.textContent).not.toContain('关键词命中率');
   });
 
@@ -177,31 +170,54 @@ describe('RecruitmentWorkbenchDialog', () => {
     Object.assign(window.otto, {
       selectFiles: vi.fn(async () => ['D:\\audio\\interview.wav']),
     });
-    fireEvent.click(screen.getByRole('button', { name: '音频面试分析' }));
-    fireEvent.click(screen.getByRole('button', { name: '选择面试录音' }));
+    fireEvent.click(screen.getByRole('button', { name: '加入面试录音或视频' }));
 
     await waitFor(() => expect(window.otto.recruitmentTranscribe)
       .toHaveBeenCalledWith('D:\\audio\\interview.wav'));
-    await screen.findByText(/面试转写与内容分析完成/);
+    await screen.findByText(/已把面试回答与简历全文联合分析/);
+    expect(window.otto.recruitmentAnalyzeResume).toHaveBeenLastCalledWith(expect.objectContaining({
+      interviewTranscript: expect.stringContaining('[00:05] 候选人'),
+    }));
+    expect(screen.getByText('简历 + 面试联合结论')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '面试方案' }));
     expect((screen.getByRole('textbox', { name: '面试转写' }) as HTMLTextAreaElement).value)
       .toContain('[00:05] 候选人');
-    expect(screen.getByText('仅分析回答内容')).toBeTruthy();
-    expect(screen.getByText('岗位知识证据')).toBeTruthy();
+    expect(screen.getByText('面试已与简历联合分析')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '面试材料' }));
     fireEvent.change(screen.getByRole('textbox', { name: '面试人员备注' }), {
       target: { value: '待复核项目中的个人贡献' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '导出面试记录' }));
+    fireEvent.click(screen.getByRole('button', { name: '导出完整面试记录' }));
     await waitFor(() => expect(window.otto.saveTextFile).toHaveBeenCalledWith(
       expect.stringContaining('面试记录.md'),
       expect.stringContaining('待复核项目中的个人贡献'),
     ));
 
-    fireEvent.click(screen.getByRole('button', { name: '隐私与审计' }));
+    fireEvent.click(screen.getByRole('button', { name: '资料与隐私' }));
     expect(screen.getByText('敏感属性不参与评价')).toBeTruthy();
-    expect(screen.getByText(/WhisperX 转写完成/)).toBeTruthy();
-    expect(screen.getByText(/whisperx\/large-v3/)).toBeTruthy();
+    expect(screen.getByText(/WhisperX 完成/)).toBeTruthy();
     expect(screen.getByText(/模型已阅读脱敏简历全文/)).toBeTruthy();
+  });
+
+  it('can create a candidate dossier directly from an interview video without a resume', async () => {
+    Object.assign(window.otto, {
+      selectFiles: vi.fn(async () => ['D:\\video\\candidate-interview.mp4']),
+    });
+    renderDialog();
+    fireEvent.change(screen.getByRole('textbox', { name: '招聘目标' }), {
+      target: { value: '我要招一名高级前端工程师，重点看复杂项目和性能优化能力' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /已取得本次所选候选人/ }));
+    fireEvent.click(screen.getByRole('button', { name: '选择简历或面试视频，开始分析' }));
+
+    await screen.findByText(/已从面试材料建立候选人档案/);
+    expect(window.otto.extractEditableDocument).not.toHaveBeenCalled();
+    expect(window.otto.recruitmentAnalyzeResume).toHaveBeenCalledWith(expect.objectContaining({
+      jobTitle: '高级前端工程师',
+      redactedResume: expect.stringContaining('未提供简历'),
+      interviewTranscript: expect.stringContaining('[00:05] 候选人'),
+    }));
+    expect(screen.getByText('面试材料结论')).toBeTruthy();
+    expect(screen.getByText('面试材料已分析')).toBeTruthy();
   });
 });

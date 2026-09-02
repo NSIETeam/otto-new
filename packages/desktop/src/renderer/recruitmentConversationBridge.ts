@@ -17,6 +17,7 @@ import type {
   RecruitmentSemanticAnalysisInput,
   RecruitmentSemanticEvaluation,
 } from '../main/recruitmentSemantic.js';
+import { inferRecruitmentJobTitle, looksLikeNaturalRecruitmentGoal } from './recruitmentGoal.js';
 
 const RECRUITMENT_DRAFT_TTL_MS = 30 * 60 * 1_000;
 const MAX_DRAFTS = 1_000;
@@ -92,7 +93,8 @@ function detectIntent(text: string): RecruitmentIntent | null {
   if (/(?:生成|查看|准备).{0,8}(?:面试材料|面试提纲|面试问题)/u.test(text)) return 'interview-kit';
   if (/(?:人员初步分析|候选人初步分析|候选人综合评估|简历匹配度|简历匹配证据|候选人证据)/u.test(text)) return 'screening';
   if (/(?:分析|处理|导入).{0,8}(?:面试录音|面试音频)|音频面试分析/u.test(text)) return 'audio-import';
-  if (/(?:分析|导入|处理).{0,8}(?:简历)|简历分析/u.test(text)) return 'resume-import';
+  if (/(?:分析|导入|处理).{0,12}(?:简历|候选人材料|面试视频)|简历分析/u.test(text)) return 'resume-import';
+  if (looksLikeNaturalRecruitmentGoal(text)) return 'resume-import';
   return null;
 }
 
@@ -106,13 +108,16 @@ function timestamp(seconds: number): string {
 }
 
 function applyResumeContext(input: RecruitmentConversationInput): void {
-  const title = labeledValue(input.text, ['岗位名称', '职位名称', '招聘岗位']);
-  const description = labeledValue(input.text, ['岗位要求', '任职要求', '职位要求']);
+  const naturalGoal = looksLikeNaturalRecruitmentGoal(input.text);
+  const title = labeledValue(input.text, ['岗位名称', '职位名称', '招聘岗位'])
+    || (naturalGoal ? inferRecruitmentJobTitle(input.text) : '');
+  const description = labeledValue(input.text, ['岗位要求', '任职要求', '职位要求'])
+    || (naturalGoal ? clean(input.text) : '');
   const retention = Number(labeledValue(input.text, ['保存期限', '材料保存期限']).match(/\d+/u)?.[0]);
   if (title) input.store.setJobTitle(title);
   if (description) input.store.setJobDescription(description);
   if ([7, 30, 90].includes(retention)) input.store.setRetentionDays(retention);
-  if (/(?:我确认|确认)?已取得候选人.{0,12}(?:授权|同意)|候选人已授权/u.test(input.text)) {
+  if (/(?:我确认|确认)?已取得候选人.{0,12}(?:授权|同意)|候选人已授权|确认候选人已授权并选择材料/u.test(input.text)) {
     input.store.setConsentConfirmed(true);
   }
 }
@@ -187,7 +192,7 @@ function isCancel(text: string): boolean {
 }
 
 function resumeConfirm(text: string): boolean {
-  return /^确认选择简历[。！!\s]*$/u.test(text.trim());
+  return /^(?:确认选择简历|确认候选人已授权并选择材料)[。！!\s]*$/u.test(text.trim());
 }
 
 function audioConfirm(text: string): boolean {
@@ -203,42 +208,86 @@ async function importResume(
   draft: RecruitmentConversationDraft,
   now: number,
 ): Promise<void> {
-  const [filePath] = await input.selectFiles();
-  if (!filePath) {
-    input.postMessage('assistant', '你取消了文件选择，简历尚未导入；草稿仍保留。');
+  const filePaths = (await input.selectFiles()).slice(0, 3);
+  if (!filePaths.length) {
+    input.postMessage('assistant', '你取消了文件选择，候选人材料尚未导入；草稿仍保留。');
     return;
   }
-  if (!RESUME_EXTENSIONS.has(extension(filePath))) throw new Error('简历仅支持 PDF、DOCX、TXT 或 Markdown 文件');
-  const extracted = await input.extractDocument(filePath);
-  if (!clean(extracted.content)) throw new Error('简历中没有提取到可分析文字');
+  const resumePaths = filePaths.filter((filePath) => RESUME_EXTENSIONS.has(extension(filePath)));
+  const mediaPaths = filePaths.filter((filePath) => AUDIO_EXTENSIONS.has(extension(filePath)));
+  if (!resumePaths.length && !mediaPaths.length) {
+    throw new Error('请选择 PDF、DOCX、TXT、Markdown 简历，或常见音频/视频文件');
+  }
+  if (resumePaths.length > 1 || mediaPaths.length > 1) {
+    throw new Error('对话入口一次处理一位候选人的一份简历和一份面试材料；批量分析请使用右侧智能招聘工作台');
+  }
   const state = input.store.getSnapshot();
   const candidateId = `candidate:${crypto.randomUUID()}`;
+  let extracted: ExtractedDocument | null = null;
+  if (resumePaths[0]) {
+    extracted = await input.extractDocument(resumePaths[0]);
+    if (!clean(extracted.content)) throw new Error('简历中没有提取到可分析文字');
+  }
+  let transcriptText = '';
+  let transcriptReport: CandidateWorkspace['transcriptReport'] = null;
+  let transcriptWarning = '';
+  let transcriptionModel = '';
+  if (mediaPaths[0]) {
+    const transcription = await input.transcribe(mediaPaths[0]);
+    const rawTranscript = transcription.segments.map((segment) => (
+      `[${timestamp(segment.startSeconds)}] ${clean(segment.speaker, 80)}：${clean(segment.text)}`
+    )).join('\n');
+    if (!rawTranscript.trim()) throw new Error('面试材料中没有提取到可分析的语音文字');
+    transcriptText = analyzeCandidateResume({
+      candidateId,
+      resumeText: rawTranscript,
+      jobDescription: state.jobDescription,
+      now: new Date(now).toISOString(),
+    }).redactedResume;
+    transcriptWarning = clean(transcription.warning);
+    transcriptionModel = clean(transcription.model, 100);
+  }
   const analysis = analyzeCandidateResume({
     candidateId,
-    resumeText: extracted.content,
+    resumeText: extracted?.content ?? transcriptText,
     jobDescription: state.jobDescription,
     now: new Date(now).toISOString(),
   });
+  if (transcriptText) {
+    transcriptReport = analyzeInterviewTranscript({
+      transcript: transcriptText,
+      redactedResume: extracted
+        ? analysis.redactedResume
+        : '当前候选人未提供简历，履历信息需要后续补充核实。',
+      jobDescription: state.jobDescription,
+    });
+  }
   const semanticEvaluation = await input.analyzeResume({
     candidateId,
     jobTitle: state.jobTitle,
     jobDescription: state.jobDescription,
-    redactedResume: analysis.redactedResume,
+    redactedResume: extracted
+      ? analysis.redactedResume
+      : '当前候选人未提供简历，请只根据面试转写判断，并将缺少的履历信息列为待核实事项。',
+    ...(transcriptText ? { interviewTranscript: transcriptText } : {}),
   });
   const candidate: CandidateWorkspace = {
     id: candidateId,
-    fileName: clean(extracted.fileName, 300),
+    fileName: clean(extracted?.fileName ?? mediaPaths[0]?.split(/[\\/]/u).at(-1) ?? '候选人材料', 300),
     consentAt: new Date(now).toISOString(),
     retentionDays: state.retentionDays,
     expiresAt: new Date(now + state.retentionDays * 86_400_000).toISOString(),
     analysis,
     semanticEvaluation,
     semanticError: '',
+    semanticMaterials: extracted && transcriptText
+      ? 'resume_interview'
+      : transcriptText ? 'interview' : 'resume',
     jobTitleSnapshot: state.jobTitle,
     jobDescriptionSnapshot: state.jobDescription,
-    transcriptText: '',
-    transcriptReport: null,
-    transcriptWarning: '',
+    transcriptText,
+    transcriptReport,
+    transcriptWarning,
     decision: null,
   };
   input.store.setCandidates((current) => [...current, candidate]);
@@ -248,13 +297,15 @@ async function importResume(
   input.store.setConsentConfirmed(false);
   input.store.setAudits((current) => [makeRecruitmentAudit(
     candidateId,
-    'resume_analyzed',
-    `已解析 ${clean(extracted.sourceFormat, 20).toUpperCase()} 简历；身份字段与能力评价已分离，保存期限 ${state.retentionDays} 天。`,
+    transcriptText && extracted ? 'resume_interview_analyzed' : transcriptText ? 'interview_only_analyzed' : 'resume_analyzed',
+    extracted
+      ? `已解析 ${clean(extracted.sourceFormat, 20).toUpperCase()} 简历${transcriptText ? `并使用 ${transcriptionModel} 转写面试材料` : ''}；身份字段与能力评价已分离，保存期限 ${state.retentionDays} 天。`
+      : `未提供简历；已使用 ${transcriptionModel} 转写面试材料并建立候选人档案，履历信息标记为待核实，保存期限 ${state.retentionDays} 天。`,
     'system',
     `${semanticEvaluation.analysisVersion}/${semanticEvaluation.modelProvider}`,
   ), ...current]);
   input.registry.clear(draft.sessionId, draft.accountId);
-  input.postMessage('assistant', `简历分析完成：全文智能结果已同步到右侧招聘工作区。当前材料匹配度 ${semanticEvaluation.overallScore}/100，证据覆盖 ${semanticEvaluation.evidenceCoverage}%。模型阅读了脱敏后的完整简历，而不是按关键词出现次数打分；手机号、邮箱等身份字段没有进入评价输入。`);
+  input.postMessage('assistant', `候选人档案已生成：${extracted && transcriptText ? '简历与面试材料已联合分析' : extracted ? '简历全文已分析' : '已根据面试材料分析，未提供的履历信息已标为待核实'}。当前材料贴合度 ${semanticEvaluation.overallScore}/100，证据覆盖 ${semanticEvaluation.evidenceCoverage}%。结果已同步到右侧智能招聘；每条能力判断可回查原文，手机号、邮箱等身份字段没有进入评价输入。`);
 }
 
 async function importAudio(
@@ -279,21 +330,31 @@ async function importAudio(
     redactedResume: candidate.analysis.redactedResume,
     jobDescription: state.jobDescription,
   });
+  const semanticEvaluation = await input.analyzeResume({
+    candidateId: candidate.id,
+    jobTitle: state.jobTitle,
+    jobDescription: state.jobDescription,
+    redactedResume: candidate.analysis.redactedResume,
+    interviewTranscript: transcriptText,
+  });
   input.store.setCandidates((current) => current.map((item) => item.id === candidate.id ? {
     ...item,
     transcriptText,
     transcriptReport,
     transcriptWarning: clean(result.warning),
+    semanticEvaluation,
+    semanticError: '',
+    semanticMaterials: 'resume_interview',
   } : item));
   input.store.setAudits((current) => [makeRecruitmentAudit(
     candidate.id,
     'interview_transcribed',
-    `已使用 ${clean(result.model, 100)} 完成转写和回答内容证据分析。`,
+    `已使用 ${clean(result.model, 100)} 完成转写，并将面试回答与简历全文联合分析。`,
     'system',
-    `whisperx/${clean(result.model, 100)}`,
+    `${semanticEvaluation.analysisVersion}/${semanticEvaluation.modelProvider}`,
   ), ...current]);
   input.registry.clear(draft.sessionId, draft.accountId);
-  input.postMessage('assistant', `面试录音分析完成：识别 ${transcriptReport.knowledgeEvidence.length} 项岗位知识证据，${transcriptReport.incompleteAnswers.length} 项回答需要追问，${transcriptReport.inconsistencies.length} 项差异需要人工核实。分析只使用回答文字，不分析口音、音高、表情或情绪。`);
+  input.postMessage('assistant', `面试材料已与简历联合分析：当前材料贴合度 ${semanticEvaluation.overallScore}/100，证据覆盖 ${semanticEvaluation.evidenceCoverage}%。候选人档案和针对性面试问题已经同步更新；只分析回答文字，不分析口音、音高、表情或情绪。`);
 }
 
 export class RecruitmentConversationDraftRegistry {
@@ -346,10 +407,10 @@ export class RecruitmentConversationDraftRegistry {
     const running = this.running.has(key);
     const missing = draft.kind === 'resume-import' ? resumeMissing(store) : [];
     const title = draft.kind === 'resume-import'
-      ? '简历分析'
+      ? '候选人材料分析'
       : draft.kind === 'audio-import' ? '面试录音分析' : '清除候选人材料';
     const confirmationText = draft.kind === 'resume-import'
-      ? '确认选择简历'
+      ? '确认候选人已授权并选择材料'
       : draft.kind === 'audio-import' ? '确认选择面试录音' : '确认删除候选人材料';
     return {
       id: draft.id,
@@ -482,12 +543,16 @@ export async function handleRecruitmentConversation(
       applyResumeContext(input);
       const missing = resumeMissing(input.store);
       if (missing.length > 0) {
-        input.postMessage('assistant', `开始简历分析前请补充：${missing.join('、')}。可填写“岗位名称：…；岗位要求：…；保存期限：7/30/90天；我确认已取得候选人授权”。`);
+        const state = input.store.getSnapshot();
+        const knownGoal = state.jobTitle && state.jobDescription
+          ? `Otto 已理解你要招聘“${state.jobTitle}”。`
+          : '';
+        input.postMessage('assistant', `${knownGoal}开始分析前只需补充：${missing.join('、')}。若已取得授权，回复“确认候选人已授权并选择材料”，随后直接选择简历、面试视频，或两者一起选择。`);
         return true;
       }
       if (!resumeConfirm(input.text)) {
         const state = input.store.getSnapshot();
-        input.postMessage('assistant', `岗位“${state.jobTitle}”的信息和候选人授权已确认，材料保存 ${state.retentionDays} 天。回复“确认选择简历”后由你亲自选择本机文件。`);
+        input.postMessage('assistant', `招聘目标“${state.jobTitle}”已理解，材料保存 ${state.retentionDays} 天。回复“确认候选人已授权并选择材料”后可直接选择简历、面试视频，或两者一起选择。`);
         return true;
       }
       if (!input.registry.begin(input.sessionId, input.accountId)) {

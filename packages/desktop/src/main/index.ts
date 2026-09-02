@@ -6204,6 +6204,7 @@ function registerIpc(): void {
         || typeof body.jobTitle !== 'string'
         || typeof body.jobDescription !== 'string'
         || typeof body.redactedResume !== 'string'
+        || (body.interviewTranscript !== undefined && typeof body.interviewTranscript !== 'string')
       ) throw new Error('招聘分析缺少完整岗位或简历正文');
       return analyzeRecruitmentResume(body as unknown as RecruitmentSemanticAnalysisInput);
     },

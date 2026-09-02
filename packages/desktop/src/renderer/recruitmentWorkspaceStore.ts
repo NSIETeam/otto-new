@@ -28,6 +28,7 @@ export interface CandidateWorkspace {
   analysis: CandidateResumeAnalysis;
   semanticEvaluation?: RecruitmentSemanticEvaluation | null;
   semanticError?: string;
+  semanticMaterials?: 'resume' | 'interview' | 'resume_interview';
   jobTitleSnapshot?: string;
   jobDescriptionSnapshot?: string;
   transcriptText: string;

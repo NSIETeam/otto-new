@@ -25,6 +25,7 @@ export type RecruitmentMatchLevel =
 export interface RecruitmentSemanticEvidence {
   line: number;
   quote: string;
+  source?: 'resume' | 'interview';
 }
 
 export interface RecruitmentSemanticDimension {
@@ -75,4 +76,5 @@ export interface RecruitmentSemanticAnalysisInput {
   jobTitle: string;
   jobDescription: string;
   redactedResume: string;
+  interviewTranscript?: string;
 }

@@ -19,11 +19,11 @@ const PARK_PROMPTS: Readonly<Record<ParkModuleTarget, string>> = {
 };
 
 const RECRUITMENT_PROMPTS: Readonly<Record<RecruitmentModuleTarget, string>> = {
-  'resume-analysis': '分析一份简历',
-  'candidate-screening': '查看人员初步分析',
-  'interview-audio': '分析面试录音',
-  'interview-kit': '生成面试材料',
-  'privacy-audit': '查看招聘隐私与审计',
+  'resume-analysis': '我要招一名员工，帮我分析候选人材料',
+  'candidate-screening': '查看当前候选人档案和原文证据',
+  'interview-audio': '把面试录音或视频加入当前候选人分析',
+  'interview-kit': '生成针对性面试问题并比较候选人',
+  'privacy-audit': '查看或清理候选人资料',
 };
 
 export function moduleConversationPrompt(module: ModuleDefinition): string | null {

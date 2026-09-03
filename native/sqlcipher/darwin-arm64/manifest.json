@@ -1,0 +1,32 @@
+{
+  "format": 3,
+  "target": "darwin-arm64",
+  "platform": "darwin",
+  "arch": "arm64",
+  "runtime": "electron",
+  "runtimeVersion": "43.2.0",
+  "sqlcipherVersion": "4.16.0 community",
+  "betterSqlite3Version": "12.11.1",
+  "cipherSelfTest": true,
+  "plainSqliteRejected": true,
+  "license": "BSD-3-Clause",
+  "source": "https://github.com/sqlcipher/sqlcipher",
+  "sourceRevision": "e2a6040f2ae5cfff2b3e08eb3320007d93cdf3fc",
+  "buildCommit": "1bfea5cbf68a54733530f5acb91e03a0a5022d21",
+  "toolchain": {
+    "nodeVersion": "24.18.0",
+    "electronVersion": "43.2.0",
+    "electronModuleAbi": "148",
+    "opensslVersion": "0.0.0"
+  },
+  "sha256": "23d813de70f6e38682525a89fb620066510259952118aeedfcc3b5028ee322f7",
+  "notices": {
+    "path": "THIRD_PARTY_NOTICES.md",
+    "sha256": "a797477aa8322b152c4339df7e4a22bda58ae640b92a48b79b8e26e6e642a708"
+  },
+  "sbom": {
+    "format": "CycloneDX",
+    "path": "sbom.cdx.json",
+    "sha256": "b96bbedb3e66f288b23fd97d7abb09a66052078bafcc6782b1710fa528082ee5"
+  }
+}

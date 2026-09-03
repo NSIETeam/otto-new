@@ -4809,11 +4809,9 @@ h6.otto-prose__h {
 
 /* 溢出小菜单（重命名 / 删除）：贴会话项右上浮出。 */
 .otto-session__menu {
-  position: absolute;
-  top: 32px;
-  right: 8px;
-  z-index: 20;
-  min-width: 118px;
+  position: fixed;
+  z-index: 1200;
+  width: 132px;
   padding: 4px;
   background: var(--otto-surface);
   border: 1px solid var(--otto-border);

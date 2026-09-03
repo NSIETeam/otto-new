@@ -18,9 +18,9 @@ import {
   statSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
 import { join, resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveOttoUserDir } from '../utils/paths.js';
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const managedStateFile = '.otto-builtin-skill.json';
@@ -155,7 +155,7 @@ export function seedDefaultSkills(): string[] {
   const seedDir = findSeedDir();
   if (!seedDir) return [];
 
-  const target = join(homedir(), '.otto-user', 'skills');
+  const target = join(resolveOttoUserDir(), 'skills');
   const seeded: string[] = [];
 
   let names: string[];

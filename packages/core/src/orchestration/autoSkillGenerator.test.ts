@@ -22,6 +22,7 @@ vi.mock('./workLog.js', () => ({
 import {
   confirmAndSaveSkill,
   confirmPendingSkill,
+  generateLegacySkillContent,
   generateSkillCandidates,
   listPendingSkillCandidates,
   rejectPendingSkill,
@@ -95,6 +96,18 @@ afterEach(async () => {
 });
 
 describe('AutoSkillGenerator 个人 Skill 候选闭环', () => {
+  it('中文工作步骤生成可被 SkillLoader 接受的稳定 ASCII 名称', () => {
+    const content = generateLegacySkillContent(
+      '检测到 → 整理资料 → 输出报告',
+      [],
+      3,
+    );
+    const name = content.match(/^name:\s*(.+)$/mu)?.[1];
+
+    expect(name).toMatch(/^auto-[a-z0-9-]+$/u);
+    expect(name).not.toContain('自动');
+  });
+
   it('候选默认指向用户级 ~/.otto-user/skills，而不是当前项目', async () => {
     const candidates = await generateSkillCandidates(fakeConfig);
 

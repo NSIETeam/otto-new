@@ -433,6 +433,7 @@ describe('EnterpriseClient', () => {
       'staff01',
       'password',
     );
+    expect(client.supportsFederationGateway()).toBe(true);
     const contactCode = `OTTO_FEDERATION_CONTACT_V1:${Buffer.from(
       JSON.stringify(remoteCard),
       'utf8',

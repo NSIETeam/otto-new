@@ -28,7 +28,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { homedir } from 'os';
+import { resolveOttoUserDir } from '../utils/paths.js';
 
 // ============================================================
 // 类型定义
@@ -140,12 +140,13 @@ export interface TokenEstimator {
 // 默认配置
 // ============================================================
 
-const MEMORY_ROOT = path.join(homedir(), '.otto-user', 'memory');
-const KNOWLEDGE_ROOT = path.join(homedir(), '.otto-user', 'knowledge');
-
-const DEFAULT_CONFIG: AutoMemoryEngineConfig = {
-  storageDir: MEMORY_ROOT,
-  knowledgeDir: KNOWLEDGE_ROOT,
+function defaultConfig(): AutoMemoryEngineConfig {
+  const userRoot = resolveOttoUserDir();
+  const memoryRoot = path.join(userRoot, 'memory');
+  const knowledgeRoot = path.join(userRoot, 'knowledge');
+  return {
+  storageDir: memoryRoot,
+  knowledgeDir: knowledgeRoot,
   maxEntriesPerScope: 500,
   similarityThreshold: 0.75,
   autoMerge: true,
@@ -153,9 +154,10 @@ const DEFAULT_CONFIG: AutoMemoryEngineConfig = {
   maxAgeDays: 90,
   llmAssistedMerge: true,
   compressAfterDays: 30,
-  globalMdPath: path.join(MEMORY_ROOT, 'global.md'),
-  knowledgeJsonlPath: path.join(KNOWLEDGE_ROOT, 'entries.jsonl'),
-};
+  globalMdPath: path.join(memoryRoot, 'global.md'),
+  knowledgeJsonlPath: path.join(knowledgeRoot, 'entries.jsonl'),
+  };
+}
 
 // 简单 token 估算（中文约 1.5 chars/token，英文约 4 chars/token）
 const DEFAULT_TOKEN_ESTIMATOR: TokenEstimator = {
@@ -181,7 +183,7 @@ export class AutoMemoryEngine {
     config?: Partial<AutoMemoryEngineConfig>,
     tokenEstimator?: TokenEstimator,
   ) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = { ...defaultConfig(), ...config };
     this.tokenEstimator = tokenEstimator || DEFAULT_TOKEN_ESTIMATOR;
   }
 

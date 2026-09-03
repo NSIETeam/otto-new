@@ -28,13 +28,18 @@ import {
 import { HttpChannelPairingBrokerV1 } from './httpChannelPairingBroker.js';
 import { ManagedChannelConnectorV1 } from './managedChannelConnector.js';
 import { ChannelWorkflowMilestoneNotifierV1 } from './channelWorkflowMilestones.js';
+import { OfficialChannelRuntimeV1 } from './officialChannelRuntime.js';
+import {
+  DingTalkOfficialQrPairingBrokerV1,
+  WeComOfficialQrPairingBrokerV1,
+} from './officialQrPairingBrokers.js';
 import {
   WorkflowTaskControlPort,
   type ChannelTaskProposalBackend,
   type WorkflowControlBackend,
 } from './workflowTaskControlPort.js';
 
-const PROVIDERS: readonly ChannelProvider[] = ['feishu', 'lark', 'wecom'];
+const PROVIDERS: readonly ChannelProvider[] = ['feishu', 'lark', 'wecom', 'dingtalk'];
 
 export interface ManagedChannelPlatformOptions {
   brokerBaseUrl: string;
@@ -52,6 +57,9 @@ export interface ManagedChannelPlatformOptions {
   createSocket?: BrokerChannelRuntimeOptions['createSocket'];
   now?: () => number;
   milestoneFilePath?: string;
+  /** Disable only for deployments that intentionally route all providers through a managed Broker. */
+  useOfficialProviderConnections?: boolean;
+  providers?: readonly ChannelProvider[];
 }
 
 export interface ManagedChannelPlatformStartResult {
@@ -101,13 +109,26 @@ export class ManagedChannelPlatformV1 {
       audit: options.auditPairing,
       now: options.now,
     });
-    for (const provider of PROVIDERS) {
+    const officialRuntime = new OfficialChannelRuntimeV1({
+      fetchImpl: options.fetchImpl,
+      onInbound: (installation, message) => bridge.handle(installation, message),
+    });
+    const useOfficial = options.useOfficialProviderConnections !== false;
+    const wecomBroker = new WeComOfficialQrPairingBrokerV1({ fetchImpl: options.fetchImpl });
+    const dingtalkBroker = new DingTalkOfficialQrPairingBrokerV1({ fetchImpl: options.fetchImpl });
+    const providers = options.providers ?? PROVIDERS;
+    for (const provider of providers) {
+      const isOfficialDirect = useOfficial && (provider === 'wecom' || provider === 'dingtalk');
       connectorMap[provider] = new ManagedChannelConnectorV1({
         provider,
         coordinator,
         vault: options.vault,
-        runtime,
-        broker,
+        runtime: isOfficialDirect ? officialRuntime : runtime,
+        broker: provider === 'wecom' && useOfficial
+          ? wecomBroker
+          : provider === 'dingtalk' && useOfficial
+            ? dingtalkBroker
+            : broker,
         outboundLedger: options.outboundLedger,
       });
     }
@@ -136,7 +157,7 @@ export class ManagedChannelPlatformV1 {
 
   async startInstalled(): Promise<ManagedChannelPlatformStartResult[]> {
     const results: ManagedChannelPlatformStartResult[] = [];
-    for (const provider of PROVIDERS) {
+    for (const provider of Object.keys(this.connectors) as ChannelProvider[]) {
       const connector = this.connectors[provider];
       if (!connector) continue;
       for (const installation of connector.listInstallations()) {
@@ -158,7 +179,7 @@ export class ManagedChannelPlatformV1 {
 
   async stopAll(): Promise<void> {
     const operations: Array<Promise<unknown>> = [];
-    for (const provider of PROVIDERS) {
+    for (const provider of Object.keys(this.connectors) as ChannelProvider[]) {
       const connector = this.connectors[provider];
       if (!connector) continue;
       for (const installation of connector.listInstallations()) {

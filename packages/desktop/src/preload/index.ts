@@ -31,6 +31,7 @@ import type {
   ChannelProvider,
   ChannelInstallation,
   ChannelHealth,
+  FeishuDeviceRegistrationPublic,
   ChannelIdentityBindingV1,
   HealthInfo,
   ServerEndpoint,
@@ -75,6 +76,10 @@ export interface ChannelPairingActionResult<T = unknown> {
   data: T | null;
   error: string | null;
 }
+
+export type ChannelInstallationResult = ChannelInstallation & {
+  ownerBindingState?: 'bound' | 'manual_required';
+};
 
 /**
  * 园区服务插件的企业定制配置（~/.otto-user/park-services.json）。
@@ -1285,6 +1290,9 @@ const IPC = {
   feishuGetConfig: 'otto:feishu-get-config',
   feishuSaveConfig: 'otto:feishu-save-config',
   feishuClearConfig: 'otto:feishu-clear-config',
+  feishuDeviceRegistrationBegin: 'otto:feishu-device-registration-begin',
+  feishuDeviceRegistrationStatus: 'otto:feishu-device-registration-status',
+  feishuDeviceRegistrationCancel: 'otto:feishu-device-registration-cancel',
   channelPairingBegin: 'otto:channel-pairing-begin',
   channelPairingStatus: 'otto:channel-pairing-status',
   channelPairingInstall: 'otto:channel-pairing-install',
@@ -1459,9 +1467,18 @@ export interface OttoBridge {
   feishuSaveConfig(body: FeishuConfigSaveRequest): Promise<FeishuConfigResult>;
   /** 停守护 + 清除凭证（对应 CLI /feishu logout）。 */
   feishuClearConfig(): Promise<FeishuConfigResult>;
+  feishuDeviceRegistrationBegin(
+    domain: 'feishu' | 'lark',
+  ): Promise<ChannelPairingActionResult<FeishuDeviceRegistrationPublic>>;
+  feishuDeviceRegistrationStatus(
+    registrationId: string,
+  ): Promise<ChannelPairingActionResult<FeishuDeviceRegistrationPublic>>;
+  feishuDeviceRegistrationCancel(
+    registrationId: string,
+  ): Promise<ChannelPairingActionResult<FeishuDeviceRegistrationPublic>>;
   channelPairingBegin(provider: ChannelProvider): Promise<ChannelPairingResult>;
   channelPairingStatus(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
-  channelPairingInstall(pairingId: string): Promise<ChannelPairingActionResult>;
+  channelPairingInstall(pairingId: string): Promise<ChannelPairingActionResult<ChannelInstallationResult>>;
   channelPairingCancel(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
   channelInstallations(): Promise<ChannelPairingActionResult<ChannelInstallation[]>>;
   channelInstallationAction(
@@ -1474,7 +1491,7 @@ export interface OttoBridge {
   channelIdentityMutation(
     installationId: string,
     input: {
-      action: 'bind' | 'revoke';
+      action: 'claim-owner' | 'bind' | 'revoke';
       providerUserId: string;
       canonicalUserId?: string;
       approvalId: string;
@@ -2435,14 +2452,23 @@ const bridge: OttoBridge = {
       'otto:feishu-clear-config',
     ) as Promise<FeishuConfigResult>;
   },
+  feishuDeviceRegistrationBegin(domain: 'feishu' | 'lark'): Promise<ChannelPairingActionResult<FeishuDeviceRegistrationPublic>> {
+    return ipcRenderer.invoke('otto:feishu-device-registration-begin', domain) as Promise<ChannelPairingActionResult<FeishuDeviceRegistrationPublic>>;
+  },
+  feishuDeviceRegistrationStatus(registrationId: string): Promise<ChannelPairingActionResult<FeishuDeviceRegistrationPublic>> {
+    return ipcRenderer.invoke('otto:feishu-device-registration-status', registrationId) as Promise<ChannelPairingActionResult<FeishuDeviceRegistrationPublic>>;
+  },
+  feishuDeviceRegistrationCancel(registrationId: string): Promise<ChannelPairingActionResult<FeishuDeviceRegistrationPublic>> {
+    return ipcRenderer.invoke('otto:feishu-device-registration-cancel', registrationId) as Promise<ChannelPairingActionResult<FeishuDeviceRegistrationPublic>>;
+  },
   channelPairingBegin(provider: ChannelProvider): Promise<ChannelPairingResult> {
     return ipcRenderer.invoke('otto:channel-pairing-begin', provider) as Promise<ChannelPairingResult>;
   },
   channelPairingStatus(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>> {
     return ipcRenderer.invoke('otto:channel-pairing-status', pairingId) as Promise<ChannelPairingActionResult<ChannelPairingPublic>>;
   },
-  channelPairingInstall(pairingId: string): Promise<ChannelPairingActionResult> {
-    return ipcRenderer.invoke('otto:channel-pairing-install', pairingId) as Promise<ChannelPairingActionResult>;
+  channelPairingInstall(pairingId: string): Promise<ChannelPairingActionResult<ChannelInstallationResult>> {
+    return ipcRenderer.invoke('otto:channel-pairing-install', pairingId) as Promise<ChannelPairingActionResult<ChannelInstallationResult>>;
   },
   channelPairingCancel(pairingId: string): Promise<ChannelPairingActionResult<ChannelPairingPublic>> {
     return ipcRenderer.invoke('otto:channel-pairing-cancel', pairingId) as Promise<ChannelPairingActionResult<ChannelPairingPublic>>;

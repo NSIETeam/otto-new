@@ -61,7 +61,7 @@ function ownerOf(run: ControllableWorkflowRun): ChannelWorkflowOwner | null {
     const value = step.input.origin;
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
     const origin = value as Record<string, unknown>;
-    if (!['feishu', 'lark', 'wecom'].includes(String(origin.provider))) continue;
+    if (!['feishu', 'lark', 'wecom', 'dingtalk'].includes(String(origin.provider))) continue;
     const fields = ['installationId', 'tenantId', 'providerUserId', 'userId', 'deviceId'] as const;
     if (!fields.every((field) => typeof origin[field] === 'string' && String(origin[field]).trim())) continue;
     return {

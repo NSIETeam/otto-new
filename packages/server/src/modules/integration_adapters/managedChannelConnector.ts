@@ -64,8 +64,16 @@ export type ChannelPairingBrokerStatus = (
   | { status: 'denied'; reason?: string }
 ) & { pollAfterMs?: number };
 
+export interface ChannelPairingRegistrationResult {
+  /** Provider-owned authorization URL that replaces the generic Broker QR. */
+  qrPayload?: string;
+  pollAfterMs?: number;
+}
+
 export interface ChannelPairingBrokerV1 {
-  register(registration: ChannelBrokerPairingRegistration): Promise<void>;
+  register(
+    registration: ChannelBrokerPairingRegistration,
+  ): Promise<void | ChannelPairingRegistrationResult>;
   poll(pairingId: string): Promise<ChannelPairingBrokerStatus>;
   cancel(pairingId: string): Promise<void>;
 }
@@ -109,12 +117,23 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
     const { session, registration } =
       await this.options.coordinator.beginForBroker(input);
     try {
-      await this.options.broker.register(registration);
+      const registered = await this.options.broker.register(registration);
+      if (registered?.qrPayload) {
+        const url = new URL(registered.qrPayload);
+        if (url.protocol !== 'https:' || url.username || url.password) {
+          throw new Error('channel broker returned an unsafe QR payload');
+        }
+        session.qrPayload = url.toString();
+      }
+      if (registered?.pollAfterMs !== undefined) {
+        session.pollAfterMs = Math.min(30_000, Math.max(1_000, registered.pollAfterMs));
+      }
     } catch (error) {
       await this.options.coordinator.deny(
         session.pairingId,
         'pairing broker registration failed',
       );
+      await this.options.broker.cancel(session.pairingId).catch(() => undefined);
       throw error;
     }
     this.brokerRegistrations.set(session.pairingId, registration);
@@ -198,6 +217,9 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
       ({ installation: pendingInstallation }) =>
         this.options.vault.commit(pendingInstallation, credential),
     );
+    // Installation is not user-visible as successful until the provider has
+    // accepted the credential and the long connection is actually ready.
+    await this.options.runtime.start(installation, credential);
     this.clearLocalPairingState(pairingId);
     await this.options.broker.cancel(pairingId).catch(() => undefined);
     return installation;

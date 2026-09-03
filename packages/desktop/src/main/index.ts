@@ -341,7 +341,7 @@ import {
 } from './enterprise-auth-sync.js';
 import {
   defaultEnterpriseServerUrl,
-  migrateEnterpriseServerUrl,
+  restoreEnterpriseServerTarget,
 } from './enterprise-server-url.js';
 import {
   decodeEnterpriseSession,
@@ -608,6 +608,9 @@ const IPC = {
   feishuGetConfig: 'otto:feishu-get-config',
   feishuSaveConfig: 'otto:feishu-save-config',
   feishuClearConfig: 'otto:feishu-clear-config',
+  feishuDeviceRegistrationBegin: 'otto:feishu-device-registration-begin',
+  feishuDeviceRegistrationStatus: 'otto:feishu-device-registration-status',
+  feishuDeviceRegistrationCancel: 'otto:feishu-device-registration-cancel',
   channelPairingBegin: 'otto:channel-pairing-begin',
   channelPairingStatus: 'otto:channel-pairing-status',
   channelPairingInstall: 'otto:channel-pairing-install',
@@ -1167,9 +1170,17 @@ function loadEnterpriseSession(): void {
           throw new Error('系统安全存储不可用');
         return safeStorage.decryptString(Buffer.from(encryptedToken, 'base64'));
       },
-      (serverUrl) =>
-        migrateEnterpriseServerUrl(serverUrl, DEFAULT_ENTERPRISE_SERVER_URL),
+      (serverUrl) => serverUrl,
     );
+    const target = restoreEnterpriseServerTarget(
+      restored.serverUrl,
+      DEFAULT_ENTERPRISE_SERVER_URL,
+      Boolean(process.env.OTTO_ENTERPRISE_SERVER_URL?.trim()),
+    );
+    restored = {
+      serverUrl: target.serverUrl,
+      token: target.endpointChanged ? null : restored.token,
+    };
   } catch {
     // 首次启动、存储损坏或系统密钥链不可用时安全地保持未登录。
   }
@@ -1525,48 +1536,7 @@ function requestChannelPairing(
   requestPath: string,
   body?: unknown,
 ): Promise<{ ok: boolean; data: unknown; error: string | null } | null> {
-  const ep = endpoint;
-  if (!ep?.controlToken) return Promise.resolve(null);
-  const payload = body === undefined ? undefined : JSON.stringify(body);
-  return new Promise((resolve) => {
-    const req = http.request(
-      {
-        host: ep.host,
-        port: ep.port,
-        path: requestPath,
-        method,
-        timeout: FEISHU_OP_TIMEOUT_MS,
-        headers: {
-          authorization: `Bearer ${ep.controlToken}`,
-          ...(payload === undefined
-            ? {}
-            : {
-                'content-type': 'application/json',
-                'content-length': Buffer.byteLength(payload),
-              }),
-        },
-      },
-      (res) => {
-        let text = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk: string) => { text += chunk; });
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(text) as { ok: boolean; data: unknown; error: string | null });
-          } catch {
-            resolve(null);
-          }
-        });
-        res.on('error', () => resolve(null));
-      },
-    );
-    req.on('timeout', () => {
-      req.destroy();
-      resolve(null);
-    });
-    req.on('error', () => resolve(null));
-    req.end(payload);
-  });
+  return serverManager.requestControlApi(method, requestPath, body);
 }
 
 /** 查询当前 server 的 /health（信封 {ok,data,error}），失败/未就绪返回 null。 */
@@ -3345,6 +3315,7 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.enterpriseFederationContacts, async () => {
     loadEnterpriseSession();
+    if (!enterpriseClient.supportsFederationGateway()) return [];
     return enterpriseClient.listFederationContacts();
   });
   ipcMain.handle(
@@ -3437,6 +3408,7 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.enterpriseFederationAtoaTasks, async () => {
     loadEnterpriseSession();
+    if (!enterpriseClient.supportsFederationGateway()) return [];
     return enterpriseClient.listFederationAtoaTasks();
   });
   ipcMain.handle(
@@ -4145,13 +4117,41 @@ function registerIpc(): void {
     if (!r) return { ok: false, config: null, error: '本地 server 未就绪。' };
     return { ok: r.ok, config: r.data, error: r.error };
   });
+  ipcMain.handle(IPC.feishuDeviceRegistrationBegin, async (_event, domain: unknown) => {
+    if (domain !== 'feishu' && domain !== 'lark') {
+      return { ok: false, data: null, error: '不支持的飞书域。' };
+    }
+    const response = await requestChannelPairing('POST', '/feishu/device-registration', { domain });
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  });
+  ipcMain.handle(IPC.feishuDeviceRegistrationStatus, async (_event, registrationId: unknown) => {
+    if (typeof registrationId !== 'string' || !/^fdr_[a-f0-9]{24}$/u.test(registrationId)) {
+      return { ok: false, data: null, error: '飞书扫码编号不合法。' };
+    }
+    const response = await requestChannelPairing(
+      'GET',
+      `/feishu/device-registration?registrationId=${encodeURIComponent(registrationId)}`,
+    );
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  });
+  ipcMain.handle(IPC.feishuDeviceRegistrationCancel, async (_event, registrationId: unknown) => {
+    if (typeof registrationId !== 'string' || !/^fdr_[a-f0-9]{24}$/u.test(registrationId)) {
+      return { ok: false, data: null, error: '飞书扫码编号不合法。' };
+    }
+    const response = await requestChannelPairing(
+      'DELETE',
+      `/feishu/device-registration?registrationId=${encodeURIComponent(registrationId)}`,
+    );
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  });
   const channelScopes: Record<ChannelProvider, readonly string[]> = {
     feishu: ['im:message', 'contact:user.base:readonly'],
     lark: ['im:message', 'contact:user.base:readonly'],
     wecom: ['message.send', 'contacts.read.basic'],
+    dingtalk: ['im:message', 'im:chat'],
   };
   ipcMain.handle(IPC.channelPairingBegin, async (_event, provider: unknown): Promise<ChannelPairingResult> => {
-    if (provider !== 'feishu' && provider !== 'lark' && provider !== 'wecom') {
+    if (provider !== 'feishu' && provider !== 'lark' && provider !== 'wecom' && provider !== 'dingtalk') {
       return { ok: false, pairing: null, error: '不支持的连接类型。' };
     }
     const keys = createChannelInstallationDeviceKeys();
@@ -4218,7 +4218,7 @@ function registerIpc(): void {
     async (_event, installationId: unknown, action: unknown) => {
       if (
         typeof installationId !== 'string' ||
-        !/^channel_(feishu|lark|wecom)_[a-f0-9]{24}$/.test(installationId)
+        !/^channel_(feishu|lark|wecom|dingtalk)_[a-f0-9]{24}$/.test(installationId)
       ) {
         return { ok: false, data: null, error: '安装编号不合法。' };
       }

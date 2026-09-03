@@ -20,7 +20,7 @@
  *   3. 在飞书给 Bot 发一句话 → Bot 回你的 open_id → 填进「授权用户」再保存。
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { FeishuConfigPublic } from '../../../preload/index.js';
 import {
   deriveFeishuBadgeState,
@@ -31,6 +31,7 @@ import { IconExternalLink } from '../icons.js';
 import { Panel, Card, Badge, Empty } from './HubUI.js';
 import { ChannelPairingCard } from './ChannelPairingCard.js';
 import { ChannelInstallationList } from './ChannelInstallationList.js';
+import { FeishuQuickSetupCard } from './FeishuQuickSetupCard.js';
 
 /** 状态轮询周期：面板打开时用户正在等连接结果，比常驻徽标（5s）稍勤。 */
 const POLL_INTERVAL_MS = 3_000;
@@ -55,7 +56,7 @@ export function FeishuPanel(): React.JSX.Element {
   const [confirmClear, setConfirmClear] = useState(false);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadConfig = async (): Promise<void> => {
+  const loadConfig = useCallback(async (): Promise<void> => {
     const res = await window.otto?.feishuGetConfig();
     if (!res) return;
     setCfg(res.config);
@@ -64,7 +65,7 @@ export function FeishuPanel(): React.JSX.Element {
       setDomain(res.config.domain ?? 'feishu');
       setOwnerOpenId(res.config.ownerOpenId ?? '');
     }
-  };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,7 +87,7 @@ export function FeishuPanel(): React.JSX.Element {
       if (timer) clearTimeout(timer);
       if (confirmTimer.current) clearTimeout(confirmTimer.current);
     };
-  }, []);
+  }, [loadConfig]);
 
   const save = async (): Promise<void> => {
     if (busy) return;
@@ -184,6 +185,7 @@ export function FeishuPanel(): React.JSX.Element {
         </button>
       }
     >
+      <FeishuQuickSetupCard domain={domain} onConnected={loadConfig} />
       <ChannelPairingCard provider={domain} />
       <ChannelInstallationList provider={domain} />
 

@@ -69,6 +69,8 @@ export * from './modules/integration_adapters/brokerChannelRuntime.js';
 export * from './modules/integration_adapters/brokerChannelTaskBridge.js';
 export * from './modules/integration_adapters/channelIdentityRegistry.js';
 export * from './modules/integration_adapters/managedChannelPlatform.js';
+export * from './modules/integration_adapters/officialQrPairingBrokers.js';
+export * from './modules/integration_adapters/officialChannelRuntime.js';
 export * from './modules/integration_adapters/workflowTaskControlPort.js';
 export * from './modules/integration_adapters/jsonChannelMessageJournal.js';
 export * from './productModules.js';
@@ -80,6 +82,7 @@ export type {
   FeishuRegisterDeps,
 } from './feishu/register.js';
 export { registerFeishu } from './feishu/register.js';
+export * from './feishu/deviceRegistration.js';
 export {
   endpointFilePath,
   readEndpoint,

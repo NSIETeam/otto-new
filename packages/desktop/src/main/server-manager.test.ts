@@ -14,7 +14,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ServerEndpoint } from 'otto-server';
 import type { RecurringTaskDefinition } from 'otto-core';
 import {
+  appendDesktopServerLog,
   prepareDesktopSqlCipherRuntime,
+  resolveDesktopUserDirectory,
   ServerManager,
   type ServerManagerDependencies,
 } from './server-manager.js';
@@ -43,7 +45,66 @@ const ENTERPRISE_ACCOUNT = {
   leaseExpiresAt: '2026-07-19T12:00:00.000Z',
 };
 
+describe('desktop user data isolation', () => {
+  it('routes every desktop-owned artifact through OTTO_USER_DIR when configured', () => {
+    expect(resolveDesktopUserDirectory(
+      { OTTO_USER_DIR: '/private/tmp/otto-isolated-user' },
+      '/Users/example',
+    )).toBe('/private/tmp/otto-isolated-user');
+    expect(resolveDesktopUserDirectory({}, '/Users/example'))
+      .toBe('/Users/example/.otto-user');
+  });
+
+  it('creates desktop logs with owner-only permissions', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'otto-desktop-logs-'));
+    try {
+      const environment = { OTTO_USER_DIR: root };
+      appendDesktopServerLog('secure log\n', environment, '/Users/example');
+
+      const directory = await fs.stat(path.join(root, 'logs'));
+      const logfile = await fs.stat(path.join(root, 'logs', 'otto-server.log'));
+      if (process.platform !== 'win32') {
+        expect(directory.mode & 0o777).toBe(0o700);
+        expect(logfile.mode & 0o777).toBe(0o600);
+      }
+      await expect(fs.readFile(path.join(root, 'logs', 'otto-server.log'), 'utf8'))
+        .resolves.toBe('secure log\n');
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('desktop SQLCipher runtime custody', () => {
+  it('configures the repository native binding for an unpackaged desktop run', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'otto-desktop-custody-'));
+    const repositoryRoot = path.join(root, 'checkout');
+    const repositoryBinding = path.join(
+      repositoryRoot,
+      'native',
+      'sqlcipher',
+      `${process.platform}-${process.arch}`,
+      'better_sqlite3.node',
+    );
+    const environment: NodeJS.ProcessEnv = {
+      OTTO_USER_DIR: path.join(root, 'otto-user'),
+    };
+    try {
+      await fs.mkdir(path.dirname(repositoryBinding), { recursive: true });
+      await fs.writeFile(repositoryBinding, 'repository-native-binding');
+
+      const prepared = prepareDesktopSqlCipherRuntime(environment, {
+        homeDirectory: root,
+        repositoryRoot,
+      });
+
+      expect(prepared.nativeBindingPath).toBe(repositoryBinding);
+      expect(environment.OTTO_SQLCIPHER_NATIVE_BINDING).toBe(repositoryBinding);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('creates one permission-restricted key and configures the packaged native binding', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'otto-desktop-custody-'));
     const userDir = path.join(root, 'otto-user');
@@ -260,6 +321,74 @@ describe('ServerManager desktop runtime diagnostics', () => {
 });
 
 describe('ServerManager trusted enterprise identity bridge', () => {
+  it('通道配对通过 manager 内部控制令牌访问 loopback，公开端点仍不泄露令牌', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: true,
+      data: { pairingId: 'pair_1234567890abcdef12345678' },
+      error: null,
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    const discovered = {
+      ...MAIN_ENDPOINT,
+      controlToken: 'discovered-control-token',
+    };
+    const mod = {
+      ...discoveredMainModule(),
+      readEndpointRecord: vi.fn(() => discovered),
+    } as unknown as Awaited<ReturnType<ServerManagerDependencies['loadOttoServer']>>;
+    const manager = new ServerManager({
+      dependencies: dependencies({
+        loadOttoServer: async () => mod,
+        fetchImpl: fetchImpl as typeof fetch,
+      }),
+    });
+
+    const ensured = await manager.ensure();
+    const response = await manager.requestControlApi(
+      'POST',
+      '/channels/pairings',
+      { provider: 'wecom' },
+    );
+
+    expect(ensured.endpoint).not.toHaveProperty('controlToken');
+    expect(response).toEqual({
+      ok: true,
+      data: { pairingId: 'pair_1234567890abcdef12345678' },
+      error: null,
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:4123/channels/pairings',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          authorization: 'Bearer discovered-control-token',
+          'content-type': 'application/json',
+        }),
+        body: JSON.stringify({ provider: 'wecom' }),
+      }),
+    );
+  });
+
+  it('控制 API 拒绝非通道路由，且旧 server 缺少控制令牌时诚实返回 null', async () => {
+    const fetchImpl = vi.fn();
+    const manager = new ServerManager({
+      dependencies: dependencies({
+        loadOttoServer: async () => discoveredMainModule(),
+        fetchImpl: fetchImpl as typeof fetch,
+      }),
+    });
+    await manager.ensure();
+
+    await expect(manager.requestControlApi('GET', '/health')).rejects.toThrow(
+      'channel control route is not allowed',
+    );
+    await expect(manager.requestControlApi('GET', '/channels/installations'))
+      .resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('内嵌 server 直接应用中心认证账号，且 renderer 端点不泄露 control token', async () => {
     const setAuthenticatedEnterpriseAccount = vi.fn();
     const mod = embeddedMainModule(setAuthenticatedEnterpriseAccount);

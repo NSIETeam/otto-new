@@ -110,11 +110,11 @@ export function resolveAutoSkillSkillsDir(): string {
 }
 
 function isPortableAutoSkillName(value: string): boolean {
-  return /^auto-[^/\\]{1,160}$/u.test(value);
+  return /^auto-[a-z0-9](?:[a-z0-9-]{0,154}[a-z0-9])?$/u.test(value);
 }
 
 function isSafeSkillDirectoryName(value: string): boolean {
-  return /^(?!\.{1,2}$)[^/\\]{1,160}$/u.test(value);
+  return /^[a-z0-9](?:[a-z0-9-]{0,158}[a-z0-9])?$/u.test(value);
 }
 
 function resolvePendingCandidateFilePath(candidate: SkillCandidate): string {
@@ -1278,19 +1278,22 @@ function isSkillCandidate(value: unknown): value is SkillCandidate {
 }
 
 function generateSkillName(steps: string[]): string {
-  // 从操作步骤生成 kebab-case 名称
   const firstStep = steps[0] || 'workflow';
-  // 提取关键词
-  const keywords = firstStep
+  const asciiSlug = firstStep
     .replace(/[：:（）()【】[\]""'']/g, '')
     .replace(/^(创建|操作|执行|发送|读取|写入|编辑|搜索|查看|查找|操作)\s*/, '')
-    .split(/[\s,，、/]+/)
-    .filter((s) => s.length > 0)
-    .slice(0, 3)
-    .map((s) => s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '-'));
-
-  const name = keywords.join('-') || 'auto-workflow';
-  return `auto-${name}`;
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/-+/gu, '-')
+    .replace(/^-|-$/gu, '')
+    .slice(0, 72)
+    .replace(/-$/u, '');
+  if (asciiSlug) return `auto-${asciiSlug}`;
+  const signature = createHash('sha256')
+    .update(steps.join('\n'))
+    .digest('hex')
+    .slice(0, 10);
+  return `auto-workflow-${signature}`;
 }
 
 function generateDescription(steps: string[], count: number): string {

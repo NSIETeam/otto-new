@@ -26,7 +26,7 @@ const pairing: PairingSession = {
   pollAfterMs: 2_000,
 };
 
-function fakeConnector(): ChannelConnectorV1 {
+function fakeConnector(ownerProviderUserId?: string): ChannelConnectorV1 {
   const installation = {
     installationId: 'channel_feishu_0123456789abcdef01234567',
     provider: 'feishu' as const,
@@ -35,6 +35,7 @@ function fakeConnector(): ChannelConnectorV1 {
     botName: 'Otto',
     grantedScopes: ['im:message'],
     connectedAtMs: Date.now(),
+    ...(ownerProviderUserId ? { ownerProviderUserId } : {}),
   };
   return {
     listInstallations: vi.fn(() => [installation]),
@@ -175,6 +176,45 @@ describe('channel pairing REST routes', () => {
       { installationPublicKey: 'public-key', signature: 'A'.repeat(86) },
     );
     expect(connector.denyPairing).toHaveBeenCalledOnce();
+  });
+
+  it('binds the scanning provider identity to the local user who initiated installation', async () => {
+    const workspace = new ProductWorkspaceStore(path.join(userDir, 'owner-workspace.json'));
+    const canonicalUserId = workspace.snapshot().context.userId;
+    const connector = fakeConnector('ou_scanner_1');
+    const { baseUrl, token } = await start({ feishu: connector }, workspace);
+    const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    await fetch(`${baseUrl}/channels/pairings`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        provider: 'feishu', installationPublicKey: 'public-key', requestedScopes: ['im:message'],
+      }),
+    });
+    const installed = await fetch(
+      `${baseUrl}/channels/pairings/${pairing.pairingId}/install`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ installationPublicKey: 'public-key', signature: 'A'.repeat(86) }),
+      },
+    );
+    expect(installed.status).toBe(200);
+
+    const identities = await fetch(
+      `${baseUrl}/channels/installations/channel_feishu_0123456789abcdef01234567/identities`,
+      { headers },
+    );
+    expect(await identities.json()).toMatchObject({
+      ok: true,
+      data: [{
+        providerUserId: 'ou_scanner_1',
+        canonicalUserId,
+        approvedBy: canonicalUserId,
+        active: true,
+        revision: 1,
+      }],
+    });
   });
 
   it('uses one authenticated installation control surface for Desktop and CLI', async () => {

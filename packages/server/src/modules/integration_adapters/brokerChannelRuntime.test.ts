@@ -25,6 +25,7 @@ const installation = {
   tenantId: 'tenant-1',
   tenantName: 'Acme',
   botName: 'Otto',
+  requestedScopes: ['im:message', 'im:resource'],
   grantedScopes: ['im:message'],
   connectedAtMs: 1,
 };
@@ -46,6 +47,11 @@ describe('BrokerChannelRuntimeV1', () => {
     const starting = runtime.start(installation, credential);
     socket.emit('open');
     await expect(starting).resolves.toMatchObject({ state: 'connected', running: true });
+    await expect(runtime.health(installation.installationId)).resolves.toMatchObject({
+      missingScopes: ['im:resource'],
+      startedAtMs: expect.any(Number),
+      connectedAtMs: expect.any(Number),
+    });
     expect(createSocket).toHaveBeenCalledWith(
       expect.stringContaining(`/v1/channel-installations/${installation.installationId}/stream?device_id=device-1`),
       { authorization: 'Bearer device-access-token' },
@@ -227,6 +233,10 @@ describe('BrokerChannelRuntimeV1', () => {
       sockets[0].emit('open');
       await starting;
       sockets[0].emit('close');
+      await expect(runtime.health(installation.installationId)).resolves.toMatchObject({
+        state: 'reconnecting',
+        nextReconnectAtMs: expect.any(Number),
+      });
       await vi.advanceTimersByTimeAsync(1_000);
       expect(sockets).toHaveLength(2);
       sockets[1].emit('open');

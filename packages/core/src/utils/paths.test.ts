@@ -13,7 +13,19 @@ import {
   unescapePath,
   needsLegacyMigration,
   migrateLegacyDirectories,
+  resolveOttoUserDir,
 } from './paths.js';
+
+describe('resolveOttoUserDir', () => {
+  it('prefers the explicit isolated root and otherwise uses the platform home', () => {
+    expect(resolveOttoUserDir(
+      { OTTO_USER_DIR: '/private/tmp/otto-isolated' },
+      '/Users/example',
+    )).toBe('/private/tmp/otto-isolated');
+    expect(resolveOttoUserDir({}, '/Users/example'))
+      .toBe('/Users/example/.otto-user');
+  });
+});
 
 describe('escapePath', () => {
   const originalPlatform = process.platform;

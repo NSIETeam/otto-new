@@ -91,7 +91,7 @@ describe('ManagedChannelPlatformV1', () => {
       createSocket,
       now: () => 2_000,
     });
-    expect(Object.keys(platform.connectors).sort()).toEqual(['feishu', 'lark', 'wecom']);
+    expect(Object.keys(platform.connectors).sort()).toEqual(['dingtalk', 'feishu', 'lark', 'wecom']);
     const starting = platform.connectors.lark!.start(installation.installationId);
     await vi.waitFor(() => expect(createSocket).toHaveBeenCalledOnce());
     socket.emit('open');

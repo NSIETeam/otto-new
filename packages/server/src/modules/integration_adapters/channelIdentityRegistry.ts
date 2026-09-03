@@ -91,7 +91,7 @@ export function createJsonChannelIdentityAuditSink(filePath?: string) {
   };
 }
 
-const PROVIDERS = new Set<ChannelProvider>(['feishu', 'lark', 'wecom']);
+const PROVIDERS = new Set<ChannelProvider>(['feishu', 'lark', 'wecom', 'dingtalk']);
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{1,199}$/u;
 
 function defaultPath(): string {

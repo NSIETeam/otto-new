@@ -593,6 +593,48 @@ describe('Sidebar 会话项：溢出菜单', () => {
     fireEvent.click(screen.getByLabelText('更多操作'));
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it('菜单挂到 body 并在视口底部自动向上避让，不受侧栏滚动容器裁剪', () => {
+    const originalInnerHeight = window.innerHeight;
+    try {
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 600 });
+      renderSidebar();
+      const trigger = screen.getByLabelText('更多操作');
+      vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
+        x: 210,
+        y: 570,
+        width: 22,
+        height: 22,
+        top: 570,
+        right: 232,
+        bottom: 592,
+        left: 210,
+        toJSON: () => ({}),
+      });
+
+      fireEvent.click(trigger);
+      const menu = screen.getByRole('menu', { name: '“旧标题”操作' });
+      expect(menu.parentElement).toBe(document.body);
+      expect(menu.style.top).toBe('484px');
+      expect(menu.style.left).toBe('100px');
+      const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles/app.css'), 'utf8');
+      expect(css).toMatch(/\.otto-session__menu\s*\{[^}]*position:\s*fixed/);
+    } finally {
+      Object.defineProperty(window, 'innerHeight', {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+    }
+  });
+
+  it('菜单打开后按 Escape 关闭并把焦点还给三点按钮', () => {
+    renderSidebar();
+    const trigger = screen.getByLabelText('更多操作');
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('menu', { name: '“旧标题”操作' })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
 });
 
 describe('Sidebar 会话项：inline 重命名', () => {

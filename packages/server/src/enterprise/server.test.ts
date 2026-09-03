@@ -1230,6 +1230,41 @@ describe('受保护 vs 公开路由边界', () => {
       },
     });
 
+    const chunkedContent = '中文账号同步内容\n';
+    const chunkedBody = Buffer.from(JSON.stringify({
+      scope: 'worklog',
+      expectedVersion: 0,
+      payload: {
+        schemaVersion: 1,
+        generatedAt: '2026-07-26T10:31:00.000Z',
+        files: [{
+          path: 'daily.md',
+          content: chunkedContent,
+          modifiedAtMs: Date.parse('2026-07-26T10:31:00.000Z'),
+          sha256: createHash('sha256').update(chunkedContent).digest('hex'),
+        }],
+      },
+    }));
+    const chineseByte = Buffer.from('中').at(0)!;
+    const splitAt = chunkedBody.indexOf(chineseByte) + 1;
+    const chunkedStatus = await new Promise<number>((resolve, reject) => {
+      const request = httpRequest(base + '/enterprise/account-sync', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer ' + firstToken,
+          'content-type': 'application/json',
+          'content-length': String(chunkedBody.length),
+        },
+      }, (response) => {
+        response.resume();
+        response.on('end', () => resolve(response.statusCode ?? 0));
+      });
+      request.on('error', reject);
+      request.write(chunkedBody.subarray(0, splitAt));
+      setImmediate(() => request.end(chunkedBody.subarray(splitAt)));
+    });
+    expect(chunkedStatus).toBe(200);
+
     const restored = await fetch(base + '/enterprise/account-sync', {
       headers: { authorization: 'Bearer ' + firstToken },
     });
@@ -1241,6 +1276,13 @@ describe('受保护 vs 公开路由边界', () => {
           scope: 'personal_memory',
           version: 1,
           payload,
+        }),
+        expect.objectContaining({
+          scope: 'worklog',
+          version: 1,
+          payload: expect.objectContaining({
+            files: [expect.objectContaining({ content: chunkedContent })],
+          }),
         }),
       ],
     });

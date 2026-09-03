@@ -53,6 +53,10 @@ import {
 const GROUPING_MENU_WIDTH = 218;
 const GROUPING_MENU_VIEWPORT_MARGIN = 12;
 const GROUPING_MENU_TRIGGER_GAP = 4;
+const SESSION_MENU_WIDTH = 132;
+const SESSION_MENU_HEIGHT = 82;
+const SESSION_MENU_VIEWPORT_MARGIN = 8;
+const SESSION_MENU_TRIGGER_GAP = 4;
 
 function getGroupingMenuPosition(rect: DOMRect): { top: number; left: number } {
   const maxLeft = Math.max(
@@ -62,6 +66,27 @@ function getGroupingMenuPosition(rect: DOMRect): { top: number; left: number } {
   return {
     top: rect.bottom + GROUPING_MENU_TRIGGER_GAP,
     left: Math.min(Math.max(GROUPING_MENU_VIEWPORT_MARGIN, rect.left), maxLeft),
+  };
+}
+
+function getSessionMenuPosition(rect: DOMRect): { top: number; left: number } {
+  const maxLeft = Math.max(
+    SESSION_MENU_VIEWPORT_MARGIN,
+    window.innerWidth - SESSION_MENU_WIDTH - SESSION_MENU_VIEWPORT_MARGIN,
+  );
+  const below = rect.bottom + SESSION_MENU_TRIGGER_GAP;
+  const top = below + SESSION_MENU_HEIGHT <= window.innerHeight - SESSION_MENU_VIEWPORT_MARGIN
+    ? below
+    : Math.max(
+      SESSION_MENU_VIEWPORT_MARGIN,
+      rect.top - SESSION_MENU_HEIGHT - SESSION_MENU_TRIGGER_GAP,
+    );
+  return {
+    top,
+    left: Math.min(
+      Math.max(SESSION_MENU_VIEWPORT_MARGIN, rect.right - SESSION_MENU_WIDTH),
+      maxLeft,
+    ),
   };
 }
 
@@ -695,6 +720,9 @@ function SessionItem({
   const [draft, setDraft] = useState(session.title);
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
 
   // 进入重命名态即聚焦并全选，让用户直接改写。
   useEffect(() => {
@@ -711,10 +739,31 @@ function SessionItem({
   useEffect(() => {
     if (mode !== 'menu') return;
     const onDoc = (e: MouseEvent): void => {
-      if (!rootRef.current?.contains(e.target as Node)) setMode('idle');
+      const target = e.target as Node;
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setMode('idle');
+      }
     };
+    const updatePosition = (): void => {
+      const rect = moreButtonRef.current?.getBoundingClientRect();
+      if (rect) setMenuPosition(getSessionMenuPosition(rect));
+    };
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      setMode('idle');
+      moreButtonRef.current?.focus();
+    };
+    updatePosition();
     document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
   }, [mode]);
 
   const startRename = (): void => {
@@ -792,12 +841,14 @@ function SessionItem({
         </span>
         <span className="otto-session__time">{formatTime(session.updatedAt)}</span>
         <button
+          ref={moreButtonRef}
           type="button"
           className="otto-session__more"
           title="更多操作"
           aria-label="更多操作"
           onClick={(e) => {
             e.stopPropagation();
+            setMenuPosition(getSessionMenuPosition(e.currentTarget.getBoundingClientRect()));
             setMode((m) => (m === 'menu' ? 'idle' : 'menu'));
           }}
         >
@@ -805,10 +856,13 @@ function SessionItem({
         </button>
       </div>
 
-      {mode === 'menu' ? (
+      {mode === 'menu' ? createPortal(
         <div
+          ref={menuRef}
           className="otto-session__menu"
           role="menu"
+          aria-label={`“${session.title || '未命名对话'}”操作`}
+          style={{ top: menuPosition.top, left: menuPosition.left }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
@@ -827,7 +881,8 @@ function SessionItem({
           >
             删除
           </button>
-        </div>
+        </div>,
+        document.body,
       ) : null}
 
       <ConfirmDialog

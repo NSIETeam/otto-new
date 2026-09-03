@@ -158,6 +158,7 @@ describe('ManagedChannelConnectorV1', () => {
         tenantId: 'tenant-1',
         tenantName: 'Acme',
         botName: 'Otto',
+        providerUserId: 'ou_scanner_1',
         grantedScopes: ['im:message'],
       },
     });
@@ -169,6 +170,7 @@ describe('ManagedChannelConnectorV1', () => {
         keys.privateKey,
       ).toString('base64url'),
     });
+    expect(installation.ownerProviderUserId).toBe('ou_scanner_1');
 
     await connector.start(installation.installationId);
     await connector.health(installation.installationId);

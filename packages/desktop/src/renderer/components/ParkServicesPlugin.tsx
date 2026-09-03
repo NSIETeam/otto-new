@@ -493,6 +493,12 @@ function errorMessage(cause: unknown): string {
     : sanitized;
 }
 
+export function isCommercialModuleNotEntitled(cause: unknown): boolean {
+  return /commercial module is not entitled/iu.test(
+    cause instanceof Error ? cause.message : String(cause),
+  );
+}
+
 function AnnouncementView({ onBack }: { onBack: () => void }): React.JSX.Element {
   const [items, setItems] = useState<EnterpriseParkPublication[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1618,7 +1624,9 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
     if (parkEnabled !== true) return undefined;
     if (!window.otto?.enterpriseParkPublications) return undefined;
     let cancelled = false;
+    let unavailable = false;
     const poll = async (): Promise<void> => {
+      if (unavailable) return;
       try {
         const publications = await window.otto.enterpriseParkPublications();
         if (cancelled) return;
@@ -1632,7 +1640,8 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
           candidate.kind === 'announcement' ? 'Otto 园区公告' : 'Otto 满意度调查',
           `${candidate.title} · 点击查看`,
         );
-      } catch {
+      } catch (error) {
+        if (isCommercialModuleNotEntitled(error)) unavailable = true;
         // 未登录或服务器暂不可达时等待下一次轮询。
       }
     };
@@ -1747,7 +1756,9 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
     if (parkEnabled !== true) return undefined;
     if (!window.otto?.enterpriseSession || !window.otto?.enterpriseTicketList) return undefined;
     let cancelled = false;
+    let unavailable = false;
     const poll = async (): Promise<void> => {
+      if (unavailable) return;
       try {
         const session = await window.otto.enterpriseSession();
         if (cancelled) return;
@@ -1885,7 +1896,8 @@ export function ParkServicesPlugin({ internalAdminPreview = false }: {
             ...current.filter((ticket) => ticket.id !== candidate.id),
           ]);
         }
-      } catch {
+      } catch (error) {
+        if (isCommercialModuleNotEntitled(error)) unavailable = true;
         // 未登录、服务器暂不可达时安静重试；报修页打开后会显示具体错误。
       }
     };

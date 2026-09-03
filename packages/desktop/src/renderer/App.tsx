@@ -119,7 +119,6 @@ import {
 } from './enterpriseUnreadNotifications.js';
 import { resolveCentralEnterpriseIdentity } from './state/centralEnterpriseIdentity.js';
 import {
-  INTERNAL_TEST_ACCESS_ENABLED,
   INTERNAL_TEST_ACCOUNT,
   INTERNAL_TEST_ADMIN_ACCOUNT,
   INTERNAL_TEST_ADMIN_ENABLED,
@@ -179,31 +178,24 @@ type PendingToolConsult = {
 export function App(): React.JSX.Element {
   const auth = useEnterpriseAuth();
   const accessMode = resolveEnterpriseAccessMode({
-    internalTestAccessEnabled: INTERNAL_TEST_ACCESS_ENABLED,
+    internalTestAccessEnabled: false,
     authStatus: auth.state.status,
     hasAccount: Boolean(auth.state.account),
     hasRegistrationIntent: Boolean(auth.state.registrationIntent),
   });
 
-  if (accessMode === 'internal-workspace') {
+  if (accessMode === 'local-workspace') {
     return (
       <OttoWorkspaceApp
         account={INTERNAL_TEST_ADMIN_ENABLED ? INTERNAL_TEST_ADMIN_ACCOUNT : INTERNAL_TEST_ACCOUNT}
-        serverUrl={INTERNAL_TEST_ADMIN_ENABLED ? 'internal://admin-preview' : 'internal://test'}
+        serverUrl={INTERNAL_TEST_ADMIN_ENABLED ? 'internal://admin-preview' : 'local://desktop'}
+        onJoinEnterprise={auth.actions.joinEnterprise}
         onLogout={auth.actions.logout}
         internalAdminPreview={INTERNAL_TEST_ADMIN_ENABLED}
       />
     );
   }
-  if (accessMode === 'booting') {
-    return (
-      <div className="otto-auth-boot" role="status">
-        <span>O</span>
-        <div><strong>OTTO</strong><small>正在验证企业身份…</small></div>
-      </div>
-    );
-  }
-  if (accessMode === 'registration' || accessMode === 'login' || !auth.state.account) {
+  if (accessMode === 'registration') {
     return (
       <EnterpriseLoginPage
         initialServerUrl={auth.state.serverUrl}
@@ -218,6 +210,9 @@ export function App(): React.JSX.Element {
         onClearError={auth.actions.clearError}
       />
     );
+  }
+  if (!auth.state.account) {
+    return <OttoWorkspaceApp account={INTERNAL_TEST_ACCOUNT} serverUrl="local://desktop" />;
   }
   return (
     <OttoWorkspaceApp

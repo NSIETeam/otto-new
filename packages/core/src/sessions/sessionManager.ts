@@ -15,7 +15,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { homedir } from 'os';
+import { resolveOttoUserDir } from '../utils/paths.js';
 
 // ============================================================
 // 类型定义
@@ -113,13 +113,15 @@ export interface SessionManagerConfig {
 // 默认配置
 // ============================================================
 
-const DEFAULT_CONFIG: SessionManagerConfig = {
-  storageDir: path.join(homedir(), '.otto-user', 'sessions'),
+function defaultConfig(): SessionManagerConfig {
+  return {
+  storageDir: path.join(resolveOttoUserDir(), 'sessions'),
   maxMessagesPerSession: 200,
   idleArchiveMinutes: 30,
   maxActiveSessions: 10,
   autoRoutingEnabled: true,
-};
+  };
+}
 
 // ============================================================
 // Session Manager 实现
@@ -138,7 +140,7 @@ export class OttoSessionManager {
   private initialized = false;
 
   constructor(config?: Partial<SessionManagerConfig>) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = { ...defaultConfig(), ...config };
   }
 
   // ── 初始化 ──────────────────────────────────────────────

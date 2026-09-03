@@ -1558,7 +1558,22 @@ export interface FeishuConfigSaveRequest {
   ownerOpenId?: string;
 }
 
-export type ChannelProvider = 'feishu' | 'lark' | 'wecom';
+export type FeishuDeviceRegistrationStatus =
+  | 'starting' | 'waiting_scan' | 'slow_down' | 'domain_switched'
+  | 'connected' | 'denied' | 'expired' | 'failed' | 'cancelled';
+
+export interface FeishuDeviceRegistrationPublic {
+  registrationId: string;
+  domain: 'feishu' | 'lark';
+  status: FeishuDeviceRegistrationStatus;
+  qrUrl?: string;
+  expiresAtMs: number;
+  pollAfterMs: number;
+  ownerOpenId?: string;
+  error?: string;
+}
+
+export type ChannelProvider = 'feishu' | 'lark' | 'wecom' | 'dingtalk';
 export type ChannelPairingStatus =
   | 'waiting_scan'
   | 'user_authorized'
@@ -1614,6 +1629,7 @@ export const HTTP_ROUTES = {
   feishuStart: '/feishu/start',
   feishuStop: '/feishu/stop',
   feishuConfig: '/feishu/config',
+  feishuDeviceRegistration: '/feishu/device-registration',
   channelPairings: '/channels/pairings',
   channelPairing: (id: string) => `/channels/pairings/${id}`,
   channelInstallations: '/channels/installations',

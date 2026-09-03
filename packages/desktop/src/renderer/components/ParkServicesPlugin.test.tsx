@@ -16,6 +16,7 @@ import {
   ParkServicesPlugin,
   effectiveMeetingSlotStatus,
   isActionableStaffTicket,
+  isCommercialModuleNotEntitled,
   isMeetingSlotPast,
   isStaffHistoryTicket,
   PARK_STATE_EVENT,
@@ -40,6 +41,13 @@ afterEach(() => {
       'enterpriseOrganizationView', 'parkConfig',
     ]) delete (window.otto as unknown as Record<string, unknown>)[key];
   }
+});
+
+it('只把明确的商业模块未授权视为终止轮询错误', () => {
+  expect(isCommercialModuleNotEntitled(new Error(
+    'Error invoking remote method: commercial module is not entitled',
+  ))).toBe(true);
+  expect(isCommercialModuleNotEntitled(new Error('request timed out'))).toBe(false);
 });
 
 /** 经右侧面板同款事件通路打开弹窗。 */

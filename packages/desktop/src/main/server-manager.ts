@@ -102,18 +102,48 @@ const ENTERPRISE_DEFAULT_PORT = 7777;
 /** enterprise-server 监听完成的最长等待时间。 */
 const ENTERPRISE_LISTEN_TIMEOUT_MS = 3000;
 
-/** 聊天记录落盘目录：~/.otto-user/sessions/（每个会话一个 json 文件）。 */
+export function resolveDesktopUserDirectory(
+  environment: NodeJS.ProcessEnv = process.env,
+  homeDirectory: string = os.homedir(),
+): string {
+  const configured = environment.OTTO_USER_DIR?.trim();
+  return configured ? path.resolve(configured) : path.join(homeDirectory, '.otto-user');
+}
+
+/** 聊天记录落盘目录（每个会话一个 json 文件）。 */
 function sessionsDir(): string {
-  return path.join(os.homedir(), '.otto-user', 'sessions');
+  return path.join(resolveDesktopUserDirectory(), 'sessions');
 }
 
-/** 固定日志目录：~/.otto-user/logs/ */
-function logsDir(): string {
-  return path.join(os.homedir(), '.otto-user', 'logs');
+/** 当前 Desktop 用户根目录下的日志目录。 */
+function logsDir(
+  environment: NodeJS.ProcessEnv = process.env,
+  homeDirectory: string = os.homedir(),
+): string {
+  return path.join(resolveDesktopUserDirectory(environment, homeDirectory), 'logs');
 }
 
-function serverLogPath(): string {
-  return path.join(logsDir(), 'otto-server.log');
+function serverLogPath(
+  environment: NodeJS.ProcessEnv = process.env,
+  homeDirectory: string = os.homedir(),
+): string {
+  return path.join(logsDir(environment, homeDirectory), 'otto-server.log');
+}
+
+/** Desktop-owned logs may contain paths and provider diagnostics; keep them owner-only. */
+export function appendDesktopServerLog(
+  content: string,
+  environment: NodeJS.ProcessEnv = process.env,
+  homeDirectory: string = os.homedir(),
+): void {
+  const directory = logsDir(environment, homeDirectory);
+  const logfile = serverLogPath(environment, homeDirectory);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  fs.appendFileSync(logfile, content, { encoding: 'utf8', mode: 0o600 });
+  if (process.platform !== 'win32') {
+    fs.chmodSync(directory, 0o700);
+    fs.chmodSync(logfile, 0o600);
+  }
 }
 
 export function prepareDesktopSqlCipherRuntime(
@@ -121,6 +151,7 @@ export function prepareDesktopSqlCipherRuntime(
   options: {
     homeDirectory?: string;
     resourcesPath?: string;
+    repositoryRoot?: string;
   } = {},
 ): { keyPath: string | null; nativeBindingPath: string | null } {
   const encryptionMode = environment.OTTO_DATABASE_ENCRYPTION
@@ -174,15 +205,23 @@ export function prepareDesktopSqlCipherRuntime(
 
   let nativeBindingPath =
     environment.OTTO_SQLCIPHER_NATIVE_BINDING?.trim() || null;
-  if (!nativeBindingPath && options.resourcesPath) {
-    const packagedBinding = path.join(
-      options.resourcesPath,
-      'sqlcipher',
-      'better_sqlite3.node',
-    );
-    if (fs.existsSync(packagedBinding)) {
-      nativeBindingPath = packagedBinding;
-      environment.OTTO_SQLCIPHER_NATIVE_BINDING = packagedBinding;
+  if (!nativeBindingPath) {
+    const target = `${process.platform}-${process.arch}`;
+    const candidates = [
+      options.resourcesPath
+        ? path.join(options.resourcesPath, 'sqlcipher', 'better_sqlite3.node')
+        : null,
+      path.join(
+        options.repositoryRoot ?? path.resolve(__dirname, '../../../..'),
+        'native',
+        'sqlcipher',
+        target,
+        'better_sqlite3.node',
+      ),
+    ].filter((candidate): candidate is string => Boolean(candidate));
+    nativeBindingPath = candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+    if (nativeBindingPath) {
+      environment.OTTO_SQLCIPHER_NATIVE_BINDING = nativeBindingPath;
     }
   }
 
@@ -211,6 +250,12 @@ export type ServerOwnership = 'discovered' | 'detached' | 'embedded';
 export interface EnsuredServer {
   endpoint: ServerEndpoint;
   ownership: ServerOwnership;
+}
+
+export interface ControlApiResponse {
+  ok: boolean;
+  data: unknown;
+  error: string | null;
 }
 
 /**
@@ -357,6 +402,54 @@ export class ServerManager {
     } finally {
       if (this.mainEnsurePromise === operation)
         this.mainEnsurePromise = undefined;
+    }
+  }
+
+  /**
+   * Calls a token-protected local channel endpoint without ever returning the
+   * control token through the renderer-safe endpoint contract.
+   */
+  async requestControlApi(
+    method: 'GET' | 'POST' | 'DELETE',
+    requestPath: string,
+    body?: unknown,
+  ): Promise<ControlApiResponse | null> {
+    if (!/^\/channels\/[a-z0-9/_-]+$/u.test(requestPath)) {
+      throw new Error('channel control route is not allowed');
+    }
+    if (!this.currentEndpointRecord) await this.ensure();
+    this.throwIfShuttingDown();
+    const record = this.currentEndpointRecord;
+    if (!record?.controlToken?.trim() || !isLoopbackHost(record.host)) return null;
+
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const response = await this.dependencies.fetchImpl(
+        `http://${formatHttpHost(record.host)}:${record.port}${requestPath}`,
+        {
+          method,
+          headers: {
+            accept: 'application/json',
+            authorization: `Bearer ${record.controlToken}`,
+            ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+          },
+          ...(payload === undefined ? {} : { body: payload }),
+          signal: controller.signal,
+        },
+      );
+      const parsed = await response.json().catch(() => null) as ControlApiResponse | null;
+      if (!parsed || typeof parsed.ok !== 'boolean') return null;
+      return {
+        ok: parsed.ok,
+        data: parsed.data ?? null,
+        error: typeof parsed.error === 'string' ? parsed.error : null,
+      };
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -638,8 +731,7 @@ export class ServerManager {
 
     const logPrefix = forceKill ? 'FORCE_SHUTDOWN' : 'SHUTDOWN';
     try {
-      fs.appendFileSync(
-        serverLogPath(),
+      appendDesktopServerLog(
         `[${new Date().toISOString()}] ${logPrefix} 进程退出\n`,
       );
     } catch {}
@@ -751,8 +843,7 @@ export class ServerManager {
       `[ServerManager] 健康检查失败 (${this.consecutiveHealthFailures}/${MAX_HEALTH_FAILURES})`,
     );
     try {
-      fs.appendFileSync(
-        serverLogPath(),
+      appendDesktopServerLog(
         `[${new Date().toISOString()}] HEALTH_FAIL #${this.consecutiveHealthFailures}\n`,
       );
     } catch {}
@@ -769,8 +860,7 @@ export class ServerManager {
       const msg = `[ServerManager] 已重启 ${MAX_RESTART_COUNT} 次依然不健康，停止自动重启。请手动排查。`;
       console.error(msg);
       try {
-        fs.appendFileSync(
-          serverLogPath(),
+        appendDesktopServerLog(
           `[${new Date().toISOString()}] ${msg}\n`,
         );
       } catch {}
@@ -826,8 +916,7 @@ export class ServerManager {
       const restartMsg = `[ServerManager] server 已成功重启于端口 ${this.currentEndpointRecord.port}`;
       console.log(restartMsg);
       try {
-        fs.appendFileSync(
-          serverLogPath(),
+        appendDesktopServerLog(
           `[${new Date().toISOString()}] ${restartMsg}\n`,
         );
       } catch {}
@@ -835,8 +924,7 @@ export class ServerManager {
       const failMsg = `[ServerManager] 自动重启失败: ${(err as Error)?.message ?? String(err)}`;
       console.error(failMsg);
       try {
-        fs.appendFileSync(
-          serverLogPath(),
+        appendDesktopServerLog(
           `[${new Date().toISOString()}] ${failMsg}\n`,
         );
       } catch {}
@@ -863,7 +951,7 @@ export class ServerManager {
     });
     // 确保日志目录存在并设置固定日志路径
     try {
-      fs.mkdirSync(logsDir(), { recursive: true });
+      fs.mkdirSync(logsDir(), { recursive: true, mode: 0o700 });
     } catch {}
     process.env.OTTO_LOG_DIR = logsDir();
     const server = new mod.OttoServer({
@@ -872,6 +960,7 @@ export class ServerManager {
       enableFeishu,
       store,
       defaultWorkspacePath: os.homedir(),
+      enableOfficialChannels: true,
     }) as TrustedOttoServer;
     try {
       await server.start();
@@ -886,16 +975,14 @@ export class ServerManager {
         }
         console.warn(`[ServerManager] 端口 ${port} 被占用，尝试 ${nextPort}…`);
         try {
-          fs.appendFileSync(
-            serverLogPath(),
+          appendDesktopServerLog(
             `[${new Date().toISOString()}] WARN 端口 ${port} 被占用，尝试 ${nextPort}\n`,
           );
         } catch {}
         return this.startEmbedded(nextPort, mod);
       }
       try {
-        fs.appendFileSync(
-          serverLogPath(),
+        appendDesktopServerLog(
           `[${new Date().toISOString()}] ERROR server启动失败: ${(err as Error)?.message ?? String(err)}\n`,
         );
       } catch {}
@@ -918,13 +1005,11 @@ export class ServerManager {
     this.embedded = server;
     const { host, port: boundPort, clientToken } = server.endpoint;
     const logMsg = `[ServerManager] otto-server 已就绪 → http://${host}:${boundPort} | 飞书:${enableFeishu ? '已启用' : '未启用'} | 日志: ${serverLogPath()}`;
-    const logFile = serverLogPath();
     try {
-      fs.mkdirSync(logsDir(), { recursive: true });
+      fs.mkdirSync(logsDir(), { recursive: true, mode: 0o700 });
     } catch {}
     try {
-      fs.appendFileSync(
-        logFile,
+      appendDesktopServerLog(
         `[${new Date().toISOString()}] STARTED ${logMsg}\n`,
       );
     } catch {}
@@ -1170,7 +1255,7 @@ function pidAlive(pid: number): boolean {
  */
 function feishuCredentialsExist(): boolean {
   try {
-    const p = path.join(os.homedir(), '.otto-user', 'feishu-credentials.json');
+    const p = path.join(resolveDesktopUserDirectory(), 'feishu-credentials.json');
     return fs.existsSync(p);
   } catch {
     return false;

@@ -6,6 +6,20 @@ import { parseChannelIdentityMutationIpc } from './channel-identity-ipc.js';
 const installationId = 'channel_wecom_0123456789abcdef01234567';
 
 describe('parseChannelIdentityMutationIpc', () => {
+  it('allows a local owner claim without accepting a caller-supplied Otto identity', () => {
+    expect(parseChannelIdentityMutationIpc(installationId, {
+      action: 'claim-owner', providerUserId: ' wm_owner ', canonicalUserId: 'spoofed',
+      expectedRevision: 0,
+    })).toEqual({
+      ok: true,
+      installationId,
+      body: {
+        action: 'claim-owner', providerUserId: 'wm_owner', approvalId: 'local-owner-claim',
+        expectedRevision: 0,
+      },
+    });
+  });
+
   it('returns a bounded bind request and drops untrusted tenant fields', () => {
     expect(parseChannelIdentityMutationIpc(installationId, {
       action: 'bind', providerUserId: ' wm_user_1 ', canonicalUserId: ' otto-user-1 ',

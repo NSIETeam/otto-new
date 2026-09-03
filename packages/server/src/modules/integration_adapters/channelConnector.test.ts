@@ -84,6 +84,7 @@ describe('ChannelPairingCoordinator', () => {
     );
     expect(installation).toMatchObject({
       provider: 'lark', tenantId: 'tenant-1', tenantName: 'Acme', botName: 'Otto',
+      requestedScopes: ['contact:user:read', 'im:message'],
       grantedScopes: ['im:message'],
     });
     expect((await coordinator.get(pairing.pairingId)).status).toBe('connected');

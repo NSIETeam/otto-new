@@ -18,15 +18,17 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { MCPServerConfig, WebSearchProvider } from "otto-core";
+import { resolveServerUserDirectory } from './userDataRoot.js';
 
 const SETTINGS_DIR_NAME = ".otto-user";
 const SETTINGS_FILE = "settings.json";
 
-export function userSettingsFilePath(homeDir = os.homedir()): string {
-  return path.join(homeDir, SETTINGS_DIR_NAME, SETTINGS_FILE);
+export function userSettingsFilePath(homeDir?: string): string {
+  return homeDir
+    ? path.join(homeDir, SETTINGS_DIR_NAME, SETTINGS_FILE)
+    : path.join(resolveServerUserDirectory(), SETTINGS_FILE);
 }
 
 /** 本文件关心的字段子集（其余字段读时原样保留在 raw 里，写回不丢）。 */
@@ -61,7 +63,7 @@ function stripJsonCommentsLoose(input: string): string {
   return out;
 }
 
-function readRaw(homeDir = os.homedir()): Record<string, unknown> {
+function readRaw(homeDir?: string): Record<string, unknown> {
   const filePath = userSettingsFilePath(homeDir);
   try {
     if (!fs.existsSync(filePath)) return {};
@@ -81,7 +83,7 @@ function readRaw(homeDir = os.homedir()): Record<string, unknown> {
 
 /** 读取本文件关心的字段子集（缺省安全值：healthyUse 默认 true，与 CLI 一致）。 */
 export function loadUserSettingsSubset(
-  homeDir = os.homedir(),
+  homeDir?: string,
 ): UserSettingsSubset {
   const raw = readRaw(homeDir);
   const searchProvider = raw['searchProvider'];
@@ -152,7 +154,7 @@ export function loadUserSettingsSubset(
  */
 export function patchUserSettings(
   patch: Partial<UserSettingsSubset>,
-  homeDir = os.homedir(),
+  homeDir?: string,
 ): void {
   const filePath = userSettingsFilePath(homeDir);
   const dir = path.dirname(filePath);

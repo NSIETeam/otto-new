@@ -1,0 +1,68 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:d5ecdbab-6133-49ce-9276-b4c40e834d1c",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-08-30T15:49:07.436Z",
+    "properties": [
+      {
+        "name": "otto:target",
+        "value": "darwin-arm64"
+      },
+      {
+        "name": "otto:buildCommit",
+        "value": "1bfea5cbf68a54733530f5acb91e03a0a5022d21"
+      },
+      {
+        "name": "otto:sourceRevision",
+        "value": "e2a6040f2ae5cfff2b3e08eb3320007d93cdf3fc"
+      },
+      {
+        "name": "otto:electronVersion",
+        "value": "43.2.0"
+      },
+      {
+        "name": "otto:electronModuleAbi",
+        "value": "148"
+      }
+    ],
+    "component": {
+      "type": "file",
+      "name": "better_sqlite3.node",
+      "version": "12.11.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "23d813de70f6e38682525a89fb620066510259952118aeedfcc3b5028ee322f7"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "SQLCipher",
+      "version": "4.16.0 community",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/sqlcipher/sqlcipher/tree/e2a6040f2ae5cfff2b3e08eb3320007d93cdf3fc"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "better-sqlite3",
+      "version": "12.11.1",
+      "purl": "pkg:npm/better-sqlite3@12.11.1"
+    }
+  ]
+}

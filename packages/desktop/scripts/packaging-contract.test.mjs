@@ -142,6 +142,7 @@ describe('desktop packaging contract', () => {
     const bundledInputs = resources.map((resource) => resource.from).join('\n');
     expect(bundledInputs).not.toContain('vendor/runtime');
     expect(bundledInputs).not.toContain('resources/video-editor');
+    expect(packageJson.build.compression).toBe('maximum');
   });
 
   it('does not exclude runtime build/src modules required by ESM dependencies', async () => {
@@ -181,6 +182,17 @@ describe('desktop packaging contract', () => {
       '!**/node_modules/playwright/lib/**',
       '!**/node_modules/react-dom/**',
       '!**/node_modules/xlsx/dist/**',
+      '!**/node_modules/js-tiktoken/dist/index.js',
+      '!**/node_modules/js-tiktoken/dist/ranks/**',
+      '!**/node_modules/@langchain/**/*.cjs',
+      '!**/node_modules/@aws-sdk/**/dist-es/**',
+      '!**/node_modules/@smithy/**/dist-es/**',
+      '!**/node_modules/@jimp/**/src/**',
+      '!**/node_modules/@jimp/plugin-print/fonts/**',
+      '!**/node_modules/@otto/native/target/**',
+      '!**/node_modules/@otto/native/src/**',
+      '!**/node_modules/@otto/native/Cargo.toml',
+      '!**/node_modules/@otto/native/Cargo.lock',
     ]));
     expect(packageJson.build.files).not.toContain(
       '!**/node_modules/better-sqlite3/lib/**',
@@ -190,6 +202,12 @@ describe('desktop packaging contract', () => {
     );
     expect(packageJson.build.files).not.toContain(
       '!**/node_modules/playwright-core/lib/server/**',
+    );
+    expect(packageJson.build.files).not.toContain(
+      '!**/node_modules/@aws-sdk/**/dist-cjs/**',
+    );
+    expect(packageJson.build.files).not.toContain(
+      '!**/node_modules/@smithy/**/dist-cjs/**',
     );
   });
 

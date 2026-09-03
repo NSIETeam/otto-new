@@ -11,12 +11,13 @@
  */
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { PROTOCOL_VERSION, type ServerEndpoint } from './protocol.js';
+import { resolveServerUserDirectory } from './userDataRoot.js';
 
-const CONFIG_DIR = path.join(os.homedir(), '.otto-user');
-const ENDPOINT_FILE = path.join(CONFIG_DIR, 'server-endpoint.json');
+function endpointPath(): string {
+  return path.join(resolveServerUserDirectory(), 'server-endpoint.json');
+}
 
 /**
  * 磁盘端点记录可以附带本机控制令牌。普通 ServerEndpoint 仍是可公开的连接信息，
@@ -27,7 +28,7 @@ export interface ServerEndpointRecord extends ServerEndpoint {
 }
 
 export function endpointFilePath(): string {
-  return ENDPOINT_FILE;
+  return endpointPath();
 }
 
 /** 写端点文件（server 启动后调）。 */
@@ -49,10 +50,11 @@ export function writeEndpoint(
     clientToken,
     ...(controlToken ? { controlToken } : {}),
   };
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(ENDPOINT_FILE, JSON.stringify(ep, null, 2), { mode: 0o600 });
+  const target = endpointPath();
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, JSON.stringify(ep, null, 2), { mode: 0o600 });
   // writeFile 的 mode 不会收紧既有文件权限；显式 chmod 保证每次都是 0600。
-  fs.chmodSync(ENDPOINT_FILE, 0o600);
+  fs.chmodSync(target, 0o600);
   return publicEndpoint(ep);
 }
 
@@ -68,7 +70,7 @@ export function readEndpoint(): ServerEndpoint | undefined {
  */
 export function readEndpointRecord(): ServerEndpointRecord | undefined {
   try {
-    const raw = fs.readFileSync(ENDPOINT_FILE, 'utf8');
+    const raw = fs.readFileSync(endpointPath(), 'utf8');
     const parsed = JSON.parse(raw) as Partial<ServerEndpointRecord>;
     if (
       typeof parsed.host !== 'string' ||
@@ -101,7 +103,7 @@ function publicEndpoint(record: ServerEndpointRecord): ServerEndpoint {
 /** 清除端点文件（server 停止时调）。 */
 export function clearEndpoint(): void {
   try {
-    fs.rmSync(ENDPOINT_FILE, { force: true });
+    fs.rmSync(endpointPath(), { force: true });
   } catch {
     // 忽略：文件不存在即视为已清。
   }

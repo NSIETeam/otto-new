@@ -6,6 +6,8 @@
  */
 
 import { parkISODate, parkMinuteOfDay } from './parkBusinessTime.js';
+import { emptyPolicyState } from './policyIntelligencePresentation.js';
+import type { PolicyAction } from '../preload/index.js';
 
 type PreviewFrame = { type: string; payload: Record<string, unknown> };
 type PreviewWindow = { otto?: unknown };
@@ -60,11 +62,10 @@ if (!previewWindow.otto) {
   };
   let previewTickets: Array<Record<string, unknown>> = [];
   let previewPolicyState = {
-    enabled: false,
+    ...emptyPolicyState(),
+    canManage: true,
     profile: { organizationName: previewAccount.organizationName },
-    policies: [] as Array<Record<string, unknown>>,
-    assessments: [] as Array<Record<string, unknown>>,
-    syncStatus: 'idle',
+    modelName: '浏览器演示，不连接模型或政策网站',
   };
   let previewCarpoolState: Record<string, unknown> = {
     capability: 'park_carpool_v1', mapConfigured: true, parkId: 'preview-park',
@@ -1029,15 +1030,12 @@ if (!previewWindow.otto) {
     enterpriseKnowledgeRevisions: () => Promise.resolve([]),
     enterpriseKnowledgeEvidence: () => Promise.resolve([]),
     policyIntelligenceGet: () => Promise.resolve(structuredClone(previewPolicyState)),
-    policyIntelligenceConfigure: (input: { enabled: boolean; profile?: Record<string, unknown> }) => {
-      previewPolicyState = { ...previewPolicyState, enabled: input.enabled, profile: { ...previewPolicyState.profile, ...(input.profile ?? {}) } };
+    policyIntelligenceAction: (input: { action: PolicyAction }) => {
+      if (input.action.action === 'configure' && (!input.action.enabled || input.action.consent)) previewPolicyState = { ...previewPolicyState, enabled: input.action.enabled === true };
+      else if (input.action.action === 'profile' && input.action.consent) previewPolicyState = { ...previewPolicyState, profile: { ...previewPolicyState.profile, ...input.action.profile } };
+      else return Promise.reject(new Error('浏览器预览不调用模型；请在连接企业服务端的 Electron 中验证真实诊断。'));
       return Promise.resolve(structuredClone(previewPolicyState));
     },
-    policyIntelligenceUpdateProfile: (input: { patch: Record<string, unknown> }) => {
-      previewPolicyState = { ...previewPolicyState, profile: { ...previewPolicyState.profile, ...input.patch } };
-      return Promise.resolve(structuredClone(previewPolicyState));
-    },
-    policyIntelligenceSync: () => Promise.resolve(structuredClone(previewPolicyState)),
   };
 
   previewWindow.otto = new Proxy(bridge, {

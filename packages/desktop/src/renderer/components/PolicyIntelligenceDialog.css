@@ -1,0 +1,263 @@
+.otto-policy-v2 {
+  display: grid;
+  gap: 14px;
+  color: var(--otto-text);
+  font-family: var(--otto-font);
+  --policy-muted: color-mix(in srgb, var(--otto-text) 75%, var(--otto-bg));
+}
+.otto-policy-v2 p {
+  line-height: 1.65;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.otto-policy-v2 h3,
+.otto-policy-v2 h4 {
+  margin: 6px 0 10px;
+}
+.otto-policy-v2 button,
+.otto-policy-v2 select,
+.otto-policy-v2 textarea,
+.otto-policy-v2 input {
+  font: inherit;
+}
+.otto-policy-v2 input:not([type='checkbox']),
+.otto-policy-v2 textarea,
+.otto-policy-v2 select {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--otto-border);
+  border-radius: 9px;
+  background: var(--otto-bg);
+  color: var(--otto-text);
+  padding: 10px 12px;
+}
+.otto-policy-v2 button {
+  padding: 9px 14px;
+  border: 1px solid var(--otto-border);
+  border-radius: 9px;
+  background: var(--otto-bg);
+  color: var(--otto-text);
+  cursor: pointer;
+}
+.otto-policy-v2 button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.otto-policy-v2 button:focus-visible,
+.otto-policy-v2 input:focus-visible,
+.otto-policy-v2 textarea:focus-visible,
+.otto-policy-v2 select:focus-visible,
+.otto-policy-v2 summary:focus-visible {
+  outline: 2px solid var(--otto-accent);
+  outline-offset: 3px;
+}
+.otto-policy-v2__hero {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 24px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--otto-accent) 9%, var(--otto-bg));
+  border: 1px solid
+    color-mix(in srgb, var(--otto-accent) 35%, var(--otto-border));
+}
+.otto-policy-v2__hero > div {
+  flex: 1;
+}
+.otto-policy-v2__hero h3 {
+  font-size: 23px;
+}
+.otto-policy-v2__hero > button,
+.otto-policy-v2__consent button:first-child {
+  background: var(--otto-accent);
+  color: white;
+  white-space: nowrap;
+}
+.otto-policy-v2__eyebrow {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--otto-accent);
+}
+.otto-policy-v2__muted,
+.otto-policy-v2__notice {
+  color: var(--policy-muted);
+  font-size: 12px;
+}
+.otto-policy-v2__coverage,
+.otto-policy-v2__tags,
+.otto-policy-v2__toolbar,
+.otto-policy-v2 footer,
+.otto-policy-v2__consent > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.otto-policy-v2__coverage > span,
+.otto-policy-v2__tags > span {
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--otto-accent) 10%, var(--otto-bg));
+}
+.otto-policy-v2__coverage > span.is-missing,
+.otto-policy-v2__warning {
+  background: color-mix(in srgb, #b66b00 10%, var(--otto-bg));
+  border-left: 3px solid #b66b00;
+  padding: 8px;
+}
+.otto-policy-v2__profile {
+  padding: 16px;
+  border: 1px solid var(--otto-border);
+  border-radius: 12px;
+}
+.otto-policy-v2__profile summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.otto-policy-v2__profile form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding-top: 12px;
+}
+.otto-policy-v2__feedback {
+  padding: 18px;
+  margin: 18px 0;
+  border: 1px solid var(--otto-border);
+  border-radius: 12px;
+}
+.otto-policy-v2__feedback form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.otto-policy-v2 textarea {
+  resize: vertical;
+}
+.otto-policy-v2__tags .is-unlikely,
+.otto-policy-v2__tags .is-has_gaps {
+  border-left: 3px solid #c7750a;
+}
+.otto-policy-v2__tags .is-likely_eligible {
+  border-left: 3px solid #14845b;
+}
+.otto-policy-v2 label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.otto-policy-v2 .is-wide {
+  grid-column: 1 / -1;
+}
+.otto-policy-v2__toolbar [role='tablist'] {
+  flex: 1;
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.otto-policy-v2 [role='tab'][aria-selected='true'] {
+  background: var(--otto-accent);
+  color: #fff;
+}
+.otto-policy-v2__filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) repeat(3, minmax(100px, 1fr));
+  gap: 10px;
+}
+.otto-policy-v2__list {
+  display: grid;
+  gap: 14px;
+}
+.otto-policy-v2__list article {
+  padding: 22px;
+  border: 1px solid var(--otto-border);
+  border-radius: 14px;
+}
+.otto-policy-v2__detail {
+  margin-top: 18px;
+  border-top: 1px solid var(--otto-border);
+  padding-top: 14px;
+}
+.otto-policy-v2__condition {
+  border-left: 3px solid #718096;
+  padding: 10px 14px;
+  margin: 10px 0;
+  background: var(--otto-surface);
+}
+.otto-policy-v2__condition.is-met {
+  border-color: #14845b;
+}
+.otto-policy-v2__condition.is-gap {
+  border-color: #c7750a;
+}
+.otto-policy-v2 blockquote {
+  margin: 8px 0;
+  line-height: 1.6;
+  font-size: 13px;
+}
+.otto-policy-v2__diagnosis,
+.otto-policy-v2__consent {
+  padding: 18px;
+  background: color-mix(in srgb, var(--otto-accent) 7%, var(--otto-bg));
+  border: 1px solid var(--otto-border);
+  border-radius: 12px;
+  margin: 10px 0;
+}
+.otto-policy-v2__consent label,
+.otto-policy-v2 label.otto-policy-v2__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.otto-policy-v2__material {
+  grid-template-columns: 1fr 130px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--otto-border);
+}
+.otto-policy-v2 small {
+  display: block;
+  line-height: 1.5;
+  color: var(--policy-muted);
+}
+.otto-policy-v2__error {
+  padding: 12px;
+  border: 1px solid var(--otto-danger);
+  border-radius: 8px;
+  color: var(--otto-danger);
+}
+.otto-policy-v2__empty {
+  text-align: center;
+  padding: 28px 16px;
+  border: 1px dashed var(--otto-border);
+  border-radius: 12px;
+}
+@media (max-width: 760px) {
+  .otto-policy-v2__hero {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 16px;
+  }
+  .otto-policy-v2__filters,
+  .otto-policy-v2__profile form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .otto-policy-v2__filters input {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 480px) {
+  .otto-policy-v2__filters,
+  .otto-policy-v2__profile form {
+    grid-template-columns: 1fr;
+  }
+  .otto-policy-v2__feedback form {
+    grid-template-columns: 1fr;
+  }
+  .otto-policy-v2__material {
+    grid-template-columns: 1fr;
+  }
+}

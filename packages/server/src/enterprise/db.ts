@@ -22,6 +22,12 @@ import {
   Database,
 } from '../modules/data_platform/index.js';
 import { createAuthorizationComposition } from '../modules/authorization/index.js';
+import { createSqlitePolicyStore } from '../modules/policy_intelligence/policyStore.js';
+import { EnterprisePolicyService } from '../modules/policy_intelligence/policyService.js';
+import { loadPolicySources } from '../modules/policy_intelligence/policySources.js';
+import { createPolicyModelFromEnv } from '../modules/policy_intelligence/policyModel.js';
+import { startPolicyRuntime } from '../modules/policy_intelligence/policyRuntime.js';
+import type { RecurringTaskRegistry } from 'otto-core';
 import {
   createDataGovernanceComposition,
   DATA_GOVERNANCE_SCHEMA_CONTRIBUTOR,
@@ -1193,6 +1199,26 @@ export const {
   inviteCodeRawLength: INVITE_CODE_RAW_LENGTH,
   audit: logAudit,
 });
+
+const policyIntelligenceStore = createSqlitePolicyStore(getDB, fieldCipher);
+let policyIntelligenceService: EnterprisePolicyService | undefined;
+export function getPolicyIntelligenceService(): EnterprisePolicyService {
+  return policyIntelligenceService ??= new EnterprisePolicyService({
+    store: policyIntelligenceStore, sources: loadPolicySources(), model: createPolicyModelFromEnv(),
+    async getBaseProfile(organizationId) {
+      const profile = getEnterprisePublicProfile(organizationId);
+      return { organizationName: profile.organizationName, industry: profile.industryTags.join('、'), mainBusiness: profile.productsServices.join('；'), productsServices: profile.productsServices, capabilities: profile.capabilities };
+    },
+    async getActor(accountId) {
+      const account = getAccount(accountId);
+      if (!account) return null;
+      return { id: account.id, organizationId: account.organizationId, organizationName: account.organizationName, isAdmin: account.isAdmin, active: account.status === 'active' && account.accountType !== 'personal' && getOrganization(account.organizationId)?.status === 'active' };
+    },
+  });
+}
+export function startPolicyIntelligenceRuntime(registry: RecurringTaskRegistry): () => void {
+  return startPolicyRuntime(getPolicyIntelligenceService(), policyIntelligenceStore, registry);
+}
 
 const parkCarpoolStore = createParkCarpoolSqliteStore({
   db: getDB,

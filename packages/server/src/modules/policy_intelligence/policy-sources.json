@@ -1,0 +1,66 @@
+[
+  {
+    "id": "national",
+    "name": "国务院政策文件库",
+    "listUrl": "https://www.gov.cn/zhengce/zhengceku/",
+    "allowedHosts": ["www.gov.cn"],
+    "level": "national",
+    "region": { "country": "CN" }
+  },
+  {
+    "id": "national-ministries",
+    "name": "国务院部门文件",
+    "listUrl": "https://www.gov.cn/zhengce/zhengceku/bmwj/home.htm",
+    "allowedHosts": ["www.gov.cn"],
+    "level": "national",
+    "region": { "country": "CN" }
+  },
+  {
+    "id": "beijing-science",
+    "name": "北京市科委申报日历",
+    "listUrl": "https://kw.beijing.gov.cn/zwgk/zwgksbrl/",
+    "allowedHosts": ["kw.beijing.gov.cn"],
+    "level": "city",
+    "region": { "country": "CN", "city": "北京市" }
+  },
+  {
+    "id": "beijing-industry",
+    "name": "北京市经信局办事通知",
+    "listUrl": "https://jxj.beijing.gov.cn/bsfw/bstz/",
+    "allowedHosts": ["jxj.beijing.gov.cn"],
+    "level": "city",
+    "region": { "country": "CN", "city": "北京市" }
+  },
+  {
+    "id": "shanghai-city",
+    "name": "上海市政府人才就业政策",
+    "listUrl": "https://www.shanghai.gov.cn/rcjysj/index.html",
+    "allowedHosts": ["www.shanghai.gov.cn"],
+    "level": "city",
+    "region": { "country": "CN", "city": "上海市" }
+  },
+  {
+    "id": "shenzhen-enterprise",
+    "name": "深圳市中小企业服务局",
+    "listUrl": "https://zxqyj.sz.gov.cn/",
+    "allowedHosts": ["zxqyj.sz.gov.cn"],
+    "level": "city",
+    "region": { "country": "CN", "city": "深圳市" }
+  },
+  {
+    "id": "shenzhen-nanshan",
+    "name": "南山区政府通知公告",
+    "listUrl": "https://www.szns.gov.cn/xxgk/qzfxxgkml/tzgg/",
+    "allowedHosts": ["www.szns.gov.cn"],
+    "level": "district",
+    "region": { "country": "CN", "city": "深圳市", "district": "南山区" }
+  },
+  {
+    "id": "shanghai-pudong",
+    "name": "浦东新区政策文件",
+    "listUrl": "https://www.pudong.gov.cn/zwgk/zcwj-fgw/index.html",
+    "allowedHosts": ["www.pudong.gov.cn"],
+    "level": "district",
+    "region": { "country": "CN", "city": "上海市", "district": "浦东新区" }
+  }
+]

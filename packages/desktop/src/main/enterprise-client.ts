@@ -3602,6 +3602,16 @@ export class EnterpriseClient {
     ).profile;
   }
 
+  async getPolicyIntelligence(): Promise<import('otto-server').PolicyIntelligenceState> {
+    await this.assertCompatibleServer(this.serverUrl, ['policy_intelligence_v3']);
+    return (await this.request<{ state: import('otto-server').PolicyIntelligenceState }>('/enterprise/policy-intelligence')).state;
+  }
+
+  async actPolicyIntelligence(action: import('otto-server').PolicyAction): Promise<import('otto-server').PolicyIntelligenceState> {
+    await this.assertCompatibleServer(this.serverUrl, ['policy_intelligence_v3']);
+    return (await this.request<{ state: import('otto-server').PolicyIntelligenceState }>('/enterprise/policy-intelligence/actions', { method: 'POST', body: JSON.stringify(action) })).state;
+  }
+
   async updateEnterprisePublicProfile(
     input: EnterprisePublicProfileInput,
   ): Promise<EnterprisePublicProfile> {

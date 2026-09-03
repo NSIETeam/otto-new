@@ -67,6 +67,11 @@ import {
 import { loadEnterpriseModelCatalog } from '../modelCatalog.js';
 import { createClusteredAttachmentMaintenance } from './clusteredAttachmentMaintenance.js';
 import { handleClusteredBusinessRoute } from './clusteredBusinessRoutes.js';
+import { EnterprisePolicyService } from '../modules/policy_intelligence/policyService.js';
+import { loadPolicySources } from '../modules/policy_intelligence/policySources.js';
+import { createPolicyModelFromEnv } from '../modules/policy_intelligence/policyModel.js';
+import { handlePolicyRoute } from '../modules/policy_intelligence/policyRoutes.js';
+import { startPolicyRuntime } from '../modules/policy_intelligence/policyRuntime.js';
 import { createClusteredMlsMaintenance } from './clusteredMlsMaintenance.js';
 import { e2eeProductionCapabilities } from './e2eeProductionReleasePolicy.js';
 import {
@@ -807,6 +812,21 @@ export function createClusteredEnterpriseServer(
     };
   };
 
+  let policyService: EnterprisePolicyService | undefined;
+  const getPolicyService = (): EnterprisePolicyService => policyService ??= new EnterprisePolicyService({
+    store: repository.getPolicyIntelligenceStore(), sources: loadPolicySources(), model: createPolicyModelFromEnv(),
+    async getBaseProfile(organizationId) {
+      const organization = await repository.getOrganization(organizationId);
+      const record = await repository.getBusinessRecord<{ industryTags?: string[]; productsServices?: string[]; capabilities?: string[] }>({ organizationId, domain: 'park', resourceType: 'public_profile', resourceId: 'public_profile_' + organizationId });
+      return { organizationName: organization?.name ?? '', industry: record?.payload.industryTags?.join('、') ?? '', mainBusiness: record?.payload.productsServices?.join('；') ?? '', productsServices: record?.payload.productsServices ?? [], capabilities: record?.payload.capabilities ?? [] };
+    },
+    async getActor(id) {
+      const account = await repository.getAccount(id);
+      if (!account) return null;
+      const organization = await repository.getOrganization(account.organizationId);
+      return { id: account.id, organizationId: account.organizationId, organizationName: account.organizationName, isAdmin: account.isAdmin, active: account.status === 'active' && organization?.status === 'active' && organization.type !== 'personal' };
+    },
+  });
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', 'http://127.0.0.1');
     const path = url.pathname;
@@ -838,6 +858,8 @@ export function createClusteredEnterpriseServer(
           version: options.appVersion || 'unknown',
           appVersion: options.appVersion || 'unknown',
           capabilities: [
+            'policy_intelligence_v2',
+            'policy_intelligence_v3',
             'password_auth',
             'sms_registration',
             'personal_registration',
@@ -1842,6 +1864,7 @@ export function createClusteredEnterpriseServer(
         }
       }
 
+      if (await handlePolicyRoute({ path, method, req, res, accountId: member.id, service: getPolicyService, readBody: readJsonBody, sendJSON: sendJson })) return;
       if (
         await handleClusteredBusinessRoute({
           path,
@@ -2862,6 +2885,13 @@ export function createClusteredEnterpriseServer(
     }
   });
 
+  let stopPolicy: (() => void) | undefined;
+  // Validate configuration before listening so malformed settings cannot throw from an event callback.
+  const initializedPolicyService = typeof repository.getPolicyIntelligenceStore === 'function' ? getPolicyService() : undefined;
+  server.once('listening', () => {
+    if (initializedPolicyService) stopPolicy = startPolicyRuntime(initializedPolicyService, repository.getPolicyIntelligenceStore());
+  });
+  server.once('close', () => stopPolicy?.());
   return { server, host, port, adminToken };
 }
 

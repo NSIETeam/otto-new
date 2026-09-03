@@ -91,3 +91,4 @@ export {
   clearEndpoint,
 } from './endpoint.js';
 export type { ServerEndpointRecord } from './endpoint.js';
+export type * from './modules/policy_intelligence/contracts.js';

@@ -230,6 +230,36 @@ beforeEach(() => {
   closeDatabases = [];
 });
 
+describe('面向所有企业的政策服务', () => {
+  it('shares the real HTTP state without requiring park membership and isolates company profiles', async () => {
+    const { base } = await startIsolated(ADMIN_TOKEN);
+    const db = await import('./db.js');
+    const organization = db.createOrganization({ name: '成都软件企业', slug: 'policy-chengdu' });
+    db.updateOrganizationFeatures(organization.id, { park_service: false });
+    expect(db.getOrganizationFeatures(organization.id).park_service).toBe(false);
+    const admin = db.createAccount({ organizationId: organization.id, username: 'policy-admin', password: 'policy-test-password', name: '政策管理员', isAdmin: true });
+    const member = db.createAccount({ organizationId: organization.id, username: 'policy-member', password: 'policy-test-password', name: '政策成员' });
+    const adminHeaders = { authorization: `Bearer ${db.createAuthSession(admin.id).token}`, 'content-type': 'application/json' };
+    const memberHeaders = { authorization: `Bearer ${db.createAuthSession(member.id).token}`, 'content-type': 'application/json' };
+    const anonymous = await fetch(`${base}/enterprise/policy-intelligence`);
+    expect(anonymous.status).toBe(401);
+    const browse = await fetch(`${base}/enterprise/policy-intelligence`, { headers: memberHeaders });
+    expect(browse.status).toBe(200);
+    await expect(browse.json()).resolves.toMatchObject({ state: { enabled: false, canManage: false, diagnoses: [] } });
+    const denied = await fetch(`${base}/enterprise/policy-intelligence/actions`, { method: 'POST', headers: memberHeaders, body: JSON.stringify({ action: 'configure', enabled: true, consent: true, accountId: admin.id }) });
+    expect(denied.status).toBe(403);
+    const saved = await fetch(`${base}/enterprise/policy-intelligence/actions`, { method: 'POST', headers: adminHeaders, body: JSON.stringify({ action: 'profile', consent: true, profile: { registeredRegion: '四川省成都市武侯区', industry: '软件服务' } }) });
+    expect(saved.status).toBe(200);
+    await expect(saved.json()).resolves.toMatchObject({ state: { region: { province: '四川省', city: '成都市', district: '武侯区' } } });
+    const other = db.createAccount({ username: 'policy-other', password: 'policy-test-password', name: '另一企业' });
+    const otherState = await fetch(`${base}/enterprise/policy-intelligence`, { headers: { authorization: `Bearer ${db.createAuthSession(other.id).token}` } });
+    expect(otherState.status).toBe(200);
+    const payload = await otherState.json();
+    expect(payload.state.region.city).toBeUndefined();
+    expect(payload.state.profile.registeredRegion).toBeUndefined();
+  });
+});
+
 describe('企业常驻任务注册', () => {
   it('persists enterprise checkpoints under OTTO_ENTERPRISE_DIR across restart', async () => {
     process.env.OTTO_ENTERPRISE_DIR = tmpDir;
@@ -421,6 +451,7 @@ describe('企业常驻任务注册', () => {
       'enterprise.data-protection-backup',
       'enterprise.local-mls-resource-maintenance',
       'enterprise.ticket-notification-delivery',
+      'enterprise.policy-intelligence.collection',
     ]);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     servers = servers.filter((item) => item !== server);
@@ -1294,6 +1325,10 @@ describe('受保护 vs 公开路由边界', () => {
       },
     );
     expect(baselineImported.status).toBe(200);
+
+    const baselinePolicy = await fetch(`${base}/enterprise/policy-intelligence`, { headers: memberHeaders });
+    expect(baselinePolicy.status).toBe(200);
+    await expect(baselinePolicy.json()).resolves.toMatchObject({ state: { enabled: false, canManage: false } });
 
     const ownOrganizationView = await fetch(
       `${base}/enterprise/organization/view`,

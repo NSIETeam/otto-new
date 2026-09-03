@@ -45,6 +45,7 @@ const ADMIN_ROUTES = new Set([
 
 /** 会读取或写入企业内部数据的成员路由，必须使用账号会话。 */
 const MEMBER_ROUTES = new Set([
+  '/enterprise/policy-intelligence',
   '/enterprise/onboard',
   '/enterprise/task',
   '/enterprise/recall',
@@ -99,6 +100,7 @@ export function isAdminRoute(path: string): boolean {
 export function isMemberRoute(path: string): boolean {
   return (
     MEMBER_ROUTES.has(path) ||
+    path.startsWith('/enterprise/policy-intelligence/') ||
     path.startsWith('/enterprise/skills/') ||
     path.startsWith('/enterprise/customer-modules/') ||
     path.startsWith('/enterprise/knowledge/') ||

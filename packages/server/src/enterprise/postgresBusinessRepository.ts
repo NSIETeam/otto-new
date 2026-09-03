@@ -208,6 +208,8 @@ async function transaction<T>(
   }
 }
 
+import { createPostgresPolicyStore } from '../modules/policy_intelligence/policyStore.js';
+
 export function createPostgresEnterpriseBusinessRepository(input: {
   pool: PostgresPoolLike;
   accountSyncKeyProvider?: AccountSyncEncryptionKeyProvider;
@@ -674,6 +676,7 @@ export function createPostgresEnterpriseBusinessRepository(input: {
 
   return {
     listAccountSyncSnapshots,
+    getPolicyIntelligenceStore: () => createPostgresPolicyStore(input.pool, { encryptText: encryptBusinessSensitiveText, decryptText: decryptBusinessSensitiveText }),
     putAccountSyncSnapshot,
     listBusinessRecords,
     getBusinessRecord,

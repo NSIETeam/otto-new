@@ -205,6 +205,8 @@ export function createEnterpriseRecurringTaskRegistry(): RecurringTaskRegistry {
 }
 
 export const ENTERPRISE_CAPABILITIES = [
+  'policy_intelligence_v2',
+  'policy_intelligence_v3',
   'password_auth',
   'sms_login',
   'sms_registration',
@@ -1131,7 +1133,8 @@ export function startEnterpriseServer(
   const clearInitialMlsCleanup = () => {
     if (initialMlsCleanup) clearImmediate(initialMlsCleanup);
   };
-  let stopTicketNotificationRuntime: () => void;
+  let stopTicketNotificationRuntime: () => void = () => undefined;
+  let stopPolicyIntelligenceRuntime: () => void = () => undefined;
   try {
     stopTicketNotificationRuntime = canaryMode
       ? () => undefined
@@ -1142,6 +1145,7 @@ export function startEnterpriseServer(
           onError: (error) =>
             console.error('[Otto Enterprise] 工单通知升级任务失败', error),
         });
+    stopPolicyIntelligenceRuntime = canaryMode ? () => undefined : db.startPolicyIntelligenceRuntime(taskRegistry);
   } catch (error) {
     clearInitialMlsCleanup();
     stopMlsCleanup();
@@ -1149,6 +1153,8 @@ export function startEnterpriseServer(
     stopPrivateDeploymentBootstrapRuntime();
     stopFederationRuntime();
     stopDataProtectionRuntime();
+    stopTicketNotificationRuntime();
+    stopPolicyIntelligenceRuntime();
     server.close();
     throw error;
   }
@@ -1159,6 +1165,7 @@ export function startEnterpriseServer(
   const cleanupRuntimes = () => {
     if (runtimesCleaned) return;
     runtimesCleaned = true;
+    stopPolicyIntelligenceRuntime();
     stopMlsCleanup();
     stopPrivateDeploymentRuntime();
     stopPrivateDeploymentBootstrapRuntime();
@@ -1191,6 +1198,7 @@ export function startEnterpriseServer(
   const gracefulClose = (): Promise<void> => {
     if (gracefulClosePromise) return gracefulClosePromise;
     closeInitiated = true;
+    stopPolicyIntelligenceRuntime();
     clearInitialMlsCleanup();
     // Stop accepting requests and stop scheduling resident work at the same
     // time. Keep the database and runtime resources alive until every task has
@@ -1224,6 +1232,7 @@ export function startEnterpriseServer(
   };
   server.once('close', () => {
     if (closeInitiated) return;
+    stopPolicyIntelligenceRuntime();
     // Defensive path for an unexpected transport close that did not enter the
     // wrapped close method. There is no caller to await, but resident work is
     // still stopped, drained, and cleaned rather than orphaned.

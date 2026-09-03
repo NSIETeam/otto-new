@@ -511,31 +511,8 @@ function OttoWorkspaceApp({
     setUnavailableModule(null);
     setPendingAgent(null);
   }, [cancelPendingAgentLaunches, moduleWorkspaceScopeKey]);
-  useEffect(() => {
-    if (edition !== 'enterprise' || typeof window.otto.policyIntelligenceGet !== 'function') return;
-    let cancelled = false;
-    void window.otto.policyIntelligenceGet(policyScopeId).then(async (current) => {
-      if (cancelled || !current?.enabled) return;
-      let enriched = policySeedProfile;
-      try {
-        const publicProfile = await window.otto.enterprisePublicProfile();
-        enriched = {
-          ...enriched,
-          ...(publicProfile.industryTags[0] ? { industry: publicProfile.industryTags.join('、') } : {}),
-          ...(publicProfile.productsServices.length ? { productsServices: publicProfile.productsServices } : {}),
-          ...(publicProfile.capabilities.length ? { capabilities: publicProfile.capabilities } : {}),
-        };
-      } catch {
-        // Public park profile is optional and may not be entitled on this server.
-      }
-      if (cancelled) return;
-      await window.otto.policyIntelligenceConfigure({ scopeId: policyScopeId, enabled: true, profile: enriched });
-      if (!cancelled) await window.otto.policyIntelligenceSync({ scopeId: policyScopeId, reason: 'startup' });
-    }).catch(() => {
-      // Policy intelligence is optional; a failed startup refresh must not block Otto.
-    });
-    return () => { cancelled = true; };
-  }, [edition, policyScopeId, policySeedProfile]);
+  // Policy collection and opt-in live on the enterprise server; opening Otto
+  // does not rewrite company facts or trigger model calls.
   useEffect(() => setPendingAgent(null), [state.activeSessionId]);
   const permissionResolver = useRef<((decision: AtoaPermissionDecision) => void) | null>(null);
   const [pendingAtoaPermission, setPendingAtoaPermission] = useState<AtoaPermissionRequest | null>(null);
@@ -1407,8 +1384,7 @@ function OttoWorkspaceApp({
           sessionId,
           registry: policyConversationRef.current,
           getState: () => window.otto.policyIntelligenceGet(policyScopeId),
-          sync: () => window.otto.policyIntelligenceSync({ scopeId: policyScopeId, reason: 'manual' }),
-          updateProfile: (patch) => window.otto.policyIntelligenceUpdateProfile({ scopeId: policyScopeId, patch }),
+          act: (action) => window.otto.policyIntelligenceAction({ scopeId: policyScopeId, action }),
           postMessage: actions.postLocalChatMessage,
         });
         if (policyHandled) return true;

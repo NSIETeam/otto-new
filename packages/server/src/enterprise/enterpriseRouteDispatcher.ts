@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { FeatureFlagManager } from 'otto-core';
 import * as db from './db.js';
+import { handlePolicyRoute } from '../modules/policy_intelligence/policyRoutes.js';
 import { handleFeatureFlagsRoute } from './featureFlagsAdmin.js';
 import { adminAccountsHTML } from './adminAccountsPage.js';
 import { adminCreditsHTML } from './adminCreditsPage.js';
@@ -124,6 +125,7 @@ export async function dispatchEnterpriseRoute({
   modelGatewayFetch,
   controlCommandHandle,
 }: EnterpriseRouteDispatcherDeps): Promise<boolean> {
+  if (await handlePolicyRoute({ path, method, req, res, accountId: memberAccount?.id, service: db.getPolicyIntelligenceService, readBody, sendJSON })) return true;
   // CONTROL-12 签名指令队列端点（配置了 Control 信任根时先于企业路由处理）。
   if (controlCommandHandle) {
     if (

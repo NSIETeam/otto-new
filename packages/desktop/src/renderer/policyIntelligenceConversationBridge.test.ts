@@ -1,90 +1,163 @@
-/** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
-
 import { describe, expect, it, vi } from 'vitest';
 import {
-  PolicyConversationRegistry,
   handlePolicyIntelligenceConversation,
+  PolicyConversationRegistry,
 } from './policyIntelligenceConversationBridge.js';
-
-const DETAIL_URL = 'https://kw.beijing.gov.cn/zwgk/zwgksbrl/202609/t20260901_1.html';
-
-function harness(overrides: Record<string, unknown> = {}) {
-  const messages: Array<{ role: 'user' | 'assistant'; text: string }> = [];
+import { emptyPolicyState } from './policyIntelligencePresentation.js';
+import type { PolicyIntelligenceState } from '../preload/index.js';
+function harness() {
+  const state: PolicyIntelligenceState = {
+    ...emptyPolicyState(),
+    canManage: true,
+    enabled: true,
+    region: { country: 'CN', city: '上海市' },
+    policies: [
+      {
+        id: 'p',
+        title: '数字化专项',
+        url: 'https://www.gov.cn/p',
+        sourceId: 's',
+        sourceName: '国务院',
+        issuer: '国务院',
+        level: 'national',
+        region: { country: 'CN' },
+        categories: ['数字化转型'],
+        fetchedAt: '2026-09-03',
+        contentHash: 'v1',
+        version: 1,
+        bodyText: '原文',
+        summary: '',
+        supportText: '',
+        conditions: [],
+        conditionTree: { all: [] },
+        materials: [],
+        resources: [],
+        attachments: [],
+        sourceStatus: 'verified',
+        interpretationStatus: 'ready',
+      },
+    ],
+  };
+  const input = {
+    scopeId: 'o:a',
+    sessionId: 's',
+    registry: new PolicyConversationRegistry(),
+    getState: vi.fn(async () => state),
+    act: vi.fn(async () => state),
+    postMessage: vi.fn(),
+  };
   return {
-    messages,
-    input: {
-      text: '', scopeId: 'org-a', sessionId: 'session-a', registry: new PolicyConversationRegistry(),
-      getState: vi.fn(async () => ({
-        enabled: true,
-        profile: { organizationName: '甲公司' },
-        policies: [], assessments: [], syncStatus: 'idle' as const,
-      })),
-      sync: vi.fn(async () => ({
-        enabled: true,
-        profile: { organizationName: '甲公司', registeredRegion: '北京市昌平区', industry: '企业软件' },
-        policies: [], assessments: [], syncStatus: 'idle' as const,
-      })),
-      updateProfile: vi.fn(),
-      postMessage: (role: 'user' | 'assistant', text: string) => messages.push({ role, text }),
-      ...overrides,
-    },
+    input,
+    state,
+    say: (text: string) =>
+      handlePolicyIntelligenceConversation({ ...input, text }),
   };
 }
-
-describe('政策智能服务对话桥', () => {
-  it('服务关闭时明确提示开启且不静默联网', async () => {
-    const state = harness({ getState: vi.fn(async () => ({ enabled: false, profile: {}, policies: [], assessments: [], syncStatus: 'idle' })) });
-    expect(await handlePolicyIntelligenceConversation({ ...state.input, text: '我们公司最近能申报什么政策？' })).toBe(true);
-    expect(state.messages.at(-1)?.text).toContain('当前未开启');
-    expect(state.input.sync).not.toHaveBeenCalled();
-  });
-
-  it('资料不足时主动追问，补充后必须确认才保存并重评估', async () => {
-    const state = harness();
-    await handlePolicyIntelligenceConversation({ ...state.input, text: '我们公司最近能申报什么政策？' });
-    expect(state.messages.at(-1)?.text).toContain('注册地区');
-    expect(state.messages.at(-1)?.text).toContain('主营行业');
-
-    await handlePolicyIntelligenceConversation({ ...state.input, text: '注册在北京昌平，主营企业软件' });
-    expect(state.messages.at(-1)?.text).toContain('确认保存');
-    expect(state.input.updateProfile).not.toHaveBeenCalled();
-
-    await handlePolicyIntelligenceConversation({ ...state.input, text: '确认保存并重新评估' });
-    expect(state.input.updateProfile).toHaveBeenCalledWith(expect.objectContaining({
-      registeredRegion: '北京市昌平区', industry: '企业软件',
-    }));
-    expect(state.input.sync).toHaveBeenCalled();
-  });
-
-  it('在对话里返回判断、缺口和官方原文链接', async () => {
-    const state = harness({
-      getState: vi.fn(async () => ({
-        enabled: true, profile: { organizationName: '甲公司', registeredRegion: '北京市', industry: '软件' }, syncStatus: 'idle',
-        policies: [{ id: 'p1', title: '软件企业研发补助', url: DETAIL_URL, sourceName: '北京市科委', publishedAt: '2026-09-01', fetchedAt: '2026-09-02T00:00:00.000Z', contentHash: 'a', bodyText: '原文' }],
-        assessments: [{ policyId: 'p1', status: 'has_gaps', score: 70, summary: '行业匹配', conditions: [], gaps: ['研发费用比例还差 2 个百分点'], missingFields: [], resourceConnections: ['市科委申报平台'], assessedAt: '2026-09-02T00:00:00.000Z', profileFingerprint: 'b', policyContentHash: 'a' }],
-      })),
+describe('政策对话与模块共用服务', () => {
+  it('对话展示排除依据，并将否和不确定按服务端字段类型传递', async () => {
+    const h = harness();
+    h.state.diagnoses = [
+      {
+        id: 'd',
+        accountId: 'a',
+        policyId: 'p',
+        policyVersion: 1,
+        policyContentHash: 'v1',
+        revision: 1,
+        status: 'unknown',
+        summary: '排除事实待核实',
+        conditions: [],
+        gaps: [],
+        missingFields: ['blacklisted'],
+        resourceConnections: [],
+        assessedAt: '2026-09-03',
+        profileFingerprint: 'f',
+        factVersion: 'f',
+        answers: {},
+        stale: false,
+        group: 'evaluate',
+        question: {
+          field: 'blacklisted',
+          label: '是否列入失信名单？',
+          valueType: 'boolean',
+        },
+        exclusions: [
+          {
+            id: 'credit',
+            label: '失信限制',
+            quote: '失信企业不予支持',
+            result: 'unknown',
+            missingFields: ['blacklisted'],
+          },
+        ],
+      },
+    ];
+    await h.say('有哪些政策');
+    await h.say('诊断第1项');
+    await h.say('同意诊断');
+    expect(
+      h.input.postMessage.mock.calls.some(([, text]) =>
+        text.includes('失信企业不予支持'),
+      ),
+    ).toBe(true);
+    await h.say('否');
+    expect(h.input.act).toHaveBeenLastCalledWith({
+      action: 'answer',
+      diagnosisId: 'd',
+      revision: 1,
+      field: 'blacklisted',
+      value: false,
     });
-    await handlePolicyIntelligenceConversation({ ...state.input, text: '这个政策我们还差什么条件？' });
-    expect(state.messages.at(-1)?.text).toContain('研发费用比例还差 2 个百分点');
-    expect(state.messages.at(-1)?.text).toContain(DETAIL_URL);
-    expect(state.messages.at(-1)?.text).toContain('辅助判断');
-  });
-
-  it('模型标记企业材料不明确时主动追问金额资料并继续走确认', async () => {
-    const state = harness({
-      getState: vi.fn(async () => ({
-        enabled: true, profile: { organizationName: '甲公司', registeredRegion: '北京市', industry: '软件' }, syncStatus: 'idle',
-        policies: [{ id: 'p1', title: '研发补助', url: DETAIL_URL, sourceName: '北京市科委', fetchedAt: '2026-09-02T00:00:00.000Z', contentHash: 'a', bodyText: '原文' }],
-        assessments: [{ policyId: 'p1', status: 'unknown', score: 40, summary: '缺少经营数据', conditions: [], gaps: [], missingFields: ['annualRevenueCny', 'rdExpenseCny'], resourceConnections: [], assessedAt: '2026-09-02T00:00:00.000Z', profileFingerprint: 'b', policyContentHash: 'a' }],
-      })),
+    await h.say('不确定');
+    expect(h.input.act).toHaveBeenLastCalledWith({
+      action: 'answer',
+      diagnosisId: 'd',
+      revision: 1,
+      field: 'blacklisted',
+      value: null,
     });
-    await handlePolicyIntelligenceConversation({ ...state.input, text: '我们能申报哪些政策？' });
-    expect(state.messages.at(-1)?.text).toContain('年营业收入');
-    expect(state.messages.at(-1)?.text).toContain('研发费用');
-
-    await handlePolicyIntelligenceConversation({ ...state.input, text: '年营业收入500万元，研发费用80万元' });
-    expect(state.messages.at(-1)?.text).toContain('确认保存');
-    await handlePolicyIntelligenceConversation({ ...state.input, text: '确认保存并重新评估' });
-    expect(state.input.updateProfile).toHaveBeenCalledWith(expect.objectContaining({ annualRevenueCny: 5_000_000, rdExpenseCny: 800_000 }));
+  });
+  it('浏览不触发模型，诊断需要单独同意', async () => {
+    const h = harness();
+    expect(await h.say('有哪些适合我们公司的政策')).toBe(true);
+    expect(h.input.act).not.toHaveBeenCalled();
+    await h.say('诊断第1项');
+    expect(h.input.act).not.toHaveBeenCalled();
+    await h.say('同意诊断');
+    expect(h.input.act).toHaveBeenCalledWith({
+      action: 'diagnose',
+      policyId: 'p',
+      consent: true,
+    });
+  });
+  it('上海企业资料按单题收集，不限制北京，并在共享前确认', async () => {
+    const h = harness();
+    h.state.missingProfileFields = ['registeredRegion', 'industry'];
+    await h.say('完善政策企业资料');
+    await h.say('上海市浦东新区');
+    expect(h.input.act).not.toHaveBeenCalled();
+    await h.say('软件研发');
+    await h.say('确认保存');
+    expect(h.input.act).toHaveBeenCalledWith({
+      action: 'profile',
+      profile: { registeredRegion: '上海市浦东新区', industry: '软件研发' },
+      consent: true,
+    });
+  });
+  it('账号和会话隔离，取消及无关提问不会继续提交', async () => {
+    const h = harness();
+    await h.say('有哪些政策');
+    await h.say('诊断第1项');
+    expect(
+      await handlePolicyIntelligenceConversation({
+        ...h.input,
+        scopeId: 'o:b',
+        text: '同意诊断',
+      }),
+    ).toBe(false);
+    await h.say('取消');
+    await h.say('同意诊断');
+    expect(h.input.act).not.toHaveBeenCalled();
+    expect(await h.say('帮我写一段代码')).toBe(false);
   });
 });

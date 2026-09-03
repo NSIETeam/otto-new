@@ -226,12 +226,7 @@ import {
 import { createDesktopCustomerModuleHost } from './customerModuleHostAdapter.js';
 import { createCustomerModuleModelInvoke } from './customerModuleModelAdapter.js';
 import { createCustomAgentGenerator } from './customAgentGenerator.js';
-import {
-  FilePolicyIntelligenceStore,
-  PolicyIntelligenceService,
-  type PolicyEnterpriseProfile,
-} from './policyIntelligenceService.js';
-import { createPolicyIntelligenceAnalyzer } from './policyIntelligenceModel.js';
+import type { PolicyAction } from 'otto-server';
 import {
   EnterpriseE2eeCrypto,
   EnterpriseE2eeKeyVault,
@@ -591,9 +586,6 @@ const mainWindowPresentations = new WeakMap<
 let pendingMainWindowFocusRequest = false;
 /** IPC、菜单和托盘初始化完成后，才允许外部事件创建主窗口。 */
 let mainWindowCreationReady = false;
-/** A tray-hidden close performs a final crawl and arms one refresh for the next explicit reopen. */
-let policySyncOnNextShow = false;
-let policyCloseSyncPromise: Promise<void> | undefined;
 /** macOS 后台提醒句柄；窗口重新聚焦时主动取消。 */
 let dockBounceId: number | undefined;
 /** 系统托盘：保持引用，避免被 GC 后托盘图标消失。 */
@@ -757,9 +749,7 @@ const IPC = {
   customerModuleCancel: 'otto:customer-module-cancel',
   generateCustomAgent: 'otto:generate-custom-agent',
   policyIntelligenceGet: 'otto:policy-intelligence-get',
-  policyIntelligenceConfigure: 'otto:policy-intelligence-configure',
-  policyIntelligenceUpdateProfile: 'otto:policy-intelligence-update-profile',
-  policyIntelligenceSync: 'otto:policy-intelligence-sync',
+  policyIntelligenceAction: 'policy-intelligence:action',
   setLocalTestUrl: 'otto:set-local-test-url',
   appVersion: 'otto:app-version',
   updateCheck: 'otto:update-check',
@@ -911,16 +901,6 @@ const customerModuleModelInvoke = createCustomerModuleModelInvoke();
 const generateCustomAgent = createCustomAgentGenerator();
 const analyzeRecruitmentResume = createRecruitmentIntelligenceAnalyzer();
 const analyzeEnterpriseMemory = createEnterpriseMemoryIntelligenceAnalyzer();
-let policyIntelligenceService: PolicyIntelligenceService | undefined;
-
-function getPolicyIntelligenceService(): PolicyIntelligenceService {
-  policyIntelligenceService ??= new PolicyIntelligenceService({
-    store: new FilePolicyIntelligenceStore(path.join(app.getPath('userData'), 'policy-intelligence-v1.json')),
-    analyze: createPolicyIntelligenceAnalyzer(),
-  });
-  return policyIntelligenceService;
-}
-
 function parsePolicyScopeId(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,160}$/u.test(value)) {
     throw new Error('政策智能服务作用域格式不正确');
@@ -942,35 +922,6 @@ function authorizePolicyScope(value: unknown): string {
   return scopeId;
 }
 
-function parsePolicyProfile(value: unknown): PolicyEnterpriseProfile {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const input = value as Record<string, unknown>;
-  const output: PolicyEnterpriseProfile = {};
-  const textFields = ['organizationName', 'registeredRegion', 'industry', 'establishedAt', 'notes'] as const;
-  for (const field of textFields) {
-    if (input[field] === undefined) continue;
-    if (typeof input[field] !== 'string') throw new Error(`企业资料 ${field} 格式不正确`);
-    output[field] = input[field].trim().slice(0, field === 'notes' ? 2_000 : 200);
-  }
-  const numberFields = ['employeeCount', 'annualRevenueCny', 'rdExpenseCny'] as const;
-  for (const field of numberFields) {
-    if (input[field] === undefined) continue;
-    const numberValue = Number(input[field]);
-    if (!Number.isFinite(numberValue) || numberValue < 0 || numberValue > Number.MAX_SAFE_INTEGER) {
-      throw new Error(`企业资料 ${field} 格式不正确`);
-    }
-    output[field] = numberValue;
-  }
-  const listFields = ['qualifications', 'productsServices', 'capabilities'] as const;
-  for (const field of listFields) {
-    if (input[field] === undefined) continue;
-    if (!Array.isArray(input[field]) || input[field].some((item) => typeof item !== 'string')) {
-      throw new Error(`企业资料 ${field} 格式不正确`);
-    }
-    output[field] = (input[field] as string[]).map((item) => item.trim().slice(0, 200)).filter(Boolean).slice(0, 50);
-  }
-  return output;
-}
 
 const enterpriseFetch = createEnterpriseNetworkFetch(
   fetch,
@@ -2284,17 +2235,6 @@ function showMainWindow(): void {
     mainWindow.show();
     mainWindow.focus();
   }
-  if (policySyncOnNextShow) {
-    policySyncOnNextShow = false;
-    const closeSync = policyCloseSyncPromise ?? Promise.resolve();
-    policyCloseSyncPromise = undefined;
-    void closeSync
-      .catch(() => undefined)
-      .then(() => getPolicyIntelligenceService().syncEnabledScopes('startup', 12_000))
-      .catch((error) => {
-        console.warn('[otto-desktop] 重新打开 Otto 时政策同步失败:', error);
-      });
-  }
 }
 
 function createTray(): void {
@@ -2483,10 +2423,6 @@ function createWindow(): BrowserWindow {
       .then((choice) => {
         if (choice === 'continue-background') {
           win.hide();
-          policySyncOnNextShow = true;
-          policyCloseSyncPromise = getPolicyIntelligenceService().syncEnabledScopesForShutdown(4_000).catch((error) => {
-            console.warn('[otto-desktop] 关闭 Otto 窗口时政策同步失败:', error);
-          });
         } else if (choice === 'stop-and-quit') {
           isQuitting = true;
           app.quit();
@@ -5723,43 +5659,24 @@ function registerIpc(): void {
     },
   );
 
-  ipcMain.handle(IPC.policyIntelligenceGet, async (_event, scopeId: unknown) => (
-    getPolicyIntelligenceService().getState(authorizePolicyScope(scopeId))
-  ));
-  ipcMain.handle(IPC.policyIntelligenceConfigure, async (_event, input: unknown) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) {
-      throw new Error('政策智能服务配置格式不正确');
-    }
-    const body = input as Record<string, unknown>;
-    if (typeof body.enabled !== 'boolean') throw new Error('政策智能服务开关格式不正确');
-    return getPolicyIntelligenceService().configure({
-      scopeId: authorizePolicyScope(body.scopeId),
-      enabled: body.enabled,
-      profile: parsePolicyProfile(body.profile),
-    });
+  ipcMain.handle(IPC.policyIntelligenceGet, async (_event, scopeId: unknown) => {
+    authorizePolicyScope(scopeId);
+    const serverUrl = enterpriseClient.snapshot().serverUrl;
+    const state = await enterpriseClient.getPolicyIntelligence();
+    authorizePolicyScope(scopeId);
+    if (enterpriseClient.snapshot().serverUrl !== serverUrl) throw new Error('企业连接已变化，请重新打开政策服务');
+    return state;
   });
-  ipcMain.handle(IPC.policyIntelligenceUpdateProfile, async (_event, input: unknown) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) {
-      throw new Error('政策企业资料格式不正确');
-    }
+  ipcMain.handle(IPC.policyIntelligenceAction, async (_event, input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('政策操作格式不正确');
     const body = input as Record<string, unknown>;
-    return getPolicyIntelligenceService().updateProfile(
-      authorizePolicyScope(body.scopeId),
-      parsePolicyProfile(body.patch),
-    );
-  });
-  ipcMain.handle(IPC.policyIntelligenceSync, async (_event, input: unknown) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) {
-      throw new Error('政策同步参数格式不正确');
-    }
-    const body = input as Record<string, unknown>;
-    if (body.reason !== 'startup' && body.reason !== 'manual' && body.reason !== 'profile_update') {
-      throw new Error('政策同步原因不正确');
-    }
-    return getPolicyIntelligenceService().sync(
-      authorizePolicyScope(body.scopeId),
-      body.reason,
-    );
+    authorizePolicyScope(body.scopeId);
+    if (!body.action || typeof body.action !== 'object' || Array.isArray(body.action) || JSON.stringify(body.action).length > 32000) throw new Error('政策操作格式不正确');
+    const serverUrl = enterpriseClient.snapshot().serverUrl;
+    const state = await enterpriseClient.actPolicyIntelligence(body.action as PolicyAction);
+    authorizePolicyScope(body.scopeId);
+    if (enterpriseClient.snapshot().serverUrl !== serverUrl) throw new Error('企业连接已变化，请重新打开政策服务');
+    return state;
   });
 
   ipcMain.handle(IPC.enterpriseSkillReview, async (_event, input: unknown) => {
@@ -6590,10 +6507,6 @@ if (!gotLock) {
           '[otto-desktop] resident task drain failed during shutdown:',
           error,
         );
-      })
-      .then(() => getPolicyIntelligenceService().syncEnabledScopesForShutdown(4_000))
-      .catch((error) => {
-        console.warn('[otto-desktop] 退出前政策增量同步失败:', error);
       })
       .then(() => flushEnterpriseAccountDataSync(3_000))
       .catch(logAccountDataSyncFailure)

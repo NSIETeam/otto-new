@@ -378,6 +378,42 @@ describe('applyFrame 各帧分支', () => {
     expect(m.tokenUsage).toEqual({ inputTokens: 1, outputTokens: 2, totalTokens: 3 });
   });
 
+  it('notifies background completion once, not for intermediate commentary', () => {
+    const notify = vi.fn().mockResolvedValue(undefined);
+    Object.assign(window.otto, { notificationShow: notify });
+    const { push } = setup();
+    push({ type: 'sessions_list', payload: { sessions: [makeSession({ sessionId: 'active' }), makeSession({ sessionId: 'background' })] } });
+    push({ type: 'chat_complete', payload: { sessionId: 'background', messageId: 'progress', phase: 'commentary', text: '找到了资料，继续验证。' } });
+    push({ type: 'chat_complete', payload: { sessionId: 'background', messageId: 'tool-only', phase: 'commentary', text: '' } });
+    expect(notify).not.toHaveBeenCalled();
+    push({ type: 'chat_complete', payload: { sessionId: 'background', messageId: 'final', phase: 'final_answer', text: '结果已交付。' } });
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ preview: '结果已交付。' }));
+  });
+
+  it('chat_complete persists commentary/final phases and older frames do not erase them', () => {
+    const { view, push } = setup();
+    push({
+      type: 'message_start',
+      payload: { message: makeMsg({ id: 'm1', turnId: 't1' }) },
+    });
+    push({
+      type: 'chat_complete',
+      payload: { sessionId: 's1', messageId: 'm1', phase: 'commentary' },
+    });
+    expect(view.result.current.state.messages.s1[0].phase).toBe('commentary');
+    push({
+      type: 'chat_complete',
+      payload: { sessionId: 's1', messageId: 'm1' },
+    });
+    expect(view.result.current.state.messages.s1[0].phase).toBe('commentary');
+    push({
+      type: 'chat_complete',
+      payload: { sessionId: 's1', messageId: 'm1', phase: 'final_answer' },
+    });
+    expect(view.result.current.state.messages.s1[0].phase).toBe('final_answer');
+  });
+
   it('chat_complete：将当前登录会话的 provider Token 用量异步上报', () => {
     const { push } = setup();
     push({

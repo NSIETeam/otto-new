@@ -143,6 +143,13 @@ export async function executeToolCall(
     const tool_output = toolResult.llmContent;
 
     const tool_display = toolResult.returnDisplay;
+    const process = toolCallRequest.name === 'run_shell_command'
+      ? toolResult.process : undefined;
+    const processError = process && process.status !== 'background' && (
+      process.status !== 'exited' || process.exitCode !== 0 || process.signal !== null
+    ) ? new Error(
+      `Command did not succeed (${process.status}, exit ${process.exitCode ?? 'unknown'}, signal ${process.signal ?? 'none'})`,
+    ) : undefined;
 
     const durationMs = Date.now() - startTime;
     // 计算响应内容长度
@@ -153,7 +160,7 @@ export async function executeToolCall(
       function_name: toolCallRequest.name,
       function_args: toolCallRequest.args,
       duration_ms: durationMs,
-      success: true,
+      success: !processError,
       prompt_id: toolCallRequest.prompt_id,
       response_length: responseLength,
     });
@@ -163,12 +170,27 @@ export async function executeToolCall(
       toolCallRequest.callId,
       tool_output,
     );
+    // Preserve the native outcome in model history as well as UI/audit data;
+    // stdout and summaries must not be able to turn a failed command into success.
+    if (process) {
+      for (const part of Array.isArray(response) ? response : [response]) {
+        if (typeof part === 'object' && part?.functionResponse) {
+          part.functionResponse.response = {
+            ...part.functionResponse.response,
+            process: { ...process },
+            success: !processError && process.status === 'exited',
+            ...(processError ? { error: processError.message } : {}),
+          };
+        }
+      }
+    }
 
     return {
       callId: toolCallRequest.callId,
       responseParts: response,
       resultDisplay: tool_display,
-      error: undefined,
+      error: processError,
+      ...(process ? { process } : {}),
     };
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));

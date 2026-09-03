@@ -8,6 +8,16 @@ export interface CompressionInvariantSnapshot {
   goals: string[];
   constraints: string[];
   evidence: string[];
+  continuity?: {
+    requests: Array<{ id: string; text: string; supersedes: string[] }>;
+    activeRequestIds: string[];
+    remaining: Array<{
+      id: string;
+      label: string;
+      status: 'pending' | 'failed' | 'not_run';
+    }>;
+    requiresReview: boolean;
+  };
 }
 
 export interface CompressionInvariantValidation {
@@ -177,6 +187,9 @@ function entryLines(snapshot: CompressionInvariantSnapshot): string[] {
     ...snapshot.evidence.map(
       (value, index) => `evidence:${index + 1}=${encode(value)}`,
     ),
+    ...(snapshot.continuity
+      ? [`continuity=${encode(JSON.stringify(snapshot.continuity))}`]
+      : []),
   ];
 }
 
@@ -188,25 +201,128 @@ export function captureCompressionInvariants(
   const conversation = history.slice(
     Math.min(skipEnvironmentMessages, history.length),
   );
-  const userTexts = conversation
-    .filter((content) => content.role === 'user')
-    .map(partText)
-    .filter(Boolean);
-  const goals = userTexts
-    .map(goalCandidate)
-    .filter(isSubstantiveGoal)
-    .slice(-3)
+  const previous = [...conversation]
+    .reverse()
+    .find((content) => content.compressionSnapshot)?.compressionSnapshot;
+  const userMessages = conversation
+    .filter(
+      (content) =>
+        content.role === 'user' &&
+        !content.compressionSnapshot &&
+        !(content.parts ?? []).some((part) => 'functionResponse' in part),
+    )
+    .map((content) => ({
+      text: partText(content),
+      promptId: content.prompt_id,
+    }))
+    .filter((entry) => entry.text);
+  const userTexts = userMessages.map((entry) => entry.text);
+  const requests = structuredClone(previous?.continuity?.requests ?? []);
+  let activeRequestIds = [...(previous?.continuity?.activeRequestIds ?? [])];
+  let requiresReview = previous?.continuity?.requiresReview ?? false;
+  for (const { text: value, promptId } of userMessages) {
+    const candidate = goalCandidate(value);
+    if (!isSubstantiveGoal(candidate)) continue;
+    const text = sanitize(value, 1600);
+    const id = createHash('sha256')
+      .update(`${promptId ?? ''}:${text}`)
+      .digest('hex')
+      .slice(0, 16);
+    if (requests.some((request) => request.id === id)) continue;
+    // Only an explicit whole-task replacement retires prior goals. Partial changes
+    // and ambiguous switches remain visible and must be reconciled by the agent.
+    const replaces =
+      /(?:取消|放弃|停止)(?:之前|原来|上一个|原先|全部)的?(?:任务|需求|工作)|(?:cancel|abandon|replace)\s+(?:the\s+)?(?:previous|earlier)\s+(?:task|request)/iu.test(
+        value,
+      );
+    const supersedes = replaces ? [...activeRequestIds] : [];
+    if (replaces) activeRequestIds = [];
+    if (
+      !replaces &&
+      activeRequestIds.length &&
+      /改为|改成|换成|instead|rather\s+than/iu.test(value)
+    )
+      requiresReview = true;
+    requests.push({ id, text, supersedes });
+    activeRequestIds.push(id);
+  }
+  const goals = requests
+    .filter((request) => activeRequestIds.includes(request.id))
+    .map((request) => goalCandidate(request.text))
     .reverse();
-  const constraints = userTexts
-    .flatMap(sentences)
-    .filter((sentence) => CONSTRAINT_PATTERN.test(sentence));
-  const evidence = conversation.flatMap(observableEvidence);
+  const constraints = [
+    ...(previous?.constraints ?? []),
+    ...userTexts
+      .flatMap(sentences)
+      .filter((sentence) => CONSTRAINT_PATTERN.test(sentence)),
+  ];
+  if (
+    constraints.length &&
+    userTexts.some((value) =>
+      /(?:现在允许|现在授权|解除限制|撤销限制|now\s+(?:allow|authorize))/iu.test(
+        value,
+      ),
+    )
+  )
+    requiresReview = true;
+  const evidence = [
+    ...(previous?.evidence ?? []),
+    ...conversation.flatMap(observableEvidence),
+  ];
+  let remaining = structuredClone(previous?.continuity?.remaining ?? []);
+  for (const content of conversation) {
+    for (const part of content.parts ?? []) {
+      const response = part.functionResponse;
+      if (
+        response?.name !== 'update_task_plan' ||
+        response.response?.success !== true
+      )
+        continue;
+      const checks = response.response.checks;
+      if (!Array.isArray(checks)) continue;
+      remaining = checks.flatMap((check) => {
+        if (!check || typeof check !== 'object') return [];
+        if (
+          !['passed', 'pending', 'failed', 'not_run'].includes(check.status) ||
+          typeof check.id !== 'string' ||
+          typeof check.label !== 'string'
+        ) {
+          requiresReview = true;
+          return [];
+        }
+        // Text history cannot establish whether a later write invalidated this receipt.
+        // Keep prior passes pending reconciliation with the live native ledger; never
+        // require a redundant execution if that ledger still has current evidence.
+        return [
+          {
+            id: sanitize(check.id, 180),
+            label: sanitize(check.label),
+            status: (check.status === 'passed' ? 'pending' : check.status) as
+              'pending' | 'failed' | 'not_run',
+          },
+        ];
+      });
+    }
+  }
+  requiresReview ||=
+    requests.length > 16 ||
+    remaining.length > 128 ||
+    new Set(constraints).size > 12;
+  const boundedRequests = requests.slice(-16);
 
   return {
     contractVersion: 1,
-    goals: unique(goals, 3),
+    goals: unique(goals.length ? goals : (previous?.goals ?? []), 16),
     constraints: unique(constraints, 12),
     evidence: unique(evidence, 16),
+    continuity: {
+      requests: boundedRequests,
+      activeRequestIds: activeRequestIds.filter((id) =>
+        boundedRequests.some((request) => request.id === id),
+      ),
+      remaining: remaining.slice(0, 128),
+      requiresReview,
+    },
   };
 }
 
@@ -226,10 +342,30 @@ export function appendCompressionInvariantSnapshot(
 export function validateCompressionInvariants(
   snapshot: CompressionInvariantSnapshot,
   restoredHistory: Content[],
+  requireNativeState = false,
 ): CompressionInvariantValidation {
   const restoredText = restoredHistory.map(partText).join('\n');
   const missing = entryLines(snapshot)
     .filter((entry) => !restoredText.includes(entry))
     .map((entry) => entry.slice(0, entry.indexOf('=')));
+  if (requireNativeState) {
+    const state = restoredHistory.find(
+      (content) => content.compressionSnapshot,
+    )?.compressionSnapshot;
+    if (
+      !state ||
+      JSON.stringify(state.continuity) !== JSON.stringify(snapshot.continuity)
+    )
+      missing.push('native-task-continuity');
+    const requests = snapshot.continuity?.requests ?? [];
+    const seen = new Set<string>();
+    for (const request of requests) {
+      if (seen.has(request.id) || request.supersedes.includes(request.id))
+        missing.push('invalid-request-chronology');
+      seen.add(request.id);
+    }
+    if (snapshot.continuity?.activeRequestIds.some((id) => !seen.has(id)))
+      missing.push('unknown-active-request');
+  }
   return { valid: missing.length === 0, missing };
 }

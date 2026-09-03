@@ -59,6 +59,8 @@ import { randomUUID } from 'node:crypto';
 
 import type { SessionStore, SessionRuntime } from './sessions.js';
 import { AgentTurnTracker } from './agentTurnTracker.js';
+import { TASK_PLAN_DECLARATION, TASK_PLAN_TOOL_NAME } from './taskContract.js';
+import { refineComplexityFromObjectives } from './complexityRouter.js';
 import {
   AdaptiveExecutionCoordinator,
   type ExecutionFailureObservation,
@@ -629,8 +631,13 @@ export class CoreSessionRuntime implements SessionRuntime {
       return;
     }
     const toolRegistry = this.toolRegistry;
-    const taskText = messageContentToText(input);
-    const intentHash = turnIntentHash(taskText);
+    const taskText = messageContentToParts(input)
+      .map((part) => part.text ?? '')
+      .filter(Boolean)
+      .join('\n');
+    // Keep existing recovery intent hashes stable; preserve line breaks separately
+    // for exact request citations and explicitly listed acceptance requirements.
+    const intentHash = turnIntentHash(messageContentToText(input));
     let recovery = this.pendingRecovery;
     if (recovery && recovery.intentHash !== intentHash) {
       this.fail(
@@ -661,15 +668,18 @@ export class CoreSessionRuntime implements SessionRuntime {
         this.store,
         this.sessionId,
         turnControl,
-        recovery
-          ? {
-              turnId: recovery.turnId,
-              attempt: recovery.attempt,
-              ...(recovery.taskGraph
-                ? { taskGraphSnapshot: recovery.taskGraph }
-                : {}),
-            }
-          : undefined,
+        {
+          taskText,
+          ...(recovery
+            ? {
+                turnId: recovery.turnId,
+                attempt: recovery.attempt,
+                ...(recovery.taskGraph
+                  ? { taskGraphSnapshot: recovery.taskGraph }
+                  : {}),
+              }
+            : {}),
+        },
       );
     } catch {
       const reason = '上次任务图无法安全恢复，需要核对已执行操作';
@@ -684,9 +694,12 @@ export class CoreSessionRuntime implements SessionRuntime {
         this.store,
         this.sessionId,
         turnControl,
-        recovery
-          ? { turnId: recovery.turnId, attempt: recovery.attempt }
-          : undefined,
+        {
+          taskText,
+          ...(recovery
+            ? { turnId: recovery.turnId, attempt: recovery.attempt }
+            : {}),
+        },
       );
     }
     if (this.recoveryStore && recovery) {
@@ -744,6 +757,7 @@ export class CoreSessionRuntime implements SessionRuntime {
     const turnDirective = [
       formatTurnControlDirective(turnControl),
       turnTracker.taskGraphDirective(),
+      turnTracker.taskContractDirective(),
     ]
       .filter(Boolean)
       .join('\n');
@@ -778,6 +792,7 @@ export class CoreSessionRuntime implements SessionRuntime {
         source: 'local',
         isStreaming: true,
         modelName,
+        turnId: turnTracker.snapshot().turnId,
       });
       this.store.publish(this.sessionId, {
         type: 'message_start',
@@ -794,15 +809,15 @@ export class CoreSessionRuntime implements SessionRuntime {
       let toolCallCount = 0;
       let replanCount = 0;
       const configuredMaxTurns = this.config.getMaxSessionTurns();
-      const routedMaxTurns = turnControl.complexity.budget.maxModelRounds;
-      const maxTurns =
-        configuredMaxTurns > 0
-          ? Math.min(configuredMaxTurns, routedMaxTurns)
-          : routedMaxTurns;
 
       // 多回合工具往返循环（移植自 nonInteractiveCli）。
       // 每一轮：流式拿文本+functionCalls；有工具则执行并回灌，无工具则收口。
       while (true) {
+        const routedMaxTurns = turnControl.complexity.budget.maxModelRounds;
+        const maxTurns =
+          configuredMaxTurns > 0
+            ? Math.min(configuredMaxTurns, routedMaxTurns)
+            : routedMaxTurns;
         turnCount++;
         if (turnCount > maxTurns) {
           const message = `本轮执行已达到模型回合预算（${maxTurns}），已安全停止。`;
@@ -840,8 +855,15 @@ export class CoreSessionRuntime implements SessionRuntime {
                   ? []
                   : [
                       {
-                        functionDeclarations:
-                          toolRegistry.getFunctionDeclarations(),
+                        functionDeclarations: [
+                          ...toolRegistry
+                            .getFunctionDeclarations()
+                            .filter(
+                              (declaration) =>
+                                declaration.name !== TASK_PLAN_TOOL_NAME,
+                            ),
+                          TASK_PLAN_DECLARATION,
+                        ],
                       },
                     ],
               },
@@ -941,9 +963,24 @@ export class CoreSessionRuntime implements SessionRuntime {
             assistantId = startAssistant();
           }
           turnTracker.completeAssistantMessage(Boolean(assistantText.trim()));
+          turnTracker.complete();
+          const finalTurn = turnTracker.snapshot();
+          const succeeded = finalTurn.status === 'completed';
+          if (finalTurn.status === 'incomplete') {
+            const outstanding = [
+              ...new Set(
+                (finalTurn.verification?.checks ?? [])
+                  .filter((check) => check.status !== 'passed')
+                  .map((check) => check.label),
+              ),
+            ].slice(0, 6);
+            assistantText =
+              `${assistantText.trim()}\n\n尚未完成验收：${outstanding.join('；') || '必要的交付条件'}。当前结果不能视为已全部验证通过。`.trim();
+          }
           this.store.patchMessage(this.sessionId, assistantId, {
             content: [{ type: 'text', value: assistantText }],
             isStreaming: false,
+            phase: 'final_answer',
           });
           this.store.publish(this.sessionId, {
             type: 'chat_complete',
@@ -956,17 +993,23 @@ export class CoreSessionRuntime implements SessionRuntime {
               tokenUsage: toProtocolTokenUsage(lastUsage, modelName),
               // 带定稿全文：切走期间丢过 chunk 的客户端据此对账自愈（补缺头）。
               text: assistantText,
+              phase: 'final_answer',
             },
           });
           // A2A 输入来自其他员工。tool-free 会话不仅不能调用工具，也不能把
           // 远端问题写进本机工作日志或触发 AutoSkill/习惯分析等状态变化。
           if (!this.options.toolFree) {
-            await this.recordWorkResult(input, assistantText);
+            await this.recordWorkResult(input, assistantText, succeeded);
           }
 
           this.store.setStatus(this.sessionId, 'idle');
-          turnTracker.complete();
-          this.publishRuntimeActivity('turn', 'completed');
+          this.publishRuntimeActivity(
+            'turn',
+            succeeded ? 'completed' : 'failed',
+            finalTurn.outcome?.type === 'incomplete'
+              ? finalTurn.outcome.reason
+              : undefined,
+          );
           break;
         }
 
@@ -977,6 +1020,7 @@ export class CoreSessionRuntime implements SessionRuntime {
             content: [{ type: 'text', value: assistantText }],
             isStreaming: false,
             isProcessingTools: true,
+            phase: 'commentary',
           });
           this.store.publish(this.sessionId, {
             type: 'chat_complete',
@@ -986,6 +1030,7 @@ export class CoreSessionRuntime implements SessionRuntime {
               tokenUsage: toProtocolTokenUsage(lastUsage, modelName),
               // 同收口处：带定稿全文供客户端对账自愈。
               text: assistantText,
+              phase: 'commentary',
             },
           });
         }
@@ -1084,6 +1129,7 @@ export class CoreSessionRuntime implements SessionRuntime {
           this.config.getOttoClient().scheduleHierarchicalCompaction('L3');
         }
         const adaptiveDirective = [
+          turnTracker.taskContractDirective(),
           adaptiveExecution.buildDirective(
             adaptiveDecisions,
             toolBatch.completedToolNames,
@@ -1284,6 +1330,42 @@ export class CoreSessionRuntime implements SessionRuntime {
 
               let executionStarted = false;
               try {
+                // Native in-memory planning only. It cannot execute code or authorize a tool.
+                if (name === TASK_PLAN_TOOL_NAME) {
+                  if (
+                    this.options.toolFree ||
+                    !this.activeTurnTracker ||
+                    !this.activeTurnControl
+                  )
+                    throw new Error('Task planning unavailable');
+                  const result =
+                    this.activeTurnTracker.updateTaskContract(parameters);
+                  this.activeTurnControl.complexity =
+                    refineComplexityFromObjectives(
+                      this.activeTurnControl.complexity,
+                      result.taskPlan.objectives,
+                      this.activeTurnControl.riskLevel,
+                    );
+                  cards.set(callId, {
+                    ...card,
+                    status: ToolCallStatus.Success,
+                    result: {
+                      success: true,
+                      data: result,
+                      executionTime: 0,
+                      toolName: name,
+                    },
+                    endTime: Date.now(),
+                  });
+                  responseParts.push({
+                    functionResponse: {
+                      id: callId,
+                      name,
+                      response: { success: true, ...result },
+                    },
+                  });
+                  return;
+                }
                 const decision =
                   this.recoveryStore && this.activeRecovery
                     ? this.recoveryStore.decisionForTool(this.activeRecovery, {
@@ -1408,6 +1490,9 @@ export class CoreSessionRuntime implements SessionRuntime {
                 );
                 const currentCard = cards.get(callId) ?? card;
                 const execResult: ToolExecutionResult = {
+                  ...(name === 'run_shell_command' && toolResponse.process
+                    ? { process: toolResponse.process }
+                    : {}),
                   success: !toolResponse.error,
                   data: display || undefined,
                   error: toolResponse.error
@@ -1866,7 +1951,9 @@ export class CoreSessionRuntime implements SessionRuntime {
   private async recordWorkResult(
     input: MessageContent,
     assistantText: string,
+    success: boolean,
   ): Promise<void> {
+    if (this.store.isEphemeralSession(this.sessionId)) return;
     const result = assistantText.trim();
     if (!result) return;
     const userInput = messageContentToText(input);
@@ -1883,7 +1970,7 @@ export class CoreSessionRuntime implements SessionRuntime {
         toolName: 'otto_work_result',
         action: taskTitle,
         category,
-        success: true,
+        success,
         entryType: 'work_result',
         taskTitle,
         userInput: userInput.slice(0, 2_000),
@@ -1891,6 +1978,7 @@ export class CoreSessionRuntime implements SessionRuntime {
         sessionId: this.sessionId,
         projectRoot: this.config.getProjectRoot?.(),
       });
+      if (!success) return;
       try {
         getRealtimeWatcher()?.record?.(taskTitle, userInput.slice(0, 500));
       } catch {

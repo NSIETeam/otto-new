@@ -208,7 +208,9 @@ function BotMessage({
   onRespondQuestion,
 }: MessageProps): React.JSX.Element {
   const text = contentToText(message.content);
-  const tools = message.associatedToolCalls ?? [];
+  const tools = (message.associatedToolCalls ?? []).filter(
+    (tool) => tool.toolName !== 'update_task_plan',
+  );
   const responding = Boolean(
     message.isStreaming ||
     message.isReasoning ||
@@ -261,6 +263,20 @@ function BotMessage({
           />
         ) : null}
 
+        {message.progressMessages?.length ? (
+          <details
+            className="otto-msg-progress"
+            open={responding ? true : undefined}
+          >
+            <summary>查看过程说明（{message.progressMessages.length}）</summary>
+            {message.progressMessages.map((progress) => (
+              <div key={progress.id}>
+                <Prose text={progress.text} />
+              </div>
+            ))}
+          </details>
+        ) : null}
+
         {displayText ? (
           <Prose text={displayText} streaming={message.isStreaming} />
         ) : message.isStreaming && tools.length === 0 ? (
@@ -275,7 +291,7 @@ function BotMessage({
           />
         ) : null}
 
-        {!responding && text.trim() ? (
+        {!responding && message.phase !== 'commentary' && text.trim() ? (
           <MessageActions
             onCopy={() => onCopy(displayText)}
             onRegenerate={() => onRegenerate(message.id)}

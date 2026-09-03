@@ -180,6 +180,12 @@ describe('AgentTurnTracker', () => {
     tracker.attachAssistantMessage(root.id);
     tracker.updateToolCalls([
       tool({
+        id: 'read-1',
+        toolName: 'read_file',
+        parameters: { path: 'login.ts' },
+        status: ToolCallStatus.Success,
+      }),
+      tool({
         id: 'edit-1',
         toolName: 'replace',
         parameters: { path: 'login.ts' },
@@ -191,7 +197,18 @@ describe('AgentTurnTracker', () => {
         toolName: 'run_shell_command',
         parameters: { command: 'npm test' },
         status: ToolCallStatus.Success,
-        result: { success: true, executionTime: 8 },
+        result: {
+          success: true,
+          executionTime: 8,
+          toolName: 'run_shell_command',
+          process: {
+            command: 'npm test',
+            directory: '/repo',
+            exitCode: 0,
+            signal: null,
+            status: 'exited',
+          },
+        },
       }),
     ]);
     tracker.completeAssistantMessage(true);
@@ -228,7 +245,7 @@ describe('AgentTurnTracker', () => {
     ]);
   });
 
-  it('automatically registers sanitized citations and verifies generated artifacts', () => {
+  it('registers sanitized citations without treating a verification-like name as artifact evidence', () => {
     const store = new InMemorySessionStore();
     const session = store.createSession();
     const root = store.appendMessage(session.sessionId, {
@@ -303,7 +320,7 @@ describe('AgentTurnTracker', () => {
       }),
     ]);
     snapshot = tracker.snapshot();
-    expect(snapshot.artifacts[0]?.verified).toBe(true);
+    expect(snapshot.artifacts[0]?.verified).toBe(false);
   });
 
   it('preserves a home-relative PPT path instead of truncating it to /Desktop', () => {

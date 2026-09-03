@@ -212,7 +212,17 @@ export abstract class BaseTool<
   ): Promise<TResult>;
 }
 
+/** Native process outcome, never inferred from stdout or model-supplied text. */
+export interface ProcessExecutionReceipt {
+  command: string;
+  directory: string;
+  status: 'exited' | 'cancelled' | 'timed_out' | 'background';
+  exitCode: number | null;
+  signal: string | null;
+}
+
 export interface ToolResult {
+  process?: ProcessExecutionReceipt;
   /**
    * A short, one-line summary of the tool's action and result.
    * e.g., "Read 5 files", "Wrote 256 bytes to foo.txt"

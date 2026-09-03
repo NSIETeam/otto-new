@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-
 /**
  * Extended Content type with UI association
  * This file extends the original @google/genai Content type to include
@@ -12,7 +11,7 @@
  */
 import {
   Content as OriginalContent,
-  GenerateContentResponseUsageMetadata
+  GenerateContentResponseUsageMetadata,
 } from '@google/genai';
 
 /**
@@ -25,7 +24,8 @@ export interface Content extends OriginalContent {
    * This field will be stripped before sending to the API server
    */
   prompt_id?: string;
-
+  /** Native continuity state; never forward as a provider message field. */
+  compressionSnapshot?: import('../services/compressionInvariants.js').CompressionInvariantSnapshot;
 }
 
 /**
@@ -35,11 +35,11 @@ export function createContentWithUI(
   originalContent: OriginalContent,
   uiData?: {
     prompt_id?: string;
-  }
+  },
 ): Content {
   return {
     ...originalContent,
-    ...uiData
+    ...uiData,
   };
 }
 
@@ -48,7 +48,11 @@ export function createContentWithUI(
  * for API compatibility
  */
 export function stripUIFields(content: Content): OriginalContent {
-  const { prompt_id: _prompt_id, ...cleanContent } = content;
+  const {
+    prompt_id: _prompt_id,
+    compressionSnapshot: _compressionSnapshot,
+    ...cleanContent
+  } = content;
   return cleanContent as OriginalContent;
 }
 
@@ -81,7 +85,7 @@ export {
   FunctionCall,
   PartListUnion,
   PartUnion,
-  GenerateContentResponseUsageMetadata
+  GenerateContentResponseUsageMetadata,
 } from '@google/genai';
 
 // Export the original Content as OriginalContent for reference

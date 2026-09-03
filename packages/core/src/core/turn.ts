@@ -88,6 +88,7 @@ export interface ToolCallRequestInfo {
 }
 
 export interface ToolCallResponseInfo {
+  process?: import('../tools/tools.js').ProcessExecutionReceipt;
   callId: string;
   responseParts: PartListUnion;
   resultDisplay: ToolResultDisplay | undefined;

@@ -41,8 +41,12 @@ export function PresentationPreviewDialog({
 
   const slides = preview?.kind === 'slides' ? preview.slides : [];
   const selectedSlide = slides[selectedIndex] ?? null;
-  const fileName = preview?.fileName || filePath.replace(/\\/gu, '/').split('/').at(-1) || 'PPT';
-  const unavailable = error || (!loading && preview && !preview.ok ? preview.error : null);
+  const fileName =
+    preview?.fileName ||
+    filePath.replace(/\\/gu, '/').split('/').at(-1) ||
+    'PPT';
+  const unavailable =
+    error || (!loading && preview && !preview.ok ? preview.error : null);
   const setSafeZoom = (next: number): void => {
     setZoom(Math.min(2, Math.max(0.5, next)));
   };
@@ -95,7 +99,10 @@ export function PresentationPreviewDialog({
         <header className="otto-presentation-preview__header">
           <div>
             <h2>{fileName}</h2>
-            <p>{slides.length > 0 ? `PPT · ${slides.length} 页` : 'PPT 交付物'}</p>
+            <p>
+              {slides.length > 0 ? `PPT · ${slides.length} 页` : 'PPT 交付物'}
+            </p>
+            {preview?.notice ? <p role="note">{preview.notice}</p> : null}
           </div>
           <div className="otto-presentation-preview__header-actions">
             {canReveal ? (
@@ -139,12 +146,17 @@ export function PresentationPreviewDialog({
           </div>
         ) : selectedSlide ? (
           <div className="otto-presentation-preview__workspace">
-            <nav aria-label="PPT 页面" className="otto-presentation-preview__rail">
+            <nav
+              aria-label="PPT 页面"
+              className="otto-presentation-preview__rail"
+            >
               {slides.map((slide, index) => (
                 <button
                   type="button"
                   key={slide.fileName}
-                  className={index === selectedIndex ? 'is-selected' : undefined}
+                  className={
+                    index === selectedIndex ? 'is-selected' : undefined
+                  }
                   aria-label={`查看第 ${slide.number} 页`}
                   aria-current={index === selectedIndex ? 'page' : undefined}
                   onClick={() => setSelectedIndex(index)}
@@ -155,12 +167,15 @@ export function PresentationPreviewDialog({
               ))}
             </nav>
             <main className="otto-presentation-preview__canvas">
-              <div className="otto-presentation-preview__viewport">
+              <div
+                className="otto-presentation-preview__viewport"
+                style={preview?.notice ? { alignItems: 'start' } : undefined}
+              >
                 <img
                   src={selectedSlide.dataUrl}
                   alt={`第 ${selectedSlide.number} 页`}
                   style={
-                    zoom === 1
+                    zoom === 1 && !preview?.notice
                       ? undefined
                       : {
                           width: `${zoom * 100}%`,
@@ -190,7 +205,10 @@ export function PresentationPreviewDialog({
                 >
                   <IconChevron size={17} />
                 </button>
-                <span className="otto-presentation-preview__zoom-divider" aria-hidden="true" />
+                <span
+                  className="otto-presentation-preview__zoom-divider"
+                  aria-hidden="true"
+                />
                 <button
                   type="button"
                   aria-label="缩小 PPT"

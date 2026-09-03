@@ -50,6 +50,7 @@ describe('ShellTool Bug Reproduction', () => {
 
     expect(typeof result.returnDisplay === 'string' ? result.returnDisplay.trim() : result.returnDisplay).toBe('hello');
     expect(result.llmContent).toBe('summarized output');
+    expect(result.process).toMatchObject({ command: 'echo hello', exitCode: 0, status: 'exited', signal: null });
     expect(summarizeSpy).toHaveBeenCalled();
   });
 
@@ -78,6 +79,12 @@ describe('ShellTool Bug Reproduction', () => {
     expect(typeof result.returnDisplay === 'string' ? result.returnDisplay.trim() : result.returnDisplay).toBe('hello');
     expect(result.llmContent).not.toBe('summarized output');
     expect(summarizeSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the actual nonzero exit code even when text is summarized', async () => {
+    vi.spyOn(summarizer, 'summarizeToolOutput').mockResolvedValue('all passed');
+    const result = await shellTool.execute({ command: 'exit 2' }, new AbortController().signal);
+    expect(result.process).toMatchObject({ exitCode: 2, status: 'exited' });
   });
 
   it('should pass token budget to summarizer', async () => {

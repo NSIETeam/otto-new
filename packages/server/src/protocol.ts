@@ -116,6 +116,8 @@ export enum ToolCallStatus {
 
 /** 工具执行结果（与 webview ToolExecutionResult 同构）。 */
 export interface ToolExecutionResult {
+  /** Populated by the native executor, not extracted from tool output text. */
+  process?: import('otto-core').ProcessExecutionReceipt;
   success: boolean;
   data?: unknown;
   error?: string;
@@ -253,7 +255,8 @@ export type TurnComplexityReason =
   | 'parallelizable'
   | 'evidence_heavy'
   | 'uncertain_diagnosis'
-  | 'explicit_orchestration';
+  | 'explicit_orchestration'
+  | 'task_structure';
 
 /** Deterministic routing metadata. Raw user input is deliberately excluded. */
 export interface TurnComplexityProfile {
@@ -286,7 +289,10 @@ export interface TurnSuccessCriterion {
   id: string;
   kind: TurnSuccessCriterionKind;
   label: string;
+  verificationKind?: TurnVerificationKind;
 }
+
+export type TurnVerificationKind = 'test' | 'typecheck' | 'lint' | 'build';
 
 /**
  * Internal response-presentation policy. It guides the model and renderer but
@@ -405,7 +411,13 @@ export interface AgentCitationReference {
 }
 
 export type AgentTaskGraphNodeKind =
-  'understand' | 'gather' | 'execute' | 'verify' | 'recover' | 'deliver';
+  | 'understand'
+  | 'gather'
+  | 'execute'
+  | 'verify'
+  | 'recover'
+  | 'deliver'
+  | 'objective';
 
 export type AgentTaskGraphNodeStatus =
   'pending' | 'in_progress' | 'completed' | 'blocked' | 'failed' | 'cancelled';
@@ -445,6 +457,7 @@ export interface AgentTaskGraphSnapshot {
   route: TurnExecutionRoute;
   nodes: AgentTaskGraphNode[];
   revisions: AgentTaskGraphRevision[];
+  taskContract?: import('./taskContract.js').TaskContractSnapshot;
 }
 
 export type AgentTurnOutcome =
@@ -556,6 +569,12 @@ export interface OttoMessage {
   toolsCompleted?: boolean;
   tokenUsage?: TokenUsage;
   modelName?: string;
+  /** Stable turn membership, also present on non-root streaming items. */
+  turnId?: string;
+  /** Runtime-authored phase; a completed text item need not be a final answer. */
+  phase?: 'commentary' | 'final_answer';
+  /** Renderer projection only. Original commentary remains in persisted items. */
+  progressMessages?: Array<{ id: string; text: string; timestamp: number }>;
   /** Structured lifecycle for this user turn; absent on legacy messages. */
   turn?: AgentTurnSnapshot;
 }
@@ -1370,6 +1389,7 @@ export type ChatCompleteMsg = Envelope<
     messageId: string;
     tokenUsage?: TokenUsage;
     finishReason?: string;
+    phase?: 'commentary' | 'final_answer';
     /**
      * 定稿纯文本全文（对账自愈）：客户端若中途取消订阅又切回（会话切换），
      * 切走期间的 chat_chunk 已丢失、本地 content 缺头。带上全文让客户端在

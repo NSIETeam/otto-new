@@ -60,6 +60,7 @@
     "benchmark:low-resource-agents": "node scripts/low-resource-multi-agent-benchmark.mjs",
     "benchmark:enterprise-load": "node scripts/enterprise-load-test.mjs",
     "eval:deterministic": "vitest run --config packages/evals/vitest.config.ts",
+    "eval:live": "vitest run --config packages/evals/vitest.live.config.ts",
     "build": "node scripts/build.js",
     "build:packages": "npm run build --workspace=packages/core && npm run build --workspace=packages/server",
     "build:sandbox": "node scripts/build_sandbox.js --skip-npm-install-build",

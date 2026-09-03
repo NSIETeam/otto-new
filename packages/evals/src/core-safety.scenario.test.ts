@@ -341,10 +341,10 @@ const scenarios: readonly DeterministicScenario[] = [
     },
   },
   {
-    id: 'agent-structured-control-citations-and-artifacts',
+    id: 'agent-structured-control-rejects-name-only-artifact-verification',
     lane: 'agent',
     description:
-      'A research-and-artifact turn exposes control policy, sanitized citations, artifact state and explicit verification.',
+      'A research-and-artifact turn retains citations and artifacts but rejects a verification-like tool name without execution evidence.',
     requiredEvidence: [
       'tool_trace',
       'citation',
@@ -413,12 +413,12 @@ const scenarios: readonly DeterministicScenario[] = [
       return {
         passed:
           policy.allowsParallelRead &&
-          snapshot.status === 'completed' &&
+          snapshot.status === 'incomplete' &&
           snapshot.citations?.length === 1 &&
           !citations.includes('private') &&
           snapshot.artifacts?.length === 1 &&
-          snapshot.artifacts[0]?.verified === true &&
-          snapshot.verification?.status === 'passed',
+          snapshot.artifacts[0]?.verified === false &&
+          snapshot.verification?.status !== 'passed',
         evidence: [
           {
             kind: 'tool_trace',
@@ -437,12 +437,12 @@ const scenarios: readonly DeterministicScenario[] = [
           {
             kind: 'verification',
             summary:
-              'artifact is verified only after a successful verification tool',
+              'a tool called verify_output cannot attest an artifact by name alone',
           },
           {
             kind: 'assertion',
             summary:
-              'research turn completed with parallel-read policy and complete evidence',
+              'missing execution evidence leaves the turn incomplete despite a success-like tool result',
           },
         ],
       };

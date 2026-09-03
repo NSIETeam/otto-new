@@ -284,7 +284,7 @@ function maybeShowChatNotification(
 ): void {
   if (frame.type === 'chat_complete') {
     const { sessionId, messageId, text, finishReason } = frame.payload;
-    if (finishReason === 'cancelled') return;
+    if (finishReason === 'cancelled' || frame.payload.phase === 'commentary') return;
     if (!sessionId || sessionId === activeSessionId) return;
     const session = sessions[sessionId];
     const preview = text?.trim()
@@ -565,9 +565,10 @@ function applyFrame(state: OttoState, frame: ServerToClient): OttoState {
     }
 
     case 'chat_complete': {
-      const { sessionId, messageId, tokenUsage, text, finishReason } = frame.payload;
+      const { sessionId, messageId, tokenUsage, text, finishReason, phase } = frame.payload;
       return patchMessage(state, sessionId, messageId, (m) => ({
         ...m,
+        phase: phase ?? m.phase,
         // 帧带定稿全文时用它覆盖本地 content 对账：切走（退订）期间丢失的
         // chunk 由此自愈——否则缺头的回复永远缺头。旧 server 不带 text 时保持原样。
         content:

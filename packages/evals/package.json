@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "otto-core": "file:../core"
+    "otto-core": "file:../core",
+    "otto-server": "file:../server"
   }
 }

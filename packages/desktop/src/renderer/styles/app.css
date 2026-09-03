@@ -1216,6 +1216,14 @@
   font-weight: 700;
   color: var(--otto-text);
 }
+.otto-msg-progress {
+  margin: 8px 0 14px;
+  color: var(--otto-text-secondary);
+  font-size: 0.9em;
+}
+.otto-msg-progress > summary { cursor: pointer; }
+.otto-msg-progress > div { margin-top: 10px; }
+
 .otto-msg-bot__time {
   font-size: 11px;
   color: var(--otto-text-tertiary);

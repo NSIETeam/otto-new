@@ -15,6 +15,7 @@ import type {
   TurnSuccessCriterion,
 } from './protocol.js';
 import { routeTurnComplexity } from './complexityRouter.js';
+import { VERIFICATION_LABELS } from './verificationEvidence.js';
 
 export interface TurnControlInput {
   text: string;
@@ -42,6 +43,7 @@ const ENTERPRISE_ACTION_PATTERN =
 function criteriaFor(
   intent: TurnIntent,
   evidenceRequirement: TurnEvidenceRequirement,
+  text: string,
 ): TurnSuccessCriterion[] {
   const criteria: TurnSuccessCriterion[] = [];
   if (intent === 'answer' || intent === 'research' || intent === 'diagnose') {
@@ -88,6 +90,31 @@ function criteriaFor(
       kind: 'verification',
       label: '完成与任务相匹配的验证',
     });
+  }
+  if (evidenceRequirement === 'local_verification') {
+    const checks = [
+      ['test', /测试|\b(?:tests?|vitest|jest|pytest)\b/iu],
+      ['typecheck', /类型检查|类型校验|\btype\s*check\b|\btsc\b/iu],
+      ['lint', /静态检查|\blint\b|\beslint\b/iu],
+      ['build', /构建|编译|\bbuild\b|\bcompile\b/iu],
+    ] as const;
+    const affirmativeClauses = text
+      .split(/[，,。；;\n]|但是|但|however|\bbut\b/iu)
+      .filter(
+        (clause) =>
+          !/(?:不要|不用|无需|不必|禁止|不得|不允许|不运行|不执行|do not|don't|skip|without)/iu.test(
+            clause,
+          ),
+      );
+    for (const [kind, pattern] of checks) {
+      if (!affirmativeClauses.some((clause) => pattern.test(clause))) continue;
+      criteria.push({
+        id: `criterion-verification-${kind}`,
+        kind: 'verification',
+        label: `完成明确要求的${VERIFICATION_LABELS[kind]}`,
+        verificationKind: kind,
+      });
+    }
   }
   return criteria;
 }
@@ -261,7 +288,7 @@ export function deriveTurnControlPolicy(
           : 'none',
     complexity,
     presentation: presentationFor(intent, complexity),
-    successCriteria: criteriaFor(intent, evidenceRequirement),
+    successCriteria: criteriaFor(intent, evidenceRequirement, text),
   };
 }
 
@@ -289,6 +316,7 @@ export function formatTurnControlDirective(policy: TurnControlPolicy): string {
     `requires_task_graph=${String(policy.complexity.requiresTaskGraph)}`,
     `success_criteria=${criteria}`,
     'Treat this as runtime control metadata. Do not quote it to the user. Do not claim completion until the criteria are supported by observable results.',
+    'Run each required check as a separate foreground tool invocation in its intended directory. A successful check covers only that command and scope, not all requested features. Missing, cancelled, failed or stale checks are not passes. Re-run checks after changes. Do not use pipelines, shell wrappers, optional scripts or background execution as verification evidence.',
     '</otto_turn_control>',
   ].join('\n');
   const presentation = [

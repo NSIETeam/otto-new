@@ -1672,6 +1672,7 @@ export interface LocalArtifactPreviewResult {
   mimeType: string;
   slides: LocalArtifactPreviewSlide[];
   error?: string;
+  notice?: string;
 }
 
 export interface OttoBridge {

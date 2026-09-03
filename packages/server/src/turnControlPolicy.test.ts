@@ -12,6 +12,19 @@ import {
 } from './turnControlPolicy.js';
 
 describe('deriveTurnControlPolicy', () => {
+  it('does not require a check that the user explicitly prohibits', () => {
+    const policy = deriveTurnControlPolicy({
+      text: '修改代码，不要运行测试和构建，只运行类型检查',
+      source: 'local',
+      toolFree: false,
+    });
+    expect(
+      policy.successCriteria.flatMap(
+        (criterion) => criterion.verificationKind ?? [],
+      ),
+    ).toEqual(['typecheck']);
+  });
+
   it('keeps simple answers direct and free of unnecessary verification', () => {
     const policy = deriveTurnControlPolicy({
       text: '1 + 1 是多少？',

@@ -22,6 +22,7 @@ import type {
 } from 'otto-server';
 import type { Attachment } from '../state/useOttoStore.js';
 import { Message } from './Message.js';
+import { contentToText } from './Prose.js';
 import type { RespondQuestionFn } from './ToolCalls.js';
 import {
   Composer,
@@ -82,7 +83,8 @@ export function presentConversationMessages(
   const presented: OttoMessage[] = [];
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index]!;
-    if (message.role !== 'assistant' || !message.turn) {
+    const turnId = message.turnId ?? message.turn?.turnId;
+    if (message.role !== 'assistant' || !turnId) {
       presented.push(message);
       continue;
     }
@@ -91,8 +93,13 @@ export function presentConversationMessages(
     let cursor = index + 1;
     while (cursor < messages.length) {
       const candidate = messages[cursor]!;
-      if (candidate.role !== 'assistant') break;
-      if (candidate.turn && candidate.turn.turnId !== message.turn.turnId) {
+      if (
+        candidate.role !== 'assistant' ||
+        candidate.sessionId !== message.sessionId
+      )
+        break;
+      const candidateTurnId = candidate.turnId ?? candidate.turn?.turnId;
+      if (candidateTurnId && candidateTurnId !== turnId) {
         break;
       }
       group.push(candidate);
@@ -104,7 +111,22 @@ export function presentConversationMessages(
       continue;
     }
 
-    const finalMessage = group[group.length - 1]!;
+    const finalMessage =
+      [...group].reverse().find((entry) => entry.phase === 'final_answer') ??
+      group[group.length - 1]!;
+    const seen = new Set<string>();
+    const progressMessages = group.flatMap((entry) => {
+      const text = contentToText(entry.content).trim();
+      if (
+        entry.id === finalMessage.id ||
+        entry.phase !== 'commentary' ||
+        !text ||
+        seen.has(text)
+      )
+        return [];
+      seen.add(text);
+      return [{ id: entry.id, text, timestamp: entry.timestamp }];
+    });
     const reasoning = group
       .map((entry) => entry.reasoning?.trim() ?? '')
       .filter(Boolean)
@@ -112,6 +134,7 @@ export function presentConversationMessages(
     presented.push({
       ...finalMessage,
       turn: message.turn,
+      progressMessages,
       associatedToolCalls: combineToolCalls(group),
       ...(reasoning ? { reasoning } : {}),
       isReasoning: group.some((entry) => entry.isReasoning),

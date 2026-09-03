@@ -23,6 +23,7 @@ flowchart LR
   p3 --> p2
   p3 --> p6
   p5 --> p1
+  p5 --> p2
 ```
 
 Arrows mean “imports or depends on”. The kernel does not depend on Desktop or Server product surfaces.

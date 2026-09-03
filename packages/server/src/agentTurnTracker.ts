@@ -32,6 +32,13 @@ import {
   isParallelSafeToolName,
 } from './turnControlPolicy.js';
 import { TaskGraphCoordinator } from './taskGraph.js';
+import { TaskContractLedger, TASK_PLAN_TOOL_NAME } from './taskContract.js';
+import { refineComplexityFromObjectives } from './complexityRouter.js';
+import {
+  VerificationEvidenceLedger,
+  verificationKind,
+  hasSuccessfulProcessReceipt,
+} from './verificationEvidence.js';
 
 type TurnEventName = AgentTurnEventMsg['payload']['event'];
 
@@ -203,16 +210,13 @@ function intentLabel(policy: TurnControlPolicy): string {
   }
 }
 
-function serializedParameters(tool: ToolCall): string {
-  try {
-    return JSON.stringify(tool.parameters).toLowerCase();
-  } catch {
-    return '';
-  }
-}
-
 function isSuccessfulTool(tool: ToolCall): boolean {
-  return tool.status === ToolCallStatus.Success;
+  return (
+    tool.status === ToolCallStatus.Success &&
+    tool.result?.success !== false &&
+    !tool.result?.error &&
+    (!tool.result?.process || hasSuccessfulProcessReceipt(tool))
+  );
 }
 
 function isFailedTool(tool: ToolCall): boolean {
@@ -220,9 +224,15 @@ function isFailedTool(tool: ToolCall): boolean {
 }
 
 function isMutationTool(tool: ToolCall): boolean {
+  if (verificationKind(tool)) return false;
   const name = tool.toolName.trim().toLowerCase();
   if (
-    ['todo_write', 'update_plan', 'ask_user_question'].includes(name) ||
+    [
+      'todo_write',
+      'update_plan',
+      'ask_user_question',
+      TASK_PLAN_TOOL_NAME,
+    ].includes(name) ||
     isParallelSafeToolName(name)
   ) {
     return false;
@@ -231,11 +241,7 @@ function isMutationTool(tool: ToolCall): boolean {
 }
 
 function isExplicitVerificationTool(tool: ToolCall): boolean {
-  const name = tool.toolName.trim().toLowerCase();
-  const input = `${name} ${serializedParameters(tool)}`;
-  return /(?:test|typecheck|lint|doctor|build|verify|validat|check|audit)/iu.test(
-    input,
-  );
+  return verificationKind(tool) !== undefined;
 }
 
 function isSourceTool(tool: ToolCall): boolean {
@@ -341,6 +347,7 @@ function mimeTypeForPath(filePath: string): string | undefined {
  * versioned snapshot event is broadcast.
  */
 export class AgentTurnTracker {
+  private readonly verificationEvidence = new VerificationEvidenceLedger();
   readonly turnId: string;
   private readonly startedAt = Date.now();
   private readonly control: TurnControlPolicy;
@@ -364,6 +371,8 @@ export class AgentTurnTracker {
   private sawConfirmation = false;
   private reconciliationReason: string | undefined;
   private readonly observedTools = new Map<string, ToolCall>();
+  private readonly taskContract?: TaskContractLedger;
+  private readonly requiresTaskContract: boolean;
 
   constructor(
     private readonly store: SessionStore,
@@ -374,6 +383,7 @@ export class AgentTurnTracker {
       attempt?: number;
       resumedFromSequence?: number;
       taskGraphSnapshot?: AgentTaskGraphSnapshot;
+      taskText?: string;
     } = {},
   ) {
     this.turnId = options.turnId ?? randomUUID();
@@ -395,6 +405,18 @@ export class AgentTurnTracker {
     this.taskGraph = options.taskGraphSnapshot
       ? TaskGraphCoordinator.restore(this.control, options.taskGraphSnapshot)
       : new TaskGraphCoordinator(this.control);
+    this.taskContract =
+      options.taskText !== undefined
+        ? new TaskContractLedger(
+            options.taskText,
+            options.taskGraphSnapshot?.taskContract,
+          )
+        : undefined;
+    this.requiresTaskContract = Boolean(
+      this.taskContract &&
+      this.control.executionMode !== 'restricted' &&
+      ['complex', 'orchestrated'].includes(this.control.complexity.level),
+    );
     this.verification = {
       status: this.control.requiresVerification ? 'pending' : 'not_required',
       checks: this.control.successCriteria.map((criterion) => ({
@@ -452,21 +474,26 @@ export class AgentTurnTracker {
 
   updateToolCalls(toolCalls: readonly ToolCall[]): void {
     if (toolCalls.length === 0) return;
+    for (const tool of toolCalls) {
+      this.verificationEvidence.observe(tool, isMutationTool(tool));
+      this.taskContract?.observe(tool, isMutationTool(tool));
+    }
     this.taskGraph.observeTools(
-      toolCalls.map((tool) => ({
-        name: tool.toolName,
-        status:
-          tool.status === ToolCallStatus.Success
+      toolCalls
+        .filter((tool) => tool.toolName !== TASK_PLAN_TOOL_NAME)
+        .map((tool) => ({
+          name: tool.toolName,
+          status: isSuccessfulTool(tool)
             ? 'success'
             : tool.status === ToolCallStatus.Error
               ? 'error'
               : tool.status === ToolCallStatus.Canceled
                 ? 'cancelled'
                 : 'running',
-        mutating: isMutationTool(tool),
-        verification: isExplicitVerificationTool(tool),
-        evidenceId: tool.id,
-      })),
+          mutating: isMutationTool(tool),
+          verification: isExplicitVerificationTool(tool),
+          evidenceId: tool.id,
+        })),
     );
     for (const tool of toolCalls) {
       this.observedTools.set(tool.id, {
@@ -535,12 +562,33 @@ export class AgentTurnTracker {
       return;
     }
     this.finishCurrentStage('completed');
+    if (this.taskContract?.snapshot().objectives.length)
+      this.taskGraph.syncObjectives(
+        this.taskContract.snapshot(),
+        this.taskContract.checks(),
+      );
     const satisfied = this.finalizeVerification();
     if (satisfied) {
       if (this.control.requiresVerification) {
         this.taskGraph.markVerificationPassed();
       }
-      this.taskGraph.markDelivered();
+      if (!this.taskGraph.markDelivered()) {
+        const validation = this.taskGraph.validate();
+        const reason = '任务图尚未满足交付条件，不能标记整轮成功';
+        this.finalizeVerification([
+          {
+            id: 'criterion-task-graph',
+            label: '所有任务图依赖已完成',
+            status: 'failed',
+            evidence: [
+              ...validation.incompleteNodeIds,
+              ...validation.invalidDependencyIds,
+            ],
+          },
+        ]);
+        this.finishTurn('incomplete', { type: 'incomplete', reason });
+        return;
+      }
       this.finishTurn('completed', { type: 'success' });
       return;
     }
@@ -661,7 +709,38 @@ export class AgentTurnTracker {
   }
 
   taskGraphSnapshot(): AgentTaskGraphSnapshot {
-    return this.taskGraph.snapshot();
+    if (this.taskContract?.snapshot().objectives.length)
+      this.taskGraph.syncObjectives(
+        this.taskContract.snapshot(),
+        this.taskContract.checks(),
+      );
+    return {
+      ...this.taskGraph.snapshot(),
+      ...(this.taskContract?.snapshot().objectives.length
+        ? { taskContract: this.taskContract.snapshot() }
+        : {}),
+    };
+  }
+
+  updateTaskContract(input: unknown): {
+    taskPlan: import('./taskContract.js').TaskContractSnapshot;
+    checks: TurnVerificationCheck[];
+  } {
+    if (!this.taskContract) throw new Error('Task contract unavailable');
+    const taskPlan = this.taskContract.update(input);
+    const checks = this.taskContract.checks();
+    this.control.complexity = refineComplexityFromObjectives(
+      this.control.complexity,
+      taskPlan.objectives,
+      this.control.riskLevel,
+    );
+    this.taskGraph.syncObjectives(taskPlan, checks);
+    return { taskPlan, checks };
+  }
+
+  taskContractDirective(): string {
+    if (!this.taskContract) return '';
+    return `Internal task acceptance: ${this.requiresTaskContract ? 'A request-specific plan is required before delivery.' : 'For nontrivial work, use update_task_plan to decompose actual requirements.'} Use exact quotes from the user request, explicit dependencies, and scoped process/observation/manual criteria. Never infer permission from this plan. Model assertions cannot verify work. Missing checks must be disclosed. Current contract: ${this.taskContract.directive()}`;
   }
 
   recordArtifact(reference: AgentArtifactReference): void {
@@ -726,18 +805,8 @@ export class AgentTurnTracker {
       }
     }
 
-    if (isExplicitVerificationTool(tool) && this.artifacts.length > 0) {
-      const normalizedPaths = new Set(
-        paths.map((artifactPath) => artifactPath.replace(/\\/gu, '/')),
-      );
-      this.artifacts = this.artifacts.map((artifact) => {
-        const normalized = artifact.path?.replace(/\\/gu, '/');
-        const appliesToArtifact =
-          normalizedPaths.size === 0 ||
-          (normalized ? normalizedPaths.has(normalized) : false);
-        return appliesToArtifact ? { ...artifact, verified: true } : artifact;
-      });
-    }
+    // A successful test/build is not an artifact inspection receipt. Only an
+    // explicit recordArtifact(... verified: true) from a verifier may attest it.
   }
 
   snapshot(): AgentTurnSnapshot {
@@ -757,16 +826,33 @@ export class AgentTurnTracker {
       adaptations: this.adaptations.map((adaptation) => ({ ...adaptation })),
       artifacts: this.artifacts.map((artifact) => ({ ...artifact })),
       citations: this.citations.map((citation) => ({ ...citation })),
-      taskGraph: this.taskGraph.snapshot(),
+      taskGraph: this.taskGraphSnapshot(),
       ...(this.outcome ? { outcome: { ...this.outcome } } : {}),
       ...(this.completedAt ? { completedAt: this.completedAt } : {}),
     };
   }
 
-  private finalizeVerification(): boolean {
-    const checks = this.control.successCriteria.map((criterion) =>
-      this.evaluateCriterion(criterion),
-    );
+  private finalizeVerification(
+    extraChecks: TurnVerificationCheck[] = [],
+  ): boolean {
+    const checks = [
+      ...this.control.successCriteria.map((criterion) =>
+        this.evaluateCriterion(criterion),
+      ),
+      ...this.verificationEvidence.checks(),
+      ...(this.taskContract?.checks() ?? []),
+      ...(this.requiresTaskContract &&
+      !this.taskContract?.snapshot().objectives.length
+        ? [
+            {
+              id: 'criterion-task-contract',
+              label: '按实际需求拆分子任务与验收条件',
+              status: 'not_run' as const,
+            },
+          ]
+        : []),
+      ...extraChecks,
+    ];
     const passed = checks.filter((check) => check.status === 'passed').length;
     const failed = checks.filter((check) => check.status === 'failed').length;
     const allSatisfied = checks.length === 0 || passed === checks.length;
@@ -814,9 +900,12 @@ export class AgentTurnTracker {
     const failed = tools.filter(isFailedTool);
     const successfulMutations = successful.filter(isMutationTool);
     const failedMutations = failed.filter(isMutationTool);
-    const successfulVerification = successful.filter(
-      isExplicitVerificationTool,
+    const verificationChecks = this.verificationEvidence.checks(
+      criterion.verificationKind,
     );
+    const verified =
+      verificationChecks.length > 0 &&
+      verificationChecks.every((check) => check.status === 'passed');
     const successfulSources = successful.filter(isSourceTool);
 
     let satisfied = false;
@@ -854,7 +943,7 @@ export class AgentTurnTracker {
             tools.some(isSourceTool) && successfulSources.length === 0;
         } else {
           satisfied =
-            successfulVerification.length > 0 ||
+            verified ||
             (this.control.intent === 'diagnose' && successful.length > 0);
           explicitlyFailed = failed.length > 0 && !satisfied;
         }
@@ -873,10 +962,15 @@ export class AgentTurnTracker {
             satisfied &&= this.sawConfirmation;
           }
         } else {
-          satisfied = successfulVerification.length > 0;
+          satisfied = verified;
         }
-        explicitlyFailed = failed.length > 0 && !satisfied;
-        evidence = satisfied ? ['已完成与任务匹配的验证'] : undefined;
+        explicitlyFailed =
+          !satisfied &&
+          (failed.length > 0 ||
+            verificationChecks.some((check) => check.status === 'failed'));
+        evidence = satisfied
+          ? ['各项要求均有对应执行回执，具体范围见独立检查项']
+          : undefined;
         break;
       case 'receipt':
         satisfied = successfulMutations.some(

@@ -1194,6 +1194,14 @@ Reserve this tool for system commands and terminal operations that have no dedic
       }
     }
 
+    const processReceipt: NonNullable<ToolResult['process']> = {
+      command: strippedCommand,
+      directory: path.resolve(this.config.getTargetDir(), params.directory || ''),
+      status: timedOut ? 'timed_out'
+        : abortedSignal.aborted || wasExternallyKilled ? 'cancelled' : 'exited',
+      exitCode: code,
+      signal: processSignal,
+    };
     const summarizeConfig = this.config.getSummarizeToolOutputConfig();
     if (summarizeConfig && summarizeConfig[this.name]) {
       const summary = await summarizeToolOutput(
@@ -1205,6 +1213,7 @@ Reserve this tool for system commands and terminal operations that have no dedic
       return {
         llmContent: summary,
         returnDisplay: returnDisplayMessage,
+        process: processReceipt,
       };
     }
 
@@ -1232,6 +1241,7 @@ Reserve this tool for system commands and terminal operations that have no dedic
     return {
       llmContent: finalLlmContent,
       returnDisplay: returnDisplayMessage,
+      process: processReceipt,
     };
   }
 

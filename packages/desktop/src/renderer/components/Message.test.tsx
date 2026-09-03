@@ -14,6 +14,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 import type { OttoMessage } from 'otto-server';
+import { ToolCallStatus } from 'otto-server';
 import { Message } from './Message.js';
 
 // mock 图片资源导入（webpack 里是 data URI，vitest 下给个占位）。
@@ -60,6 +61,26 @@ function userMessageWithImage(): OttoMessage {
 }
 
 describe('Message 动作行', () => {
+  it('keeps native acceptance-plan bookkeeping out of user tool cards', () => {
+    const { container } = render(
+      <Message
+        message={botMessage({
+          associatedToolCalls: [
+            {
+              id: 'plan',
+              toolName: 'update_task_plan',
+              parameters: { expectedRevision: 0 },
+              status: ToolCallStatus.Success,
+            },
+          ],
+        })}
+        onCopy={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
+    );
+    expect(container.textContent).not.toContain('update_task_plan');
+    expect(container.querySelector('.otto-process-trace')).toBeNull();
+  });
   it('把完成的 PPT 交付物直接放在回答下方，不藏进已收起的处理记录', async () => {
     const outputPath = 'C:\\Users\\otto\\Desktop\\经营汇报.pptx';
     (window as unknown as { otto: unknown }).otto = {

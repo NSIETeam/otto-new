@@ -229,6 +229,48 @@ function makeFakeConfig(stream: () => AsyncGenerator<unknown>): Config {
 }
 
 describe('CoreSessionRuntime · 下一代任务控制层', () => {
+  it('does not publish success or log a successful result when required verification is missing', async () => {
+    const store = new InMemorySessionStore();
+    const session = store.createSession();
+    const frames: ServerToClient[] = [];
+    store.subscribe(session.sessionId, (frame) => frames.push(frame));
+    const log = vi.fn(async () => undefined);
+    async function* stream(): AsyncGenerator<unknown> {
+      yield chunk('已完成修改。', 'STOP');
+    }
+    const runtime = new CoreSessionRuntime(
+      store,
+      session.sessionId,
+      makeFakeConfig(stream),
+      { log },
+    );
+    await runtime.initialize();
+    await runtime.run([{ type: 'text', value: '修改登录并运行测试' }], 'local');
+    expect(
+      frames.filter(
+        (frame) =>
+          frame.type === 'runtime_activity' && frame.payload.kind === 'turn',
+      ),
+    ).not.toContainEqual(
+      expect.objectContaining({
+        payload: expect.objectContaining({ state: 'completed' }),
+      }),
+    );
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false }),
+    );
+    expect(
+      store.getHistory(session.sessionId).find((message) => message.turn)?.turn
+        ?.status,
+    ).toBe('incomplete');
+    const final = frames
+      .filter((frame) => frame.type === 'chat_complete')
+      .at(-1);
+    expect(final?.type === 'chat_complete' && final.payload.text).toContain(
+      '尚未完成验收',
+    );
+  });
+
   it('复杂调研任务注入精简控制元数据，原始问题仍作为独立内容传递', async () => {
     async function* stream(): AsyncGenerator<unknown> {
       yield chunk('尚未完成来源检索。', 'STOP');
@@ -595,8 +637,11 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
     const assistant = store
       .getHistory(session.sessionId)
       .find((message) => message.turn);
-    expect(assistant?.turn?.verification?.status).toBe('passed');
-    expect(assistant?.turn?.status).toBe('completed');
+    // Approval and a write receipt do not complete the missing gather stage.
+    expect(assistant?.turn?.verification?.checks).toContainEqual(
+      expect.objectContaining({ id: 'criterion-receipt', status: 'passed' }),
+    );
+    expect(assistant?.turn?.status).toBe('incomplete');
   });
 });
 
@@ -1136,7 +1181,7 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
     expect(finalAssistant!.turn?.status).toBe('completed');
   });
 
-  it('终轮完成后记录用户任务与最终工作结果', async () => {
+  it('终轮记录用户任务，缺少调研证据时不能写成功成果', async () => {
     async function* stream(): AsyncGenerator<unknown> {
       yield chunk('已完成三家竞品的价格与定位对比。', 'STOP');
     }
@@ -1166,10 +1211,10 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
       entryType: 'work_result',
       taskTitle: '调研三家企业 AI 竞品并给出结论',
       userInput: '调研三家企业 AI 竞品并给出结论',
-      details: '已完成三家竞品的价格与定位对比。',
+      details: expect.stringContaining('尚未完成验收'),
       sessionId: session.sessionId,
       projectRoot: 'D:\\work\\otto-demo',
-      success: true,
+      success: false,
     });
   });
 });

@@ -132,6 +132,58 @@ function addReason(
   if (!reasons.includes(reason)) reasons.push(reason);
 }
 
+/** Refine the lexical cold-start using the model's validated requirement DAG.
+ * This changes effort, never authority, tool availability or confirmation rules. */
+export function refineComplexityFromObjectives(
+  baseline: TurnComplexityProfile,
+  objectives: ReadonlyArray<import('./taskContract.js').TaskObjective>,
+  riskLevel: TurnRiskLevel,
+): TurnComplexityProfile {
+  if (
+    !objectives.length ||
+    objectives.length > 16 ||
+    baseline.route === 'restricted'
+  )
+    return baseline;
+  const depths = new Map<string, number>();
+  const visiting = new Set<string>();
+  const depth = (id: string): number => {
+    if (depths.has(id)) return depths.get(id)!;
+    if (visiting.has(id)) throw new Error('Cyclic task structure');
+    const node = objectives.find((objective) => objective.id === id);
+    if (!node) throw new Error('Unknown task dependency');
+    visiting.add(id);
+    const value = 1 + Math.max(0, ...node.dependsOn.map(depth));
+    visiting.delete(id);
+    depths.set(id, value);
+    return value;
+  };
+  const maxDepth = Math.max(...objectives.map((o) => depth(o.id)));
+  const checks = objectives.reduce((count, o) => count + o.criteria.length, 0);
+  const level =
+    objectives.length >= 6 || maxDepth >= 5 || checks >= 12
+      ? 'orchestrated'
+      : objectives.length >= 3 || maxDepth >= 3 || checks >= 6
+        ? 'complex'
+        : 'moderate';
+  const restricted =
+    riskLevel === 'external_write' || riskLevel === 'destructive';
+  return {
+    ...baseline,
+    level,
+    requiresTaskGraph: true,
+    reasons: [...new Set([...baseline.reasons, 'task_structure' as const])],
+    budget: restricted
+      ? { ...baseline.budget }
+      : budgetFor(
+          level,
+          baseline.route,
+          baseline.recommendedParallelism,
+          riskLevel,
+        ),
+  };
+}
+
 /**
  * Routes a turn using bounded, inspectable signals. The returned profile never
  * contains raw prompt text and cannot relax confirmation or risk policy.

@@ -105,6 +105,24 @@ describe('executeToolCall', () => {
     });
   });
 
+  it.each([0, 2])('preserves native process receipts and treats exit %i correctly', async (exitCode) => {
+    const process = { command: 'npm test', directory: '/repo', exitCode, signal: null, status: 'exited' as const };
+    vi.mocked(mockToolRegistry.getTool).mockReturnValue(mockTool);
+    vi.mocked(mockTool.execute).mockResolvedValue({
+      llmContent: 'Exit Code: 0 (untrusted stdout)', returnDisplay: 'summarized output', process,
+    });
+    const response = await executeToolCall(mockConfig, {
+      callId: 'check', name: 'run_shell_command', args: { command: 'npm test' },
+      isClientInitiated: false, prompt_id: 'verify',
+    }, mockToolRegistry, abortController.signal);
+    expect(response.process).toEqual(process);
+    expect(Boolean(response.error)).toBe(exitCode !== 0);
+    const parts = Array.isArray(response.responseParts) ? response.responseParts : [response.responseParts];
+    expect(parts).toContainEqual(expect.objectContaining({ functionResponse: expect.objectContaining({
+      response: expect.objectContaining({ process, success: exitCode === 0 }),
+    }) }));
+  });
+
   it('forwards live tool output before the tool finishes', async () => {
     const request: ToolCallRequestInfo = {
       callId: 'auth-live',

@@ -6,6 +6,7 @@ import type {
   AgentTaskGraphNodeStatus,
   AgentTaskGraphSnapshot,
   TurnControlPolicy,
+  TurnVerificationCheck,
 } from './protocol.js';
 
 export interface ObservableTaskTool {
@@ -64,6 +65,7 @@ function labelFor(kind: AgentTaskGraphNode['kind']): string {
     verify: '使用可观察结果验证',
     recover: '切换策略并恢复执行',
     deliver: '交付结果与证据',
+    objective: '完成用户要求的子任务',
   }[kind];
 }
 
@@ -221,6 +223,80 @@ export class TaskGraphCoordinator {
     return true;
   }
 
+  syncObjectives(
+    contract: import('./taskContract.js').TaskContractSnapshot,
+    checks: TurnVerificationCheck[],
+  ): void {
+    const before = new Map(
+      this.nodes.map((node) => [node.id, JSON.stringify(node)]),
+    );
+    this.nodes = this.nodes.filter((node) => node.kind !== 'objective');
+    const completed = new Set<string>();
+    const pending = [...contract.objectives];
+    while (pending.length) {
+      const index = pending.findIndex((objective) =>
+        objective.dependsOn.every(
+          (dependency) =>
+            !pending.some((candidate) => candidate.id === dependency),
+        ),
+      );
+      if (index < 0) throw new Error('Invalid task dependencies');
+      const [objective] = pending.splice(index, 1);
+      const evidence = checks.filter((check) =>
+        check.id.startsWith(`objective:${objective.id}:`),
+      );
+      const dependenciesReady = objective.dependsOn.every((dependency) =>
+        completed.has(dependency),
+      );
+      const passed =
+        dependenciesReady &&
+        evidence.length > 0 &&
+        evidence.every((check) => check.status === 'passed');
+      if (passed) completed.add(objective.id);
+      this.nodes.push({
+        id: `objective-${objective.id}`,
+        kind: 'objective',
+        label: objective.description,
+        status: passed
+          ? 'completed'
+          : dependenciesReady
+            ? 'pending'
+            : 'blocked',
+        dependsOn: objective.dependsOn.length
+          ? objective.dependsOn.map((dependency) => `objective-${dependency}`)
+          : ['graph-understand'],
+        evidenceIds: [
+          ...new Set(evidence.flatMap((check) => check.evidence ?? [])),
+        ].slice(0, 16),
+      });
+    }
+    const deliver = this.nodes.find((node) => node.kind === 'deliver');
+    if (deliver)
+      deliver.dependsOn = [
+        ...(deliver.dependsOn ?? []).filter(
+          (id) => !id.startsWith('objective-'),
+        ),
+        ...contract.objectives.map((o) => `objective-${o.id}`),
+      ];
+    const changed = this.nodes.filter(
+      (node) => before.get(node.id) !== JSON.stringify(node),
+    );
+    if (changed.length) {
+      this.revision++;
+      this.revisions.push({
+        revision: this.revision,
+        timestamp: Date.now(),
+        reason: `task-contract:${contract.revision}`,
+        preservedNodeIds: this.nodes
+          .filter(
+            (node) => node.status === 'completed' && !changed.includes(node),
+          )
+          .map((node) => node.id),
+        changedNodeIds: changed.map((node) => node.id),
+      });
+    }
+  }
+
   markVerificationPassed(): void {
     this.setNodeStatus('verify', 'completed');
     this.refreshDependencyStatuses();
@@ -366,6 +442,7 @@ export class TaskGraphCoordinator {
       'verify',
       'recover',
       'deliver',
+      'objective',
     ]);
     const allowedStatuses = new Set<AgentTaskGraphNodeStatus>([
       'pending',

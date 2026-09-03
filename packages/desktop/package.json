@@ -39,6 +39,8 @@
   },
   "dependencies": {
     "@otto/native": "0.1.0",
+    "@xmldom/xmldom": "0.8.15",
+    "jszip": "3.10.1",
     "motion": "^13.1.1",
     "otto-rpa": "file:../rpa",
     "otto-server": "file:../server",

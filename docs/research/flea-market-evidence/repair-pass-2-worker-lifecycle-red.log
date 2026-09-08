@@ -1,0 +1,38 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+(node:66596) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/modules/park_services/flea_market/fleaMarketWorkerLifecycle.test.ts (2 tests | 2 failed) 2809ms
+   × sqlite: worker restarts are idempotent and obsolete stop callbacks cannot close a newer lifecycle 284ms
+     → expected false to be true // Object.is equality
+   × postgres: worker restarts are idempotent and obsolete stop callbacks cannot close a newer lifecycle 2524ms
+     → expected false to be true // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketWorkerLifecycle.test.ts > sqlite: worker restarts are idempotent and obsolete stop callbacks cannot close a newer lifecycle
+ FAIL  src/modules/park_services/flea_market/fleaMarketWorkerLifecycle.test.ts > postgres: worker restarts are idempotent and obsolete stop callbacks cannot close a newer lifecycle
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/modules/park_services/flea_market/fleaMarketWorkerLifecycle.test.ts:20:41
+     18|    stop();expect(app.readiness().ready).toBe(false);expect(stops).toBe…
+     19|    const next=app.start(registry as never);await app.initialize();expe…
+     20|    stop();expect(app.readiness().ready).toBe(true);expect(stops).toBe(…
+       |                                         ^
+     21|    next();expect(stops).toBe(2);expect(app.readiness().ready).toBe(fal…
+     22|    expect(()=>app.start({register:()=>{throw new Error('registration f…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  23:19:47
+   Duration  10.54s (transform 3.59s, setup 0ms, collect 7.33s, tests 2.81s, environment 0ms, prepare 105ms)

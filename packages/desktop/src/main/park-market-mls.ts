@@ -30,6 +30,7 @@ export interface MarketMlsPacket {
     epoch: number;
     ciphertext: string;
     eventId: string;
+    attachments?: Array<{ id: string; nonce: string; ciphertextSize: number }>;
   };
   senderScope?: string;
   authority?: ParkMlsAuthority;
@@ -259,6 +260,7 @@ export class ParkMarketMls {
     messageId: string,
     text: string,
     devices: Array<EnterpriseE2eeDeviceBundle & { organizationId: string }>,
+    attachments?: Array<{ id: string; nonce: string; ciphertextSize: number }>,
   ) {
     return this.serial(async (): Promise<MarketMlsPacket> => {
       const kernel = await this.ready(context);
@@ -290,6 +292,7 @@ export class ParkMarketMls {
         epoch: encrypted.epoch,
         ciphertext: encrypted.ciphertext,
         eventId,
+        ...(attachments?.length ? { attachments } : {}),
       };
       return {
         encryption: 'mls',

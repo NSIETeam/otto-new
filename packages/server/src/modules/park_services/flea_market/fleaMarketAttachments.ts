@@ -223,11 +223,15 @@ export function createMarketAttachments(deps: MarketImageDependencies) {
     async cleanup() {
       return deps.repository.transaction(async (tx) => {
         await tx.run(
-          "DELETE FROM park_market_image_refs WHERE kind IN ('draft','evidence') AND expires_at<=?",
+          "DELETE FROM park_market_image_refs WHERE (image_id,kind,object_id) IN (SELECT image_id,kind,object_id FROM park_market_image_refs WHERE kind IN ('draft','evidence') AND expires_at<=? ORDER BY expires_at,image_id LIMIT 100)",
           [now()],
         );
+        const [progress] = await tx.all(
+          "SELECT cursor FROM park_market_maintenance WHERE name='images'",
+        );
         const images = await tx.all(
-          "SELECT * FROM park_market_images WHERE state='available'",
+          "SELECT * FROM park_market_images WHERE state='available' AND id>? ORDER BY id LIMIT 100",
+          [progress?.cursor ?? ''],
         );
         for (const image of images) {
           const refs = await tx.all(
@@ -258,6 +262,10 @@ export function createMarketAttachments(deps: MarketImageDependencies) {
             [image.id],
           );
         }
+        await tx.run(
+          "INSERT INTO park_market_maintenance(name,cursor,updated_at) VALUES ('images',?,?) ON CONFLICT(name) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at",
+          [images.length < 100 ? '' : String(images.at(-1)?.id), now()],
+        );
       });
     },
     validateOwned: ownImages,

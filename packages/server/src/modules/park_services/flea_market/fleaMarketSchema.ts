@@ -1,4 +1,12 @@
-import { MARKET_SEARCH_SCHEMA_SQL } from './fleaMarketSearchIndex.js';
+import {
+  PARK_CONTACT_ATTACHMENT_SCHEMA_SQL,
+  PARK_CONTACT_UPLOAD_INTENT_SCHEMA_SQL,
+} from '../../collaboration/parkContactAttachments.js';
+import { MARKET_MAINTENANCE_SCHEMA_SQL, MARKET_CLEANUP_SCAN_SCHEMA_SQL } from './fleaMarketJobs.js';
+import {
+  MARKET_SEARCH_SCAN_SCHEMA_SQL,
+  MARKET_SEARCH_SCHEMA_SQL,
+} from './fleaMarketSearchIndex.js';
 import { MARKET_IMAGE_CHARGE_SCHEMA_SQL } from './fleaMarketStorageQuota.js';
 import { PARK_CONTACT_MLS_SCHEMA_SQL } from '../../collaboration/parkContactMls.js';
 import { MARKET_CONTACT_SCHEMA_SQL } from './fleaMarketContacts.js';
@@ -104,5 +112,10 @@ export const PARK_FLEA_MARKET_SCHEMA_CONTRIBUTOR: DatabaseSchemaContributor = {
     db.exec(MARKET_PERSONAL_SCHEMA_SQL);
     db.exec(MARKET_IMAGE_CHARGE_SCHEMA_SQL);
     db.exec(MARKET_SEARCH_SCHEMA_SQL);
+    db.exec(MARKET_SEARCH_SCAN_SCHEMA_SQL);
+    db.exec(MARKET_MAINTENANCE_SCHEMA_SQL);
+    db.exec(PARK_CONTACT_ATTACHMENT_SCHEMA_SQL);
+    db.exec(PARK_CONTACT_UPLOAD_INTENT_SCHEMA_SQL);
+    db.exec(MARKET_CLEANUP_SCAN_SCHEMA_SQL);
   },
 };

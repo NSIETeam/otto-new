@@ -1,0 +1,125 @@
+/** Real main + preload + full App with a disposable enterprise deployment. */
+import {generateKeyPairSync,randomBytes} from 'node:crypto';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {_electron as electron} from 'playwright';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+const temp=await mkdtemp(path.join(tmpdir(),'otto-market-acceptance-'));
+const evidence=path.join(root,'docs/research/flea-market-evidence');
+process.env.OTTO_ENTERPRISE_DIR=temp;
+process.env.OTTO_MARKET_LOCAL_ACCEPTANCE='1';
+process.env.NODE_ENV='development';
+process.env.OTTO_SQLCIPHER_NATIVE_BINDING=process.env.OTTO_SQLCIPHER_NATIVE_BINDING||'/Users/yang/Desktop/otto-new/native/sqlcipher/darwin-arm64/better_sqlite3.node';
+process.env.OTTO_DATABASE_ENCRYPTION_KEY_FILE=path.join(temp,'custody.key');
+process.env.OTTO_ENTERPRISE_PUBLIC_BASE_URL='http://127.0.0.1';
+await writeFile(process.env.OTTO_DATABASE_ENCRYPTION_KEY_FILE,randomBytes(32),{mode:0o600});
+await writeFile(path.join(temp,'.otto-market-acceptance.json'),JSON.stringify({purpose:'isolated-local-acceptance',version:1}));
+const licenseKeys=generateKeyPairSync('ed25519');
+process.env.OTTO_LICENSE_PUBLIC_KEY=licenseKeys.publicKey.export({format:'pem',type:'spki'}).toString();
+const apps=[];let server,db;
+try {
+ db=await import(path.join(root,'packages/server/dist/src/enterprise/db.js'));
+ const {signEd25519Envelope}=await import(path.join(root,'packages/server/dist/src/modules/commercial_control/signedEnvelope.js'));
+ const {startEnterpriseServer}=await import(path.join(root,'packages/server/dist/src/enterprise/server.js'));
+ const operator=db.createAccount({username:'market.operator',password:'Local-market-fixture-926!',name:'验收运营',isAdmin:true});
+ const park=db.createPark({adminOrganizationId:operator.organizationId,actorAccountId:operator.id,name:'本地市场验收园区'});
+ const license={id:'local-market-acceptance-license',deploymentId:db.getDeploymentId(),organizationId:operator.organizationId,machineFingerprint:db.getMachineFingerprint(),customerName:'Isolated local acceptance',plan:'enterprise',expiresAtMs:Date.now()+86400000,seatLimit:20,modules:['enterprise_tree','direct_messages','park_services','knowledge','atoa','skill_market'],offline:true,telemetryAllowed:false,issuedAtMs:Date.now()};
+ db.importDeploymentLicense({license,signature:signEd25519Envelope(license,licenseKeys.privateKey.export({format:'pem',type:'pkcs8'}).toString())});
+ const members={};
+ for(const name of ['seller','buyer']){
+  const org=db.createOrganization({name:`本地验收企业-${name}`,slug:`market-${name}`});
+  const member=db.createAccount({organizationId:org.id,username:`market.${name}`,password:'Local-market-fixture-926!',name:`验收-${name}`,isAdmin:true});
+  const invite=db.issueParkInvite({parkId:park.id,actorAccountId:operator.id});
+  db.joinOrganizationToPark({organizationId:org.id,actorAccountId:member.id,code:invite.code,address:'本地园区',roomNumber:'101'});
+  members[name]=member;
+ }
+ server=startEnterpriseServer({host:'127.0.0.1',port:0,publicUrl:'http://127.0.0.1',adminToken:'local-market-fixture-admin',smsSender:null,repairSmsSender:null,repairFeishuSender:null});
+ await new Promise(resolve=>server.once('listening',resolve));
+ server.prependListener('request',(req,res)=>res.on('finish',()=>{
+  if(res.statusCode>=400)console.log(JSON.stringify({request:new URL(req.url,'http://localhost').pathname,status:res.statusCode}));
+ }));
+ const runtime=db.getFleaMarketApplication();await runtime.initialize();
+ if(!runtime.readiness().ready)throw new Error(JSON.stringify(runtime.readiness()));
+ await runtime.roles.assign(operator.id,park.id,{accountId:operator.id,enabled:true,reason:'本地验收运营授权',requestId:'operator-role'});
+ await runtime.settings.update(operator.id,park.id,{enabled:true,rules:'仅限园区个人闲置，禁止违禁品与商业广告',contact:'本地验收服务台',responsibleAccountId:operator.id,timezone:'Asia/Shanghai',expectedVersion:0,requestId:'operator-config'});
+ const base=`http://127.0.0.1:${server.address().port}`;
+ const counts=new Map();server.prependListener('request',req=>{const route=new URL(req.url,base).pathname;counts.set(route,(counts.get(route)||0)+1);});
+ const diagnostics=setInterval(()=>console.log(JSON.stringify({requests:[...counts].sort((a,b)=>b[1]-a[1]).slice(0,8)})),15000);diagnostics.unref();
+ for(const name of ['seller','buyer']) {
+  const profile=path.join(temp,`profile-${name}`),wrapper=path.join(temp,`main-${name}.cjs`);
+  await writeFile(wrapper,`const {app}=require('electron');app.setPath('userData',${JSON.stringify(profile)});require(${JSON.stringify(path.join(root,'packages/desktop/dist/main/index.js'))});`);
+  const env={...process.env,OTTO_ENTERPRISE_DIR:path.join(profile,'enterprise'),OTTO_USER_DATA_DIR:profile,OTTO_USER_DIR:path.join(temp,`user-${name}`),OTTO_ENTERPRISE_SERVER_URL:base,OTTO_SERVER_PORT:'0'};delete env.ELECTRON_RUN_AS_NODE;
+  const app=await electron.launch({args:[wrapper],env,timeout:60000});apps.push(app);
+  const page=await app.firstWindow({timeout:60000});
+  page.setDefaultTimeout(30000);
+  console.log(JSON.stringify(await page.evaluate(async()=>({serverUrl:(await window.otto.enterpriseSession()).serverUrl}))));
+  await page.getByRole('button',{name:'重新连接',exact:true}).click();
+  await page.getByRole('button',{name:'密码登录',exact:true}).click();
+  await page.getByLabel('账号或手机号',{exact:true}).fill(`market.${name}`);
+  await page.getByLabel('密码',{exact:true}).fill('Local-market-fixture-926!');
+  await page.getByRole('button',{name:'进入 Otto',exact:true}).click({timeout:30000});
+  await page.getByText('欢迎回来',{exact:true}).waitFor({state:'hidden',timeout:60000});
+  await page.getByRole('button',{name:/我的消息/}).first().waitFor({state:'visible',timeout:60000});
+  if(await page.getByRole('button',{name:'稍后了解',exact:true}).isVisible())await page.getByRole('button',{name:'稍后了解',exact:true}).click();
+  await writeFile(path.join(evidence,`repair-pass-2-normal-app-${name}.txt`),await page.locator('body').innerText());
+  await page.screenshot({path:path.join(evidence,`repair-pass-2-normal-app-${name}.png`)});
+ }
+ const [seller,buyer]=await Promise.all(apps.map(app=>app.firstWindow()));
+ async function openMarket(page,name){
+  await page.getByRole('button',{name:`验收-${name}，个人空间`,exact:true}).click();
+  await page.getByRole('menuitem',{name:'我的发布记录',exact:true}).click();
+  await page.getByRole('button',{name:'逛市场',exact:true}).click();
+ }
+ await openMarket(seller,'seller');await openMarket(buyer,'buyer');
+ await seller.getByRole('button',{name:'发布闲置',exact:true}).click();
+ await seller.getByLabel('标题 *',{exact:true}).fill('正式应用验收台灯');
+ await seller.getByLabel(/^分类/).selectOption('office');
+ await seller.getByLabel('售价（元）*',{exact:true}).fill('35.50');
+ await seller.getByLabel(/^成色/).selectOption('used');
+ await seller.getByLabel(/^功能状态/).selectOption('working');
+ await seller.getByLabel('物品说明 *',{exact:true}).fill('本地合成验收商品，灯光开关正常。');
+ await seller.getByLabel('大致交接区域 *',{exact:true}).fill('验收大厅');
+ const {default:sharp}=await import('sharp');
+ const photo=await sharp({create:{width:160,height:120,channels:3,background:'#e0b030'}}).png().toBuffer();
+ await seller.locator('input[type=file]').setInputFiles({name:'fixture.png',mimeType:'image/png',buffer:photo});
+ await seller.getByRole('button',{name:'正式发布',exact:true}).click();
+ await seller.getByText('发布已保存',{exact:true}).waitFor();
+ await buyer.getByLabel('搜索商品',{exact:true}).fill('正式应用验收');
+ await buyer.getByRole('button',{name:'搜索',exact:true}).click();
+ await buyer.getByRole('button',{name:/正式应用验收台灯/}).click();
+ await buyer.getByRole('button',{name:'联系卖家',exact:true}).click();
+ await buyer.getByLabel('你的问题（1–500 字）').fill('验收：今晚方便交接吗？');
+ await buyer.getByRole('button',{name:'发送问题',exact:true}).click();
+ await buyer.getByText('问题已发送，请在“我的消息”查看后续咨询。').waitFor();
+ await seller.getByRole('button',{name:'关闭跳蚤市场'}).click();
+ await seller.getByRole('button',{name:/我的消息/}).first().click();
+ await seller.getByRole('button',{name:'回复并接受',exact:true}).first().click();
+ await seller.getByLabel('消息',{exact:true}).fill('验收：今晚七点方便。');
+ await seller.getByRole('region',{name:'商品会话',exact:true}).getByRole('button',{name:'回复并接受',exact:true}).click();
+ await seller.getByText('验收：今晚七点方便。',{exact:true}).waitFor();
+ await buyer.getByRole('button',{name:'关闭跳蚤市场'}).click();
+ await buyer.getByRole('button',{name:/我的消息/}).first().click();
+ await buyer.getByRole('button',{name:/^商品会话/}).first().click();
+ await buyer.getByText('验收：今晚七点方便。',{exact:true}).waitFor();
+ await openMarket(seller,'seller');
+ await seller.getByRole('button',{name:'我的发布记录',exact:true}).click();
+ await seller.getByRole('button',{name:/正式应用验收台灯/}).click();
+ await seller.getByLabel('预计交接时间',{exact:true}).fill(new Date(Date.now()+3600000).toISOString().slice(0,16));
+ await seller.getByRole('button',{name:'设为预留',exact:true}).click();
+ await seller.getByRole('button',{name:'取消预留',exact:true}).waitFor();
+ await seller.getByLabel('预计交接时间',{exact:true}).fill(new Date(Date.now()+7200000).toISOString().slice(0,16));
+ await seller.getByRole('button',{name:'修改预留时间 / 备注',exact:true}).click();
+ await seller.getByRole('button',{name:'标记已售出',exact:true}).click();
+ await seller.getByRole('button',{name:/撤销售出/}).waitFor();
+ await buyer.getByLabel('消息',{exact:true}).fill('验收：售出后继续确认交接。');
+ await buyer.getByRole('region',{name:'商品会话',exact:true}).getByRole('button',{name:'发送',exact:true}).click();
+ await buyer.getByText('验收：售出后继续确认交接。',{exact:true}).waitFor();
+ await seller.screenshot({path:path.join(evidence,'repair-pass-2-normal-app-sold.jpg'),quality:70});
+ console.log(JSON.stringify({normalMain:true,normalPreload:true,fullApp:true,realServerStartup:true,accountsLoggedIn:2,journeyCompleted:true,flow:'image-publish/search/detail/contact/reply/reserve/change-time/sold/continue-chat',at:new Date().toISOString()}));
+} catch(error) {
+ console.error(String(error.message).replaceAll('Local-market-fixture-926!','[fixture-password]'));
+ for(let i=0;i<apps.length;i++){try{const page=await apps[i].firstWindow();await writeFile(path.join(evidence,`repair-pass-2-normal-app-error-${i}.txt`),await page.locator('body').innerText());await page.screenshot({path:path.join(evidence,`repair-pass-2-normal-app-error-${i}.png`)});}catch{}}
+ process.exitCode=1;
+} finally {for(const app of apps)await app.close();if(server){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}db?.closeEnterpriseDatabase();await rm(temp,{recursive:true,force:true});}

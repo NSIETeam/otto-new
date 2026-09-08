@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ParkMlsCommand } from '../../collaboration/parkContactMls.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -51,6 +52,60 @@ export async function handleMarketHttp(
       .map(decodeURIComponent);
     const [resource, id, action] = parts;
     if (parts.length > 3) throw new MarketError('NOT_FOUND');
+    if (resource === 'chat-attachments' && method === 'POST' && id) {
+      if (action === 'read') {
+        const command = (await input.readBody(req)) as {
+          deviceId: string;
+          signature: string;
+          payload: Record<string, unknown>;
+        };
+        if (command.payload?.id !== id) throw new MarketError('INVALID_INPUT');
+        await app.authorizeAttachmentDevice(actor, 'attachment-read', command);
+        send({
+          data: (
+            await app.chatAttachments.read(actor, id, command.deviceId)
+          ).toString('base64'),
+        });
+      } else if (!action) {
+        const bytes = await imageBody(req);
+        let command: {
+          deviceId: string;
+          signature: string;
+          payload: Record<string, unknown>;
+        };
+        try {
+          command = JSON.parse(
+            Buffer.from(
+              String(req.headers['x-otto-attachment-proof'] ?? ''),
+              'base64url',
+            ).toString(),
+          );
+        } catch {
+          throw new MarketError('INVALID_INPUT');
+        }
+        if (
+          command.payload?.id !== id ||
+          command.payload.sha256 !==
+            createHash('sha256').update(bytes).digest('hex')
+        )
+          throw new MarketError('INVALID_INPUT');
+        await app.authorizeAttachmentDevice(
+          actor,
+          'attachment-upload',
+          command,
+        );
+        send(
+          await app.chatAttachments.upload(actor, {
+            id,
+            conversationId: String(command.payload.conversationId),
+            messageId: String(command.payload.messageId),
+            deviceId: command.deviceId,
+            bytes,
+          }),
+        );
+      } else throw new MarketError('NOT_FOUND');
+      return true;
+    }
     if (
       resource === 'listings' &&
       id &&

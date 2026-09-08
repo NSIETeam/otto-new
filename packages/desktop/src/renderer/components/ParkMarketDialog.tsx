@@ -39,6 +39,7 @@ type Settings = {
   parkId: string | null;
   enabled: boolean;
   ready: boolean;
+  search?: { state: 'backfilling' | 'ready' };
   rules: string;
   contact: string;
   responsibleAccountId: string;
@@ -899,6 +900,9 @@ function MarketContent({
         </p>
       )}
       {notice && <p role="status">{notice}</p>}
+      {settings?.search?.state === 'backfilling' && (
+        <p role="status">搜索正在准备中，请稍后重试；仍可管理本人发布记录。</p>
+      )}
       {settings && (!settings.enabled || !settings.ready) && (
         <p role="status">
           {settings.ready ? '园区市场已暂停。' : '市场服务尚未就绪。'}

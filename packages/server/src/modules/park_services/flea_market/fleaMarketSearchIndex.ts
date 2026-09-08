@@ -97,3 +97,82 @@ export async function indexMarketListing(
     [listing.id, listing.version],
   );
 }
+
+// The version table is the persistent work queue: a committed current version is
+// complete; missing/stale versions survive restarts without an in-memory cursor.
+export async function marketSearchPending(
+  tx: MarketTransaction,
+  park?: string,
+) {
+  return (
+    (
+      await tx.all(
+        `SELECT l.id FROM park_market_listings l
+    WHERE l.state IN ('active','reserved') ${park ? 'AND l.park_id=?' : ''}
+    AND NOT EXISTS (SELECT 1 FROM park_market_search_documents d WHERE d.listing_id=l.id AND d.version=l.version)
+    LIMIT 1`,
+        park ? [park] : [],
+      )
+    ).length > 0
+  );
+}
+export async function backfillMarketSearch(
+  deps: {
+    repository: import('./fleaMarketRepository.js').MarketRepository;
+    cipher: EncryptedFieldCipher;
+  },
+  limit = 100,
+) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 250)
+    throw new Error('INVALID_SEARCH_BATCH');
+  return deps.repository.transaction(async (tx) => {
+    const rows = await tx.all(
+      `SELECT l.* FROM park_market_listings l
+      WHERE l.state IN ('active','reserved') AND NOT EXISTS
+      (SELECT 1 FROM park_market_search_documents d WHERE d.listing_id=l.id AND d.version=l.version)
+      ORDER BY l.id LIMIT ?`,
+      [limit],
+    );
+    for (const row of rows) {
+      const listing: Listing = JSON.parse(
+        deps.cipher.decryptText(
+          JSON.parse(String(row.payload)),
+          `park-market-listing:${row.id}`,
+        ),
+      );
+      await indexMarketListing(tx, deps.cipher, listing);
+    }
+    return { indexed: rows.length, pending: await marketSearchPending(tx) };
+  });
+}
+
+/** Internal maintenance operation; callers must use the deployment's operator boundary.
+ * Clearing document versions and terms with the new key is atomic. Requests report
+ * backfill pending until the bounded worker has rebuilt every live document.
+ */
+export async function rotateMarketSearchKey(
+  deps: {
+    repository: import('./fleaMarketRepository.js').MarketRepository;
+    cipher: EncryptedFieldCipher;
+  },
+  park: string,
+) {
+  await deps.repository.transaction(async (tx) => {
+    await tx.run('DELETE FROM park_market_search_terms WHERE park_id=?', [
+      park,
+    ]);
+    await tx.run(
+      'DELETE FROM park_market_search_documents WHERE listing_id IN (SELECT id FROM park_market_listings WHERE park_id=?)',
+      [park],
+    );
+    await tx.run('DELETE FROM park_market_search_keys WHERE park_id=?', [park]);
+    await marketSearchKey(tx, deps.cipher, park, true);
+  });
+}
+
+export const MARKET_SEARCH_SCAN_SCHEMA_SQL = `
+CREATE INDEX IF NOT EXISTS park_market_search_pending ON park_market_listings(park_id,state,id,version);
+CREATE INDEX IF NOT EXISTS park_market_live_latest ON park_market_listings(park_id,listed_at DESC,id) WHERE state IN ('active','reserved');
+CREATE INDEX IF NOT EXISTS park_market_live_price_asc ON park_market_listings(park_id,price_cents ASC,listed_at DESC,id) WHERE state IN ('active','reserved');
+CREATE INDEX IF NOT EXISTS park_market_live_price_desc ON park_market_listings(park_id,price_cents DESC,listed_at DESC,id) WHERE state IN ('active','reserved');
+`;

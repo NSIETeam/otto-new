@@ -29,6 +29,7 @@ export interface ParkMlsPacket {
     epoch: number;
     ciphertext: string;
     eventId: string;
+    attachments?: Array<{id:string;nonce:string;ciphertextSize:number}>;
   };
   signature: string;
 }

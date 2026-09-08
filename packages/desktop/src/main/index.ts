@@ -4432,10 +4432,19 @@ function registerIpc(): void {
     await enterpriseClient.requestParkMarket({ path: `/listings/${listingId}`, method: 'GET' });
     const link = marketLink(server, listingId); clipboard.writeText(link); return { copied: true };
   });
-  const marketMessaging = new ParkMarketMessaging({ mls: parkMarketMls, context: () => enterpriseClient.marketMessagingContext(), ensureDevice: () => enterpriseClient.ensureE2eeDeviceReady(), request: (path, method = 'GET', body) => enterpriseClient.requestParkMarket({ path, method, body }), pending: new MarketDraftStore(path.join(app.getPath('userData'), 'park-market-pending'), text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，消息未发送'); return safeStorage.encryptString(text); }, bytes => safeStorage.decryptString(bytes), 50) });
+  const marketMessaging = new ParkMarketMessaging({ uploadAttachment: input => enterpriseClient.requestParkMarket(input, {onProgress:(loaded,total)=>mainWindow?.webContents.send('otto:enterprise-market-attachment-progress',{messageId:input.attachmentProof.payload.messageId,id:input.attachmentProof.payload.id,loaded,total})}), mls: parkMarketMls, context: () => enterpriseClient.marketMessagingContext(), ensureDevice: () => enterpriseClient.ensureE2eeDeviceReady(), request: (path, method = 'GET', body) => enterpriseClient.requestParkMarket({ path, method, body }), pending: new MarketDraftStore(path.join(app.getPath('userData'), 'park-market-pending'), text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，消息未发送'); return safeStorage.encryptString(text); }, bytes => safeStorage.decryptString(bytes), 50) });
   ipcMain.handle(IPC.enterpriseMarketSend, async (event, input: Parameters<ParkMarketMessaging['send']>[0]) => {
     if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许发送市场消息');
     loadEnterpriseSession(); return marketMessaging.send(input);
+  });
+  ipcMain.handle('otto:enterprise-market-download', async (event, conversationId:string, messageId:string, sequence:number, attachmentId:string) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许下载市场附件');
+    loadEnterpriseSession();
+    const attachment=await marketMessaging.download(conversationId,messageId,sequence,attachmentId);
+    const selected=await dialog.showSaveDialog(mainWindow,{defaultPath:path.basename(attachment.fileName)});
+    if(selected.canceled || !selected.filePath)return {canceled:true};
+    await fs.promises.writeFile(selected.filePath,Buffer.from(attachment.data,'base64'),{mode:0o600});
+    return {canceled:false};
   });
   ipcMain.handle('otto:enterprise-market-recover', async (event, id: string) => {
     if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许恢复市场会话');

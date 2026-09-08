@@ -1,0 +1,895 @@
+../../integration/park-market/authenticated-flow.test.ts(325,53): error TS7016: Could not find a declaration file for module './desktop-flow.mjs'. '/Users/yang/Desktop/otto-carpool-fixed-91bc4e/integration/park-market/desktop-flow.mjs' implicitly has an 'any' type.
+../core/src/core/customModelAdapter.test.ts(12,74): error TS2411: Property 'length' of type 'number' is not assignable to 'string' index type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(49,34): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'string'.
+../core/src/core/customModelAdapter.test.ts(59,14): error TS18046: 'result' is of type 'unknown'.
+../core/src/core/customModelAdapter.test.ts(60,14): error TS18046: 'result' is of type 'unknown'.
+../core/src/core/customModelAdapter.test.ts(66,14): error TS18046: 'result' is of type 'unknown'.
+../core/src/core/customModelAdapter.test.ts(67,14): error TS18046: 'result' is of type 'unknown'.
+../core/src/core/customModelAdapter.test.ts(80,14): error TS18046: 'result' is of type 'unknown'.
+../core/src/core/customModelAdapter.test.ts(89,14): error TS18046: 'result' is of type 'unknown'.
+../core/src/core/customModelAdapter.test.ts(90,14): error TS18046: 'result' is of type 'unknown'.
+../core/src/core/customModelAdapter.test.ts(96,14): error TS18046: 'result' is of type 'unknown'.
+../core/src/core/customModelAdapter.test.ts(97,14): error TS18046: 'result' is of type 'unknown'.
+../core/src/core/customModelAdapter.test.ts(117,14): error TS18046: 'result' is of type 'unknown'.
+../core/src/core/customModelAdapter.test.ts(165,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(166,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(167,28): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(168,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(171,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(177,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(223,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(224,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(225,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(323,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(324,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(325,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(326,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(327,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(328,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(329,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(329,58): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(381,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(382,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(383,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(384,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(428,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(429,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(430,28): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(431,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(434,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(441,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(490,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(491,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(495,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(549,28): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(550,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(551,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(598,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(640,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(641,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(691,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(694,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(697,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(698,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(749,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(750,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(751,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(754,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(755,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(756,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(802,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(803,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(804,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(861,24): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(864,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(868,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(869,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(870,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(910,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(914,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(915,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(916,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(957,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(962,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1002,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1045,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1140,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1141,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1142,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1209,24): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(1218,31): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(1223,75): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(1292,24): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(1297,31): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(1302,75): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(1374,24): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(1380,31): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(1385,75): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(1450,24): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(1457,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1460,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1462,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1463,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1465,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1467,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1469,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1527,24): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(1534,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1538,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1540,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1541,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1543,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1545,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(1605,24): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(1612,31): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(1619,39): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(1626,31): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(1691,24): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(1696,31): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(1701,75): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(1766,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1767,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1768,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1769,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1772,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1835,21): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1845,25): error TS2345: Argument of type 'LooseJson' is not assignable to parameter of type 'string'.
+../core/src/core/customModelAdapter.test.ts(1926,20): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(1995,20): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2121,24): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(2127,31): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(2136,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(2137,14): error TS18048: 'usageResponse' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(2198,24): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(2204,31): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(2209,75): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(2267,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2268,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2270,14): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2313,24): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(2317,51): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(2324,51): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(2364,38): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(predicate: (value: Part, index: number, array: Part[]) => value is Part, thisArg?: any): Part[]', gave the following error.
+    Argument of type '(p: LooseJson) => boolean' is not assignable to parameter of type '(value: Part, index: number, array: Part[]) => value is Part'.
+      Types of parameters 'p' and 'value' are incompatible.
+        Property 'length' is missing in type 'Part' but required in type 'LooseJson'.
+  Overload 2 of 2, '(predicate: (value: Part, index: number, array: Part[]) => unknown, thisArg?: any): Part[]', gave the following error.
+    Argument of type '(p: LooseJson) => boolean' is not assignable to parameter of type '(value: Part, index: number, array: Part[]) => unknown'.
+      Types of parameters 'p' and 'value' are incompatible.
+        Property 'length' is missing in type 'Part' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(2365,33): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(predicate: (value: Part, index: number, array: Part[]) => value is Part, thisArg?: any): Part[]', gave the following error.
+    Argument of type '(p: LooseJson) => boolean' is not assignable to parameter of type '(value: Part, index: number, array: Part[]) => value is Part'.
+      Types of parameters 'p' and 'value' are incompatible.
+        Property 'length' is missing in type 'Part' but required in type 'LooseJson'.
+  Overload 2 of 2, '(predicate: (value: Part, index: number, array: Part[]) => unknown, thisArg?: any): Part[]', gave the following error.
+    Argument of type '(p: LooseJson) => boolean' is not assignable to parameter of type '(value: Part, index: number, array: Part[]) => unknown'.
+      Types of parameters 'p' and 'value' are incompatible.
+        Property 'length' is missing in type 'Part' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(2424,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2425,19): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2426,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2455,16): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2484,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2516,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2542,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2569,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2612,23): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2621,27): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2648,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2649,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2681,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2684,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(2867,22): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(2870,101): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(2874,96): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(2878,95): error TS2349: This expression is not callable.
+  Type 'LooseJson' has no call signatures.
+../core/src/core/customModelAdapter.test.ts(2886,12): error TS18048: 'usage' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(2971,22): error TS2345: Argument of type 'GenerateContentResponse' is not assignable to parameter of type 'LooseJson'.
+  Property 'length' is missing in type 'GenerateContentResponse' but required in type 'LooseJson'.
+../core/src/core/customModelAdapter.test.ts(2976,15): error TS18048: 'usageResp' is possibly 'undefined'.
+../core/src/core/customModelAdapter.test.ts(3277,78): error TS2559: Type 'LooseJson' has no properties in common with type 'NativeRequest'.
+../core/src/core/customModelAdapter.test.ts(3281,39): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(3285,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(3286,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/customModelAdapter.test.ts(3287,12): error TS2454: Variable 'capturedBody' is used before being assigned.
+../core/src/core/nonInteractiveToolExecutor.test.ts(175,64): error TS2352: Conversion of type '{ type: "exec"; command: string; warning: string; onConfirm: Mock<Procedure>; }' to type 'ToolCallConfirmationDetails' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ type: "exec"; command: string; warning: string; onConfirm: Mock<Procedure>; }' is missing the following properties from type 'ToolExecuteConfirmationDetails': title, rootCommand
+../core/src/lsp/binaryManager.test.ts(78,7): error TS2740: Type 'EventEmitter<any>' is missing the following properties from type 'Readable': readableAborted, readable, readableDidRead, readableEncoding, and 37 more.
+../core/src/lsp/binaryManager.test.ts(79,7): error TS2740: Type 'EventEmitter<any>' is missing the following properties from type 'Readable': readableAborted, readable, readableDidRead, readableEncoding, and 37 more.
+../core/src/lsp/binaryManager.test.ts(130,7): error TS2740: Type 'EventEmitter<any>' is missing the following properties from type 'Readable': readableAborted, readable, readableDidRead, readableEncoding, and 37 more.
+../core/src/lsp/binaryManager.test.ts(131,7): error TS2740: Type 'EventEmitter<any>' is missing the following properties from type 'Readable': readableAborted, readable, readableDidRead, readableEncoding, and 37 more.
+../core/src/lsp/client.test.ts(101,18): error TS18046: 'folders' is of type 'unknown'.
+../core/src/lsp/client.test.ts(102,18): error TS18046: 'folders' is of type 'unknown'.
+../core/src/orchestration/proactiveService.test.ts(86,47): error TS2493: Tuple type '[]' of length '0' has no element at index '2'.
+../core/src/orchestration/proactiveService.test.ts(91,47): error TS2493: Tuple type '[]' of length '0' has no element at index '2'.
+../core/src/orchestration/proactiveService.test.ts(185,21): error TS2493: Tuple type '[]' of length '0' has no element at index '2'.
+../core/src/orchestration/proactiveService.test.ts(191,19): error TS2493: Tuple type '[]' of length '0' has no element at index '2'.
+../core/src/orchestration/proactiveService.test.ts(194,28): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../core/src/orchestration/proactiveService.test.ts(195,28): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../core/src/orchestration/proactiveService.test.ts(196,28): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../core/src/services/aliyunSmsSender.test.ts(50,57): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../core/src/services/aliyunSmsSender.test.ts(71,57): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../core/src/services/gitService.test.ts(31,10): error TS2339: Property 'env' does not exist on type '{ checkIsRepo: Mock<Procedure>; init: Mock<Procedure>; raw: Mock<Procedure>; add: Mock<Procedure>; commit: Mock<Procedure>; addConfig: Mock<...>; status: Mock<...>; clean: Mock<...>; }'.
+../core/src/services/gitService.test.ts(90,14): error TS2339: Property 'env' does not exist on type '{ checkIsRepo: Mock<Procedure>; init: Mock<Procedure>; raw: Mock<Procedure>; add: Mock<Procedure>; commit: Mock<Procedure>; addConfig: Mock<...>; status: Mock<...>; clean: Mock<...>; }'.
+../core/src/services/microCompactService.test.ts(127,14): error TS18048: 'firstToolResponse' is possibly 'undefined'.
+../core/src/services/microCompactService.test.ts(127,14): error TS18048: 'firstToolResponse.response' is possibly 'undefined'.
+../core/src/services/microCompactService.test.ts(131,14): error TS18048: 'nonCompactableResponse' is possibly 'undefined'.
+../core/src/services/microCompactService.test.ts(131,14): error TS18048: 'nonCompactableResponse.response' is possibly 'undefined'.
+../core/src/services/microCompactService.test.ts(135,14): error TS18048: 'lastToolResponse' is possibly 'undefined'.
+../core/src/services/microCompactService.test.ts(135,14): error TS18048: 'lastToolResponse.response' is possibly 'undefined'.
+../core/src/services/microCompactService.test.ts(142,7): error TS2532: Object is possibly 'undefined'.
+../core/src/services/microCompactService.test.ts(165,14): error TS18048: 'envResponse' is possibly 'undefined'.
+../core/src/services/microCompactService.test.ts(165,14): error TS18048: 'envResponse.response' is possibly 'undefined'.
+../core/src/telemetry/loggers.test.ts(58,49): error TS2345: Argument of type '{ emit: Mock<Procedure>; }' is not assignable to parameter of type 'Logger'.
+  Property 'enabled' is missing in type '{ emit: Mock<Procedure>; }' but required in type 'Logger'.
+../core/src/tools/analyze-data.test.ts(198,25): error TS2339: Property 'toLowerCase' does not exist on type 'PartListUnion'.
+  Property 'toLowerCase' does not exist on type 'Part'.
+../core/src/tools/analyze-data.test.ts(207,25): error TS2339: Property 'toLowerCase' does not exist on type 'PartListUnion'.
+  Property 'toLowerCase' does not exist on type 'Part'.
+../core/src/tools/analyze-data.test.ts(224,25): error TS2339: Property 'toLowerCase' does not exist on type 'PartListUnion'.
+  Property 'toLowerCase' does not exist on type 'Part'.
+../core/src/tools/analyze-data.test.ts(233,25): error TS2339: Property 'toLowerCase' does not exist on type 'PartListUnion'.
+  Property 'toLowerCase' does not exist on type 'Part'.
+../core/src/tools/ask-user-question.test.ts(118,15): error TS2322: Type 'string' is not assignable to type 'AskUserQuestionOption'.
+../core/src/tools/ask-user-question.test.ts(119,15): error TS2741: Property 'description' is missing in type '{ label: string; }' but required in type 'AskUserQuestionOption'.
+../core/src/tools/audio-reader.test.ts(61,5): error TS2322: Type 'Mock<() => { createTemporaryChat: Mock<Procedure>; }>' is not assignable to type '(() => OttoClient) & Mock<Procedure>'.
+  Type 'Mock<() => { createTemporaryChat: Mock<Procedure>; }>' is not assignable to type '() => OttoClient'.
+    Type '{ createTemporaryChat: Mock<Procedure>; }' is missing the following properties from type 'OttoClient': generateContentConfig, sessionTurnCount, MAX_TURNS, financialConversationStates, and 64 more.
+../core/src/tools/batch.test.ts(65,49): error TS2740: Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }[]': length, pop, push, concat, and 35 more.
+../core/src/tools/batch.test.ts(72,11): error TS2739: Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }': tool, parameters
+../core/src/tools/batch.test.ts(73,11): error TS2739: Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }': tool, parameters
+../core/src/tools/batch.test.ts(74,11): error TS2739: Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }': tool, parameters
+../core/src/tools/batch.test.ts(84,24): error TS2739: Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }': tool, parameters
+../core/src/tools/batch.test.ts(91,13): error TS2740: Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }[]': length, pop, push, concat, and 35 more.
+../core/src/tools/batch.test.ts(103,9): error TS2740: Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }[]': length, pop, push, concat, and 35 more.
+../core/src/tools/batch.test.ts(110,9): error TS2740: Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }[]': length, pop, push, concat, and 35 more.
+../core/src/tools/batch.test.ts(120,9): error TS2740: Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }[]': length, pop, push, concat, and 35 more.
+../core/src/tools/batch.test.ts(129,11): error TS2739: Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }': tool, parameters
+../core/src/tools/batch.test.ts(148,46): error TS2345: Argument of type '{ tool_calls: BatchToolParams[]; }' is not assignable to parameter of type 'BatchToolParams'.
+  Types of property 'tool_calls' are incompatible.
+    Type 'BatchToolParams[]' is not assignable to type '{ tool: string; parameters: Record<string, unknown>; }[]'.
+      Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }': tool, parameters
+../core/src/tools/batch.test.ts(166,48): error TS2345: Argument of type '{ tool_calls: BatchParams; }' is not assignable to parameter of type 'BatchToolParams'.
+  Types of property 'tool_calls' are incompatible.
+    Type 'BatchToolParams' is missing the following properties from type '{ tool: string; parameters: Record<string, unknown>; }[]': length, pop, push, concat, and 35 more.
+../core/src/tools/convert-document.test.ts(153,25): error TS2339: Property 'toLowerCase' does not exist on type 'PartListUnion'.
+  Property 'toLowerCase' does not exist on type 'Part'.
+../core/src/tools/convert-document.test.ts(162,25): error TS2339: Property 'toLowerCase' does not exist on type 'PartListUnion'.
+  Property 'toLowerCase' does not exist on type 'Part'.
+../core/src/tools/diagnose-system.test.ts(66,19): error TS2339: Property 'stdout' does not exist on type 'EventEmitter<any>'.
+../core/src/tools/diagnose-system.test.ts(67,19): error TS2339: Property 'stderr' does not exist on type 'EventEmitter<any>'.
+../core/src/tools/diagnose-system.test.ts(68,19): error TS2339: Property 'pid' does not exist on type 'EventEmitter<any>'.
+../core/src/tools/diagnose-system.test.ts(70,21): error TS2339: Property 'stdout' does not exist on type 'EventEmitter<any>'.
+../core/src/tools/diagnose-system.test.ts(82,33): error TS2554: Expected 2 arguments, but got 1.
+../core/src/tools/diagnose-system.test.ts(88,33): error TS2554: Expected 2 arguments, but got 1.
+../core/src/tools/diagnose-system.test.ts(93,33): error TS2554: Expected 2 arguments, but got 1.
+../core/src/tools/diagnose-system.test.ts(98,33): error TS2554: Expected 2 arguments, but got 1.
+../core/src/tools/diagnose-system.test.ts(103,33): error TS2554: Expected 2 arguments, but got 1.
+../core/src/tools/diagnose-system.test.ts(108,33): error TS2554: Expected 2 arguments, but got 1.
+../core/src/tools/diagnose-system.test.ts(113,33): error TS2554: Expected 2 arguments, but got 1.
+../core/src/tools/feishu-project-collab.test.ts(9,349): error TS2554: Expected 1 arguments, but got 2.
+../core/src/tools/feishu-project-collab.test.ts(16,97): error TS2554: Expected 1 arguments, but got 2.
+../core/src/tools/feishu-project-collab.test.ts(21,204): error TS2554: Expected 1 arguments, but got 2.
+../core/src/tools/feishu-project-collab.test.ts(27,96): error TS2554: Expected 1 arguments, but got 2.
+../core/src/tools/feishu-project-collab.test.ts(29,138): error TS2554: Expected 1 arguments, but got 2.
+../core/src/tools/generate-document.test.ts(218,7): error TS2345: Argument of type 'Mock<() => { executable: string; source: string; pythonSitePackages: string; }>' is not assignable to parameter of type 'DocumentRuntimeResolver'.
+  Call signature return types '{ executable: string; source: string; pythonSitePackages: string; }' and 'DocumentRuntimeResolution' are incompatible.
+    The types of 'source' are incompatible between these types.
+      Type 'string' is not assignable to type 'RuntimeSource'.
+../core/src/tools/generate-document.test.ts(269,7): error TS2345: Argument of type 'Mock<() => { executable: string; source: string; pythonSitePackages: string; }>' is not assignable to parameter of type 'DocumentRuntimeResolver'.
+  Call signature return types '{ executable: string; source: string; pythonSitePackages: string; }' and 'DocumentRuntimeResolution' are incompatible.
+    The types of 'source' are incompatible between these types.
+      Type 'string' is not assignable to type 'RuntimeSource'.
+../core/src/tools/generate-document.test.ts(325,25): error TS2339: Property 'toLowerCase' does not exist on type 'PartListUnion'.
+  Property 'toLowerCase' does not exist on type 'Part'.
+../core/src/tools/generate-document.test.ts(467,25): error TS2339: Property 'toLowerCase' does not exist on type 'PartListUnion'.
+  Property 'toLowerCase' does not exist on type 'Part'.
+../core/src/tools/generate-document.test.ts(484,25): error TS2339: Property 'toLowerCase' does not exist on type 'PartListUnion'.
+  Property 'toLowerCase' does not exist on type 'Part'.
+../core/src/tools/generate-document.test.ts(664,9): error TS2322: Type '(_process: BrowserProcessHandle, force: boolean) => number' is not assignable to type '(processHandle: BrowserProcessHandle, force: boolean) => void | Promise<void>'.
+  Type 'number' is not assignable to type 'void | Promise<void>'.
+../core/src/tools/generate-document.test.ts(695,9): error TS2322: Type '(_process: BrowserProcessHandle, force: boolean) => number' is not assignable to type '(processHandle: BrowserProcessHandle, force: boolean) => void | Promise<void>'.
+  Type 'number' is not assignable to type 'void | Promise<void>'.
+../core/src/tools/generate-document.test.ts(725,9): error TS2322: Type '(_process: BrowserProcessHandle, force: boolean) => number' is not assignable to type '(processHandle: BrowserProcessHandle, force: boolean) => void | Promise<void>'.
+  Type 'number' is not assignable to type 'void | Promise<void>'.
+../core/src/tools/local-schedule.test.ts(103,31): error TS2345: Argument of type '{ action: "create"; startAt: string; }' is not assignable to parameter of type 'LocalScheduleToolParams'.
+  Property 'title' is missing in type '{ action: "create"; startAt: string; }' but required in type '{ action: "create"; title: string; startAt: string; endAt?: string | undefined; notes?: string | undefined; reason?: string | undefined; }'.
+../core/src/tools/meeting-actions.test.ts(43,10): error TS2554: Expected 1 arguments, but got 2.
+../core/src/tools/ppt/pptGenerateTool.test.ts(92,27): error TS2339: Property 'prompt' does not exist on type 'ToolCallConfirmationDetails'.
+  Property 'prompt' does not exist on type 'ToolEditConfirmationDetails'.
+../core/src/tools/ppt/pptGenerateTool.test.ts(93,27): error TS2339: Property 'prompt' does not exist on type 'ToolCallConfirmationDetails'.
+  Property 'prompt' does not exist on type 'ToolEditConfirmationDetails'.
+../core/src/tools/ppt/pptGenerateTool.test.ts(94,27): error TS2339: Property 'prompt' does not exist on type 'ToolCallConfirmationDetails'.
+  Property 'prompt' does not exist on type 'ToolEditConfirmationDetails'.
+../core/src/tools/ppt/pptGenerateTool.test.ts(95,27): error TS2339: Property 'prompt' does not exist on type 'ToolCallConfirmationDetails'.
+  Property 'prompt' does not exist on type 'ToolEditConfirmationDetails'.
+../core/src/tools/ppt/pptGenerateTool.test.ts(96,27): error TS2339: Property 'prompt' does not exist on type 'ToolCallConfirmationDetails'.
+  Property 'prompt' does not exist on type 'ToolEditConfirmationDetails'.
+../core/src/tools/toolEnvelope.test.ts(47,9): error TS2352: Conversion of type '{ type: "object"; properties: Record<string, unknown>; }' to type 'Schema' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'type' are incompatible.
+    Type '"object"' is not comparable to type 'Type | undefined'.
+../core/src/tools/use-skill.test.ts(43,36): error TS2339: Property 'loadEnabledSkills' does not exist on type '{}'.
+../core/src/tools/use-skill.test.ts(48,38): error TS2339: Property 'loadSkillLevel2' does not exist on type '{}'.
+preview/setup-preview.tsx(20,8): error TS2741: Property 'onSave' is missing in type '{ models: any; onClose: () => void; }' but required in type 'SetupPanelProps'.
+src/renderer/components/AccountManagementPage.tsx(174,14): error TS2488: Type 'NodeListOf<HTMLElement>' must have a '[Symbol.iterator]()' method that returns an iterator.
+src/renderer/runtime-import-boundary.test.ts(10,49): error TS1470: The 'import.meta' meta-property is not allowed in files which will build into CommonJS output.
+vitest.config.ts(25,65): error TS1470: The 'import.meta' meta-property is not allowed in files which will build into CommonJS output.
+../server/src/agentTurnTracker.test.ts(193,9): error TS2741: Property 'toolName' is missing in type '{ success: true; executionTime: number; }' but required in type 'ToolExecutionResult'.
+../server/src/agentTurnTracker.test.ts(323,12): error TS18048: 'snapshot.artifacts' is possibly 'undefined'.
+../server/src/authorizationBoundary.test.ts(42,60): error TS2345: Argument of type '{ type: "edit"; }' is not assignable to parameter of type 'ConfirmationDetails'.
+  Type '{ type: "edit"; }' is missing the following properties from type 'ToolEditConfirmationDetails': title, onConfirm, fileName, fileDiff, and 2 more.
+../server/src/authorizationBoundary.test.ts(45,7): error TS2353: Object literal may only specify known properties, and 'riskLevel' does not exist in type 'ToolExecuteConfirmationDetails'.
+../server/src/authorizationBoundary.test.ts(47,60): error TS2345: Argument of type '{ type: "exec"; warning: string; }' is not assignable to parameter of type 'ConfirmationDetails'.
+  Type '{ type: "exec"; warning: string; }' is missing the following properties from type 'ToolExecuteConfirmationDetails': title, onConfirm, command, rootCommand
+../server/src/authorizationBoundary.test.ts(51,60): error TS2345: Argument of type '{ type: "delete"; }' is not assignable to parameter of type 'ConfirmationDetails'.
+  Type '{ type: "delete"; }' is missing the following properties from type 'ToolDeleteConfirmationDetails': title, onConfirm, fileName, filePath, and 2 more.
+../server/src/authorizationBoundary.test.ts(52,60): error TS2345: Argument of type '{ type: "question"; }' is not assignable to parameter of type 'ConfirmationDetails'.
+  Type '{ type: "question"; }' is missing the following properties from type 'ToolQuestionConfirmationDetails': title, questions, onConfirm
+../server/src/authorizationBoundary.test.ts(53,60): error TS2345: Argument of type '{ type: "workflow"; }' is not assignable to parameter of type 'ConfirmationDetails'.
+  Type '{ type: "workflow"; }' is missing the following properties from type 'ToolWorkflowConfirmationDetails': title, description, phases, rawScript, onConfirm
+../server/src/authorizationPolicy.test.ts(9,48): error TS2345: Argument of type '{ type: "edit"; }' is not assignable to parameter of type 'ConfirmationDetails'.
+  Type '{ type: "edit"; }' is missing the following properties from type 'ToolEditConfirmationDetails': title, onConfirm, fileName, fileDiff, and 2 more.
+../server/src/authorizationPolicy.test.ts(13,46): error TS2345: Argument of type '{ type: "edit"; }' is not assignable to parameter of type 'ConfirmationDetails'.
+  Type '{ type: "edit"; }' is missing the following properties from type 'ToolEditConfirmationDetails': title, onConfirm, fileName, fileDiff, and 2 more.
+../server/src/authorizationPolicy.test.ts(14,62): error TS2353: Object literal may only specify known properties, and 'riskLevel' does not exist in type 'ToolExecuteConfirmationDetails'.
+../server/src/authorizationPolicy.test.ts(15,46): error TS2345: Argument of type '{ type: "exec"; warning: string; }' is not assignable to parameter of type 'ConfirmationDetails'.
+  Type '{ type: "exec"; warning: string; }' is missing the following properties from type 'ToolExecuteConfirmationDetails': title, onConfirm, command, rootCommand
+../server/src/authorizationPolicy.test.ts(16,46): error TS2345: Argument of type '{ type: "delete"; }' is not assignable to parameter of type 'ConfirmationDetails'.
+  Type '{ type: "delete"; }' is missing the following properties from type 'ToolDeleteConfirmationDetails': title, onConfirm, fileName, filePath, and 2 more.
+../server/src/authorizationPolicy.test.ts(17,46): error TS2345: Argument of type '{ type: "question"; }' is not assignable to parameter of type 'ConfirmationDetails'.
+  Type '{ type: "question"; }' is missing the following properties from type 'ToolQuestionConfirmationDetails': title, questions, onConfirm
+../server/src/channelPairingRoutes.test.ts(43,5): error TS2322: Type 'Mock<() => Promise<{ status: string; pairingId: string; provider: ChannelProvider; qrPayload: string; expiresAtMs: number; requestedScopes: readonly string[]; pollAfterMs: number; tenantName?: string | undefined; failureReason?: string | undefined; }>>' is not assignable to type '(pairingId: string, reason?: string | undefined) => Promise<PairingSession>'.
+  Type 'Promise<{ status: string; pairingId: string; provider: ChannelProvider; qrPayload: string; expiresAtMs: number; requestedScopes: readonly string[]; pollAfterMs: number; tenantName?: string | undefined; failureReason?: string | undefined; }>' is not assignable to type 'Promise<PairingSession>'.
+    Type '{ status: string; pairingId: string; provider: ChannelProvider; qrPayload: string; expiresAtMs: number; requestedScopes: readonly string[]; pollAfterMs: number; tenantName?: string; failureReason?: string; }' is not assignable to type 'PairingSession'.
+      Types of property 'status' are incompatible.
+        Type 'string' is not assignable to type 'PairingStatus'.
+../server/src/channelPairingRoutes.test.ts(45,5): error TS2322: Type 'Mock<() => Promise<{ installationId: string; running: boolean; state: string; reconnectCount: number; }>>' is not assignable to type '(installationId: string) => Promise<ChannelHealth>'.
+  Type 'Promise<{ installationId: string; running: boolean; state: string; reconnectCount: number; }>' is not assignable to type 'Promise<ChannelHealth>'.
+    Type '{ installationId: string; running: boolean; state: string; reconnectCount: number; }' is not assignable to type 'ChannelHealth'.
+      Types of property 'state' are incompatible.
+        Type 'string' is not assignable to type '"failed" | "revoked" | "connected" | "reconnecting" | "stopped"'.
+../server/src/channelPairingRoutes.test.ts(46,5): error TS2322: Type 'Mock<() => Promise<{ installationId: string; running: boolean; state: string; reconnectCount: number; }>>' is not assignable to type '(installationId: string) => Promise<ChannelHealth>'.
+  Type 'Promise<{ installationId: string; running: boolean; state: string; reconnectCount: number; }>' is not assignable to type 'Promise<ChannelHealth>'.
+    Type '{ installationId: string; running: boolean; state: string; reconnectCount: number; }' is not assignable to type 'ChannelHealth'.
+      Types of property 'state' are incompatible.
+        Type 'string' is not assignable to type '"failed" | "revoked" | "connected" | "reconnecting" | "stopped"'.
+../server/src/channelPairingRoutes.test.ts(48,5): error TS2322: Type 'Mock<() => Promise<{ installationId: string; running: boolean; state: string; reconnectCount: number; }>>' is not assignable to type '(installationId: string) => Promise<ChannelHealth>'.
+  Type 'Promise<{ installationId: string; running: boolean; state: string; reconnectCount: number; }>' is not assignable to type 'Promise<ChannelHealth>'.
+    Type '{ installationId: string; running: boolean; state: string; reconnectCount: number; }' is not assignable to type 'ChannelHealth'.
+      Types of property 'state' are incompatible.
+        Type 'string' is not assignable to type '"failed" | "revoked" | "connected" | "reconnecting" | "stopped"'.
+../server/src/channelPairingRoutes.test.ts(76,48): error TS2559: Type 'string' has no properties in common with type 'ProductWorkspaceStoreOptions'.
+../server/src/channelPairingRoutes.test.ts(295,49): error TS2559: Type 'string' has no properties in common with type 'ProductWorkspaceStoreOptions'.
+../server/src/channelPairingRoutes.test.ts(342,33): error TS2559: Type 'string' has no properties in common with type 'ProductWorkspaceStoreOptions'.
+../server/src/coreConfig.test.ts(80,7): error TS2741: Property 'providerConfigs' is missing in type '{ provider: "volcengine"; apiKey: string; apiUrl: string; model: string; }' but required in type 'SearchRuntimeConfig'.
+../server/src/customModels.test.ts(194,21): error TS2345: Argument of type '{ displayName: string; apiKey: string; provider: string; baseUrl: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(202,21): error TS2345: Argument of type '{ displayName: string; apiKey: string; provider: string; baseUrl: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(212,21): error TS2345: Argument of type '{ displayName: string; modelId: string; apiKey: string; provider: string; baseUrl: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(218,21): error TS2345: Argument of type '{ displayName: string; modelId: string; apiKey: string; provider: string; baseUrl: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(236,32): error TS2345: Argument of type '{ displayName: string; apiKey: string; provider: string; baseUrl: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(239,34): error TS2345: Argument of type '{ displayName: string; apiKey: string; provider: string; baseUrl: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(251,21): error TS2345: Argument of type '{ displayName: string; apiKey: string; provider: string; baseUrl: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(261,34): error TS2345: Argument of type '{ displayName: string; baseUrl: string; apiKey: string; provider: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(275,33): error TS2345: Argument of type '{ displayName: string; provider: string; baseUrl: string; apiKey: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(277,7): error TS2345: Argument of type '{ displayName: string; modelId: string; provider: string; baseUrl: string; apiKey: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(293,32): error TS2345: Argument of type '{ displayName: string; provider: string; baseUrl: string; apiKey: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(300,34): error TS2345: Argument of type '{ displayName: string; provider: string; baseUrl: string; apiKey: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(302,7): error TS2345: Argument of type '{ displayName: string; modelId: string; provider: string; baseUrl: string; apiKey: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(327,35): error TS2345: Argument of type '{ maxTokens: number; displayName: string; provider: string; baseUrl: string; apiKey: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(360,35): error TS2345: Argument of type '{ displayName: string; provider: string; baseUrl: string; apiKey: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(362,31): error TS2345: Argument of type '{ apiKey: string; displayName: string; provider: string; baseUrl: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(370,44): error TS2345: Argument of type '{ apiKey: string; displayName: string; provider: string; baseUrl: string; modelId: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(376,37): error TS2345: Argument of type '{ displayName: string; modelId: string; apiKey: string; provider: string; baseUrl: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(382,21): error TS2345: Argument of type '{ displayName: string; modelId: string; apiKey: string; provider: string; baseUrl: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/customModels.test.ts(391,46): error TS2345: Argument of type '{ displayName: string; modelId: string; apiKey: string; provider: string; baseUrl: string; }' is not assignable to parameter of type 'CustomModelConfig'.
+  Types of property 'provider' are incompatible.
+    Type 'string' is not assignable to type 'CustomModelProvider'.
+../server/src/dataGovernance.test.ts(156,22): error TS2352: Conversion of type '{ schemaVersion: number; exportedAt: string; requestId: string; account: Record<string, unknown>; employee: Record<string, unknown> | null; tags: Record<string, unknown>[]; legalConsents: Record<...>[]; ... 9 more ...; parkServiceRequests: Record<...>[]; }' to type '{ account: Record<string, unknown>; messages: { content: string; }[]; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'messages' are incompatible.
+    Type 'Record<string, unknown>[]' is not comparable to type '{ content: string; }[]'.
+      Property 'content' is missing in type 'Record<string, unknown>' but required in type '{ content: string; }'.
+../server/src/enterprise/clusteredServer.test.ts(887,5): error TS2322: Type 'Mock<() => Promise<{ departments: { id: string; organizationId: string; name: string; parentDepartmentId: null; memberCount: number; positions: { id: string; organizationId: string; departmentId: string; title: string; roleMapping: string; createdAt: string; updatedAt: string; }[]; createdAt: string; updatedAt: stri...' is not assignable to type '(organizationIdValue: string) => Promise<PostgresOrganizationStructureView>'.
+  Type 'Promise<{ departments: { id: string; organizationId: string; name: string; parentDepartmentId: null; memberCount: number; positions: { id: string; organizationId: string; departmentId: string; title: string; roleMapping: string; createdAt: string; updatedAt: string; }[]; createdAt: string; updatedAt: string; }[]; }>' is not assignable to type 'Promise<PostgresOrganizationStructureView>'.
+    Type '{ departments: { id: string; organizationId: string; name: string; parentDepartmentId: null; memberCount: number; positions: { id: string; organizationId: string; departmentId: string; title: string; roleMapping: string; createdAt: string; updatedAt: string; }[]; createdAt: string; updatedAt: string; }[]; }' is not assignable to type 'PostgresOrganizationStructureView'.
+      Types of property 'departments' are incompatible.
+        Type '{ id: string; organizationId: string; name: string; parentDepartmentId: null; memberCount: number; positions: { id: string; organizationId: string; departmentId: string; title: string; roleMapping: string; createdAt: string; updatedAt: string; }[]; createdAt: string; updatedAt: string; }[]' is not assignable to type '{ id: string; organizationId: string; name: string; parentDepartmentId: string | null; memberCount: number; positions: { id: string; organizationId: string; departmentId: string; title: string; roleMapping: OrganizationPositionRoleMapping; createdAt: string; updatedAt: string; }[]; createdAt: string; updatedAt: stri...'.
+          Type '{ id: string; organizationId: string; name: string; parentDepartmentId: null; memberCount: number; positions: { id: string; organizationId: string; departmentId: string; title: string; roleMapping: string; createdAt: string; updatedAt: string; }[]; createdAt: string; updatedAt: string; }' is not assignable to type '{ id: string; organizationId: string; name: string; parentDepartmentId: string | null; memberCount: number; positions: { id: string; organizationId: string; departmentId: string; title: string; roleMapping: OrganizationPositionRoleMapping; createdAt: string; updatedAt: string; }[]; createdAt: string; updatedAt: stri...'.
+            Types of property 'positions' are incompatible.
+              Type '{ id: string; organizationId: string; departmentId: string; title: string; roleMapping: string; createdAt: string; updatedAt: string; }[]' is not assignable to type '{ id: string; organizationId: string; departmentId: string; title: string; roleMapping: OrganizationPositionRoleMapping; createdAt: string; updatedAt: string; }[]'.
+                Type '{ id: string; organizationId: string; departmentId: string; title: string; roleMapping: string; createdAt: string; updatedAt: string; }' is not assignable to type '{ id: string; organizationId: string; departmentId: string; title: string; roleMapping: OrganizationPositionRoleMapping; createdAt: string; updatedAt: string; }'.
+                  Types of property 'roleMapping' are incompatible.
+                    Type 'string' is not assignable to type 'OrganizationPositionRoleMapping'.
+../server/src/enterprise/clusteredServer.test.ts(975,5): error TS2322: Type 'Mock<() => Promise<PostgresBusinessRecord<Record<string, unknown>>[]>>' is not assignable to type '<T = Record<string, unknown>>(adminOrganizationIdValue: string) => Promise<PostgresBusinessRecord<T>[]>'.
+  Type 'Promise<PostgresBusinessRecord<Record<string, unknown>>[]>' is not assignable to type 'Promise<PostgresBusinessRecord<T>[]>'.
+    Type 'PostgresBusinessRecord<Record<string, unknown>>[]' is not assignable to type 'PostgresBusinessRecord<T>[]'.
+      Type 'PostgresBusinessRecord<Record<string, unknown>>' is not assignable to type 'PostgresBusinessRecord<T>'.
+        Type 'Record<string, unknown>' is not assignable to type 'T'.
+          'T' could be instantiated with an arbitrary type which could be unrelated to 'Record<string, unknown>'.
+../server/src/enterprise/clusteredServer.test.ts(976,5): error TS2322: Type 'Mock<(organizationId: string) => Promise<{ id: string; name: string; slug: string; parkId: string; status: "active"; createdAt: string; updatedAt: string; } | { id: string; name: string; slug: string; parkId: null; status: "active"; createdAt: string; updatedAt: string; } | null>>' is not assignable to type '(id: string) => Promise<PostgresEnterpriseOrganizationView | null>'.
+  Type 'Promise<{ id: string; name: string; slug: string; parkId: string; status: "active"; createdAt: string; updatedAt: string; } | { id: string; name: string; slug: string; parkId: null; status: "active"; createdAt: string; updatedAt: string; } | null>' is not assignable to type 'Promise<PostgresEnterpriseOrganizationView | null>'.
+    Type '{ id: string; name: string; slug: string; parkId: string; status: "active"; createdAt: string; updatedAt: string; } | { id: string; name: string; slug: string; parkId: null; status: "active"; createdAt: string; updatedAt: string; } | null' is not assignable to type 'PostgresEnterpriseOrganizationView | null'.
+      Property 'type' is missing in type '{ id: string; name: string; slug: string; parkId: string; status: "active"; createdAt: string; updatedAt: string; }' but required in type 'PostgresEnterpriseOrganizationView'.
+../server/src/enterprise/clusteredServer.test.ts(1155,41): error TS2345: Argument of type '{ organizationId: string; domain: string; resourceType: string; resourceId: string; }' is not assignable to parameter of type '{ organizationId: string; domain: "park" | "knowledge" | "skills" | "commercial_control" | "data_governance" | "ticketing"; resourceType: string; resourceId: string; }'.
+  Types of property 'domain' are incompatible.
+    Type 'string' is not assignable to type '"park" | "knowledge" | "skills" | "commercial_control" | "data_governance" | "ticketing"'.
+../server/src/enterprise/clusteredServer.test.ts(1254,7): error TS2322: Type 'Mock<() => Promise<PostgresBusinessRecord<Record<string, unknown>>[]>>' is not assignable to type '<T = Record<string, unknown>>(adminOrganizationIdValue: string) => Promise<PostgresBusinessRecord<T>[]>'.
+  Type 'Promise<PostgresBusinessRecord<Record<string, unknown>>[]>' is not assignable to type 'Promise<PostgresBusinessRecord<T>[]>'.
+    Type 'PostgresBusinessRecord<Record<string, unknown>>[]' is not assignable to type 'PostgresBusinessRecord<T>[]'.
+      Type 'PostgresBusinessRecord<Record<string, unknown>>' is not assignable to type 'PostgresBusinessRecord<T>'.
+        Type 'Record<string, unknown>' is not assignable to type 'T'.
+          'T' could be instantiated with an arbitrary type which could be unrelated to 'Record<string, unknown>'.
+../server/src/enterprise/db.test.ts(477,14): error TS18047: 'migratedLinkedEmployee' is possibly 'null'.
+../server/src/enterprise/db.upgrade-1.9.13.test.ts(135,54): error TS2561: Object literal may only specify known properties, but 'readonly' does not exist in type '{ readOnly?: boolean | undefined; }'. Did you mean to write 'readOnly'?
+../server/src/enterprise/db.upgrade-1.9.13.test.ts(153,49): error TS2561: Object literal may only specify known properties, but 'readonly' does not exist in type '{ readOnly?: boolean | undefined; }'. Did you mean to write 'readOnly'?
+../server/src/enterprise/db.upgrade-1.9.13.test.ts(358,52): error TS2561: Object literal may only specify known properties, but 'readonly' does not exist in type '{ readOnly?: boolean | undefined; }'. Did you mean to write 'readOnly'?
+../server/src/enterprise/db.upgrade-1.9.13.test.ts(405,49): error TS2561: Object literal may only specify known properties, but 'readonly' does not exist in type '{ readOnly?: boolean | undefined; }'. Did you mean to write 'readOnly'?
+../server/src/enterprise/gracefulShutdown.test.ts(24,7): error TS2322: Type '{ close: (callback: (error?: Error) => void) => ...; closeAllConnections: Mock<Procedure>; }' is not assignable to type 'Pick<Server<typeof IncomingMessage, typeof ServerResponse>, "close" | "closeAllConnections">'.
+  The types returned by 'close(...)' are incompatible between these types.
+    Type '{ close: (callback: (error?: Error | undefined) => void) => ...; closeAllConnections: Mock<Procedure>; }' is missing the following properties from type 'Server<typeof IncomingMessage, typeof ServerResponse>': setTimeout, maxHeadersCount, maxRequestsPerSocket, timeout, and 29 more.
+../server/src/enterprise/gracefulShutdown.test.ts(47,9): error TS2322: Type '{ close: (callback: (error?: Error) => void) => ...; closeAllConnections: Mock<Procedure>; }' is not assignable to type 'Pick<Server<typeof IncomingMessage, typeof ServerResponse>, "close" | "closeAllConnections">'.
+  The types returned by 'close(...)' are incompatible between these types.
+    Type '{ close: (callback: (error?: Error | undefined) => void) => ...; closeAllConnections: Mock<Procedure>; }' is missing the following properties from type 'Server<typeof IncomingMessage, typeof ServerResponse>': setTimeout, maxHeadersCount, maxRequestsPerSocket, timeout, and 29 more.
+../server/src/enterprise/postgresAttachmentImport.test.ts(76,5): error TS2322: Type 'Mock<(sql: string, values?: readonly unknown[]) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; state: string; }> | PostgresQueryResult<...> | PostgresQueryResult<...>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; state: string; }> | PostgresQueryResult<{ table_name: string; column_names: string[]; source_row_count: number; copied_row_count: number; state: string; }> | PostgresQueryResult<...>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; state: string; }> | PostgresQueryResult<{ table_name: string; column_names: string[]; source_row_count: number; copied_row_count: number; state: string; }> | PostgresQueryResult<...>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresBusinessRepository.test.ts(26,7): error TS2322: Type 'Mock<(sql: string, values?: readonly unknown[]) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ organization_id: string; ... 8 more ...; updated_at: Date; }>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ organization_id: string; account_id: string; ... 7 more ...; updated_at: Date; }>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ organization_id: string; account_id: string; ... 7 more ...; updated_at: Date; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(172,7): error TS2322: Type 'Mock<(sql: string) => Promise<PostgresQueryResult<{ id: string; organization_id: string; name: string; member_count: string; created_at: Date; updated_at: Date; }> | PostgresQueryResult<...>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<{ id: string; organization_id: string; name: string; member_count: string; created_at: Date; updated_at: Date; }> | PostgresQueryResult<{ id: string; ... 5 more ...; updated_at: Date; }>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<{ id: string; organization_id: string; name: string; member_count: string; created_at: Date; updated_at: Date; }> | PostgresQueryResult<{ id: string; ... 5 more ...; updated_at: Date; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<{ id: string; organization_id: string; name: string; member_count: string; created_at: Date; updated_at: Date; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type '{ id: string; organization_id: string; name: string; member_count: string; created_at: Date; updated_at: Date; }' is not assignable to type 'Row'.
+          '{ id: string; organization_id: string; name: string; member_count: string; created_at: Date; updated_at: Date; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(230,7): error TS2322: Type 'Mock<() => Promise<PostgresQueryResult<{ document_id: "privacy" | "terms"; document_version: string; policy_hash: string; accepted_at: Date; }>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<{ document_id: "privacy" | "terms"; document_version: string; policy_hash: string; accepted_at: Date; }>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<{ document_id: "privacy" | "terms"; document_version: string; policy_hash: string; accepted_at: Date; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type '{ document_id: "privacy" | "terms"; document_version: string; policy_hash: string; accepted_at: Date; }' is not assignable to type 'Row'.
+        '{ document_id: "privacy" | "terms"; document_version: string; policy_hash: string; accepted_at: Date; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(263,7): error TS2322: Type 'Mock<(sql: string, values?: readonly unknown[]) => Promise<PostgresQueryResult<Record<string, unknown>>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'Record<string, unknown>' is not assignable to type 'Row'.
+        'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(379,7): error TS2322: Type 'Mock<(sql: string, values?: readonly unknown[]) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(444,7): error TS2322: Type 'Mock<(sql: string, values?: readonly unknown[]) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<{ ...; }>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<{ peer_account_id: string; }>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<{ peer_account_id: string; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(497,7): error TS2322: Type 'Mock<(sql: string, values?: readonly unknown[]) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<{ ...; }>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<{ key_package_reference: string; expires_at: Date; }>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<{ key_package_reference: string; expires_at: Date; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(559,7): error TS2322: Type 'Mock<(sql: string) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<{ claimed_at: null; }>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<{ claimed_at: null; }>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<{ claimed_at: null; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(608,7): error TS2322: Type 'Mock<(sql: string, values?: readonly unknown[]) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(812,7): error TS2322: Type 'Mock<(sql: string, values?: readonly unknown[]) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(949,7): error TS2322: Type 'Mock<(sql: string) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; }> | PostgresQueryResult<{ available: number; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(992,7): error TS2322: Type 'Mock<(sql: string) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ locked: boolean; }> | PostgresQueryResult<{ sequence: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ locked: boolean; }> | PostgresQueryResult<{ sequence: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ locked: boolean; }> | PostgresQueryResult<{ sequence: number; }> | PostgresQueryResult<...> | PostgresQueryResult<...> | PostgresQueryResult<...>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(1091,7): error TS2322: Type 'Mock<(sql: string, values?: readonly unknown[]) => Promise<PostgresQueryResult<{ retry_after_seconds: number; }>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<{ retry_after_seconds: number; }>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<{ retry_after_seconds: number; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type '{ retry_after_seconds: number; }' is not assignable to type 'Row'.
+        '{ retry_after_seconds: number; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(1112,7): error TS2322: Type 'Mock<(sql: string) => Promise<PostgresQueryResult<{ id: string; organization_id: string; storage_key: string; ciphertext_bytes: number; }>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<{ id: string; organization_id: string; storage_key: string; ciphertext_bytes: number; }>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<{ id: string; organization_id: string; storage_key: string; ciphertext_bytes: number; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type '{ id: string; organization_id: string; storage_key: string; ciphertext_bytes: number; }' is not assignable to type 'Row'.
+        '{ id: string; organization_id: string; storage_key: string; ciphertext_bytes: number; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(1149,7): error TS2322: Type 'Mock<(sql: string) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; name: string; slug: string; type: string; status: string; park_id: null; created_at: Date; updated_at: Date; }>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; name: string; slug: string; type: string; status: string; park_id: null; created_at: Date; updated_at: Date; }>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; name: string; slug: string; type: string; status: string; park_id: null; created_at: Date; updated_at: Date; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(1196,7): error TS2322: Type 'Mock<(sql: string) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; name: string; slug: string; type: string; status: string; park_id: null; created_at: Date; updated_at: Date; }>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; name: string; slug: string; type: string; status: string; park_id: null; created_at: Date; updated_at: Date; }>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; name: string; slug: string; type: string; status: string; park_id: null; created_at: Date; updated_at: Date; }>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresCoreRepository.test.ts(1240,7): error TS2322: Type 'Mock<(sql: string) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; name: string; slug: string; type: string; status: string; park_id: null; created_at: Date; updated_at: Date; }> | PostgresQueryResult<...>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; name: string; slug: string; type: string; status: string; park_id: null; created_at: Date; updated_at: Date; }> | PostgresQueryResult<...>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; name: string; slug: string; type: string; status: string; park_id: null; created_at: Date; updated_at: Date; }> | PostgresQueryResult<...>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresLicenseSeatAdmission.test.ts(39,5): error TS2322: Type 'Mock<(sql: string) => Promise<{ rows: { version: number; payload: { signedEnvelope: { payload: Record<string, unknown> | { organizationId: string; seatLimit: number; expiresAt: string; }; signature: string; }; }; }[]; rowCount: number; } | { ...; } | { ...; }>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<{ rows: { version: number; payload: { signedEnvelope: { payload: Record<string, unknown> | { organizationId: string; seatLimit: number; expiresAt: string; }; signature: string; }; }; }[]; rowCount: number; } | { ...; } | { ...; }>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type '{ rows: { version: number; payload: { signedEnvelope: { payload: Record<string, unknown> | { organizationId: string; seatLimit: number; expiresAt: string; }; signature: string; }; }; }[]; rowCount: number; } | { ...; } | { ...; }' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type '{ rows: { version: number; payload: { signedEnvelope: { payload: Record<string, unknown> | { organizationId: string; seatLimit: number; expiresAt: string; }; signature: string; }; }; }[]; rowCount: number; }' is not assignable to type 'PostgresQueryResult<Row>'.
+        Types of property 'rows' are incompatible.
+          Type '{ version: number; payload: { signedEnvelope: { payload: Record<string, unknown> | { organizationId: string; seatLimit: number; expiresAt: string; }; signature: string; }; }; }[]' is not assignable to type 'Row[]'.
+            Type '{ version: number; payload: { signedEnvelope: { payload: Record<string, unknown> | { organizationId: string; seatLimit: number; expiresAt: string; }; signature: string; }; }; }' is not assignable to type 'Row'.
+              '{ version: number; payload: { signedEnvelope: { payload: Record<string, unknown> | { organizationId: string; seatLimit: number; expiresAt: string; }; signature: string; }; }; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresPromotion.test.ts(39,5): error TS2322: Type 'Mock<(sql: string, values?: readonly unknown[]) => Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; state: string; }> | ... 5 more ... | PostgresQueryResult<...>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; state: string; }> | PostgresQueryResult<{ accounts: number; messages: number; ... 6 more ...; non_default_organizations: number; }> | ... 4 more ... | PostgresQueryResult<...>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>> | PostgresQueryResult<{ id: string; state: string; }> | PostgresQueryResult<{ accounts: number; messages: number; ... 6 more ...; non_default_organizations: number; }> | ... 4 more ... | PostgresQueryResult<...>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+        Type 'Record<string, unknown>' is not assignable to type 'Row'.
+          'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/postgresRegistrationRepository.test.ts(31,5): error TS2322: Type 'Mock<(sql: string, values?: readonly unknown[]) => Promise<PostgresQueryResult<Record<string, unknown>>>>' is not assignable to type '<Row extends Record<string, unknown> = Record<string, unknown>>(sql: string, values?: readonly unknown[] | undefined) => Promise<PostgresQueryResult<Row>>'.
+  Type 'Promise<PostgresQueryResult<Record<string, unknown>>>' is not assignable to type 'Promise<PostgresQueryResult<Row>>'.
+    Type 'PostgresQueryResult<Record<string, unknown>>' is not assignable to type 'PostgresQueryResult<Row>'.
+      Type 'Record<string, unknown>' is not assignable to type 'Row'.
+        'Record<string, unknown>' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/enterprise/server.test.ts(41,14): error TS2339: Property 'export' does not exist on type 'string | NonSharedBuffer | KeyObject | JsonWebKey'.
+  Property 'export' does not exist on type 'string'.
+../server/src/enterprise/server.test.ts(126,7): error TS2345: Argument of type 'string | NonSharedBuffer | KeyObject | JsonWebKey' is not assignable to parameter of type 'KeyLike | SignKeyObjectInput | SignPrivateKeyInput | SignJsonWebKeyInput'.
+  Type 'JsonWebKey' is not assignable to type 'KeyLike | SignKeyObjectInput | SignPrivateKeyInput | SignJsonWebKeyInput'.
+../server/src/enterprise/server.test.ts(749,22): error TS2352: Conversion of type '(request: IncomingMessage, response: ServerResponse<IncomingMessage> & { req: IncomingMessage; }) => void' to type '(req: Record<string, unknown>, res: Record<string, unknown>) => Promise<void>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of parameters 'request' and 'req' are incompatible.
+    Type 'Record<string, unknown>' is missing the following properties from type 'IncomingMessage': aborted, httpVersion, httpVersionMajor, httpVersionMinor, and 67 more.
+../server/src/enterprise/server.test.ts(3063,13): error TS2345: Argument of type 'string | NonSharedBuffer | KeyObject | JsonWebKey' is not assignable to parameter of type 'KeyLike | SignKeyObjectInput | SignPrivateKeyInput | SignJsonWebKeyInput'.
+  Type 'JsonWebKey' is not assignable to type 'KeyLike | SignKeyObjectInput | SignPrivateKeyInput | SignJsonWebKeyInput'.
+../server/src/enterprise/server.test.ts(4528,22): error TS2353: Object literal may only specify known properties, and 'channel' does not exist in type '{ send(phone: string, title: string, body: string): Promise<boolean>; }'.
+../server/src/enterprise/server.test.ts(4732,22): error TS2353: Object literal may only specify known properties, and 'channel' does not exist in type '{ send(phone: string, title: string, body: string): Promise<boolean>; }'.
+../server/src/enterpriseKnowledge.test.ts(469,32): error TS18047: 'evidence' is possibly 'null'.
+../server/src/enterpriseKnowledge.test.ts(472,32): error TS18047: 'evidence' is possibly 'null'.
+../server/src/feishu/feishuAdapter.test.ts(279,65): error TS2741: Property 'resolveToolConfirmation' is missing in type '{ run(input: MessageContent, source: MessageSource): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<...>; }' but required in type 'SessionRuntime'.
+../server/src/feishu/feishuAdapter.test.ts(336,9): error TS2741: Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/feishu/feishuAdapter.test.ts(429,11): error TS2741: Property 'resolveToolConfirmation' is missing in type '{ run(input: MessageContent): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/feishu/feishuAdapter.test.ts(472,40): error TS2352: Conversion of type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' to type 'SessionRuntime' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/feishu/feishuAdapter.test.ts(500,40): error TS2352: Conversion of type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' to type 'SessionRuntime' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/feishu/feishuAdapter.test.ts(590,40): error TS2352: Conversion of type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' to type 'SessionRuntime' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/feishu/feishuAdapter.test.ts(642,8): error TS2454: Variable 'appFrames' is used before being assigned.
+../server/src/identityOrganizationAccountLifecycle.test.ts(151,5): error TS2353: Object literal may only specify known properties, and 'normalizeTags' does not exist in type 'AccountLifecycleRepositoryStore<TestAccountView>'.
+../server/src/identityOrganizationAccountLifecycle.test.ts(151,21): error TS7006: Parameter 'tags' implicitly has an 'any' type.
+../server/src/identityOrganizationAccountLifecycle.test.ts(153,38): error TS7006: Parameter 'tag' implicitly has an 'any' type.
+../server/src/identityOrganizationFeatures.test.ts(120,29): error TS2345: Argument of type '() => never' is not assignable to parameter of type 'Mock<Procedure>'.
+  Type '() => never' is missing the following properties from type 'Mock<Procedure>': getMockName, mockName, mock, mockClear, and 14 more.
+../server/src/identityOrganizationRoutes.test.ts(23,5): error TS2322: Type 'Mock<() => { enterprise_tree: boolean; park_service: boolean; feishu_auto_reply: boolean; direct_messages: boolean; atoa: boolean; knowledge: boolean; skill_market: boolean; }>' is not assignable to type '(organizationId: string) => OrganizationFeatures'.
+  Property 'model_gateway' is missing in type '{ enterprise_tree: boolean; park_service: boolean; feishu_auto_reply: boolean; direct_messages: boolean; atoa: boolean; knowledge: boolean; skill_market: boolean; }' but required in type 'OrganizationFeatures'.
+../server/src/identityOrganizationRoutes.test.ts(24,5): error TS2322: Type 'Mock<() => { enterprise_tree: boolean; park_service: boolean; feishu_auto_reply: boolean; direct_messages: boolean; atoa: boolean; knowledge: boolean; skill_market: boolean; }>' is not assignable to type '(organizationId: string) => OrganizationFeatures'.
+  Property 'model_gateway' is missing in type '{ enterprise_tree: boolean; park_service: boolean; feishu_auto_reply: boolean; direct_messages: boolean; atoa: boolean; knowledge: boolean; skill_market: boolean; }' but required in type 'OrganizationFeatures'.
+../server/src/identityOrganizationRoutes.test.ts(25,5): error TS2322: Type 'Mock<() => { configured: { enterprise_tree: boolean; park_service: boolean; feishu_auto_reply: boolean; direct_messages: boolean; atoa: boolean; knowledge: boolean; skill_market: boolean; }; entitled: { ...; }; effective: { ...; }; }>' is not assignable to type '(organizationId: string) => OrganizationFeatureState'.
+  Call signature return types '{ configured: { enterprise_tree: boolean; park_service: boolean; feishu_auto_reply: boolean; direct_messages: boolean; atoa: boolean; knowledge: boolean; skill_market: boolean; }; entitled: { ...; }; effective: { ...; }; }' and 'OrganizationFeatureState' are incompatible.
+    The types of 'configured' are incompatible between these types.
+      Property 'model_gateway' is missing in type '{ enterprise_tree: boolean; park_service: boolean; feishu_auto_reply: boolean; direct_messages: boolean; atoa: boolean; knowledge: boolean; skill_market: boolean; }' but required in type 'OrganizationFeatures'.
+../server/src/identityOrganizationRoutes.test.ts(30,5): error TS2322: Type 'Mock<(_organizationId: any, patch: any) => { enterprise_tree: boolean; park_service: boolean; feishu_auto_reply: boolean; direct_messages: boolean; atoa: boolean; knowledge: any; skill_market: boolean; }>' is not assignable to type '(organizationId: string, patch: Partial<OrganizationFeatures>) => OrganizationFeatures'.
+  Property 'model_gateway' is missing in type '{ enterprise_tree: boolean; park_service: boolean; feishu_auto_reply: boolean; direct_messages: boolean; atoa: boolean; knowledge: any; skill_market: boolean; }' but required in type 'OrganizationFeatures'.
+../server/src/identityOrganizationRoutes.test.ts(65,5): error TS2322: Type '{ kind: "system" | "account"; organizationId: string; } | null' is not assignable to type 'OrganizationRouteAdminPrincipal | null'.
+  Type '{ kind: "system" | "account"; organizationId: string; }' is not assignable to type 'OrganizationRouteAdminPrincipal | null'.
+    Type '{ kind: "system" | "account"; organizationId: string; }' is not assignable to type '{ kind: "system"; organizationId: string; } | { kind: "account"; organizationId: string; account: OrganizationRouteMemberAccount; }'.
+      Property 'account' is missing in type '{ kind: "system" | "account"; organizationId: string; }' but required in type '{ kind: "account"; organizationId: string; account: OrganizationRouteMemberAccount; }'.
+../server/src/identityOrganizationStructure.test.ts(397,31): error TS2345: Argument of type '() => never' is not assignable to parameter of type 'Mock<Procedure>'.
+  Type '() => never' is missing the following properties from type 'Mock<Procedure>': getMockName, mockName, mock, mockClear, and 14 more.
+../server/src/mcpManagement.test.ts(284,19): error TS2345: Argument of type '() => Promise<undefined>' is not assignable to parameter of type '(url: URL) => Promise<PublicMcpEndpoint>'.
+  Type 'Promise<undefined>' is not assignable to type 'Promise<PublicMcpEndpoint>'.
+    Type 'undefined' is not assignable to type 'PublicMcpEndpoint'.
+../server/src/mcpServerSecurity.test.ts(61,32): error TS2322: Type 'Map<any, any>' is not assignable to type 'Map<string, never>'.
+  Type 'any' is not assignable to type 'never'.
+../server/src/modules/collaboration/e2eeRepository.test.ts(25,14): error TS2339: Property 'export' does not exist on type 'string | NonSharedBuffer | KeyObject | JsonWebKey'.
+  Property 'export' does not exist on type 'string'.
+../server/src/modules/collaboration/e2eeRepository.test.ts(119,9): error TS2345: Argument of type 'string | NonSharedBuffer | KeyObject | JsonWebKey' is not assignable to parameter of type 'KeyLike | SignKeyObjectInput | SignPrivateKeyInput | SignJsonWebKeyInput'.
+  Type 'JsonWebKey' is not assignable to type 'KeyLike | SignKeyObjectInput | SignPrivateKeyInput | SignJsonWebKeyInput'.
+../server/src/modules/collaboration/e2eeRepository.test.ts(158,9): error TS2345: Argument of type 'string | NonSharedBuffer | KeyObject | JsonWebKey' is not assignable to parameter of type 'KeyLike | SignKeyObjectInput | SignPrivateKeyInput | SignJsonWebKeyInput'.
+  Type 'JsonWebKey' is not assignable to type 'KeyLike | SignKeyObjectInput | SignPrivateKeyInput | SignJsonWebKeyInput'.
+../server/src/modules/commercial_control/billingAdmissionRepository.test.ts(71,24): error TS2558: Expected 0 type arguments, but got 1.
+../server/src/modules/commercial_control/billingAdmissionRepository.test.ts(90,33): error TS2558: Expected 0 type arguments, but got 1.
+../server/src/modules/commercial_control/billingAdmissionRepository.test.ts(112,31): error TS2558: Expected 0 type arguments, but got 1.
+../server/src/modules/commercial_control/billingAdmissionRepository.test.ts(141,31): error TS2558: Expected 0 type arguments, but got 1.
+../server/src/modules/commercial_control/billingAdmissionRepository.test.ts(159,32): error TS2558: Expected 0 type arguments, but got 1.
+../server/src/modules/commercial_control/billingAdmissionRepository.test.ts(171,32): error TS2558: Expected 0 type arguments, but got 1.
+../server/src/modules/commercial_control/billingAdmissionRepository.test.ts(199,32): error TS2558: Expected 0 type arguments, but got 1.
+../server/src/modules/commercial_control/billingAdmissionRepository.test.ts(241,32): error TS2558: Expected 0 type arguments, but got 1.
+../server/src/modules/commercial_control/billingAdmissionRepository.test.ts(275,32): error TS2558: Expected 0 type arguments, but got 1.
+../server/src/modules/commercial_control/billingAdmissionRepository.test.ts(494,24): error TS2558: Expected 0 type arguments, but got 1.
+../server/src/modules/commercial_control/billingUsageRepository.test.ts(468,31): error TS2339: Property 'mock' does not exist on type '{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; }'.
+../server/src/modules/commercial_control/billingUsageRepository.test.ts(552,51): error TS2339: Property 'mock' does not exist on type '{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; }'.
+../server/src/modules/commercial_control/deploymentRoutes.test.ts(48,40): error TS2345: Argument of type '{ path: string; method: string; req: IncomingMessage; res: ServerResponse; url: URL; principal: null; memberPrincipal: { organizationId: string; } | null; services: DeploymentRouteServices; readBody: Mock<...>; sendJSON: Mock<...>; }' is not assignable to parameter of type 'DeploymentRouteDeps'.
+  Property 'runtime' is missing in type '{ path: string; method: string; req: IncomingMessage; res: ServerResponse; url: URL; principal: null; memberPrincipal: { organizationId: string; } | null; services: DeploymentRouteServices; readBody: Mock<...>; sendJSON: Mock<...>; }' but required in type 'DeploymentRouteDeps'.
+../server/src/modules/commercial_control/deploymentRoutes.test.ts(58,40): error TS2345: Argument of type '{ path: string; method: string; req: IncomingMessage; res: ServerResponse; url: URL; principal: null; memberPrincipal: { organizationId: string; } | null; services: DeploymentRouteServices; readBody: Mock<...>; sendJSON: Mock<...>; }' is not assignable to parameter of type 'DeploymentRouteDeps'.
+  Property 'runtime' is missing in type '{ path: string; method: string; req: IncomingMessage; res: ServerResponse; url: URL; principal: null; memberPrincipal: { organizationId: string; } | null; services: DeploymentRouteServices; readBody: Mock<...>; sendJSON: Mock<...>; }' but required in type 'DeploymentRouteDeps'.
+../server/src/modules/control_commands/controlCommandHttp.test.ts(98,20): error TS2339: Property 'receipt' does not exist on type 'Promise<{ receipt: ControlCommandReceipt; }> | { receipt: ControlCommandReceipt; }'.
+  Property 'receipt' does not exist on type 'Promise<{ receipt: ControlCommandReceipt; }>'.
+../server/src/modules/control_commands/controlCommandHttp.test.ts(99,17): error TS2339: Property 'receipt' does not exist on type 'Promise<{ receipt: ControlCommandReceipt; }> | { receipt: ControlCommandReceipt; }'.
+  Property 'receipt' does not exist on type 'Promise<{ receipt: ControlCommandReceipt; }>'.
+../server/src/modules/control_commands/controlCommandHttp.test.ts(100,19): error TS2339: Property 'receipt' does not exist on type 'Promise<{ receipt: ControlCommandReceipt; }> | { receipt: ControlCommandReceipt; }'.
+  Property 'receipt' does not exist on type 'Promise<{ receipt: ControlCommandReceipt; }>'.
+../server/src/modules/control_commands/controlCommandHttp.test.ts(207,79): error TS2339: Property 'receipt' does not exist on type 'Promise<{ receipt: ControlCommandReceipt; }> | { receipt: ControlCommandReceipt; }'.
+  Property 'receipt' does not exist on type 'Promise<{ receipt: ControlCommandReceipt; }>'.
+../server/src/modules/data_governance/diagnosticPackage.test.ts(64,3): error TS2741: Property 'appendDeletionTombstone' is missing in type '{ db: () => NodeSqliteDatabase; now: () => number; createId: () => string; createDeletionPasswordHash: () => string; }' but required in type 'DataGovernanceRepositoryStore'.
+../server/src/modules/data_platform/attachmentObjectStoreRuntime.test.ts(15,3): error TS2322: Type 'Mock<() => { backend: string; key: string; }>' is not assignable to type '(input: { namespace: string; objectId: string; content: Buffer<ArrayBufferLike>; }) => { backend: "encrypted-filesystem"; key: string; }'.
+  Call signature return types '{ backend: string; key: string; }' and '{ backend: "encrypted-filesystem"; key: string; }' are incompatible.
+    The types of 'backend' are incompatible between these types.
+      Type 'string' is not assignable to type '"encrypted-filesystem"'.
+../server/src/modules/data_platform/attachmentStorageService.test.ts(133,5): error TS2322: Type 'Mock<() => Promise<{ method: string; url: string; expiresInSeconds: number; requiredHeaders: {}; }>>' is not assignable to type '(input: { key: string; uploadId: string; partNumber: number; ciphertextBytes: number; ciphertextSha256: string; }) => Promise<AttachmentPresignedRequest>'.
+  Type 'Promise<{ method: string; url: string; expiresInSeconds: number; requiredHeaders: {}; }>' is not assignable to type 'Promise<AttachmentPresignedRequest>'.
+    Type '{ method: string; url: string; expiresInSeconds: number; requiredHeaders: {}; }' is not assignable to type 'AttachmentPresignedRequest'.
+      Types of property 'method' are incompatible.
+        Type 'string' is not assignable to type '"GET" | "PUT"'.
+../server/src/modules/data_platform/attachmentStorageService.test.ts(146,5): error TS2322: Type 'Mock<() => Promise<{ method: string; url: string; expiresInSeconds: number; requiredHeaders: {}; }>>' is not assignable to type '(input: { key: string; expiresInSeconds?: number | undefined; }) => Promise<AttachmentPresignedRequest>'.
+  Type 'Promise<{ method: string; url: string; expiresInSeconds: number; requiredHeaders: {}; }>' is not assignable to type 'Promise<AttachmentPresignedRequest>'.
+    Type '{ method: string; url: string; expiresInSeconds: number; requiredHeaders: {}; }' is not assignable to type 'AttachmentPresignedRequest'.
+      Types of property 'method' are incompatible.
+        Type 'string' is not assignable to type '"GET" | "PUT"'.
+../server/src/modules/data_platform/attachmentStorageService.test.ts(394,7): error TS2322: Type 'Mock<() => Promise<{ backend: string; key: string; ciphertextBytes: number; ciphertextSha256: string; }>>' is not assignable to type '(key: string) => Promise<AttachmentObjectLocation>'.
+  Type 'Promise<{ backend: string; key: string; ciphertextBytes: number; ciphertextSha256: string; }>' is not assignable to type 'Promise<AttachmentObjectLocation>'.
+    Type '{ backend: string; key: string; ciphertextBytes: number; ciphertextSha256: string; }' is not assignable to type 'AttachmentObjectLocation'.
+      Types of property 'backend' are incompatible.
+        Type 'string' is not assignable to type 'AttachmentObjectBackend'.
+../server/src/modules/data_platform/attachmentStorageService.test.ts(530,7): error TS2322: Type 'Mock<(key: any) => Promise<{ backend: string; key: any; ciphertextBytes: number; ciphertextSha256: string; }>>' is not assignable to type '(key: string) => Promise<AttachmentObjectLocation>'.
+  Type 'Promise<{ backend: string; key: any; ciphertextBytes: number; ciphertextSha256: string; }>' is not assignable to type 'Promise<AttachmentObjectLocation>'.
+    Type '{ backend: string; key: any; ciphertextBytes: number; ciphertextSha256: string; }' is not assignable to type 'AttachmentObjectLocation'.
+      Types of property 'backend' are incompatible.
+        Type 'string' is not assignable to type 'AttachmentObjectBackend'.
+../server/src/modules/data_platform/attachmentStorageService.test.ts(544,7): error TS2322: Type 'Mock<(key: any) => Promise<{ backend: string; key: any; ciphertextBytes: number; ciphertextSha256: string; }>>' is not assignable to type '(key: string) => Promise<AttachmentObjectLocation>'.
+  Type 'Promise<{ backend: string; key: any; ciphertextBytes: number; ciphertextSha256: string; }>' is not assignable to type 'Promise<AttachmentObjectLocation>'.
+    Type '{ backend: string; key: any; ciphertextBytes: number; ciphertextSha256: string; }' is not assignable to type 'AttachmentObjectLocation'.
+      Types of property 'backend' are incompatible.
+        Type 'string' is not assignable to type 'AttachmentObjectBackend'.
+../server/src/modules/data_platform/attachmentStorageService.test.ts(555,7): error TS2322: Type 'Mock<() => Promise<{ backend: string; key: string; ciphertextBytes: number; ciphertextSha256: string; }>>' is not assignable to type '(input: { ciphertext: Buffer<ArrayBufferLike>; ciphertextSha256: string; encryption: AttachmentCiphertextEncryption; }) => Promise<...>'.
+  Type 'Promise<{ backend: string; key: string; ciphertextBytes: number; ciphertextSha256: string; }>' is not assignable to type 'Promise<AttachmentObjectLocation>'.
+    Type '{ backend: string; key: string; ciphertextBytes: number; ciphertextSha256: string; }' is not assignable to type 'AttachmentObjectLocation'.
+      Types of property 'backend' are incompatible.
+        Type 'string' is not assignable to type 'AttachmentObjectBackend'.
+../server/src/modules/data_platform/dataProtectionService.test.ts(284,49): error TS2345: Argument of type '{ dataDirectory: string; databasePath: string; schemaVersion: number; accountSyncKeyPath: string; attachmentKeyPath: string; attachmentDirectory: string; attachmentObjectStore: EncryptedObjectStore; ... 6 more ...; now: () => Date; }' is not assignable to parameter of type 'DataProtectionServiceOptions'.
+  Property 'fieldEncryptionKeyPath' is missing in type '{ dataDirectory: string; databasePath: string; schemaVersion: number; accountSyncKeyPath: string; attachmentKeyPath: string; attachmentDirectory: string; attachmentObjectStore: EncryptedObjectStore; ... 6 more ...; now: () => Date; }' but required in type 'DataProtectionServiceOptions'.
+../server/src/modules/data_platform/enterpriseInfrastructureCli.test.ts(30,7): error TS2322: Type 'Mock<() => Promise<{ ready: boolean; backend: string; schemaVersion: number; serverVersion: number; writable: boolean; }>>' is not assignable to type '() => Promise<PostgresDatabaseReadiness>'.
+  Type 'Promise<{ ready: boolean; backend: string; schemaVersion: number; serverVersion: number; writable: boolean; }>' is not assignable to type 'Promise<PostgresDatabaseReadiness>'.
+    Type '{ ready: boolean; backend: string; schemaVersion: number; serverVersion: number; writable: boolean; }' is not assignable to type 'PostgresDatabaseReadiness'.
+      Types of property 'ready' are incompatible.
+        Type 'boolean' is not assignable to type 'true'.
+../server/src/modules/data_platform/enterpriseInfrastructureRuntime.test.ts(16,5): error TS2322: Type 'Mock<() => Promise<{ ready: boolean; backend: string; schemaVersion: number; serverVersion: number; writable: boolean; }>>' is not assignable to type '() => Promise<PostgresDatabaseReadiness>'.
+  Type 'Promise<{ ready: boolean; backend: string; schemaVersion: number; serverVersion: number; writable: boolean; }>' is not assignable to type 'Promise<PostgresDatabaseReadiness>'.
+    Type '{ ready: boolean; backend: string; schemaVersion: number; serverVersion: number; writable: boolean; }' is not assignable to type 'PostgresDatabaseReadiness'.
+      Types of property 'ready' are incompatible.
+        Type 'boolean' is not assignable to type 'true'.
+../server/src/modules/data_platform/enterpriseInfrastructureRuntime.test.ts(28,5): error TS2322: Type 'Mock<() => Promise<{ ready: boolean; backend: string; }>>' is not assignable to type '() => Promise<EnterpriseSharedCacheReadiness>'.
+  Type 'Promise<{ ready: boolean; backend: string; }>' is not assignable to type 'Promise<EnterpriseSharedCacheReadiness>'.
+    Type '{ ready: boolean; backend: string; }' is not assignable to type 'EnterpriseSharedCacheReadiness'.
+      Types of property 'ready' are incompatible.
+        Type 'boolean' is not assignable to type 'true'.
+../server/src/modules/data_platform/postgresAttachmentMetadataRepository.test.ts(85,32): error TS2345: Argument of type '{ attachmentId: string; organizationId: string; accountId: string; authorizedAccountIds: string[]; encryption: "e2ee-client-v1"; ciphertextBytes: number; ciphertextSha256: string; expiresAt: string; }' is not assignable to parameter of type '{ attachmentId: string; organizationId: string; accountId: string; authorizedAccountIds: string[]; encryption: AttachmentCiphertextEncryption; ciphertextBytes: number; ciphertextSha256: string; expiresAt: string; mlsAuthorization: AttachmentMlsAuthorization | null; }'.
+  Property 'mlsAuthorization' is missing in type '{ attachmentId: string; organizationId: string; accountId: string; authorizedAccountIds: string[]; encryption: "e2ee-client-v1"; ciphertextBytes: number; ciphertextSha256: string; expiresAt: string; }' but required in type '{ attachmentId: string; organizationId: string; accountId: string; authorizedAccountIds: string[]; encryption: AttachmentCiphertextEncryption; ciphertextBytes: number; ciphertextSha256: string; expiresAt: string; mlsAuthorization: AttachmentMlsAuthorization | null; }'.
+../server/src/modules/data_platform/postgresDatabaseCli.test.ts(37,11): error TS2352: Conversion of type '{ server_version_num: number; in_recovery: boolean; schema_version: number; }' to type 'Row' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  '{ server_version_num: number; in_recovery: boolean; schema_version: number; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/modules/data_platform/postgresDatabaseLifecycle.test.ts(36,22): error TS2352: Conversion of type '{ version: number; name: string; checksum: string; }[]' to type 'Row[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ version: number; name: string; checksum: string; }' is not comparable to type 'Row'.
+    '{ version: number; name: string; checksum: string; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/modules/data_platform/postgresDatabaseLifecycle.test.ts(47,11): error TS2352: Conversion of type '{ server_version_num: number; in_recovery: boolean; schema_version: number; }' to type 'Row' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  '{ server_version_num: number; in_recovery: boolean; schema_version: number; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/modules/data_platform/sqlitePostgresImport.test.ts(92,23): error TS2352: Conversion of type '{ locked: boolean; }' to type 'Row' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  '{ locked: boolean; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/modules/data_platform/sqlitePostgresImport.test.ts(101,15): error TS2352: Conversion of type '{ id: string; state: string; source_schema_version: number; target_schema_version: number; }' to type 'Row' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  '{ id: string; state: string; source_schema_version: number; target_schema_version: number; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/modules/data_platform/sqlitePostgresImport.test.ts(127,11): error TS2352: Conversion of type '{ next_row_index: number; copied_rows: number; }' to type 'Row' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  '{ next_row_index: number; copied_rows: number; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/modules/data_platform/sqlitePostgresImport.test.ts(167,22): error TS2352: Conversion of type '{ row_sha256: string; row_index: number; }[]' to type 'Row[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ row_sha256: string; row_index: number; }' is not comparable to type 'Row'.
+    '{ row_sha256: string; row_index: number; }' is assignable to the constraint of type 'Row', but 'Row' could be instantiated with a different subtype of constraint 'Record<string, unknown>'.
+../server/src/modules/deployment_registration/deploymentRegistration.test.ts(108,24): error TS2339: Property 'deploymentId' does not exist on type '{ ok: boolean; reason?: string | undefined; }'.
+../server/src/modules/deployment_registration/deploymentRegistration.test.ts(109,24): error TS2339: Property 'identity' does not exist on type '{ ok: boolean; reason?: string | undefined; }'.
+../server/src/modules/deployment_registration/deploymentRegistration.test.ts(110,24): error TS2339: Property 'identity' does not exist on type '{ ok: boolean; reason?: string | undefined; }'.
+../server/src/modules/federation_gateway/federationComposition.test.ts(619,29): error TS2352: Conversion of type '{ contentType: "text/plain"; version: typeof FEDERATION_PROTOCOL_VERSION; messageId: string; type: FederationMessageType; ... 6 more ...; routing: FederationRoutingMetadata; }' to type 'FederationEnvelope' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'contentType' are incompatible.
+    Type '"text/plain"' is not comparable to type '"application/otto-e2ee+json"'.
+../server/src/modules/integration_adapters/brokerChannelRuntime.test.ts(18,28): error TS2345: Argument of type '(...args: never[]) => void' is not assignable to parameter of type '(...args: any[]) => void'.
+  Types of parameters 'args' and 'args' are incompatible.
+    Type 'any' is not assignable to type 'never'.
+../server/src/modules/integration_adapters/channelConnector.test.ts(24,25): error TS2322: Type 'number' is not assignable to type 'void | Promise<void>'.
+../server/src/modules/integration_adapters/channelConnector.test.ts(225,7): error TS2345: Argument of type '({ idempotencyKey }: ChannelInstallationCommitContext) => number' is not assignable to parameter of type '(context: ChannelInstallationCommitContext) => void | Promise<void>'.
+  Type 'number' is not assignable to type 'void | Promise<void>'.
+../server/src/modules/integration_adapters/channelWorkflowMilestones.test.ts(69,12): error TS2532: Object is possibly 'undefined'.
+../server/src/modules/integration_adapters/channelWorkflowMilestones.test.ts(69,42): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../server/src/modules/integration_adapters/channelWorkflowMilestones.test.ts(70,13): error TS2532: Object is possibly 'undefined'.
+../server/src/modules/integration_adapters/channelWorkflowMilestones.test.ts(70,43): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../server/src/modules/integration_adapters/externalCallBoundary.test.ts(25,25): error TS2322: Type 'number' is not assignable to type 'void | Promise<void>'.
+../server/src/modules/integration_adapters/externalCallBoundary.test.ts(79,25): error TS2322: Type 'number' is not assignable to type 'void | Promise<void>'.
+../server/src/modules/integration_adapters/httpChannelPairingBroker.test.ts(91,7): error TS2322: Type 'Mock<(_url: any, init: any) => Promise<unknown>>' is not assignable to type '{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; }'.
+  Type 'Promise<unknown>' is not assignable to type 'Promise<Response>'.
+    Type 'unknown' is not assignable to type 'Response'.
+../server/src/modules/integration_adapters/managedChannelConnector.test.ts(49,5): error TS2322: Type 'Mock<(installation: any) => Promise<{ installationId: any; running: boolean; state: string; reconnectCount: number; }>>' is not assignable to type '(installation: Readonly<ChannelInstallation>, plaintextCredential: string) => Promise<ChannelHealth>'.
+  Type 'Promise<{ installationId: any; running: boolean; state: string; reconnectCount: number; }>' is not assignable to type 'Promise<ChannelHealth>'.
+    Type '{ installationId: any; running: boolean; state: string; reconnectCount: number; }' is not assignable to type 'ChannelHealth'.
+      Types of property 'state' are incompatible.
+        Type 'string' is not assignable to type '"failed" | "revoked" | "connected" | "reconnecting" | "stopped"'.
+../server/src/modules/integration_adapters/managedChannelConnector.test.ts(55,5): error TS2322: Type 'Mock<(installationId: any) => Promise<{ installationId: any; running: boolean; state: string; reconnectCount: number; }>>' is not assignable to type '(installationId: string) => Promise<ChannelHealth>'.
+  Type 'Promise<{ installationId: any; running: boolean; state: string; reconnectCount: number; }>' is not assignable to type 'Promise<ChannelHealth>'.
+    Type '{ installationId: any; running: boolean; state: string; reconnectCount: number; }' is not assignable to type 'ChannelHealth'.
+      Types of property 'state' are incompatible.
+        Type 'string' is not assignable to type '"failed" | "revoked" | "connected" | "reconnecting" | "stopped"'.
+../server/src/modules/integration_adapters/managedChannelConnector.test.ts(61,5): error TS2322: Type 'Mock<(installationId: any) => Promise<{ installationId: any; running: boolean; state: string; reconnectCount: number; }>>' is not assignable to type '(installationId: string) => Promise<ChannelHealth>'.
+  Type 'Promise<{ installationId: any; running: boolean; state: string; reconnectCount: number; }>' is not assignable to type 'Promise<ChannelHealth>'.
+    Type '{ installationId: any; running: boolean; state: string; reconnectCount: number; }' is not assignable to type 'ChannelHealth'.
+      Types of property 'state' are incompatible.
+        Type 'string' is not assignable to type '"failed" | "revoked" | "connected" | "reconnecting" | "stopped"'.
+../server/src/modules/integration_adapters/managedChannelPlatform.test.ts(16,28): error TS2345: Argument of type '(...args: never[]) => void' is not assignable to parameter of type '(...args: any[]) => void'.
+  Types of parameters 'args' and 'args' are incompatible.
+    Type 'any' is not assignable to type 'never'.
+../server/src/modules/park_carpool/amapParkCarpoolProvider.test.ts(51,7): error TS2322: Type 'Mock<(url: string | URL) => Promise<Response>>' is not assignable to type '{ (input: URL | RequestInfo, init?: RequestInit | undefined): Promise<Response>; (input: string | URL | Request, init?: RequestInit | undefined): Promise<...>; }'.
+  Types of parameters 'url' and 'input' are incompatible.
+    Type 'URL | RequestInfo' is not assignable to type 'string | URL'.
+      Type 'Request' is not assignable to type 'string | URL'.
+../server/src/modules/park_carpool/parkCarpoolDomain.test.ts(87,46): error TS2345: Argument of type '{ travelDate: string; origin: { label: string; coordinate: { longitude: number; latitude: number; }; }; destination: { label: string; coordinate: { longitude: number; latitude: number; }; }; departureTime: string; flexibleMinutes: number; travelOptions: string[]; }' is not assignable to parameter of type 'ParkCarpoolIntentInput'.
+  Types of property 'travelOptions' are incompatible.
+    Type 'string[]' is not assignable to type '("driver" | "rider" | "shared_taxi")[]'.
+      Type 'string' is not assignable to type '"driver" | "rider" | "shared_taxi"'.
+../server/src/modules/park_carpool/parkCarpoolDomain.test.ts(92,25): error TS2322: Type '"plane"' is not assignable to type '"driver" | "rider" | "shared_taxi"'.
+../server/src/modules/park_carpool/parkCarpoolDomain.test.ts(96,35): error TS2345: Argument of type '{ travelDate: string; destination: { label: string; coordinate: { longitude: number; latitude: number; }; }; origin: { label: string; coordinate: { longitude: number; latitude: number; }; }; departureTime: string; flexibleMinutes: number; travelOptions: string[]; }' is not assignable to parameter of type 'ParkCarpoolIntentInput'.
+  Types of property 'travelOptions' are incompatible.
+    Type 'string[]' is not assignable to type '("driver" | "rider" | "shared_taxi")[]'.
+      Type 'string' is not assignable to type '"driver" | "rider" | "shared_taxi"'.
+../server/src/modules/park_carpool/parkCarpoolRetention.test.ts(7,21): error TS2345: Argument of type '{ from: string; to: string; }' is not assignable to parameter of type '{ from: string; to: string; createdAt: string; }'.
+  Property 'createdAt' is missing in type '{ from: string; to: string; }' but required in type '{ from: string; to: string; createdAt: string; }'.
+../server/src/modules/park_carpool/parkCarpoolService.test.ts(192,7): error TS2322: Type 'null' is not assignable to type 'string'.
+../server/src/modules/park_carpool/parkCarpoolService.test.ts(240,36): error TS2345: Argument of type '{ route: { provider: string; distanceMeters: number; durationSeconds: number; polyline: { longitude: number; latitude: number; }[]; }; status: "active"; lastConfirmedAt: string; expiresAt: string; ... 13 more ...; parkId: string; }' is not assignable to parameter of type 'ParkCarpoolIntent'.
+  Types of property 'travelOptions' are incompatible.
+    The type 'readonly ["rider", "shared_taxi"]' is 'readonly' and cannot be assigned to the mutable type '("driver" | "rider" | "shared_taxi")[]'.
+../server/src/modules/park_carpool/parkCarpoolService.test.ts(264,36): error TS2345: Argument of type '{ route: { provider: string; distanceMeters: number; durationSeconds: number; polyline: { longitude: number; latitude: number; }[]; }; status: "active"; lastConfirmedAt: string; expiresAt: string; ... 13 more ...; parkId: string; }' is not assignable to parameter of type 'ParkCarpoolIntent'.
+  Types of property 'travelOptions' are incompatible.
+    The type 'readonly ["rider", "shared_taxi"]' is 'readonly' and cannot be assigned to the mutable type '("driver" | "rider" | "shared_taxi")[]'.
+../server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts(38,5): error TS2741: Property 'clear' is missing in type '{ getKey: () => Buffer<ArrayBuffer>; }' but required in type 'EncryptionKeyProvider'.
+../server/src/modules/park_carpool/parkCarpoolTransport.integration.test.ts(33,48): error TS2345: Argument of type '{ config: Readonly<{ pilotParkIds: readonly string[] | undefined; minimumOverlap: number; requestLimitPerHour: number; cooldownMinutes: number; maxTaxiMembers: number; staleMinutes: number; pauseMinutes: number; ... 7 more ...; groupsEnabled: boolean; }>; store: ParkCarpoolStore; now: () => Date; mapProvider: { ...;...' is not assignable to parameter of type '{ config?: Readonly<{ pilotParkIds: readonly string[] | undefined; minimumOverlap: number; requestLimitPerHour: number; cooldownMinutes: number; maxTaxiMembers: number; staleMinutes: number; pauseMinutes: number; ... 7 more ...; groupsEnabled: boolean; }> | undefined; ... 4 more ...; minimumOverlap?: number | undefi...'.
+  Property 'createId' is missing in type '{ config: Readonly<{ pilotParkIds: readonly string[] | undefined; minimumOverlap: number; requestLimitPerHour: number; cooldownMinutes: number; maxTaxiMembers: number; staleMinutes: number; pauseMinutes: number; ... 7 more ...; groupsEnabled: boolean; }>; store: ParkCarpoolStore; now: () => Date; mapProvider: { ...;...' but required in type '{ config?: Readonly<{ pilotParkIds: readonly string[] | undefined; minimumOverlap: number; requestLimitPerHour: number; cooldownMinutes: number; maxTaxiMembers: number; staleMinutes: number; pauseMinutes: number; ... 7 more ...; groupsEnabled: boolean; }> | undefined; ... 4 more ...; minimumOverlap?: number | undefi...'.
+../server/src/modules/park_carpool/parkCarpoolTransport.integration.test.ts(224,25): error TS18048: 'setup.sessions' is possibly 'undefined'.
+../server/src/modules/park_carpool/parkCarpoolTransport.integration.test.ts(245,27): error TS18048: 'joined.sessions' is possibly 'undefined'.
+../server/src/modules/park_carpool/parkCarpoolTransport.integration.test.ts(274,23): error TS18048: 'inbox.events' is possibly 'undefined'.
+../server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts(51,52): error TS2339: Property 'title' does not exist on type '{ id: string; state: "unavailable"; } | { isOwner: boolean; title: string; category: "electronics" | "office" | "home" | "sports" | "books" | "other"; saleMode: "sale" | "free"; priceCents: number; ... 14 more ...; expiresAt: number; } | { ...; }'.
+  Property 'title' does not exist on type '{ id: string; state: "unavailable"; }'.
+../server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts(88,52): error TS2339: Property 'priceCents' does not exist on type '{ id: string; state: "unavailable"; } | { isOwner: boolean; title: string; category: "electronics" | "office" | "home" | "sports" | "books" | "other"; saleMode: "sale" | "free"; priceCents: number; ... 14 more ...; expiresAt: number; } | { ...; }'.
+  Property 'priceCents' does not exist on type '{ id: string; state: "unavailable"; }'.
+../server/src/modules/park_services/flea_market/fleaMarketContacts.test.ts(110,55): error TS2339: Property 'title' does not exist on type '{ id: string; state: "unavailable"; } | { isOwner: boolean; title: string; category: "electronics" | "office" | "home" | "sports" | "books" | "other"; saleMode: "sale" | "free"; priceCents: number; ... 14 more ...; expiresAt: number; } | { ...; }'.
+  Property 'title' does not exist on type '{ id: string; state: "unavailable"; }'.
+../server/src/modules/park_services/flea_market/fleaMarketDiscovery.test.ts(100,31): error TS2554: Expected 0 arguments, but got 2.
+../server/src/modules/policy_intelligence/policyService.test.ts(75,39): error TS7006: Parameter 'item' implicitly has an 'any' type.
+../server/src/modules/policy_intelligence/policySources.test.ts(107,34): error TS2493: Tuple type '[url: string | URL | Request]' of length '1' has no element at index '1'.
+../server/src/runtime.test.ts(80,12): error TS2532: Object is possibly 'undefined'.
+../server/src/runtime.test.ts(80,40): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../server/src/runtime.test.ts(305,55): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../server/src/runtime.test.ts(306,28): error TS2339: Property 'message' does not exist on type 'never'.
+../server/src/runtime.test.ts(427,55): error TS2352: Conversion of type '{ scheduleHierarchicalCompaction: Mock<Procedure>; }' to type 'OttoClient' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ scheduleHierarchicalCompaction: Mock<Procedure>; }' is missing the following properties from type 'OttoClient': config, generateContentConfig, sessionTurnCount, MAX_TURNS, and 64 more.
+../server/src/server.test.ts(39,3): error TS2206: The 'type' modifier cannot be used on a named import when 'import type' is used on its import statement.
+../server/src/server.test.ts(885,45): error TS2322: Type '{ id: string; username: string; name: string; role: null; department: null; positionId: null; positionTitle: null; isAdmin: boolean; status: string; }[] | { id: string; username: string; name: string; ... 5 more ...; status: string; }[]' is not assignable to type 'AuthenticatedEnterpriseOrganizationMember[] | undefined'.
+  Type '{ id: string; username: string; name: string; role: null; department: null; positionId: null; positionTitle: null; isAdmin: boolean; status: string; }[]' is not assignable to type 'AuthenticatedEnterpriseOrganizationMember[]'.
+    Type '{ id: string; username: string; name: string; role: null; department: null; positionId: null; positionTitle: null; isAdmin: boolean; status: string; }' is not assignable to type 'AuthenticatedEnterpriseOrganizationMember'.
+      Types of property 'status' are incompatible.
+        Type 'string' is not assignable to type '"disabled" | "active"'.
+../server/src/server.test.ts(1150,11): error TS2353: Object literal may only specify known properties, and 'origin' does not exist in type 'string[]'.
+../server/src/server.test.ts(1694,49): error TS2322: Type 'Promise<{ run: Mock<() => Promise<undefined>>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<...>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+  Property 'resolveToolConfirmation' is missing in type '{ run: Mock<() => Promise<undefined>>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<...>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(1754,7): error TS2322: Type '() => Promise<{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(1802,7): error TS2322: Type '() => Promise<{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(1838,42): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../server/src/server.test.ts(1839,42): error TS2493: Tuple type '[]' of length '0' has no element at index '0'.
+../server/src/server.test.ts(1878,7): error TS2322: Type '() => Promise<{ run: Mock<() => Promise<undefined>>; generateTitle: () => Promise<string>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run: Mock<() => Promise<undefined>>; generateTitle: () => Promise<string>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run: Mock<() => Promise<undefined>>; generateTitle: () => Promise<string>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(1920,7): error TS2322: Type '() => Promise<{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(1962,7): error TS2322: Type '() => Promise<{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(2013,7): error TS2322: Type '() => Promise<{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; generateTitle: Mock<() => Promise<string>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(2068,7): error TS2322: Type '() => Promise<{ run(): Promise<void>; generateTitle: Mock<(input: string) => Promise<"首份合同检查" | "第二消息分析">>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<...>; }>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run(): Promise<void>; generateTitle: Mock<(input: string) => Promise<"首份合同检查" | "第二消息分析">>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<...>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; generateTitle: Mock<(input: string) => Promise<"首份合同检查" | "第二消息分析">>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<...>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(2123,11): error TS2322: Type '(runtimeStore: SessionStore, sessionId: string, _model: string | undefined, _workspaceContext: string | undefined, _documentIdentity: DocumentIdentity | undefined, workspacePath: string | undefined) => Promise<...>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose: Mock<() => Promise<undefined>>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose: Mock<() => Promise<undefined>>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(2200,11): error TS2322: Type '() => Promise<{ run: Mock<() => Promise<undefined>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run: Mock<() => Promise<undefined>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run: Mock<() => Promise<undefined>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(2256,7): error TS2322: Type '() => Promise<{ run: Mock<() => Promise<undefined>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run: Mock<() => Promise<undefined>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run: Mock<() => Promise<undefined>>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(2350,11): error TS2322: Type '(store: SessionStore, sessionId: string, _model: string | undefined, workspaceContext: string | undefined, documentIdentity: DocumentIdentity | undefined) => Promise<...>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(2446,13): error TS2741: Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(2491,65): error TS2322: Type 'Promise<{ run(content: MessageContent): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+  Property 'resolveToolConfirmation' is missing in type '{ run(content: MessageContent): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(2550,65): error TS2322: Type 'Promise<{ run(content: MessageContent): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+  Property 'resolveToolConfirmation' is missing in type '{ run(content: MessageContent): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(2705,65): error TS2322: Type 'Promise<{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+  Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/server.test.ts(2885,7): error TS2322: Type '(runtimeStore: SessionStore, sessionId: string) => Promise<{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'RuntimeFactory'.
+  Type 'Promise<{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }>' is not assignable to type 'Promise<SessionRuntime>'.
+    Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/sessions-persistent.test.ts(58,33): error TS2345: Argument of type '"running"' is not assignable to parameter of type 'SessionStatus'.
+../server/src/sessions.test.ts(361,13): error TS2741: Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/sessions.test.ts(379,13): error TS2741: Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<void>; }' but required in type 'SessionRuntime'.
+../server/src/sessions.test.ts(400,13): error TS2741: Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<never>; }' but required in type 'SessionRuntime'.
+../server/src/sessions.test.ts(421,13): error TS2741: Property 'resolveToolConfirmation' is missing in type '{ run(): Promise<void>; cancel(): void; setModel(): void; getConfig(): undefined; dispose(): Promise<never>; }' but required in type 'SessionRuntime'.

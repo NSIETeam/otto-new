@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync, unlinkSync, readdirSync, lstatSync } from 'node:fs';
+import { join, basename } from 'node:path';
 import type { ParkMarketMls, MarketMlsPacket } from './park-market-mls.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { createHash } from 'node:crypto';
@@ -7,6 +9,7 @@ import type {
   EnterpriseE2eeKeyTransparencyView,
   EnterpriseE2eeSendPayload,
   EnterpriseE2eeWireMessage,
+  EnterpriseE2eePlainAttachmentUpload,
 } from './enterprise-e2ee.js';
 import type { MarketDraftStore } from './park-market.js';
 import type { MarketDraftScope } from '../shared/park-market.js';
@@ -42,7 +45,35 @@ interface EncryptedMessage {
   };
   snapshot: Record<string, unknown> | null;
 }
+type AttachmentView = { id: string; nonce: string; ciphertextSize: number };
+type StoredEnvelope = Omit<EnterpriseE2eeSendPayload, 'attachments'> & {
+  attachments: AttachmentView[];
+  senderIdentitySigningPublicKey?: string;
+};
+function discardUploads(uploads: Array<{ file: string }>) {
+  for (const upload of uploads) {
+    try {
+      unlinkSync(upload.file);
+    } catch {
+      /* A failed filesystem deletion contains ciphertext only. */
+    }
+  }
+}
+function pruneInterruptedUploads(directory:string,records:Array<Record<string,unknown>>) {
+  const referenced=new Set(records.flatMap(record=>Array.isArray(record.uploads)?record.uploads.flatMap(upload=>typeof upload?.file==='string'?[basename(upload.file)]:[]):[]));
+  let deleted=0;
+  for(const entry of readdirSync(directory,{withFileTypes:true})){
+    if(deleted>=100)break;
+    if(!entry.isFile() || referenced.has(entry.name))continue;
+    const file=join(directory,entry.name);
+    try{if(Date.now()-lstatSync(file).mtimeMs>=86400000){unlinkSync(file);deleted++;}}catch{/* Missing or unavailable cache files never invalidate a pending send. */}
+  }
+}
 export class ParkMarketMessaging {
+  private downloads = new Map<
+    string,
+    { message: EnterpriseE2eeWireMessage; parkId: string }
+  >();
   constructor(
     private deps: {
       context(): Context;
@@ -52,6 +83,16 @@ export class ParkMarketMessaging {
         method?: 'GET' | 'POST',
         body?: Record<string, unknown>,
       ): Promise<unknown>;
+      uploadAttachment?(input: {
+        path: string;
+        method: 'POST';
+        attachmentBase64: string;
+        attachmentProof: {
+          deviceId: string;
+          signature: string;
+          payload: Record<string, unknown>;
+        };
+      }): Promise<unknown>;
       pending: MarketDraftStore;
       mls?: ParkMarketMls;
     },
@@ -100,6 +141,7 @@ export class ParkMarketMessaging {
     expectedVersion?: number;
     question: string;
     requestId: string;
+    attachments?: EnterpriseE2eePlainAttachmentUpload[];
   }) {
     if (
       !input ||
@@ -108,17 +150,44 @@ export class ParkMarketMessaging {
       !/^[A-Za-z0-9_-]{1,128}$/.test(input.requestId)
     )
       throw new Error('咨询参数无效');
+    const files = input.attachments ?? [];
+    if (
+      !Array.isArray(files) ||
+      files.length > 6 ||
+      (files.length && input.kind !== 'conversation')
+    )
+      throw new Error('首次问题和接受前回复不能附带文件；正常聊天最多6个附件');
+    for (const file of files)
+      if (
+        !file ||
+        typeof file.fileName !== 'string' ||
+        !file.fileName.trim() ||
+        file.fileName.length > 255 ||
+        typeof file.mimeType !== 'string' ||
+        file.mimeType.length > 200 ||
+        !Number.isSafeInteger(file.size) ||
+        file.size < 1 ||
+        file.size > 10 * 1024 * 1024 ||
+        typeof file.data !== 'string' ||
+        file.data.length > 14_000_000
+      )
+        throw new Error('每个聊天附件限10MB');
+    if (files.length && !this.deps.uploadAttachment)
+      throw new Error('当前客户端缺少安全附件上传能力');
     const question = input.question.trim();
     const length = [
       ...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(
         question,
       ),
     ].length;
-    if (length < 1 || length > (input.kind === 'listing' ? 500 : 5000))
+    if (
+      (!length && !files.length) ||
+      length > (input.kind === 'listing' ? 500 : 4000)
+    )
       throw new Error(
         input.kind === 'listing'
           ? '首次问题需要 1–500 字'
-          : '消息需要 1–5000 字',
+          : '消息最多4000字，可附带文件',
       );
     const context = this.deps.context();
     if (context.requiresMls && !this.deps.mls)
@@ -129,6 +198,7 @@ export class ParkMarketMessaging {
       .update(JSON.stringify(input))
       .digest('hex');
     const saved = this.deps.pending.load(this.scope(context));
+    pruneInterruptedUploads(this.deps.pending.attachmentDirectory(this.scope(context)),saved);
     let pending = saved.find((p) => p.id === input.requestId);
     if (pending && pending.fingerprint !== fingerprint)
       throw new Error('正在确认的消息不能修改；请先确认原消息结果');
@@ -146,52 +216,140 @@ export class ParkMarketMessaging {
       const devices = this.directory(context, prepared.directories).filter(
         (d) => d.approvalState === 'approved' && !d.revokedAt,
       );
-      const envelope = context.requiresMls
-        ? await this.deps.mls!.encrypt(
-            context,
-            prepared.conversationId,
-            input.requestId,
-            question,
-            devices,
-          )
-        : context.crypto.encryptMessage({
-            serverScope: context.serverScope,
-            organizationId: `park-market:${prepared.parkId}`,
-            senderAccountId: context.accountId,
-            recipientAccountId: prepared.peerId,
-            messageId: input.requestId,
-            content: question,
-            contentType: 'message',
-            devices,
+      const encrypted =
+        !context.requiresMls || files.length
+          ? context.crypto.encryptMessage({
+              serverScope: context.serverScope,
+              organizationId: `park-market:${prepared.parkId}`,
+              senderAccountId: context.accountId,
+              recipientAccountId: prepared.peerId,
+              messageId: input.requestId,
+              content: question,
+              contentType: 'message',
+              devices,
+              attachments: files,
+            })
+          : null;
+      const uploads: Array<{
+        id: string;
+        file: string;
+        nonce: string;
+        ciphertextSize: number;
+        sha256: string;
+      }> = [];
+      let retained = false;
+      try {
+        for (const attachment of encrypted?.attachments ?? []) {
+          const bytes = Buffer.from(attachment.ciphertext, 'base64');
+          const file = join(
+            this.deps.pending.attachmentDirectory(this.scope(context)),
+            attachment.id,
+          );
+          writeFileSync(file, bytes, { mode: 0o600, flag: 'wx' });
+          uploads.push({
+            id: attachment.id,
+            file,
+            nonce: attachment.nonce,
+            ciphertextSize: bytes.length,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
           });
-      const path =
-        input.kind === 'listing'
-          ? `/listings/${input.id}/contact`
-          : input.kind === 'reply'
-            ? `/contacts/${input.id}`
-            : `/conversations/${input.id}`;
-      const body = {
-        requestId: input.requestId,
-        expectedVersion: input.expectedVersion,
-        envelope,
-        ...(input.kind === 'reply' ? { action: 'reply' } : {}),
-      };
-      pending = { id: input.requestId, fingerprint, path, body };
-      // Persist ciphertext before any send. A timeout retries the identical signed bytes.
-      this.check(context);
-      const latest = this.deps.pending.load(this.scope(context));
-      const concurrent = latest.find((entry) => entry.id === input.requestId);
-      if (concurrent) {
-        if (concurrent.fingerprint !== fingerprint)
-          throw new Error('正在确认的消息不能修改；请先确认原消息结果');
-        pending = concurrent;
-      } else {
-        this.deps.pending.save(this.scope(context), [...latest, pending]);
+        }
+        const references = uploads.map(({ id, nonce, ciphertextSize }) => ({
+          id,
+          nonce,
+          ciphertextSize,
+        }));
+        const stored = encrypted
+          ? { ...encrypted, attachments: references }
+          : null;
+        // With attachments the entire existing E2EE key envelope is carried INSIDE
+        // the native MLS application message. No attachment key escapes MLS, and
+        // the server cannot downgrade this packet to the legacy transport.
+        const envelope = context.requiresMls
+          ? await this.deps.mls!.encrypt(
+              context,
+              prepared.conversationId,
+              input.requestId,
+              files.length
+                ? JSON.stringify({
+                    format: 'otto:market-attachments:v1',
+                    envelope: stored,
+                  })
+                : question,
+              devices,
+              references,
+            )
+          : stored;
+        const path =
+          input.kind === 'listing'
+            ? `/listings/${input.id}/contact`
+            : input.kind === 'reply'
+              ? `/contacts/${input.id}`
+              : `/conversations/${input.id}`;
+        const body = {
+          requestId: input.requestId,
+          expectedVersion: input.expectedVersion,
+          envelope,
+          ...(input.kind === 'reply' ? { action: 'reply' } : {}),
+        };
+        pending = {
+          id: input.requestId,
+          fingerprint,
+          path,
+          body,
+          uploads,
+          conversationId: prepared.conversationId,
+        };
+        // Persist ciphertext before any send. A timeout retries the identical signed bytes.
+        this.check(context);
+        const latest = this.deps.pending.load(this.scope(context));
+        const concurrent = latest.find((entry) => entry.id === input.requestId);
+        if (concurrent) {
+          if (concurrent.fingerprint !== fingerprint)
+            throw new Error('正在确认的消息不能修改；请先确认原消息结果');
+          pending = concurrent;
+        } else {
+          this.deps.pending.save(this.scope(context), [...latest, pending]);
+          retained = true;
+        }
+      } finally {
+        if (!retained) discardUploads(uploads);
       }
     }
     this.check(context);
     let result: unknown;
     try {
+      for (const upload of (pending.uploads ?? []) as Array<{
+        id: string;
+        file: string;
+        sha256: string;
+      }>) {
+        this.check(context);
+        const bytes = readFileSync(upload.file);
+        if (createHash('sha256').update(bytes).digest('hex') !== upload.sha256)
+          throw new Error('待重试附件损坏，未发送');
+        const payload = {
+          id: upload.id,
+          conversationId: pending.conversationId,
+          messageId: input.requestId,
+          sha256: upload.sha256,
+        };
+        const proof = {
+          payload,
+          ...context.crypto.signParkMarketMls({
+            ...context,
+            action: 'attachment-upload',
+            payload,
+          }),
+        };
+        await this.deps.uploadAttachment!({
+          path: `/chat-attachments/${upload.id}`,
+          method: 'POST',
+          attachmentBase64: bytes.toString('base64'),
+          attachmentProof: proof,
+        });
+      }
+
       result = await this.deps.request(
         String(pending.path),
         'POST',
@@ -218,6 +376,7 @@ export class ParkMarketMessaging {
             .load(this.scope(context))
             .filter((entry) => entry.id !== input.requestId),
         );
+        discardUploads((pending.uploads ?? []) as Array<{ file: string }>);
         throw new Error(
           `服务器已明确未发送，可修改后重试：${rejection.message}`,
           { cause: error },
@@ -232,7 +391,51 @@ export class ParkMarketMessaging {
         .load(this.scope(context))
         .filter((p) => p.id !== input.requestId),
     );
+    discardUploads((pending.uploads ?? []) as Array<{ file: string }>);
     return result;
+  }
+  async download(
+    conversationId: string,
+    messageId: string,
+    sequence: number,
+    attachmentId: string,
+  ) {
+    const context = this.deps.context();
+    await this.messages(conversationId, sequence + 1);
+    this.check(context);
+    const entry = this.downloads.get(
+      `${JSON.stringify(this.scope(context))}:${messageId}:${attachmentId}`,
+    );
+    if (!entry) throw new Error('此设备不能解密该附件，请在原设备查看');
+    const payload = { id: attachmentId };
+    const proof = {
+      payload,
+      ...context.crypto.signParkMarketMls({
+        ...context,
+        action: 'attachment-read',
+        payload,
+      }),
+    };
+    const result = (await this.deps.request(
+      `/chat-attachments/${attachmentId}/read`,
+      'POST',
+      proof,
+    )) as { data: string };
+    this.check(context);
+    const attachment = entry.message.attachments.find(
+      (a) => a.id === attachmentId,
+    )!;
+    return context.crypto.decryptAttachment({
+      serverScope: context.serverScope,
+      organizationId: `park-market:${entry.parkId}`,
+      accountId: context.accountId,
+      message: entry.message,
+      attachment: {
+        id: attachmentId,
+        nonce: attachment.nonce,
+        ciphertext: result.data,
+      },
+    });
   }
   async recover(conversationId: string) {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(conversationId) || !this.deps.mls)
@@ -293,61 +496,87 @@ export class ParkMarketMessaging {
             devices,
           )
         : new Map<string, string>();
-    const items = response.items.map((item) => {
-      if ((item.envelope as unknown as MarketMlsPacket).encryption === 'mls')
-        return {
-          ...item,
-          envelope: undefined,
-          content: mlsContent.get(item.id) ?? '',
-          error: mlsContent.has(item.id)
-            ? ''
-            : '此设备无法解密该历史消息，请使用原设备',
-        };
+    const decryptEnvelope = (
+      item: EncryptedMessage,
+      envelope: StoredEnvelope,
+    ) => {
       const sender = devices.find(
         (d) =>
           d.accountId === item.senderId &&
-          d.deviceId === item.envelope.senderDeviceId,
+          d.deviceId === envelope.senderDeviceId,
       );
       if (
         !sender ||
-        sender.identitySigningPublicKey !==
-          item.envelope.senderIdentitySigningPublicKey
+        (envelope.senderIdentitySigningPublicKey &&
+          sender.identitySigningPublicKey !==
+            envelope.senderIdentitySigningPublicKey)
       )
-        return {
-          ...item,
-          envelope: undefined,
-          content: '',
-          error: '发送设备无法通过身份校验，消息未展示',
-        };
+        throw new Error('发送设备无法通过身份校验');
+      const message: EnterpriseE2eeWireMessage = {
+        ...envelope,
+        senderIdentitySigningPublicKey: sender.identitySigningPublicKey,
+        id: item.id,
+        senderAccountId: item.senderId,
+        recipientAccountId: item.recipientId,
+        createdAt: new Date(item.createdAt).toISOString(),
+        readAt:
+          item.readAt === null ? null : new Date(item.readAt).toISOString(),
+        attachments: envelope.attachments ?? [],
+      };
+      const plaintext = context.crypto.decryptMessage({
+        serverScope: context.serverScope,
+        organizationId: `park-market:${response.parkId}`,
+        accountId: context.accountId,
+        message,
+      });
+      for (const attachment of plaintext.attachments)
+        this.downloads.set(
+          `${JSON.stringify(this.scope(context))}:${item.id}:${attachment.id}`,
+          { message, parkId: response.parkId },
+        );
+      while (this.downloads.size > 1200)
+        this.downloads.delete(this.downloads.keys().next().value!);
+      return { content: plaintext.content, attachments: plaintext.attachments };
+    };
+    const items = response.items.map((item) => {
       try {
-        const message: EnterpriseE2eeWireMessage = {
-          ...item.envelope,
-          id: item.envelope.messageId,
-          senderAccountId: item.senderId,
-          recipientAccountId: item.recipientId,
-          createdAt: new Date(item.createdAt).toISOString(),
-          readAt:
-            item.readAt === null ? null : new Date(item.readAt).toISOString(),
-          attachments: [],
+        const packet = item.envelope as unknown as MarketMlsPacket;
+        let plaintext: {
+          content: string;
+          attachments: Array<{
+            id: string;
+            fileName: string;
+            mimeType: string;
+            size: number;
+          }>;
         };
-        const plaintext = context.crypto.decryptMessage({
-          serverScope: context.serverScope,
-          organizationId: `park-market:${response.parkId}`,
-          accountId: context.accountId,
-          message,
-        });
-        return {
-          ...item,
-          envelope: undefined,
-          content: plaintext.content,
-          error: '',
-        };
+        if (packet.encryption === 'mls') {
+          const text = mlsContent.get(item.id);
+          if (text === undefined)
+            throw new Error('此设备无法解密该历史消息，请使用原设备');
+          if (packet.payload.attachments?.length) {
+            const wrapped = JSON.parse(text);
+            if (
+              wrapped.format !== 'otto:market-attachments:v1' ||
+              JSON.stringify(wrapped.envelope?.attachments) !==
+                JSON.stringify(packet.payload.attachments)
+            )
+              throw new Error('附件加密上下文不一致');
+            plaintext = decryptEnvelope(item, wrapped.envelope);
+          } else plaintext = { content: text, attachments: [] };
+        } else
+          plaintext = decryptEnvelope(
+            item,
+            item.envelope as unknown as StoredEnvelope,
+          );
+        return { ...item, envelope: undefined, ...plaintext, error: '' };
       } catch {
         return {
           ...item,
           envelope: undefined,
           content: '',
-          error: '此设备无法解密该历史消息，请使用原设备或恢复密钥',
+          attachments: [],
+          error: '此设备无法解密该历史消息或附件，请使用原设备',
         };
       }
     });

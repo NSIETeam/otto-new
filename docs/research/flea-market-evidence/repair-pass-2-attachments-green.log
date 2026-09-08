@@ -1,0 +1,12 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+(node:21821) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/collaboration/parkContactAttachments.test.ts (2 tests) 1171ms
+   ✓ postgres: private attachment stages once, binds atomically, survives restart and never uses listing grants  1140ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  20:23:23
+   Duration  3.08s (transform 932ms, setup 0ms, collect 1.79s, tests 1.17s, environment 0ms, prepare 26ms)

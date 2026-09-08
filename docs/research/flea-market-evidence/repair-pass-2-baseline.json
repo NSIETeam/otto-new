@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-08T20:06:57.595511+08:00",
+  "root": "/Users/yang/Desktop/otto-carpool-fixed-91bc4e",
+  "head": "cecf75a13406923cb14a68ad160b7685ea916233",
+  "branch": "codex/blue-heron-7f3a9c",
+  "status": " M packages/desktop/src/main/park-carpool-chat.integration.test.ts\n M packages/server/src/enterprise/parkCarpoolRoutes.test.ts\n M packages/server/src/modules/park_carpool/parkCarpoolHttp.ts\n M packages/server/src/modules/park_carpool/parkCarpoolTestSupport.ts\n M packages/server/src/modules/park_carpool/parkCarpoolTransport.integration.test.ts\n?? docs/plans/2026-09-08-flea-market-repair-and-acceptance-prompt.md\n?? docs/research/carpool-delivery/evidence/repair-pass-2-baseline.json\n?? docs/research/carpool-delivery/evidence/repair-pass-2-native-root-baseline.log\n?? docs/research/carpool-delivery/evidence/repair-pass-2-native-root-green.log\n?? docs/research/carpool-delivery/evidence/repair-pass-2-native-workspace-red.log\n?? docs/research/carpool-delivery/evidence/repair-pass-2-route-baseline.log\n?? docs/research/carpool-delivery/evidence/repair-pass-2-route-green.log\n?? docs/research/carpool-delivery/evidence/repair-pass-2-route-red.log\n?? packages/server/src/modules/park_carpool/parkCarpoolHttpErrors.ts\n",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "cpus": 8,
+  "preexistingModifiedSha256": {
+    "packages/desktop/src/main/park-carpool-chat.integration.test.ts": "19c7156e75de527fc7c05950ad20857f4189bd3192d57fac371f3aab0459c6a2",
+    "packages/server/src/enterprise/parkCarpoolRoutes.test.ts": "4e72e5345bceee20633468ab42aac3cd308758d1ae8a16ec4c7dcb2f08ef2eb1",
+    "packages/server/src/modules/park_carpool/parkCarpoolHttp.ts": "73efa8bffbc24de0e54e86cdbe60939e69e82cf0ef66d27e3d1440b4a8bff412",
+    "packages/server/src/modules/park_carpool/parkCarpoolTestSupport.ts": "4e373671ec1b9c507d8bd85394911a3009395bb944f8226039f82bac29911544",
+    "packages/server/src/modules/park_carpool/parkCarpoolTransport.integration.test.ts": "0df746e6fe6856c672942dd9cd2d71fbd73a3e2ea3824664dfeb050f8e620414"
+  }
+}

@@ -132,3 +132,9 @@ it('keeps associated history and controlled historical images reachable after th
   expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/images', {method:'POST'})).toBe('park_service');
   expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/listings/i/renew', {method:'POST'})).toBe('park_service');
 });
+
+it('keeps independently authorized chat attachments reachable after removing the market module',()=>{
+ expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/chat-attachments/file',{method:'POST'})).toBeNull();
+ expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/chat-attachments/file/read',{method:'POST'})).toBeNull();
+ expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/images',{method:'POST'})).toBe('park_service');
+});

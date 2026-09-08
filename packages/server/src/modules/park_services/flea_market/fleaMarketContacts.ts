@@ -39,6 +39,13 @@ export interface MarketContactDependencies extends MarketServiceDependencies {
     tx: MarketTransaction,
     accounts: Array<{ accountId: string; organizationId: string }>,
   ): Promise<unknown>;
+  bindAttachments?(
+    tx: MarketTransaction,
+    actor: string,
+    conversation: string,
+    message: string,
+    ids: string[],
+  ): Promise<void>;
   verifyMessage(
     tx: MarketTransaction,
     context: MarketMessageAuthority,
@@ -191,6 +198,21 @@ export function createMarketContacts(deps: MarketContactDependencies) {
       ).length
     )
       throw new MarketError('CONFLICT', 'messageId');
+    const packet = input.envelope as {
+      encryption?: string;
+      attachments?: Array<{ id: string }>;
+      payload?: { attachments?: Array<{ id: string }> };
+    };
+    const references =
+      (packet?.encryption === 'mls'
+        ? packet.payload?.attachments
+        : packet?.attachments) ?? [];
+    if (
+      !Array.isArray(references) ||
+      references.length > 6 ||
+      (item && references.length)
+    )
+      throw new MarketError('INVALID_INPUT', 'attachments');
     const verified = await deps.verifyMessage(
       tx,
       {
@@ -202,6 +224,17 @@ export function createMarketContacts(deps: MarketContactDependencies) {
       },
       input.envelope,
     );
+    if (references.length) {
+      if (!deps.bindAttachments)
+        throw new MarketError('DEPENDENCY_UNAVAILABLE', 'attachments');
+      await deps.bindAttachments(
+        tx,
+        actor,
+        thread.id,
+        messageId,
+        references.map((a) => a.id),
+      );
+    }
     const snapshot = item
       ? {
           listingId: item.id,

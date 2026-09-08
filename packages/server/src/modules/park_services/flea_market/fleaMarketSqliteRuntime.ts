@@ -11,7 +11,8 @@ export function createMarketSqliteRuntime(input: {
   cipher: EncryptedFieldCipher;
   objects: EncryptedObjectStore;
   enterpriseEnabled(organizationId: string): boolean;
-  ready: () => boolean;
+  ready?: () => boolean;
+  localAcceptance?: boolean;
   requiresMls?: () => boolean;
 }) {
   return createMarketApplication({

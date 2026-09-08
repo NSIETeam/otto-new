@@ -12,6 +12,7 @@ it('keeps own records and drafts reachable when the market is paused and validat
         parkId: 'P',
         enabled: false,
         ready: true,
+        search: { state: 'backfilling' },
         rules: '个人闲置',
         contact: '服务台',
         version: 1,
@@ -49,6 +50,9 @@ it('keeps own records and drafts reachable when the market is paused and validat
     />,
   );
   expect(await screen.findByText('我的办公椅')).toBeTruthy();
+  expect(
+    screen.getByText('搜索正在准备中，请稍后重试；仍可管理本人发布记录。'),
+  ).toBeTruthy();
   expect(screen.getByRole('heading', { name: '原园区：P' })).toBeTruthy();
   expect(await screen.findByText('草稿台灯')).toBeTruthy();
   expect(

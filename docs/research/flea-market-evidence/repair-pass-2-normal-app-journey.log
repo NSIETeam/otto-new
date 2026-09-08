@@ -1,0 +1,52 @@
+[Otto Enterprise] 服务端运行于 http://127.0.0.1:0
+[Otto Enterprise] 账号管理: http://localhost:0/enterprise/admin
+[Otto Enterprise] 企业引入: http://127.0.0.1/enterprise/join/{邀请码}
+[Otto Enterprise] 老板看板: http://localhost:0/enterprise/dashboard
+[Otto Enterprise] 数据: ~/.otto-enterprise/data.db（本地，零云端）
+[Otto Enterprise] 已使用环境中配置的平台管理令牌（不会输出令牌内容）
+[Otto Enterprise] 积分管理: http://localhost:0/enterprise/admin/credits
+[Otto Enterprise] Ctrl+C 停止
+{"serverUrl":"http://127.0.0.1:62402"}
+{"request":"/enterprise/model-gateway/access-token","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/model-gateway/access-token","status":503}
+{"requests":[["/enterprise/tickets",5183],["/enterprise/e2ee/mls/key-packages",10],["/enterprise/account-sync",4],["/enterprise/federation/identity",3],["/enterprise/health",2],["/enterprise/model-gateway/access-token",2],["/enterprise/e2ee/devices",2],["/enterprise/e2ee/mls/inbound-conversations",2]]}
+{"request":"/enterprise/federation/identity","status":503}
+{"requests":[["/enterprise/tickets",12425],["/enterprise/e2ee/mls/key-packages",10],["/enterprise/account-sync",4],["/enterprise/federation/identity",4],["/enterprise/health",2],["/enterprise/organization/view",2],["/enterprise/model-gateway/access-token",2],["/enterprise/e2ee/devices",2]]}
+{"requests":[["/enterprise/tickets",18296],["/enterprise/e2ee/mls/key-packages",10],["/enterprise/account-sync",4],["/enterprise/federation/identity",4],["/enterprise/messages/unread",3],["/enterprise/health",2],["/enterprise/organization/view",2],["/enterprise/model-gateway/access-token",2]]}
+{"request":"/enterprise/model-gateway/access-token","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"requests":[["/enterprise/tickets",23958],["/enterprise/e2ee/mls/key-packages",10],["/enterprise/account-sync",5],["/enterprise/federation/identity",5],["/enterprise/messages/unread",4],["/enterprise/model-gateway/access-token",3],["/enterprise/health",2],["/enterprise/organization/view",2]]}
+page.evaluate: Application exited
+Browser logs:
+
+<launching> /Users/yang/Desktop/otto-carpool-fixed-91bc4e/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron -r /Users/yang/Desktop/otto-carpool-fixed-91bc4e/node_modules/playwright-core/lib/server/electron/loader.js --inspect=0 --remote-debugging-port=0 /var/folders/mg/ctd9153d5_g93y9n6w7tvmf80000gn/T/otto-market-acceptance-taXO3I/main-buyer.cjs
+<launched> pid=50458
+[pid=50458][err] Debugger listening on ws://127.0.0.1:61833/559cf877-cf45-416e-843e-0313a835a717
+[pid=50458][err] For help, see: https://nodejs.org/learn/getting-started/debugging
+[pid=50458][err] Debugger attached.
+[pid=50458][err]
+[pid=50458][err] DevTools listening on ws://127.0.0.1:62545/devtools/browser/0c1c894b-14ab-4020-a781-86729166c1a4
+[pid=50458][err] [otto-desktop] macOS Accessibility RPA host unavailable: Error: Cannot find package '/Users/yang/Desktop/otto-carpool-fixed-91bc4e/node_modules/otto-rpa/dist/index.js' imported from /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/dist/main/index.js
+[pid=50458][err]     at legacyMainResolve (node:internal/modules/esm/resolve:205:44)
+[pid=50458][err]     at packageResolve (node:internal/modules/esm/resolve:790:12)
+[pid=50458][err]     at moduleResolve (node:internal/modules/esm/resolve:871:18)
+[pid=50458][err]     at defaultResolve (node:internal/modules/esm/resolve:1004:11)
+[pid=50458][err]     at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+[pid=50458][err]     at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+[pid=50458][err]     at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+[pid=50458][err]     at #resolve (node:internal/modules/esm/loader:683:17)
+[pid=50458][err]     at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+[pid=50458][err]     at node:internal/modules/esm/loader:632:32 {
+[pid=50458][err]   code: 'ERR_MODULE_NOT_FOUND'
+[pid=50458][err] }
+[pid=50458][err] [ServerManager] enterprise-server 启动失败（非致命，管理后台不可用）: listen EADDRINUSE: address already in use 127.0.0.1:62402
+[pid=50458][out] [otto-desktop] server discovered @ http://127.0.0.1:7637
+[pid=50458][err] Waiting for the debugger to disconnect...
+[pid=50458] <gracefully close start>
+[pid=50458] <process did exit: exitCode=0, signal=null>
+[pid=50458] starting temporary directories cleanup
+[pid=50458] finished temporary directories cleanup
+{"requests":[["/enterprise/tickets",28787],["/enterprise/e2ee/mls/key-packages",10],["/enterprise/account-sync",6],["/enterprise/federation/identity",5],["/enterprise/messages/unread",4],["/enterprise/model-gateway/access-token",3],["/enterprise/park-services/publications",3],["/enterprise/atoa/inbox",3]]}

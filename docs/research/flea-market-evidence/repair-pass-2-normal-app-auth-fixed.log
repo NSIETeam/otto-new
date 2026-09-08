@@ -1,0 +1,45 @@
+[Otto Enterprise] 服务端运行于 http://127.0.0.1:0
+[Otto Enterprise] 账号管理: http://localhost:0/enterprise/admin
+[Otto Enterprise] 企业引入: http://127.0.0.1/enterprise/join/{邀请码}
+[Otto Enterprise] 老板看板: http://localhost:0/enterprise/dashboard
+[Otto Enterprise] 数据: ~/.otto-enterprise/data.db（本地，零云端）
+[Otto Enterprise] 已使用环境中配置的平台管理令牌（不会输出令牌内容）
+[Otto Enterprise] 积分管理: http://localhost:0/enterprise/admin/credits
+[Otto Enterprise] Ctrl+C 停止
+{"serverUrl":"http://127.0.0.1:49303"}
+{"request":"/enterprise/model-gateway/access-token","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"serverUrl":"http://127.0.0.1:49303"}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+{"request":"/enterprise/federation/identity","status":503}
+locator.click: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('button', { name: '进入 Otto', exact: true })[22m
+[2m    - locator resolved to <button disabled type="submit" class="otto-auth-submit">…</button>[22m
+[2m  - attempting click action[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is not enabled[22m
+[2m    - retrying click action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is not enabled[22m
+[2m    - retrying click action[22m
+[2m      - waiting 100ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is not enabled[22m
+[2m    - retrying click action[22m
+[2m      - waiting 500ms[22m
+[2m    - waiting for element to be visible, enabled and stable[22m
+
+{"request":"/enterprise/federation/identity","status":503}

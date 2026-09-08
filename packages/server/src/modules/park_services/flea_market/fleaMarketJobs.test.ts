@@ -47,3 +47,86 @@ it('expires once across two workers, persists notification across restart and cl
     await h.close();
   }
 });
+
+it('prioritizes due listings without decrypting an entire history backlog and resumes its bounded scan after restart', async () => {
+  const h = await sqliteMarketHarness();
+  try {
+    const base = await marketServiceFixture(h.repository);
+    const service = createMarketService(base);
+    const original = await service.publish('seller', {
+      ...testListingFields,
+      requestId: 'bounded',
+    });
+    await h.repository.transaction(async (tx) => {
+      for (let i = 0; i < 301; i++) {
+        const id = i === 300 ? 'zz-due' : `old-${String(i).padStart(3, '0')}`;
+        const item = {
+          ...original,
+          id,
+          state: i === 300 ? 'active' : 'offline',
+          expiresAt: base.now(),
+          endedAt: i === 300 ? null : base.now(),
+        };
+        await tx.run(
+          'INSERT INTO park_market_listings VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+          [
+            id,
+            'P',
+            'seller',
+            1,
+            item.state,
+            item.category,
+            item.priceCents,
+            item.listedAt,
+            item.expiresAt,
+            item.updatedAt,
+            item.endedAt,
+            JSON.stringify(
+              base.cipher.encryptText(
+                JSON.stringify(item),
+                `park-market-listing:${id}`,
+              ),
+            ),
+          ],
+        );
+      }
+    });
+    let decrypted = 0;
+    const deps = {
+      ...base,
+      cipher: {
+        ...base.cipher,
+        decryptText: (...args: Parameters<typeof base.cipher.decryptText>) => {
+          if (String(args[1]).startsWith('park-market-listing:')) decrypted++;
+          return base.cipher.decryptText(...args);
+        },
+      },
+    };
+    await runMarketJobs(deps);
+    expect(decrypted).toBeLessThanOrEqual(250);
+    expect(
+      await h.repository.read((tx) =>
+        tx.all("SELECT state FROM park_market_listings WHERE id='zz-due'"),
+      ),
+    ).toEqual([{ state: 'offline' }]);
+    const progress = await h.repository.read((tx) =>
+      tx.all(
+        "SELECT cursor FROM park_market_maintenance WHERE name='listings'",
+      ),
+    );
+    expect(progress[0].cursor).not.toBe('');
+    await h.restart();
+    decrypted = 0;
+    await runMarketJobs({ ...deps, repository: h.repository });
+    expect(decrypted).toBeLessThanOrEqual(250);
+    expect(
+      await h.repository.read((tx) =>
+        tx.all(
+          "SELECT cursor FROM park_market_maintenance WHERE name='listings'",
+        ),
+      ),
+    ).not.toEqual(progress);
+  } finally {
+    await h.close();
+  }
+});

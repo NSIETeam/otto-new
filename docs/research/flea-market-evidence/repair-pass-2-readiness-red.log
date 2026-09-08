@@ -1,0 +1,26 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketReadiness.test.ts [ src/modules/park_services/flea_market/fleaMarketReadiness.test.ts ]
+Error: Cannot find module './fleaMarketReadiness.js' imported from '/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketReadiness.test.ts'
+ ❯ src/modules/park_services/flea_market/fleaMarketReadiness.test.ts:6:1
+      4| import { tmpdir } from 'node:os';
+      5| import { join } from 'node:path';
+      6| import { localMarketAcceptance, createMarketReadiness } from './fleaMa…
+       | ^
+      7| it('requires explicit isolated local acceptance, completed probes and …
+      8|  const root=mkdtempSync(join(tmpdir(),'otto-market-acceptance-'));
+
+Caused by: Error: Failed to load url ./fleaMarketReadiness.js (resolved id: ./fleaMarketReadiness.js) in /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketReadiness.test.ts. Does the file exist?
+ ❯ loadAndTransform ../../node_modules/vite/dist/node/chunks/config.js:22739:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  21:42:52
+   Duration  125ms (transform 17ms, setup 0ms, collect 0ms, tests 0ms, environment 0ms, prepare 26ms)

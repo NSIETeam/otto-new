@@ -76,3 +76,56 @@ it('persists real encrypted image bytes, denies another account and cleans expir
     rmSync(directory, { recursive: true });
   }
 });
+
+it('bounds orphan collection and makes progress across repeated runs instead of scanning every stored image', async () => {
+  const h = await sqliteMarketHarness();
+  try {
+    await h.repository.transaction(async (tx) => {
+      for (let i = 0; i < 205; i++)
+        await tx.run(
+          "INSERT INTO park_market_images VALUES (?, 'seller','P','available',?,?,1,1,10,0,0)",
+          [`old-${String(i).padStart(3, '0')}`, `object-${i}`, `thumb-${i}`],
+        );
+    });
+    const deleted: string[] = [];
+    const images = createMarketAttachments({
+      repository: h.repository,
+      now: () => 8 * 86400000,
+      principal: async () => actor,
+      listingReadable: async () => false,
+      objects: {
+        put: () => ({ key: 'unused' }),
+        read: () => Buffer.alloc(1),
+        delete: (key) => {
+          deleted.push(key);
+        },
+      },
+    });
+    await images.cleanup();
+    expect(deleted.length).toBeGreaterThan(0);
+    expect(deleted.length).toBeLessThanOrEqual(200);
+    await h.restart();
+    const resumed = createMarketAttachments({
+      repository: h.repository,
+      now: () => 8 * 86400000,
+      principal: async () => actor,
+      listingReadable: async () => false,
+      objects: {
+        put: () => ({ key: 'unused' }),
+        read: () => Buffer.alloc(1),
+        delete: (key) => {
+          deleted.push(key);
+        },
+      },
+    });
+    for (let i = 0; i < 4; i++) await resumed.cleanup();
+    expect(new Set(deleted).size).toBe(410);
+    expect(
+      await h.repository.read((tx) =>
+        tx.all("SELECT id FROM park_market_images WHERE state='available'"),
+      ),
+    ).toEqual([]);
+  } finally {
+    await h.close();
+  }
+});

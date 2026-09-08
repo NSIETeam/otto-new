@@ -1,0 +1,13 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+(node:69379) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketWorkerLifecycle.test.ts (2 tests) 2662ms
+   ✓ sqlite: worker restarts are idempotent and obsolete stop callbacks cannot close a newer lifecycle  396ms
+   ✓ postgres: worker restarts are idempotent and obsolete stop callbacks cannot close a newer lifecycle  2264ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  23:20:20
+   Duration  10.16s (transform 3.48s, setup 0ms, collect 7.19s, tests 2.66s, environment 0ms, prepare 82ms)

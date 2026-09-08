@@ -1,4 +1,5 @@
 import { createMarketPostgresImageQuota } from './fleaMarketStorageQuota.js';
+import { assertLocalMarketPostgres } from './fleaMarketReadiness.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import type { PostgresPoolLike } from '../../data_platform/postgresDatabaseLifecycle.js';
 import type { EncryptedFieldCipher } from '../../data_platform/encryptedFieldCipher.js';
@@ -41,12 +42,19 @@ export function createMarketPostgresRuntime(input: {
   pool: PostgresPoolLike;
   cipher: EncryptedFieldCipher;
   objects: MarketObjectStore;
-  ready: () => boolean;
+  ready?: () => boolean;
+  localAcceptance?: boolean;
   requiresMls?: () => boolean;
   defaultQuotaBytes: number;
 }) {
   return createMarketApplication({
     ...input,
+    async localDatabaseProbe() {
+      const result = await input.pool.query(
+        "SELECT inet_server_addr() IS NULL AS local_socket,current_setting('data_directory') AS data_directory",
+      );
+      await assertLocalMarketPostgres(result.rows[0] ?? {});
+    },
     reuseEnterpriseConversations: true,
     imageQuota: createMarketPostgresImageQuota(input.defaultQuotaBytes),
     repository: createMarketPostgresRepository(input.pool),

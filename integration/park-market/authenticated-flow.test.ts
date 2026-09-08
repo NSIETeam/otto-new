@@ -2,13 +2,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import sharp from 'sharp';
-import { createMarketSqliteRuntime } from '../../packages/server/src/modules/park_services/flea_market/fleaMarketSqliteRuntime.js';
-import {
-  createEncryptedFieldCipher,
-  createEncryptedObjectStore,
-} from '../../packages/server/src/modules/data_platform/index.js';
 import {
   EnterpriseE2eeCrypto,
   EnterpriseE2eeKeyVault,
@@ -18,11 +13,17 @@ import { ParkMarketMessaging } from '../../packages/desktop/src/main/park-market
 import { testListingFields } from '../../packages/server/src/modules/park_services/flea_market/fleaMarketTestSupport.js';
 
 it('real enterprise login and membership authority drive cross-company publish / encrypted contact / reply / reserve / sale HTTP flow', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'otto-market-authenticated-'));
+  const root = mkdtempSync(join(tmpdir(), 'otto-market-acceptance-'));
   const previous = process.env.OTTO_ENTERPRISE_DIR;
+  const previousLocal = process.env.OTTO_MARKET_LOCAL_ACCEPTANCE;
+  process.env.OTTO_MARKET_LOCAL_ACCEPTANCE = '1';
+  writeFileSync(
+    join(root, '.otto-market-acceptance.json'),
+    JSON.stringify({ purpose: 'isolated-local-acceptance', version: 1 }),
+  );
   process.env.OTTO_ENTERPRISE_DIR = root;
   const db = await import('../../packages/server/src/enterprise/db.js');
-  const { createEnterpriseServer } =
+  const { startEnterpriseServer } =
     await import('../../packages/server/src/enterprise/server.js');
   const authority = db.createAccount({
     username: 'market.operator',
@@ -66,30 +67,22 @@ it('real enterprise login and membership authority drive cross-company publish /
   const buyer = createMember('buyer', true);
   createMember('outsider', false);
   createMember('stranger', true);
-  const keys = { getKey: () => Buffer.alloc(32, 91), clear() {} };
-  const runtime = createMarketSqliteRuntime({
-    database: db.getDB(),
-    cipher: createEncryptedFieldCipher({ keyProvider: keys }),
-    objects: createEncryptedObjectStore({
-      root: join(root, 'market-objects'),
-      keyProvider: keys,
-    }),
-    enterpriseEnabled: (id) => db.getOrganizationFeatures(id).park_service,
-    ready: () => true,
-  });
-  // Only dependency readiness is overridden in this disposable server; identity, sessions,
-  // park membership, device approval, routes, encryption and storage are real implementations.
-  const application = vi
-    .spyOn(db, 'getFleaMarketApplication')
-    .mockReturnValue(runtime);
-  const { server } = createEnterpriseServer({
+  const runtime = db.getFleaMarketApplication();
+  const server = startEnterpriseServer({
+    port: 0,
     host: '127.0.0.1',
     adminToken: 'fixture-admin-token',
     smsSender: null,
     repairSmsSender: null,
     repairFeishuSender: null,
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  await runtime.initialize();
+  expect(runtime.readiness().blocked).toEqual([]);
+  expect(runtime.readiness()).toMatchObject({
+    ready: true,
+    mode: 'isolated-local-acceptance',
+  });
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const login = async (
     identifier: string,
@@ -218,6 +211,24 @@ it('real enterprise login and membership authority drive cross-company publish /
           }),
           ensureDevice: async () => undefined,
           request: request(token),
+          async uploadAttachment(input) {
+            const result = await fetch(
+              `${base}/enterprise/park-market${input.path}`,
+              {
+                method: 'POST',
+                headers: {
+                  authorization: `Bearer ${token}`,
+                  'content-type': 'application/octet-stream',
+                  'x-otto-attachment-proof': Buffer.from(
+                    JSON.stringify(input.attachmentProof),
+                  ).toString('base64url'),
+                },
+                body: Buffer.from(input.attachmentBase64, 'base64'),
+              },
+            );
+            expect(result.status).toBe(200);
+            return result.json();
+          },
           pending: new MarketDraftStore(
             join(root, `pending-${account.id}`),
             (v) => Buffer.from(v),
@@ -246,6 +257,47 @@ it('real enterprise login and membership authority drive cross-company publish /
     expect(
       (await clients[1].messages(first.conversationId)).items.at(-1)?.content,
     ).toBe('可以调节，今晚交接。');
+    const chatData = Buffer.from('HTTP private attachment');
+    await clients[1].send({
+      kind: 'conversation',
+      id: first.conversationId,
+      question: '附件说明',
+      requestId: 'http-file',
+      attachments: [
+        {
+          fileName: '验收.txt',
+          mimeType: 'text/plain',
+          size: chatData.length,
+          data: chatData.toString('base64'),
+        },
+      ],
+    });
+    const attachmentMessage = (
+      await clients[0].messages(first.conversationId)
+    ).items.find((m) => m.id === 'http-file')!;
+    expect(attachmentMessage.attachments).toHaveLength(1);
+    expect(
+      (
+        await clients[0].download(
+          first.conversationId,
+          attachmentMessage.id,
+          attachmentMessage.sequence,
+          attachmentMessage.attachments[0].id,
+        )
+      ).data,
+    ).toBe(chatData.toString('base64'));
+    const thirdParty = await call(
+      tokens.stranger,
+      `/chat-attachments/${attachmentMessage.attachments[0].id}/read`,
+      'POST',
+      {
+        deviceId: 'unknown',
+        signature: 'invalid',
+        payload: { id: attachmentMessage.attachments[0].id },
+      },
+    );
+    expect(thirdParty.status).toBe(403);
+
     expect(
       (await call(tokens.stranger, `/conversations/${first.conversationId}`))
         .status,
@@ -275,7 +327,7 @@ it('real enterprise login and membership authority drive cross-company publish /
     );
     expect(
       (await clients[1].messages(first.conversationId)).items,
-    ).toHaveLength(2);
+    ).toHaveLength(3);
     if (process.env.OTTO_MARKET_DESKTOP_FLOW === '1') {
       const uiBuyer = createMember('ui-buyer', true);
       const uiToken = await login('market.ui-buyer');
@@ -399,7 +451,9 @@ it('real enterprise login and membership authority drive cross-company publish /
     await new Promise<void>((resolve, reject) =>
       server.close((e) => (e ? reject(e) : resolve())),
     );
-    application.mockRestore();
+    if (previousLocal === undefined)
+      delete process.env.OTTO_MARKET_LOCAL_ACCEPTANCE;
+    else process.env.OTTO_MARKET_LOCAL_ACCEPTANCE = previousLocal;
     db.closeEnterpriseDatabase();
     if (previous === undefined) delete process.env.OTTO_ENTERPRISE_DIR;
     else process.env.OTTO_ENTERPRISE_DIR = previous;

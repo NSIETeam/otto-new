@@ -1,0 +1,3 @@
+SQLCipher native asset is missing: /Users/yang/Desktop/otto-carpool-fixed-91bc4e/native/sqlcipher/darwin-arm64/better_sqlite3.node
+(node:81122) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

@@ -332,9 +332,23 @@ function MarketConversation({
   const [reporting, setReporting] = useState(false);
   const [view, setView] = useState<View | null>(null);
   const [question, setQuestion] = useState('');
+  const [attachments, setAttachments] = useState<
+    Array<{ fileName: string; mimeType: string; size: number; data: string }>
+  >([]);
+  const [attachmentProgress, setAttachmentProgress] = useState('');
   const [sendId, setSendId] = useState<string>(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useEffect(
+    () =>
+      window.otto.onMarketAttachmentProgress?.((progress) => {
+        if (progress.messageId === sendId)
+          setAttachmentProgress(
+            `附件上传 ${Math.round((progress.loaded / progress.total) * 100)}%`,
+          );
+      }),
+    [sendId],
+  );
   const refresh = useCallback(async () => {
     try {
       if (!window.otto.enterpriseMarketMessages)
@@ -477,6 +491,31 @@ function MarketConversation({
               </aside>
             )}
             <p>{item.error || item.content}</p>
+            {item.attachments?.map((attachment) => (
+              <button
+                key={attachment.id}
+                disabled={busy}
+                onClick={() => {
+                  if (!window.otto.enterpriseMarketDownload) {
+                    setError('当前客户端缺少安全附件下载能力');
+                    return;
+                  }
+                  setBusy(true);
+                  void window.otto
+                    .enterpriseMarketDownload(
+                      id,
+                      item.id,
+                      item.sequence,
+                      attachment.id,
+                    )
+                    .catch((e) => setError(String(e)))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                下载 {attachment.fileName}（{Math.ceil(attachment.size / 1024)}{' '}
+                KB）
+              </button>
+            ))}
             {!item.error && (
               <label>
                 <input
@@ -515,9 +554,12 @@ function MarketConversation({
                 conversationId: id,
                 question,
                 requestId: sendId,
+                attachments,
               })
               .then(async () => {
                 setQuestion('');
+                setAttachments([]);
+                setAttachmentProgress('');
                 setSendId(crypto.randomUUID());
                 await refresh();
                 await onChanged();
@@ -538,7 +580,87 @@ function MarketConversation({
               onChange={(e) => setQuestion(e.target.value)}
             />
           </label>
-          <button disabled={busy || !question.trim()}>
+          {!canReply && (
+            <>
+              <label>
+                聊天附件（最多6个，每个10MB）
+                <input
+                  type="file"
+                  multiple
+                  disabled={busy}
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? []);
+                    event.target.value = '';
+                    if (attachments.length + files.length > 6) {
+                      setError('最多6个附件，请减少选择');
+                      return;
+                    }
+                    if (
+                      files.some(
+                        (file) => file.size < 1 || file.size > 10 * 1024 * 1024,
+                      )
+                    ) {
+                      setError('每个附件必须为1字节至10MB');
+                      return;
+                    }
+                    setBusy(true);
+                    setError('');
+                    void Promise.all(
+                      files.map(
+                        (file) =>
+                          new Promise<{
+                            fileName: string;
+                            mimeType: string;
+                            size: number;
+                            data: string;
+                          }>((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onerror = () =>
+                              reject(new Error('附件读取失败，请重新选择'));
+                            reader.onload = () =>
+                              resolve({
+                                fileName: file.name,
+                                mimeType:
+                                  file.type || 'application/octet-stream',
+                                size: file.size,
+                                data: String(reader.result).split(',')[1],
+                              });
+                            reader.readAsDataURL(file);
+                          }),
+                      ),
+                    )
+                      .then((next) =>
+                        setAttachments((previous) => [...previous, ...next]),
+                      )
+                      .catch((error) => setError(String(error)))
+                      .finally(() => setBusy(false));
+                  }}
+                />
+              </label>
+              {attachments.map((file, index) => (
+                <div key={`${index}:${file.fileName}`}>
+                  {file.fileName}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      setAttachments((previous) =>
+                        previous.filter((_, i) => i !== index),
+                      )
+                    }
+                  >
+                    移除附件 {file.fileName}
+                  </button>
+                </div>
+              ))}
+              {attachmentProgress && (
+                <p role="status">
+                  {attachmentProgress}；等待服务器确认后才算发送成功。
+                </p>
+              )}
+            </>
+          )}
+          <button disabled={busy || (!question.trim() && !attachments.length)}>
             {busy ? '正在确认结果…' : canReply ? '回复并接受' : '发送消息'}
           </button>
         </form>

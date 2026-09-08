@@ -5,10 +5,7 @@ import {
   type SendE2eeDirectMessageInput,
 } from './e2eeRepository.js';
 /** A separate, explicit scope; this never loosens enterprise private-message membership. */
-export type ParkCiphertextInput = Omit<
-  SendE2eeDirectMessageInput,
-  'organizationId' | 'senderAccountId' | 'recipientAccountId'
->;
+export type ParkCiphertextInput = Omit<SendE2eeDirectMessageInput, 'organizationId' | 'senderAccountId' | 'recipientAccountId' | 'attachments'> & { attachments?: Array<{ id: string; nonce: string; ciphertextSize: number }> };
 export interface ParkApprovedDevice {
   accountId: string;
   deviceId: string;
@@ -27,7 +24,6 @@ export function verifyParkCiphertext(input: {
     message.protocolVersion !== 1 ||
     message.contentType !== 'message' ||
     message.inReplyToMessageId ||
-    message.attachments?.length ||
     !/^[A-Za-z0-9_-]{1,128}$/.test(message.messageId)
   )
     throw new Error('invalid park message');
@@ -44,6 +40,12 @@ export function verifyParkCiphertext(input: {
       throw new Error('invalid ciphertext');
     return bytes;
   };
+  const attachments = (message.attachments ?? []) as Array<{id:string;nonce:string;ciphertextSize:number}>;
+  if (!Array.isArray(attachments) || attachments.length > 6 || new Set(attachments.map(a=>a.id)).size !== attachments.length) throw new Error('invalid park attachments');
+  for (const attachment of attachments) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(attachment.id) || !Number.isSafeInteger(attachment.ciphertextSize) || attachment.ciphertextSize <= 16 || attachment.ciphertextSize > 10*1024*1024+16) throw new Error('invalid park attachment');
+    base64(attachment.nonce,12,12);
+  }
   if (base64(message.ciphertext, 32768).length <= 16)
     throw new Error('invalid ciphertext');
   base64(message.nonce, 12, 12);
@@ -94,6 +96,7 @@ export function verifyParkCiphertext(input: {
       null,
       e2eeMessageSignaturePayload({
         ...message,
+        attachments: undefined,
         organizationId: `park-market:${input.parkId}`,
         senderAccountId: input.senderId,
         recipientAccountId: input.recipientId,
@@ -119,7 +122,7 @@ export function verifyParkCiphertext(input: {
       wrappedKey: e.wrappedKey,
       nonce: e.nonce,
     })),
-    attachments: [],
+    attachments,
   };
 }
 export const PARK_CONTACT_MESSAGE_SCHEMA_SQL = `

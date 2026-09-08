@@ -32,9 +32,9 @@ for (const nativeMls of [false, true])
       const nativeClients: ParkMarketMls[] = [];
       try {
         const base = await marketServiceFixture(h.repository);
-        const endpoint = (account: string) => {
+        const endpoint = (account: string, name = account) => {
           const vault = new EnterpriseE2eeKeyVault({
-            directory: join(root, account),
+            directory: join(root, name),
             deviceName: () => account,
             now: () => new Date(base.now()),
             protect: (text) => Buffer.from(text).toString('base64'),
@@ -154,11 +154,17 @@ for (const nativeMls of [false, true])
           requestId: 'publish',
         });
         let loseResponse = true;
+        let loseAttachmentResponse = true;
         let measureWrites = false;
         const writeTimes: number[] = [];
-        const client = (actor: 'buyer' | 'seller', forceEnvelope = false) => {
+        const client = (
+          actor: 'buyer' | 'seller',
+          forceEnvelope = false,
+          identity = actor === 'buyer' ? buyer : seller,
+          name: string = actor,
+        ) => {
           const context = () => ({
-            crypto: actor === 'buyer' ? buyer.crypto : seller.crypto,
+            crypto: identity.crypto,
             accountId: actor,
             organizationId: actor === 'buyer' ? 'E2' : 'E1',
             serverScope: 'market-test',
@@ -170,7 +176,24 @@ for (const nativeMls of [false, true])
             method = 'GET',
             body: Record<string, unknown> = {},
           ) => {
-            const parts = path.split('/').filter(Boolean);
+            const url = new URL(path, 'https://market.test');
+            const parts = url.pathname.split('/').filter(Boolean);
+            if (parts[0] === 'chat-attachments' && parts[2] === 'read') {
+              await app.authorizeAttachmentDevice(
+                actor,
+                'attachment-read',
+                body as never,
+              );
+              return {
+                data: (
+                  await app.chatAttachments.read(
+                    actor,
+                    parts[1],
+                    String(body.deviceId),
+                  )
+                ).toString('base64'),
+              };
+            }
             if (parts[0] === 'mls') return app.mls(actor, body as never);
             if (parts[0] === 'contact-prepare')
               return app.contacts.prepare(
@@ -190,9 +213,22 @@ for (const nativeMls of [false, true])
               return app.contacts.resolve(actor, parts[1], body);
             if (parts[0] === 'conversations') {
               if (method === 'GET')
-                return app.contacts.messages(actor, parts[1]);
+                return app.contacts.messages(
+                  actor,
+                  parts[1],
+                  url.searchParams.has('beforeSequence')
+                    ? Number(url.searchParams.get('beforeSequence'))
+                    : undefined,
+                );
               const started = performance.now();
               const result = await app.contacts.send(actor, parts[1], body);
+              if (
+                body.requestId === 'attachment-message' &&
+                loseAttachmentResponse
+              ) {
+                loseAttachmentResponse = false;
+                throw new Error('attachment response lost after commit');
+              }
               if (measureWrites) writeTimes.push(performance.now() - started);
               return result;
             }
@@ -200,7 +236,7 @@ for (const nativeMls of [false, true])
           };
           const mls = nativeMls
             ? new ParkMarketMls({
-                directory: join(root, `native-${actor}`),
+                directory: join(root, `native-${name}`),
                 binaryPath: join(
                   process.cwd(),
                   'otto-native/target/debug/otto-native',
@@ -216,9 +252,24 @@ for (const nativeMls of [false, true])
             context,
             ensureDevice: async () => undefined,
             request,
+            async uploadAttachment(input) {
+              await app.authorizeAttachmentDevice(
+                actor,
+                'attachment-upload',
+                input.attachmentProof,
+              );
+              const payload = input.attachmentProof.payload;
+              return app.chatAttachments.upload(actor, {
+                id: String(payload.id),
+                conversationId: String(payload.conversationId),
+                messageId: String(payload.messageId),
+                deviceId: input.attachmentProof.deviceId,
+                bytes: Buffer.from(input.attachmentBase64, 'base64'),
+              });
+            },
             mls,
             pending: new MarketDraftStore(
-              join(root, `pending-${actor}`),
+              join(root, `pending-${name}`),
               (text) => Buffer.from(text),
               (bytes) => bytes.toString(),
               process.env.OTTO_MARKET_CHAT_CAPACITY === '1' ? 200 : 20,
@@ -262,6 +313,84 @@ for (const nativeMls of [false, true])
           (await clients.buyer.messages(receipt.conversationId)).items[1]
             .content,
         ).toBe('可以调节，下午交接方便。');
+        const attachmentData = Buffer.from(
+          'synthetic private chat attachment',
+        ).toString('base64');
+        await expect(
+          clients.buyer.send({
+            ...input,
+            requestId: 'forbidden-first-file',
+            attachments: [
+              {
+                fileName: 'test.txt',
+                mimeType: 'text/plain',
+                size: 33,
+                data: attachmentData,
+              },
+            ],
+          }),
+        ).rejects.toThrow('首次问题');
+        const attachmentInput = {
+          kind: 'conversation' as const,
+          id: receipt.conversationId,
+          question: '文件说明',
+          requestId: 'attachment-message',
+          attachments: [
+            {
+              fileName: 'test.txt',
+              mimeType: 'text/plain',
+              size: Buffer.from(attachmentData, 'base64').length,
+              data: attachmentData,
+            },
+          ],
+        };
+        await expect(clients.buyer.send(attachmentInput)).rejects.toThrow(
+          'attachment response lost',
+        );
+        await clients.buyer.send(attachmentInput);
+        const attachmentPage = await clients.seller.messages(
+          receipt.conversationId,
+        );
+        const attachmentMessage = attachmentPage.items.find(
+          (m) => m.id === 'attachment-message',
+        )!;
+        expect(attachmentMessage.content).toBe('文件说明');
+        expect(attachmentMessage.attachments).toHaveLength(1);
+        const attachmentId = attachmentMessage.attachments[0].id;
+        expect(
+          (
+            await clients.seller.download(
+              receipt.conversationId,
+              attachmentMessage.id,
+              attachmentMessage.sequence,
+              attachmentId,
+            )
+          ).data,
+        ).toBe(attachmentData);
+        await h.restart();
+        app = makeApp();
+        expect(
+          (
+            await clients.buyer.download(
+              receipt.conversationId,
+              attachmentMessage.id,
+              attachmentMessage.sequence,
+              attachmentId,
+            )
+          ).data,
+        ).toBe(attachmentData);
+        await expect(
+          app.chatAttachments.read(
+            'stranger',
+            attachmentId,
+            seller.device.deviceId,
+          ),
+        ).rejects.toThrow('NOT_FOUND');
+        const storedAttachments = await h.repository.read((tx) =>
+          tx.all('SELECT * FROM park_contact_attachments'),
+        );
+        expect(storedAttachments).toHaveLength(1);
+        expect(JSON.stringify(storedAttachments)).not.toContain('test.txt');
         if (nativeMls)
           await expect(
             client('buyer', true).send({
@@ -291,7 +420,12 @@ for (const nativeMls of [false, true])
           (await clients.seller.messages(receipt.conversationId)).items.map(
             (item) => item.content,
           ),
-        ).toEqual([input.question, '可以调节，下午交接方便。', '已收到，谢谢']);
+        ).toEqual([
+          input.question,
+          '可以调节，下午交接方便。',
+          '文件说明',
+          '已收到，谢谢',
+        ]);
         if (nativeMls) {
           for (const native of nativeClients) await native.close();
           // Simulate loss of this device's MLS persistence, keeping its approved identity vault.
@@ -315,6 +449,150 @@ for (const nativeMls of [false, true])
           expect(after.items.at(-1)?.content).toBe('新连接已恢复');
           expect(after.items[0].error).toBeTruthy();
         }
+        const second = endpoint('buyer', 'buyer-second');
+        const secondClient = client('buyer', false, second, 'buyer-second');
+        const device = second.device,
+          at = new Date(base.now()).toISOString();
+        await h.repository.transaction((tx) =>
+          tx.run(
+            'INSERT INTO e2ee_devices(organization_id,account_id,device_id,device_name,identity_signing_public_key,device_exchange_public_key,key_fingerprint,approval_state,approved_by_device_id,approved_at,created_at,last_seen_at,revoked_at) VALUES (?,?,?,?,?,?,?,?,NULL,NULL,?,?,NULL)',
+            [
+              'E2',
+              'buyer',
+              device.deviceId,
+              device.deviceName,
+              device.identitySigningPublicKey,
+              device.deviceExchangePublicKey,
+              device.keyFingerprint,
+              'pending',
+              at,
+              at,
+            ],
+          ),
+        );
+        async function deviceEvent(
+          event: 'registered_pending' | 'approved' | 'revoked',
+        ) {
+          await h.repository.transaction(async (tx) => {
+            const [previous] = await tx.all(
+              "SELECT sequence,entry_hash FROM e2ee_key_transparency_log WHERE organization_id='E2' ORDER BY sequence DESC LIMIT 1",
+            );
+            const entry = {
+              sequence: Number(previous.sequence) + 1,
+              organizationId: 'E2',
+              accountId: 'buyer',
+              deviceId: device.deviceId,
+              event,
+              keyFingerprint: device.keyFingerprint,
+              actorDeviceId: buyer.device.deviceId,
+              previousHash: String(previous.entry_hash),
+              createdAt: at,
+            };
+            const hash = createHash('sha256')
+              .update('otto:e2ee-key-transparency:v1\n')
+              .update(JSON.stringify(entry))
+              .digest('hex');
+            await tx.run(
+              'INSERT INTO e2ee_key_transparency_log VALUES (?,?,?,?,?,?,?,?,?,?)',
+              [
+                'E2',
+                entry.sequence,
+                'buyer',
+                device.deviceId,
+                event,
+                device.keyFingerprint,
+                buyer.device.deviceId,
+                entry.previousHash,
+                hash,
+                at,
+              ],
+            );
+            if (event === 'approved')
+              await tx.run(
+                "UPDATE e2ee_devices SET approval_state='approved',approved_by_device_id=?,approved_at=? WHERE device_id=?",
+                [buyer.device.deviceId, at, device.deviceId],
+              );
+            if (event === 'revoked')
+              await tx.run(
+                'UPDATE e2ee_devices SET revoked_at=? WHERE device_id=?',
+                [at, device.deviceId],
+              );
+          });
+        }
+        await deviceEvent('registered_pending');
+        const attachmentProof = () => {
+          const payload = { id: attachmentId };
+          return {
+            payload,
+            ...second.crypto.signParkMarketMls({
+              serverScope: 'market-test',
+              organizationId: 'E2',
+              accountId: 'buyer',
+              action: 'attachment-read',
+              payload,
+            }),
+          };
+        };
+        await expect(
+          app.authorizeAttachmentDevice(
+            'buyer',
+            'attachment-read',
+            attachmentProof(),
+          ),
+        ).rejects.toThrow('FORBIDDEN');
+        await expect(
+          secondClient.send({
+            kind: 'conversation',
+            id: receipt.conversationId,
+            question: 'pending device',
+            requestId: 'pending-device',
+          }),
+        ).rejects.toThrow();
+        await deviceEvent('approved');
+        await expect(
+          app.authorizeAttachmentDevice(
+            'buyer',
+            'attachment-read',
+            attachmentProof(),
+          ),
+        ).resolves.toBeUndefined();
+        const oldHistory = await secondClient.messages(receipt.conversationId);
+        expect(oldHistory.items.every((message) => !!message.error)).toBe(true);
+        await expect(
+          secondClient.download(
+            receipt.conversationId,
+            attachmentMessage.id,
+            attachmentMessage.sequence,
+            attachmentId,
+          ),
+        ).rejects.toThrow();
+        if (nativeMls) await secondClient.recover(receipt.conversationId);
+        await secondClient.send({
+          kind: 'conversation',
+          id: receipt.conversationId,
+          question: 'approved second device',
+          requestId: 'second-device-message',
+        });
+        expect(
+          (await clients.seller.messages(receipt.conversationId)).items.at(-1)
+            ?.content,
+        ).toBe('approved second device');
+        await deviceEvent('revoked');
+        await expect(
+          app.authorizeAttachmentDevice(
+            'buyer',
+            'attachment-read',
+            attachmentProof(),
+          ),
+        ).rejects.toThrow('FORBIDDEN');
+        await expect(
+          secondClient.send({
+            kind: 'conversation',
+            id: receipt.conversationId,
+            question: 'revoked device',
+            requestId: 'revoked-device',
+          }),
+        ).rejects.toThrow();
         const stored = await h.repository.read((tx) =>
           tx.all('SELECT payload FROM park_contact_messages'),
         );

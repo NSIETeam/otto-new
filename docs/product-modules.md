@@ -226,7 +226,7 @@ License 暂停时执行层关闭对应功能但不删除配置，授权恢复后
 
 ## 园区跳蚤市场开发状态（2026-09-08）
 
-`park_services/flea_market` 已开始实现字段、商品事务、图片、状态、发现/收藏、部分治理与定时处理函数；仍属于 `park_services`，未新增稳定产品模块 ID。
-SQLite schema contributor 已注册，企业 PostgreSQL 追加市场迁移（当前为 16，保留并行拼车迁移 15）。领域查询和事务通过独立 Repository，共用数据平台字段及对象加密。
-目前这些能力尚未接入完整 HTTP/IPC/UI、统一消息和服务器 worker 生命周期，不能据此宣告 `park_flea_market_v1` 可用。当前无生产市场入口或能力开放。
+`park_services/flea_market` 已实现商品事务、图片、发现/收藏、治理、后台清理，以及 HTTP/IPC/桌面与受控会话附件接入；仍属于 `park_services`，未新增稳定产品模块 ID。
+SQLite schema contributor 已注册，企业 PostgreSQL 追加市场迁移（基础从16开始，本轮追加25–29，保留既有拼车迁移）。领域查询和事务通过独立 Repository，共用数据平台字段及对象加密。
+正常服务组合根已接入诊断 readiness 与 worker 生命周期，支持显式标记的隔离本地测试。生产能力仍关闭；用户本轮排除真机/安装包验收，自动化通过不代表生产开放。
 准确进度与失败/未验证项见 [执行日志](research/2026-09-08-park-flea-market-execution-log.md) 和 [自查报告](research/2026-09-08-park-flea-market-self-check.md)。

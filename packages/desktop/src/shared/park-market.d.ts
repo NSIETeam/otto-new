@@ -4,6 +4,8 @@ export interface MarketDesktopRequest {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: Record<string, unknown>;
   imageBase64?: string;
+  attachmentBase64?: string;
+  attachmentProof?: {deviceId:string;signature:string;payload:Record<string,unknown>};
   uploadId?: string;
 }
 export interface MarketDraftScope {

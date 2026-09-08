@@ -972,6 +972,10 @@ export interface EnterpriseParkCarpoolPublishInput {
 }
 
 export interface EnterprisePublicProfileInput {
+  primaryIndustryCode?: string | null;
+  primaryIndustryName?: string | null;
+  industryClassificationBasis?: 'company_selected' | 'researcher_classified_from_public_business' | 'migrated_suggestion' | null;
+  industryConfirmedByCompany?: boolean;
   summary: string;
   website: string;
   industryTags: string[];
@@ -999,6 +1003,14 @@ export interface EnterpriseParkPartnershipEdge {
 }
 
 export interface EnterpriseParkStarMap {
+  capacityStatus?: 'ready' | 'list_only';
+  totalNodeCount?: number;
+  relationType?: 'same_industry';
+  dataSource?: 'real' | 'demo';
+  taxonomyVersion?: string;
+  industryGroups?: Array<{ code: string; name: string; memberOrganizationIds: string[] }>;
+  unclassifiedNodeIds?: string[];
+  relationshipCount?: number;
   parkId: string;
   parkName: string;
   currentOrganizationId: string;
@@ -2274,6 +2286,8 @@ export interface OttoBridge {
   enterpriseParkCarpoolWorkflowExecute(command: CarpoolWorkflowCommand): Promise<CarpoolWorkflowView>;
   enterpriseMarketRecover?(id:string): Promise<{recovered:boolean}>;
   enterpriseMarketLink?(listingId?: string): Promise<{ listingId?: string; error?: string; copied?: boolean } | null>;
+  onMarketAttachmentProgress?(listener:(progress:{messageId:string;id:string;loaded:number;total:number})=>void):()=>void;
+  enterpriseMarketDownload?(conversationId:string,messageId:string,sequence:number,attachmentId:string): Promise<{canceled:boolean}>;
   enterpriseMarketSend?(input: Parameters<ParkMarketMessaging['send']>[0]): ReturnType<ParkMarketMessaging['send']>;
   enterpriseMarketMessages?(id: string, beforeSequence?: number): ReturnType<ParkMarketMessaging['messages']>;
   enterpriseMarketUploadCancel?(id: string): Promise<boolean>;
@@ -3911,6 +3925,8 @@ const bridge: OttoBridge = {
   },
   enterpriseMarketRecover(id:string): Promise<{recovered:boolean}> { return ipcRenderer.invoke('otto:enterprise-market-recover',id); },
   enterpriseMarketLink(listingId?: string): Promise<{ listingId?: string; error?: string; copied?: boolean } | null> { return ipcRenderer.invoke('otto:enterprise-market-link', listingId); },
+  onMarketAttachmentProgress(listener:(progress:{messageId:string;id:string;loaded:number;total:number})=>void) { const handler=(_event:Electron.IpcRendererEvent,progress:{messageId:string;id:string;loaded:number;total:number})=>listener(progress); ipcRenderer.on('otto:enterprise-market-attachment-progress',handler); return ()=>ipcRenderer.removeListener('otto:enterprise-market-attachment-progress',handler); },
+  enterpriseMarketDownload(conversationId:string,messageId:string,sequence:number,attachmentId:string): Promise<{canceled:boolean}> { return ipcRenderer.invoke('otto:enterprise-market-download',conversationId,messageId,sequence,attachmentId); },
   enterpriseMarketSend(input: Parameters<ParkMarketMessaging['send']>[0]): ReturnType<ParkMarketMessaging['send']> { return ipcRenderer.invoke(IPC.enterpriseMarketSend, input); },
   enterpriseMarketMessages(id: string, beforeSequence?: number): ReturnType<ParkMarketMessaging['messages']> { return ipcRenderer.invoke(IPC.enterpriseMarketMessages, id, beforeSequence); },
   enterpriseMarketUploadCancel(id: string): Promise<boolean> {return ipcRenderer.invoke('otto:enterprise-market-upload-cancel',id);},

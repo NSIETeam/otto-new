@@ -1,0 +1,18 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:91409) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:91408) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ integration/park-market/conversation-capacity.test.ts (2 tests) 1572ms
+   ✓ postgres: 100 independent active conversations retain writes and reads while two maintenance workers run  1436ms
+ ✓ integration/park-market/encrypted-flow.test.ts (4 tests) 6939ms
+   ✓ postgres/envelope: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server  1659ms
+   ✓ sqlite/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server  1945ms
+   ✓ postgres/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server  3204ms
+
+ Test Files  2 passed (2)
+      Tests  6 passed (6)
+   Start at  22:54:52
+   Duration  9.54s (transform 1.27s, setup 0ms, collect 4.88s, tests 8.51s, environment 0ms, prepare 75ms)

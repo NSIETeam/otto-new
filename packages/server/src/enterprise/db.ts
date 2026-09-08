@@ -1,3 +1,4 @@
+import { localMarketAcceptance } from '../modules/park_services/flea_market/fleaMarketReadiness.js';
 import { carpoolRuntimeConfig } from '../modules/park_carpool/parkCarpoolConfig.js';
 import { E2EE_PRODUCTION_RELEASE_POLICY } from './e2eeProductionReleasePolicy.js';
 import { createMarketSqliteRuntime } from '../modules/park_services/flea_market/fleaMarketSqliteRuntime.js';
@@ -1230,8 +1231,7 @@ export function getFleaMarketApplication() {
   return fleaMarketApplication ??= createMarketSqliteRuntime({
     database: getDB(), cipher: fieldCipher, objects: attachmentObjectStore,
     enterpriseEnabled: organizationId => getOrganizationFeatures(organizationId).park_service,
-    // Enable only after the complete encrypted contact and desktop acceptance gate passes.
-    ready: () => false,
+    localAcceptance: localMarketAcceptance(DATA_DIR),
     requiresMls: () => E2EE_PRODUCTION_RELEASE_POLICY.enabled,
   });
 }

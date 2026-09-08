@@ -1481,7 +1481,7 @@ export class EnterpriseE2eeCrypto {
 
   signParkMarketMls(input: {
     serverScope: string; accountId: string;
-    action: 'package' | 'state' | 'activate' | 'message';
+    action: 'package' | 'state' | 'activate' | 'message' | 'attachment-upload' | 'attachment-read';
     payload: Record<string, unknown>;
   }) {
     const active = this.vault.loadOrCreate(input.serverScope, input.accountId).active;

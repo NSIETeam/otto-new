@@ -1,0 +1,59 @@
+
+> otto-desktop@1.9.14 build
+> npm run build:main && npm run build:preload && npm run build:renderer
+
+
+> otto-desktop@1.9.14 prebuild:main
+> npm run build:native
+
+
+> otto-desktop@1.9.14 build:native
+> npm run build --workspace=@otto/native
+
+
+> @otto/native@0.1.0 build
+> tsc -p tsconfig.json
+
+
+> otto-desktop@1.9.14 build:main
+> tsc -p tsconfig.main.json
+
+
+> otto-desktop@1.9.14 build:preload
+> tsc -p tsconfig.preload.json --noEmit && webpack-cli --config webpack.preload.cjs --mode production && node scripts/verify-preload-bundle.mjs
+
+asset index.js 26.2 KiB [compared for emit] [minimized] (name: main) 1 related asset
+orphan modules 7.89 KiB [orphan] 4 modules
+./src/preload/index.ts + 4 modules 60.5 KiB [not cacheable] [built] [code generated]
+webpack 5.108.4 compiled successfully in 6553 ms
+[preload] sandbox 单文件验证通过: /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/dist/preload/index.js; requires=["electron"]
+
+> otto-desktop@1.9.14 build:renderer
+> webpack-cli --config webpack.config.cjs --mode production
+
+assets by status 5.87 MiB [big]
+  asset 922.main.js 4.54 MiB [compared for emit] [minimized] [big] 1 related asset
+  asset 314.main.js 1.33 MiB [compared for emit] [minimized] [big]
+assets by chunk 334 KiB (id hint: vendors)
+  asset 979.main.js 184 KiB [compared for emit] [minimized] (id hint: vendors)
+  asset 818.main.js 150 KiB [compared for emit] [minimized] (id hint: vendors)
+asset main.js 143 KiB [compared for emit] [minimized] (name: main) 1 related asset
+asset 216.main.js 27.7 KiB [compared for emit] [minimized]
+asset 976.main.js 27.5 KiB [compared for emit] [minimized] 1 related asset
+asset 435.main.js 6.65 KiB [compared for emit] [minimized] 1 related asset
+asset 642.main.js 3.7 KiB [compared for emit] [minimized] 1 related asset
+asset index.html 1.69 KiB [compared for emit]
+asset 513.main.js 645 bytes [compared for emit] [minimized] 1 related asset
+orphan modules 7.3 MiB [orphan] 774 modules
+runtime modules 7.75 KiB 12 modules
+cacheable modules 7.97 MiB
+  modules by path ../../node_modules/ 934 KiB 62 modules
+  modules by path ./ 7.06 MiB
+    modules by path ./src/renderer/ 6.92 MiB 19 modules
+    modules by path ./node_modules/ 143 KiB
+      modules by path ./node_modules/react/ 8 KiB 4 modules
+      modules by path ./node_modules/react-dom/ 131 KiB 3 modules
+      modules by path ./node_modules/scheduler/ 4.33 KiB
+        ./node_modules/scheduler/index.js 198 bytes [built] [code generated]
+        ./node_modules/scheduler/cjs/scheduler.production.min.js 4.14 KiB [built] [code generated]
+webpack 5.108.4 compiled successfully in 31405 ms

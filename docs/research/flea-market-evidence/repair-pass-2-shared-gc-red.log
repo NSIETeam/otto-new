@@ -1,0 +1,25 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:71645) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketRemoteReferences.test.ts (1 test | 1 failed) 944ms
+   × shared orphan collection retains staged and bound market chat objects independently of product images 943ms
+     → (0 , marketRemoteKeyReferenced) is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_services/flea_market/fleaMarketRemoteReferences.test.ts > shared orphan collection retains staged and bound market chat objects independently of product images
+TypeError: (0 , marketRemoteKeyReferenced) is not a function
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketRemoteReferences.test.ts:8:56
+
+ ❯ transact packages/server/src/modules/park_services/flea_market/fleaMarketPostgresRepository.ts:37:28
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketRemoteReferences.test.ts:9:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  22:47:15
+   Duration  3.58s (transform 1.17s, setup 0ms, collect 2.49s, tests 944ms, environment 0ms, prepare 32ms)

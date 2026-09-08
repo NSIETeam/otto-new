@@ -1,6 +1,7 @@
+import { localMarketAcceptance } from '../modules/park_services/flea_market/fleaMarketReadiness.js';
 import { E2EE_PRODUCTION_RELEASE_POLICY } from './e2eeProductionReleasePolicy.js';
 import { createMarketPostgresRuntime } from '../modules/park_services/flea_market/fleaMarketPostgresRuntime.js';
-import { createMarketRemoteObjects } from '../modules/park_services/flea_market/fleaMarketObjectStore.js';
+import { createMarketRemoteObjects, marketRemoteKeyReferenced } from '../modules/park_services/flea_market/fleaMarketObjectStore.js';
 import { createEncryptedFieldCipher } from '../modules/data_platform/encryptedFieldCipher.js';
 
 /**
@@ -199,11 +200,7 @@ export async function createClusteredEnterpriseInfrastructure(input: {
         return { ...metadata, async isStorageKeyReferenced(location) {
           if (await metadata.isStorageKeyReferenced(location)) return true;
           if (location.backend !== 's3') return false;
-          const result = await pool.query(`SELECT id FROM park_market_images WHERE state='available' AND (
-            CASE WHEN left(object_key,1)='{' THEN object_key::jsonb->>'key' ELSE object_key END=$1 OR
-            CASE WHEN left(thumbnail_key,1)='{' THEN thumbnail_key::jsonb->>'key' ELSE thumbnail_key END=$1
-          ) LIMIT 1`, [location.key]);
-          return result.rows.length > 0;
+          return marketRemoteKeyReferenced(pool, location.key);
         } };
       })(),
       stores: {
@@ -221,7 +218,7 @@ export async function createClusteredEnterpriseInfrastructure(input: {
       repository,
       cache,
       sharedState: createClusteredEnterpriseSharedState({ repository, cache }),
-      fleaMarketApplication: createMarketPostgresRuntime({ pool, defaultQuotaBytes, cipher: createEncryptedFieldCipher({ keyProvider: accountSyncKeyProvider }), objects: createMarketRemoteObjects(attachmentRuntime.store, createEncryptedFieldCipher({ keyProvider: accountSyncKeyProvider })), ready: () => false, requiresMls: () => E2EE_PRODUCTION_RELEASE_POLICY.enabled }),
+      fleaMarketApplication: createMarketPostgresRuntime({ pool, defaultQuotaBytes, cipher: createEncryptedFieldCipher({ keyProvider: accountSyncKeyProvider }), objects: createMarketRemoteObjects(attachmentRuntime.store, createEncryptedFieldCipher({ keyProvider: accountSyncKeyProvider })), localAcceptance: localMarketAcceptance(dataDirectory), requiresMls: () => E2EE_PRODUCTION_RELEASE_POLICY.enabled }),
       attachmentStorage,
       attachmentStore: attachmentRuntime.store,
       legacyAttachmentReadEnabled: Boolean(legacyStore),

@@ -19,7 +19,7 @@ export function validateMarketRequest(value: unknown): MarketDesktopRequest {
   if (
     typeof input.path !== 'string' ||
     input.path.length > 3000 ||
-    !/^\/(?:mls|contacts|contact-prepare|conversations|blocks|settings|mine|listings|favorites|notifications|records|admin|reports|appeals|restore|restrictions|roles|images|drafts)?(?:\/[A-Za-z0-9_-]+){0,2}(?:\?[^#]*)?$/.test(
+    !/^\/(?:chat-attachments|mls|contacts|contact-prepare|conversations|blocks|settings|mine|listings|favorites|notifications|records|admin|reports|appeals|restore|restrictions|roles|images|drafts)?(?:\/[A-Za-z0-9_-]+){0,2}(?:\?[^#]*)?$/.test(
       input.path,
     ) ||
     !['GET', 'POST', 'PUT', 'DELETE'].includes(input.method)
@@ -33,6 +33,15 @@ export function validateMarketRequest(value: unknown): MarketDesktopRequest {
       input.imageBase64.length > 28_000_000)
   )
     throw new Error('图片请求无效');
+  if (
+    input.attachmentBase64 !== undefined &&
+    (!/^\/chat-attachments\/[A-Za-z0-9_-]+$/.test(input.path) ||
+      input.method !== 'POST' ||
+      typeof input.attachmentBase64 !== 'string' ||
+      input.attachmentBase64.length > 14_000_000 ||
+      !input.attachmentProof)
+  )
+    throw new Error('附件请求无效');
   return input;
 }
 export function assertMarketDraftScope(
@@ -66,6 +75,11 @@ export class MarketDraftStore {
         )
         .digest('hex')}.draft`,
     );
+  }
+  attachmentDirectory(scope: MarketDraftScope) {
+    const directory = `${this.path(scope)}-attachments`;
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    return directory;
   }
   load(scope: MarketDraftScope): MarketDraft[] {
     const file = this.path(scope);

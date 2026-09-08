@@ -903,6 +903,10 @@ export interface EnterpriseParkCarpoolPublishInput {
 }
 
 export interface EnterprisePublicProfileInput {
+  primaryIndustryCode?: string | null;
+  primaryIndustryName?: string | null;
+  industryClassificationBasis?: 'company_selected' | 'researcher_classified_from_public_business' | 'migrated_suggestion' | null;
+  industryConfirmedByCompany?: boolean;
   summary: string;
   website: string;
   industryTags: string[];
@@ -930,6 +934,14 @@ export interface EnterpriseParkPartnershipEdge {
 }
 
 export interface EnterpriseParkStarMap {
+  capacityStatus?: 'ready' | 'list_only';
+  totalNodeCount?: number;
+  relationType?: 'same_industry';
+  dataSource?: 'real' | 'demo';
+  taxonomyVersion?: string;
+  industryGroups?: Array<{ code: string; name: string; memberOrganizationIds: string[] }>;
+  unclassifiedNodeIds?: string[];
+  relationshipCount?: number;
   parkId: string;
   parkName: string;
   currentOrganizationId: string;
@@ -3515,9 +3527,10 @@ export class EnterpriseClient {
   }
   async requestParkMarket(value: unknown, upload: {signal?: AbortSignal; onProgress?: (loaded: number, total: number) => void} = {}): Promise<unknown> {
     const input = validateMarketRequest(value);
-    if (input.imageBase64 !== undefined) {
-      const bytes = Buffer.from(input.imageBase64, 'base64');
-      if (!bytes.length || bytes.length > 20 * 1024 * 1024 || bytes.toString('base64') !== input.imageBase64) throw new Error('图片内容无效');
+    const uploadBase64=input.imageBase64 ?? input.attachmentBase64;
+    if (uploadBase64 !== undefined) {
+      const bytes = Buffer.from(uploadBase64, 'base64');
+      if (!bytes.length || bytes.length > 20 * 1024 * 1024 || bytes.toString('base64') !== uploadBase64) throw new Error('图片内容无效');
       if (upload.signal?.aborted) throw new Error('图片上传已取消');
       let offset = 0;
       const body = new ReadableStream<Uint8Array>({pull(controller) {
@@ -3527,7 +3540,7 @@ export class EnterpriseClient {
         offset = end;
         upload.onProgress?.(offset,bytes.length);
       }});
-      return this.request(`/enterprise/park-market${input.path}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'content-length':String(bytes.length) }, body, duplex:'half', signal:upload.signal } as RequestInit & {duplex:'half'}, { timeoutMs: 30_000 });
+      return this.request(`/enterprise/park-market${input.path}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'content-length':String(bytes.length), ...(input.attachmentProof ? {'x-otto-attachment-proof':Buffer.from(JSON.stringify(input.attachmentProof)).toString('base64url')} : {}) }, body, duplex:'half', signal:upload.signal } as RequestInit & {duplex:'half'}, { timeoutMs: 30_000 });
     }
     return this.request(`/enterprise/park-market${input.path}`, { method: input.method, body: input.body === undefined ? undefined : JSON.stringify(input.body) });
   }
@@ -3697,11 +3710,18 @@ export class EnterpriseClient {
   }
 
   async getEnterpriseParkStarMap(): Promise<EnterpriseParkStarMap> {
+    try {
     return (
       await this.request<{ starMap: EnterpriseParkStarMap }>(
         '/enterprise/park/star-map',
       )
     ).starMap;
+    } catch (error) {
+      if (error instanceof EnterpriseRequestError && (error.status === 401 || error.status === 403)) {
+        throw new Error(`[STAR_MAP_ACCESS_DENIED] ${error.message}`);
+      }
+      throw error;
+    }
   }
 
   async getParkStatistics(): Promise<EnterpriseParkStatistics> {

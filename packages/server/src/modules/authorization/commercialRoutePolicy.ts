@@ -88,6 +88,9 @@ export function commercialFeatureForEnterpriseRoute(
  ): OrganizationFeatureKey | null {
   // MLS commands retain signed-device and conversation authorization in the service.
   if (path === '/enterprise/park-market/mls') return null;
+  // Attachment routes independently enforce current device and conversation access.
+  if ((context.method ?? 'GET').toUpperCase() === 'POST'
+    && /^\/enterprise\/park-market\/chat-attachments\/[^/]+(?:\/read)?$/.test(path)) return null;
   if ((context.method ?? 'GET').toUpperCase() === 'GET' && /^\/enterprise\/park-market\/(?:conversations\/[^/]+\/items|images\/[^/]+)$/.test(path)) return null;
   // Personal market history survives module removal. Its service still checks
   // account identity and ownership; actions that revive publication recheck entitlements.

@@ -209,6 +209,7 @@ export function createEnterpriseRecurringTaskRegistry(): RecurringTaskRegistry {
 export const ENTERPRISE_CAPABILITIES = [
   'policy_intelligence_v2',
   'policy_intelligence_v3',
+  'park_flea_market_protocol_v1',
   'password_auth',
   'sms_login',
   'sms_registration',

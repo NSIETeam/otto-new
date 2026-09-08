@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { isAdminRoute, isMemberRoute } from './enterpriseRoutePolicy.js';
 
+it('supplies authenticated membership to startup carpool requests without matching unrelated prefixes', () => {
+  for (const route of ['/enterprise/park-carpool', '/enterprise/park-carpool/workflow']) expect(isMemberRoute(route)).toBe(true);
+  expect(isMemberRoute('/enterprise/park-carpooling')).toBe(false);
+});
+
 describe('customer module route authorization', () => {
   it('keeps authoring and installation on member sessions', () => {
     expect(isMemberRoute('/enterprise/customer-modules')).toBe(true);

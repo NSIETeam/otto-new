@@ -1,4 +1,8 @@
-import { marketSearchKey, marketQueryTokens } from './fleaMarketSearchIndex.js';
+import {
+  marketSearchKey,
+  marketQueryTokens,
+  marketSearchPending,
+} from './fleaMarketSearchIndex.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { createHash } from 'node:crypto';
 import { MarketError, categories, type Listing } from './fleaMarketTypes.js';
@@ -61,9 +65,32 @@ export function createMarketDiscovery(deps: MarketServiceDependencies) {
           !canDiscover(actor, await deps.config(tx, actor.parkId), actor.parkId)
         )
           throw new MarketError('FORBIDDEN');
+        if (query && (await marketSearchPending(tx, actor.parkId)))
+          throw new MarketError(
+            'DEPENDENCY_UNAVAILABLE',
+            'search-index',
+            now() + 60000,
+          );
+        const owners = new Map<
+          string,
+          Awaited<ReturnType<typeof deps.principal>>
+        >();
         const searchKey = query
           ? await marketSearchKey(tx, deps.cipher, actor.parkId)
           : null;
+        if (query && !searchKey) {
+          const live = await tx.all(
+            "SELECT id FROM park_market_listings WHERE park_id=? AND state IN ('active','reserved') LIMIT 1",
+            [actor.parkId],
+          );
+          if (live.length)
+            throw new MarketError(
+              'DEPENDENCY_UNAVAILABLE',
+              'search-index',
+              now() + 60000,
+            );
+          return { items: [], nextCursor: null };
+        }
         const searchTokens = searchKey
           ? marketQueryTokens(searchKey, query)
           : [];
@@ -99,6 +126,26 @@ export function createMarketDiscovery(deps: MarketServiceDependencies) {
             throw new MarketError('INVALID_INPUT', 'cursor');
           }
         }
+        // An absent ngram proves no exact substring can match. Avoid scanning
+        // the rank index for no-match searches (still never decrypt metadata).
+        let sparseToken: string | undefined;
+        let sparseIds: string[] = [];
+        for (const searchToken of searchTokens) {
+          // Inspect at most 201 metadata entries, never count/decrypt the full
+          // posting list. A small posting list should drive the sorted query.
+          const posting = await tx.all(
+            'SELECT listing_id FROM park_market_search_terms WHERE park_id=? AND token=? LIMIT 201',
+            [actor.parkId, searchToken],
+          );
+          if (!posting.length) return { items: [], nextCursor: null };
+          if (
+            posting.length <= 200 &&
+            (!sparseToken || posting.length < sparseIds.length)
+          ) {
+            sparseToken = searchToken;
+            sparseIds = posting.map((row) => String(row.listing_id));
+          }
+        }
         const items = [];
         let exhausted = false;
         // Bounded batches keep SQL sort/filter indexes useful. Text remains encrypted;
@@ -110,11 +157,16 @@ export function createMarketDiscovery(deps: MarketServiceDependencies) {
             'expires_at>?',
           ];
           const args: unknown[] = [actor.parkId, now()];
-          if (searchTokens.length) {
-            where.push(
-              `(id IN (SELECT listing_id FROM park_market_search_terms WHERE park_id=? AND token IN (${searchTokens.map(() => '?').join(',')}) GROUP BY listing_id HAVING COUNT(*)=?) OR NOT EXISTS (SELECT 1 FROM park_market_search_documents d WHERE d.listing_id=park_market_listings.id AND d.version=park_market_listings.version))`,
-            );
-            args.push(actor.parkId, ...searchTokens, searchTokens.length);
+          for (const searchToken of searchTokens) {
+            if (searchToken === sparseToken) {
+              where.push(`id IN (${sparseIds.map(() => '?').join(',')})`);
+              args.push(...sparseIds);
+            } else {
+              where.push(
+                'EXISTS (SELECT 1 FROM park_market_search_terms t WHERE t.park_id=? AND t.token=? AND t.listing_id=park_market_listings.id LIMIT 1 OFFSET 0)',
+              );
+              args.push(actor.parkId, searchToken);
+            }
           }
           if (input.category) {
             where.push('category=?');
@@ -172,7 +224,12 @@ export function createMarketDiscovery(deps: MarketServiceDependencies) {
                 .includes(query)
             )
               continue;
-            const owner = await deps.principal(tx, listing.ownerId);
+            if (!owners.has(listing.ownerId))
+              owners.set(
+                listing.ownerId,
+                await deps.principal(tx, listing.ownerId),
+              );
+            const owner = owners.get(listing.ownerId) ?? null;
             if (!samePark(owner, actor.parkId)) continue;
             items.push(publicListing(listing, owner));
             if (items.length === 20) {

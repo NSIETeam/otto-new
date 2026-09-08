@@ -1,0 +1,15 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+(node:42228) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketRepairRaces.test.ts (8 tests) 8154ms
+   ✓ postgres: renewal committed ahead of queued expiry cleanup cannot be overwritten by the old deadline  1942ms
+   ✓ postgres: identity revocation holding the transaction blocks and rejects a queued first contact without a message  1829ms
+   ✓ postgres: committed draft renewal and publication protect the image from queued cleanup  2203ms
+   ✓ postgres: report snapshot holding the write transaction survives a queued seller deletion  1907ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  23:14:51
+   Duration  13.82s (transform 2.64s, setup 0ms, collect 5.38s, tests 8.15s, environment 0ms, prepare 72ms)

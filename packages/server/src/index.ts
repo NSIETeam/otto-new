@@ -93,3 +93,4 @@ export {
 } from './endpoint.js';
 export type { ServerEndpointRecord } from './endpoint.js';
 export type * from './modules/policy_intelligence/contracts.js';
+export { policyApplicationStatus } from './modules/policy_intelligence/policyDomain.js';

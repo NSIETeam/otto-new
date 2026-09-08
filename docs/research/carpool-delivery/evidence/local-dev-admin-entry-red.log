@@ -1,0 +1,44 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ❯ src/renderer/state/useModuleWorkspaceCapabilities.test.ts (14 tests | 1 failed) 815ms
+   ✓ useModuleWorkspaceCapabilities > 显式管理员 UI 预览使用本地完整目录且不请求企业后端 22ms
+   ✓ useModuleWorkspaceCapabilities > 企业能力尚未解析时保持 loading，失败后可显式重试恢复 111ms
+   ✓ useModuleWorkspaceCapabilities > 个人版立即就绪且不会请求企业能力 4ms
+   ✓ useModuleWorkspaceCapabilities > does not grant park administration modules to a tenant organization administrator 55ms
+   ✓ useModuleWorkspaceCapabilities > exposes staff tasks only when the current account has received a park ticket 55ms
+   ✓ useModuleWorkspaceCapabilities > exposes carpool only when its dedicated server endpoint succeeds 107ms
+   ✓ useModuleWorkspaceCapabilities > isolates park capability loading failures from non-park modules 55ms
+   ✓ useModuleWorkspaceCapabilities > does not request protected park endpoints when the effective feature is disabled 54ms
+   ✓ useModuleWorkspaceCapabilities > isolates park ticket loading failures from non-park modules 55ms
+   ✓ useModuleWorkspaceCapabilities > synchronously drops the previous privilege snapshot when account or role changes 108ms
+   ✓ useModuleWorkspaceCapabilities > separates configured baseline collaboration from commercial Federation entitlement 55ms
+   ✓ useModuleWorkspaceCapabilities > fails closed when the three-layer feature-state bridge is unavailable 3ms
+   × keeps an enabled carpool entry without a map but respects pilot access true 74ms
+     → expected 'hidden' to be 'available' // Object.is equality
+   ✓ keeps an enabled carpool entry without a map but respects pilot access false 54ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/state/useModuleWorkspaceCapabilities.test.ts > keeps an enabled carpool entry without a map but respects pilot access true
+AssertionError: expected 'hidden' to be 'available' // Object.is equality
+
+Expected: "available"
+Received: "hidden"
+
+ ❯ src/renderer/state/useModuleWorkspaceCapabilities.test.ts:305:99
+    303|    }));
+    304|    await waitFor(() => expect(view.result.current.status).toBe('ready'…
+    305|    expect(view.result.current.modules.find(module => module.id === 'pa…
+       |                                                                                                   ^
+    306|  });
+    307| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 13 passed (14)
+   Start at  23:10:35
+   Duration  2.11s (transform 149ms, setup 129ms, collect 168ms, tests 815ms, environment 494ms, prepare 155ms)
+

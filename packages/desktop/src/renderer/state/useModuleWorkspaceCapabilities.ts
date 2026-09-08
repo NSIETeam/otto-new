@@ -159,7 +159,10 @@ export function useModuleWorkspaceCapabilities(input: {
             }
             if (carpoolResult.status === 'fulfilled') {
               const carpool = carpoolResult.value;
-              canUseCarpool = carpool.availability?.canPublish === true || Boolean(carpool.currentIntent || carpool.hasGroup);
+              canUseCarpool = carpool.availability?.canPublish === true
+                || (carpool.availability?.parkEnabled === true
+                  && carpool.capabilities?.includes('park_carpool_requests_v1') === true)
+                || Boolean(carpool.currentIntent || carpool.hasGroup);
             }
             if (marketResult.status === 'fulfilled') { const market = marketResult.value as { parkId?: string; enabled?: boolean; ready?: boolean }; canUseMarket = !!market.parkId && market.enabled === true && market.ready === true; }
           }

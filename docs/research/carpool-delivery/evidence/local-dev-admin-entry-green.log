@@ -1,0 +1,12 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ✓ src/renderer/moduleGroupCatalog.test.ts (8 tests) 15ms
+ ✓ src/renderer/state/useModuleWorkspaceCapabilities.test.ts (14 tests) 817ms
+ ✓ src/renderer/components/ParkCarpoolDialog.test.tsx (4 tests) 590ms
+
+ Test Files  3 passed (3)
+      Tests  26 passed (26)
+   Start at  23:11:06
+   Duration  2.97s (transform 608ms, setup 507ms, collect 949ms, tests 1.42s, environment 1.96s, prepare 407ms)
+

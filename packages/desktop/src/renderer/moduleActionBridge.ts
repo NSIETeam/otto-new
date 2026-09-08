@@ -5,6 +5,7 @@
  */
 
 import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
+import { validateParkFields } from '../main/parkConversationPlan.js';
 
 /**
  * Conversation-to-module bridge.
@@ -51,6 +52,8 @@ export interface ModuleActionDraft {
   expiresAt: number;
   phase: 'collecting' | 'awaiting_confirmation';
   autoSubmit: boolean;
+  /** A transport error may hide a successful write. Freeze the request until reconciled/retried. */
+  submissionAttempted?: boolean;
   fields: RepairModuleFields;
 }
 
@@ -91,6 +94,9 @@ export interface PrepareModuleActionInput {
 }
 
 export interface HandleModuleActionConversationInput {
+  isCurrent?: () => boolean;
+  beforeSubmit?: () => Promise<void>;
+  semantic?: { intent: 'repair'; fields: Record<string, string> };
   text: string;
   sessionId: string;
   accountId: string;
@@ -276,7 +282,7 @@ function createDraft(input: PrepareModuleActionInput): ModuleActionDraft {
   const fields = applyText(initialFields, input.text);
   const complete = missingFields(fields).length === 0;
   return {
-    id: `park-repair:${input.accountId}:${input.sessionId}:${now}`,
+    id: `park-repair:${input.accountId}:${input.sessionId}:${globalThis.crypto.randomUUID()}`,
     idempotencyKey: `repair:${globalThis.crypto.randomUUID()}`,
     moduleId: 'park-repair',
     sessionId: input.sessionId,
@@ -388,16 +394,21 @@ export async function submitModuleAction(
   const recipients = ticket.recipients.map((recipient) => recipient.name).filter(Boolean);
   const recipientCopy = recipients.length
     ? recipients.join('、')
-    : `${Math.max(1, ticket.recipientCount)} 位物业维修人员`;
+    : Number.isSafeInteger(ticket.recipientCount) && ticket.recipientCount > 0
+      ? `${ticket.recipientCount} 位物业维修人员` : '';
   return {
     ticket,
-    assistantMessage: `物业报修工单 **${number}** 已创建，并已发送给 **${recipientCopy}**。当前状态：${ticket.status}。你可以在右侧“物业报修”模块查看处理进度。`,
+    assistantMessage: `物业报修工单 **${number}** 已创建${recipientCopy ? `，并已发送给 **${recipientCopy}**` : '，暂未返回接收人员信息，请在“我的申请”中核对分派情况'}。当前状态：${ticket.status}。你可以在右侧“物业报修”模块查看处理进度。`,
   };
 }
 
 export class ModuleActionDraftRegistry {
   private readonly drafts = new Map<string, ModuleActionDraft>();
   private readonly submitting = new Set<string>();
+
+  isSubmitting(sessionId: string, accountId: string): boolean {
+    return this.submitting.has(this.key(sessionId, accountId));
+  }
   private saveCount = 0;
 
   private key(sessionId: string, accountId: string): string {
@@ -453,7 +464,7 @@ export class ModuleActionDraftRegistry {
       id: draft.id,
       source: 'repair',
       title: '物业报修',
-      phase: submitting ? 'submitting' : draft.phase,
+      phase: submitting ? 'submitting' : draft.submissionAttempted ? 'failed' : draft.phase,
       updatedAt: draft.updatedAt,
       expiresAt: draft.expiresAt,
       missingFields: missing,
@@ -540,11 +551,34 @@ export async function handleModuleActionConversation(
     input.postMessage('assistant', '该物业报修草稿已变化或过期，本次没有提交。请检查当前草稿后重新确认。');
     return true;
   }
-  if (!existing && !repairIntent(input.text)) return false;
+  if (!existing && !input.semantic && !repairIntent(input.text)) return false;
 
   input.postMessage('user', input.text.trim());
+  if (input.registry.isSubmitting(input.sessionId, input.accountId)) {
+    input.postMessage('assistant', '物业报修工单正在提交，请勿重复操作；请等结果后再修改或取消。'); return true;
+  }
+  if (existing?.submissionAttempted && (input.semantic || !isConfirmation(input.text))) {
+    if (!input.semantic && isCancellation(input.text)) {
+      input.registry.clear(input.sessionId, input.accountId);
+      input.postMessage('assistant', '已停止本地报修重试，但上次请求可能已成功。请到“我的申请”核对；这不代表撤销已创建的工单。');
+    } else input.postMessage('assistant', '上次提交结果尚未核实，原申请内容已冻结。请查看“我的申请”，或回复“确认提交”用同一幂等键核对重试；不能改内容后当作同一单重发。');
+    return true;
+  }
   let transition: ModuleActionTransition | null;
-  if (existing) {
+  if (input.semantic) {
+    try {
+      const fields = validateParkFields('repair', input.semantic.fields);
+      const base = existing ?? createDraft({ text: '我要物业报修', sessionId: input.sessionId,
+        accountId: input.accountId, defaults: await input.loadDefaults(), now });
+      const draft: ModuleActionDraft = { ...base, fields: { ...base.fields, ...fields }, autoSubmit: false,
+        updatedAt: now, expiresAt: now + MODULE_ACTION_DRAFT_TTL_MS };
+      draft.phase = missingFields(draft.fields).length ? 'collecting' : 'awaiting_confirmation';
+      transition = { draft, shouldSubmit: false, assistantMessage: draft.phase === 'collecting'
+        ? collectionMessage(draft.fields) : confirmationMessage(draft.fields) };
+    } catch {
+      input.postMessage('assistant', '暂时无法准备物业报修草稿，请检查企业资料或稍后继续办理。'); return true;
+    }
+  } else if (existing) {
     transition = updateModuleDraft(existing, input.text, now);
   } else {
     try {
@@ -562,6 +596,8 @@ export async function handleModuleActionConversation(
     }
   }
   if (!transition) return false;
+  if (input.isCurrent && !input.isCurrent()) return true;
+  if (input.registry.isSubmitting(input.sessionId, input.accountId)) return true;
 
   if (!transition.draft) {
     input.registry.clear(input.sessionId, input.accountId);
@@ -581,6 +617,10 @@ export async function handleModuleActionConversation(
   }
 
   try {
+    transition.draft.submissionAttempted = true;
+    input.registry.save(transition.draft);
+    await input.beforeSubmit?.();
+    if (input.isCurrent && !input.isCurrent()) return true;
     const submitted = await submitModuleAction(transition.draft, input.submit);
     input.registry.clear(input.sessionId, input.accountId);
     try {

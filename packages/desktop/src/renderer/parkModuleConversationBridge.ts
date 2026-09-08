@@ -62,6 +62,7 @@ interface ParkTicketSummary {
 }
 
 export interface ParkQueryConversationInput {
+  intent?: ParkQueryKind;
   text: string;
   enabled: boolean;
   postMessage(role: ChatRole, text: string): void;
@@ -192,7 +193,7 @@ export async function handleParkQueryConversation(
   input: ParkQueryConversationInput,
 ): Promise<boolean> {
   if (!input.enabled) return false;
-  const kind = detectParkQueryIntent(input.text);
+  const kind = input.intent ?? detectParkQueryIntent(input.text);
   if (!kind) return false;
   input.postMessage('user', input.text.trim());
   try {

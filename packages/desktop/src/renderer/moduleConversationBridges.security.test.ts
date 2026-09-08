@@ -78,7 +78,6 @@ describe('通用园区桥安全边界', () => {
     };
     const loadMeetingResources = vi.fn()
       .mockResolvedValueOnce(availableResources)
-      .mockResolvedValueOnce(availableResources)
       .mockResolvedValueOnce(booked);
     const h = parkHarness({ loadMeetingResources });
     await handleParkServiceActionConversation({
@@ -86,7 +85,7 @@ describe('通用园区桥安全边界', () => {
       text: '预约会议室，参会人数：6，日期：2026-09-10，时间：14:00-15:00，会议内容：安全评审',
     });
     await handleParkServiceActionConversation({ ...h.common, text: '确认提交' });
-    expect(loadMeetingResources).toHaveBeenCalledTimes(3);
+    expect(loadMeetingResources).toHaveBeenCalledTimes(2);
     expect(h.submitTicket).not.toHaveBeenCalled();
   });
 });

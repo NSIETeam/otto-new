@@ -23,6 +23,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { ParkConversationRequest, ParkConversationPlan } from '../main/parkConversationPlan.js';
 import type {
   ClientToServer,
   FeishuConfigPublic,
@@ -1364,6 +1365,7 @@ const IPC = {
   getWorkspaceDirectories: 'otto:get-workspace-directories',
   recruitmentTranscribe: 'otto:recruitment-transcribe',
   recruitmentAnalyzeResume: 'otto:recruitment-analyze-resume',
+  parkConversationPlan: 'otto:park-conversation-plan',
   authorizeWorkspaceDirectory: 'otto:authorize-workspace-directory',
   grantBrowserFile: 'otto:grant-browser-file',
   authorizeMessageFiles: 'otto:authorize-message-files',
@@ -1621,6 +1623,7 @@ export interface LocalArtifactPreviewResult {
 }
 
 export interface OttoBridge {
+  parkConversationPlan(input: ParkConversationRequest): Promise<ParkConversationPlan>;
   /** 连接到本地 server（解析端点后建 WS）。返回是否连上。 */
   connect(): Promise<boolean>;
   /** 主动断开（不自动重连，直到下次 connect()）。 */
@@ -2890,6 +2893,9 @@ const bridge: OttoBridge = {
   },
   mcpCredentialRemove(input: { serverName: string; variableName: string }): Promise<void> {
     return ipcRenderer.invoke(IPC.mcpCredentialRemove, input) as Promise<void>;
+  },
+  parkConversationPlan(input: ParkConversationRequest): Promise<ParkConversationPlan> {
+    return ipcRenderer.invoke(IPC.parkConversationPlan, input) as Promise<ParkConversationPlan>;
   },
   conversationDraftLoad(scope: string): Promise<unknown | null> {
     return ipcRenderer.invoke(IPC.conversationDraftLoad, scope) as Promise<unknown | null>;

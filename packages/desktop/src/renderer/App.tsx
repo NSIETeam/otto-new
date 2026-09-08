@@ -124,6 +124,8 @@ import {
   handleModuleActionConversation,
 } from './moduleActionBridge.js';
 import { handleParkQueryConversation } from './parkModuleConversationBridge.js';
+import { ParkConversationCoordinator, parseParkConversationCommand, type ActiveParkDraft } from './parkConversationCoordinator.js';
+import { PARK_INTENTS, pickParkConversationFields, type ParkConversationItem } from '../main/parkConversationPlan.js';
 import {
   ParkServiceActionDraftRegistry,
   handleParkServiceActionConversation,
@@ -299,6 +301,7 @@ function OttoWorkspaceApp({
   });
   const moduleActionDraftsRef = useRef(new ModuleActionDraftRegistry());
   const parkServiceActionDraftsRef = useRef(new ParkServiceActionDraftRegistry());
+  const parkConversationCoordinatorRef = useRef(new ParkConversationCoordinator());
   const customerModuleActionDraftsRef = useRef(new CustomerModuleConversationDraftRegistry());
   const recruitmentActionDraftsRef = useRef(new RecruitmentConversationDraftRegistry());
   const workspaceCapabilityDraftsRef = useRef(new WorkspaceCapabilityDraftRegistry());
@@ -312,9 +315,25 @@ function OttoWorkspaceApp({
   );
   const [conversationDraftVaultReady, setConversationDraftVaultReady] = useState<string | null>(null);
   const conversationDraftVaultWarningRef = useRef('');
+  const parkConversationContextRef = useRef('');
+  const captureConversationDrafts = useCallback((now = Date.now()) => ({
+    version: 1,
+    accountId: account.id,
+    savedAt: now,
+    repair: moduleActionDraftsRef.current.snapshot(account.id, now),
+    parkService: parkServiceActionDraftsRef.current.snapshot(account.id, now),
+    parkQueue: parkConversationCoordinatorRef.current.snapshot(conversationDraftVaultScope, now),
+    customerModule: customerModuleActionDraftsRef.current.snapshot(account.id, now),
+    recruitment: recruitmentActionDraftsRef.current.snapshot(account.id, now),
+    workspaceCapability: workspaceCapabilityDraftsRef.current.snapshot(account.id),
+    ticketLinks: conversationTicketLinksRef.current.snapshot(now),
+  }), [account.id, conversationDraftVaultScope]);
   useEffect(() => {
     let cancelled = false;
     setConversationDraftVaultReady(null);
+    moduleActionDraftsRef.current = new ModuleActionDraftRegistry();
+    parkServiceActionDraftsRef.current = new ParkServiceActionDraftRegistry();
+    parkConversationCoordinatorRef.current = new ParkConversationCoordinator();
     if (typeof window.otto.conversationDraftLoad !== 'function') {
       // 兼容升级过程中短暂存在的旧 preload；不写 localStorage 明文降级。
       return () => { cancelled = true; };
@@ -333,6 +352,7 @@ function OttoWorkspaceApp({
           const now = Date.now();
           moduleActionDraftsRef.current.restore(account.id, snapshot.repair, now);
           parkServiceActionDraftsRef.current.restore(account.id, snapshot.parkService, now);
+          parkConversationCoordinatorRef.current.restore(conversationDraftVaultScope, snapshot.parkQueue, now);
           customerModuleActionDraftsRef.current.restore(account.id, snapshot.customerModule, now);
           recruitmentActionDraftsRef.current.restore(account.id, snapshot.recruitment, now);
           workspaceCapabilityDraftsRef.current.restore(account.id, snapshot.workspaceCapability);
@@ -353,18 +373,9 @@ function OttoWorkspaceApp({
     if (conversationDraftVaultReady !== conversationDraftVaultScope) return;
     const timer = window.setTimeout(() => {
       const now = Date.now();
-      const snapshot = {
-        version: 1,
-        accountId: account.id,
-        savedAt: now,
-        repair: moduleActionDraftsRef.current.snapshot(account.id, now),
-        parkService: parkServiceActionDraftsRef.current.snapshot(account.id, now),
-        customerModule: customerModuleActionDraftsRef.current.snapshot(account.id, now),
-        recruitment: recruitmentActionDraftsRef.current.snapshot(account.id, now),
-        workspaceCapability: workspaceCapabilityDraftsRef.current.snapshot(account.id),
-        ticketLinks: conversationTicketLinksRef.current.snapshot(now),
-      };
+      const snapshot = captureConversationDrafts(now);
       const draftCount = snapshot.repair.length
+        + snapshot.parkQueue.length
         + snapshot.parkService.length
         + snapshot.customerModule.length
         + snapshot.recruitment.length
@@ -387,6 +398,7 @@ function OttoWorkspaceApp({
     conversationDraftRevision,
     conversationDraftVaultReady,
     conversationDraftVaultScope,
+    captureConversationDrafts,
   ]);
   const enterpriseUnreadTrackerRef = useRef<EnterpriseUnreadNotificationTracker | null>(null);
   const centralIdentity = useMemo(
@@ -1339,6 +1351,7 @@ function OttoWorkspaceApp({
   }, [activeSession?.workspacePath, refreshWorkspaceDirectories]);
 
   const busy = activeSession?.status === 'thinking' || activeSession?.status === 'streaming';
+  parkConversationContextRef.current = JSON.stringify([conversationDraftVaultScope, state.activeSessionId, effectiveParkService]);
 
   const handleRegenerate = (messageId?: string): void => {
     let target: (typeof activeMessages)[number] | undefined;
@@ -1372,30 +1385,30 @@ function OttoWorkspaceApp({
     targetDraft?: ConversationActionDraftSummary,
   ): Promise<boolean> => {
       const sessionId = activeSession?.sessionId;
-      if (
-        edition === 'enterprise'
-        && sessionId
-        && text.trim()
-        && (!attachments || attachments.length === 0)
-      ) {
-        const policyHandled = await handlePolicyIntelligenceConversation({
-          text,
-          scopeId: policyScopeId,
-          sessionId,
-          registry: policyConversationRef.current,
-          getState: () => window.otto.policyIntelligenceGet(policyScopeId),
-          act: (action) => window.otto.policyIntelligenceAction({ scopeId: policyScopeId, action }),
-          postMessage: actions.postLocalChatMessage,
-        });
-        if (policyHandled) return true;
+      if (sessionId && !targetDraft && parseParkConversationCommand(text.trim())) {
+        const drafts = [
+          moduleActionDraftsRef.current.summary(sessionId, account.id),
+          parkServiceActionDraftsRef.current.summary(sessionId, account.id),
+          customerModuleActionDraftsRef.current.summary(sessionId, account.id),
+          recruitmentActionDraftsRef.current.summary(sessionId, account.id, recruitmentWorkspace),
+          workspaceCapabilityDraftsRef.current.summary(account.id, sessionId),
+        ].filter(Boolean);
+        if (drafts.length > 1) {
+          actions.postLocalChatMessage('user', text);
+          actions.postLocalChatMessage('assistant', '当前有多个办事草稿，请在输入框上方的草稿卡片选择要确认或取消的那一项，避免误提交。');
+          return true;
+        }
       }
       if (
         effectiveParkService
         && sessionId
+        && (!targetDraft || targetDraft.source === 'repair' || targetDraft.source === 'park-service')
         && text.trim()
         && (!attachments || attachments.length === 0)
       ) {
-        if (effectiveParkCarpool && !targetDraft) {
+        if (effectiveParkCarpool && !targetDraft
+          && !moduleActionDraftsRef.current.get(sessionId, account.id)
+          && !parkServiceActionDraftsRef.current.get(sessionId, account.id)) {
           const carpoolHandled = await handleParkCarpoolConversation({
             text,
             scopeId: `${account.organizationId}:${account.id}`,
@@ -1409,84 +1422,116 @@ function OttoWorkspaceApp({
           });
           if (carpoolHandled) return true;
         }
-        const handled = await handleModuleActionConversation({
-          text,
-          sessionId,
-          accountId: account.id,
-          enabled: !targetDraft || targetDraft.source === 'repair',
-          registry: moduleActionDraftsRef.current,
-          loadDefaults: async () => {
-            const park = await window.otto.enterpriseParkView();
-            return {
-              company: account.organizationName,
-              roomNumber: park?.tenantRoomNumber?.trim() || '',
-              contact: account.name,
-              phone: account.phone?.replace(/^\+86/, '') || '',
-            };
-          },
-          submit: (input) => window.otto.enterpriseTicketSubmit(input),
-          onSubmitted: (ticket, draft) => {
-            conversationTicketLinksRef.current.track({
-              ...ticket,
-              title: `物业报修 · ${draft.fields.issue}`,
-              updatedAt: new Date().toISOString(),
-            }, sessionId);
-          },
-          postMessage: actions.postLocalChatMessage,
-          expectedDraftId: targetDraft?.source === 'repair' ? targetDraft.id : undefined,
+        const context = JSON.stringify([conversationDraftVaultScope, sessionId, true]);
+        const isCurrent = (): boolean => parkConversationContextRef.current === context;
+        const beforeParkSubmit = async (): Promise<void> => {
+          if (conversationDraftVaultReady !== conversationDraftVaultScope || !isCurrent()) throw new Error('安全草稿存储尚未就绪，未发送申请');
+          // Persist the frozen request before HTTP; a restart must not unlock a possibly submitted payload.
+          await window.otto.conversationDraftSave(conversationDraftVaultScope, captureConversationDrafts());
+          setConversationDraftRevision((revision) => revision + 1);
+        };
+        const activeParkDrafts = (): ActiveParkDraft[] => {
+          const repair = moduleActionDraftsRef.current.get(sessionId, account.id);
+          const park = parkServiceActionDraftsRef.current.get(sessionId, account.id);
+          return [
+            ...(repair ? [{ id: repair.id, intent: 'repair' as const, updatedAt: repair.updatedAt,
+              fields: pickParkConversationFields('repair', { ...repair.fields }),
+              missingFields: moduleActionDraftsRef.current.summary(sessionId, account.id)?.missingFields }] : []),
+            ...(park ? [{ id: park.id, intent: park.kind === 'survey' ? 'satisfaction' as const : park.serviceId,
+              fields: pickParkConversationFields(park.kind === 'survey' ? 'satisfaction' : park.serviceId, park.fields),
+              updatedAt: park.updatedAt, missingFields: parkServiceActionDraftsRef.current.summary(sessionId, account.id)?.missingFields }] : []),
+          ];
+        };
+        const postParkMessage = (role: 'user' | 'assistant', message: string): void => {
+          if (isCurrent() && role === 'assistant') actions.postLocalChatMessage(role, message);
+        };
+        const executeParkItem = async (item: ParkConversationItem | null, command: string, draft?: ActiveParkDraft): Promise<boolean> => {
+          if (!isCurrent()) return false;
+          if (conversationDraftVaultReady !== conversationDraftVaultScope) {
+            postParkMessage('assistant', '安全草稿尚未恢复完成，请稍后继续办理。本次未修改或发送申请。'); return false;
+          }
+          const intent = item?.intent ?? draft?.intent;
+          const message = item ? item.quote || PARK_INTENTS[item.intent] : command;
+          const common = {
+            text: message, sessionId, accountId: account.id, enabled: true, isCurrent,
+            beforeSubmit: beforeParkSubmit, postMessage: postParkMessage, expectedDraftId: draft?.id,
+            loadDefaults: async () => {
+              const park = await window.otto.enterpriseParkView();
+              return {
+                company: account.organizationName, roomNumber: park?.tenantRoomNumber?.trim() || '',
+                contact: account.name, phone: account.phone?.replace(/^\+86/, '') || '',
+              };
+            },
+          };
+          if (intent === 'repair') {
+            const handled = await handleModuleActionConversation({
+              ...common,
+              semantic: item ? { intent: 'repair', fields: item.fields } : undefined,
+              registry: moduleActionDraftsRef.current,
+              submit: (input) => window.otto.enterpriseTicketSubmit(input),
+              onSubmitted: (ticket, submittedDraft) => {
+                if (!isCurrent()) return;
+                conversationTicketLinksRef.current.track({
+                  ...ticket, title: `物业报修 · ${submittedDraft.fields.issue}`, updatedAt: new Date().toISOString(),
+                }, sessionId);
+              },
+            });
+            return handled && (!item || !!moduleActionDraftsRef.current.get(sessionId, account.id));
+          }
+          if (intent && !intent.startsWith('query:')) {
+            const serviceIntent = intent as Exclude<typeof intent, `query:${string}`>;
+            const handled = await handleParkServiceActionConversation({
+              ...common,
+              semantic: item ? { intent: serviceIntent, fields: item.fields } : undefined,
+              registry: parkServiceActionDraftsRef.current,
+              loadMeetingResources: window.otto.enterpriseParkResources,
+              listPublications: window.otto.enterpriseParkPublications,
+              submitTicket: window.otto.enterpriseTicketSubmit,
+              onTicketSubmitted: (ticket, submittedDraft) => {
+                if (!isCurrent()) return;
+                conversationTicketLinksRef.current.track({
+                  ...ticket,
+                  title: `${submittedDraft.serviceId} · ${submittedDraft.fields.request || submittedDraft.fields.purpose || '园区服务申请'}`,
+                  updatedAt: new Date().toISOString(),
+                }, sessionId);
+              },
+              submitSurvey: window.otto.enterpriseParkSurveySubmit,
+            });
+            return handled && (!item || !!parkServiceActionDraftsRef.current.get(sessionId, account.id));
+          }
+          if (!intent?.startsWith('query:')) return false;
+          return handleParkQueryConversation({
+            text: message,
+            intent: intent.slice(6) as 'announcements' | 'statistics' | 'star-map' | 'my-applications' | 'staff-tasks',
+            enabled: true, postMessage: postParkMessage,
+            listPublications: window.otto.enterpriseParkPublications,
+            loadStatistics: window.otto.enterpriseParkStatistics,
+            loadStarMap: window.otto.enterpriseParkStarMap,
+            listMyApplications: window.otto.enterpriseTicketList,
+            listStaffTasks: window.otto.enterpriseTicketInbox,
+          });
+        };
+        const parkHandled = await parkConversationCoordinatorRef.current.handle({
+          text, scope: conversationDraftVaultScope, sessionId, targetDraftId: targetDraft?.id,
+          active: activeParkDrafts, execute: executeParkItem, isCurrent,
+          plan: window.otto.parkConversationPlan,
+          postMessage: (role, message) => { if (isCurrent()) actions.postLocalChatMessage(role, message); },
         });
-        if (handled) {
+        if (parkHandled) {
           setConversationDraftRevision((revision) => revision + 1);
           return true;
         }
-
-        const parkActionHandled = await handleParkServiceActionConversation({
-          text,
-          sessionId,
-          accountId: account.id,
-          enabled: !targetDraft || targetDraft.source === 'park-service',
-          registry: parkServiceActionDraftsRef.current,
-          loadDefaults: async () => {
-            const park = await window.otto.enterpriseParkView();
-            return {
-              company: account.organizationName,
-              roomNumber: park?.tenantRoomNumber?.trim() || '',
-              contact: account.name,
-              phone: account.phone?.replace(/^\+86/, '') || '',
-            };
-          },
-          loadMeetingResources: window.otto.enterpriseParkResources,
-          listPublications: window.otto.enterpriseParkPublications,
-          submitTicket: window.otto.enterpriseTicketSubmit,
-          onTicketSubmitted: (ticket, draft) => {
-            conversationTicketLinksRef.current.track({
-              ...ticket,
-              title: `${draft.serviceId} · ${draft.fields.request || draft.fields.purpose || '园区服务申请'}`,
-              updatedAt: new Date().toISOString(),
-            }, sessionId);
-          },
-          submitSurvey: window.otto.enterpriseParkSurveySubmit,
-          postMessage: actions.postLocalChatMessage,
-          expectedDraftId: targetDraft?.source === 'park-service' ? targetDraft.id : undefined,
-        });
-        if (parkActionHandled) {
-          setConversationDraftRevision((revision) => revision + 1);
-          return true;
-        }
-
-        const parkQueryHandled = !targetDraft && await handleParkQueryConversation({
-          text,
-          enabled: true,
-          postMessage: actions.postLocalChatMessage,
-          listPublications: window.otto.enterpriseParkPublications,
-          loadStatistics: window.otto.enterpriseParkStatistics,
-          loadStarMap: window.otto.enterpriseParkStarMap,
-          listMyApplications: window.otto.enterpriseTicketList,
-          listStaffTasks: window.otto.enterpriseTicketInbox,
-        });
-        if (parkQueryHandled) return true;
       }
 
+      if (edition === 'enterprise' && sessionId && !targetDraft && text.trim() && (!attachments || attachments.length === 0)) {
+        const policyHandled = await handlePolicyIntelligenceConversation({
+          text, scopeId: policyScopeId, sessionId, registry: policyConversationRef.current,
+          getState: () => window.otto.policyIntelligenceGet(policyScopeId),
+          act: (action) => window.otto.policyIntelligenceAction({ scopeId: policyScopeId, action }),
+          postMessage: actions.postLocalChatMessage,
+        });
+        if (policyHandled) return true;
+      }
       if (sessionId && text.trim() && (!attachments || attachments.length === 0)) {
         const customerModuleHandled = await handleCustomerModuleConversation({
           text,
@@ -1696,14 +1741,14 @@ function OttoWorkspaceApp({
 
   const cancelConversationActionDraft = (draft: ConversationActionDraftSummary): void => {
     if (!activeSession) return;
+    if (draft.source === 'repair' || draft.source === 'park-service') {
+      void handleSend('取消', 'local', undefined, undefined, draft).finally(() => {
+        setConversationDraftRevision((revision) => revision + 1);
+      });
+      return;
+    }
     const now = Date.now();
     const currentSummary = (): ConversationActionDraftSummary | null => {
-      if (draft.source === 'repair') {
-        return moduleActionDraftsRef.current.summary(activeSession.sessionId, account.id, now);
-      }
-      if (draft.source === 'park-service') {
-        return parkServiceActionDraftsRef.current.summary(activeSession.sessionId, account.id, now);
-      }
       if (draft.source === 'customer-module') {
         return customerModuleActionDraftsRef.current.summary(activeSession.sessionId, account.id, now);
       }
@@ -1717,15 +1762,11 @@ function OttoWorkspaceApp({
       }
       return workspaceCapabilityDraftsRef.current.summary(account.id, activeSession.sessionId);
     };
-    const discarded = draft.source === 'repair'
-      ? moduleActionDraftsRef.current.discard(draft.id, activeSession.sessionId, account.id, now)
-      : draft.source === 'park-service'
-        ? parkServiceActionDraftsRef.current.discard(draft.id, activeSession.sessionId, account.id, now)
-        : draft.source === 'customer-module'
-          ? customerModuleActionDraftsRef.current.discard(draft.id, activeSession.sessionId, account.id, now)
-          : draft.source === 'recruitment'
-            ? recruitmentActionDraftsRef.current.discard(draft.id, activeSession.sessionId, account.id, now)
-            : workspaceCapabilityDraftsRef.current.discard(draft.id, account.id, activeSession.sessionId);
+    const discarded = draft.source === 'customer-module'
+      ? customerModuleActionDraftsRef.current.discard(draft.id, activeSession.sessionId, account.id, now)
+      : draft.source === 'recruitment'
+        ? recruitmentActionDraftsRef.current.discard(draft.id, activeSession.sessionId, account.id, now)
+        : workspaceCapabilityDraftsRef.current.discard(draft.id, account.id, activeSession.sessionId);
     setConversationDraftRevision((revision) => revision + 1);
     if (!discarded) {
       const current = currentSummary();

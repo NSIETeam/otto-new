@@ -186,6 +186,7 @@ import {
 import { transcribeAudio } from './voiceService.js';
 import { transcribeRecruitmentInterview } from './recruitment-transcription.js';
 import { createRecruitmentIntelligenceAnalyzer } from './recruitmentIntelligenceModel.js';
+import { createParkConversationPlanner } from './parkConversationModel.js';
 import type { RecruitmentSemanticAnalysisInput } from './recruitmentSemantic.js';
 import {
   createEnterpriseMemoryIntelligenceAnalyzer,
@@ -675,6 +676,7 @@ const IPC = {
   getWorkspaceDirectories: 'otto:get-workspace-directories',
   recruitmentTranscribe: 'otto:recruitment-transcribe',
   recruitmentAnalyzeResume: 'otto:recruitment-analyze-resume',
+  parkConversationPlan: 'otto:park-conversation-plan',
   authorizeWorkspaceDirectory: 'otto:authorize-workspace-directory',
   grantBrowserFile: 'otto:grant-browser-file',
   authorizeMessageFiles: 'otto:authorize-message-files',
@@ -900,6 +902,7 @@ const customerModuleRunControllers = new Map<string, AbortController>();
 const customerModuleModelInvoke = createCustomerModuleModelInvoke();
 const generateCustomAgent = createCustomAgentGenerator();
 const analyzeRecruitmentResume = createRecruitmentIntelligenceAnalyzer();
+const planParkConversation = createParkConversationPlanner({ getScope: () => JSON.stringify(enterpriseClient.snapshot()) });
 const analyzeEnterpriseMemory = createEnterpriseMemoryIntelligenceAnalyzer();
 function parsePolicyScopeId(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,160}$/u.test(value)) {
@@ -4299,6 +4302,14 @@ function registerIpc(): void {
   ipcMain.handle(IPC.enterpriseParkView, async () => {
     loadEnterpriseSession();
     return enterpriseClient.getParkView();
+  });
+  ipcMain.handle(IPC.parkConversationPlan, async (_event, value: unknown) => {
+    loadEnterpriseSession();
+    const scope = JSON.stringify(enterpriseClient.snapshot());
+    // Use the existing server permission/license boundary before spending a model request.
+    await enterpriseClient.getParkView();
+    if (scope !== JSON.stringify(enterpriseClient.snapshot())) throw new Error('企业账号已变化');
+    return planParkConversation(value);
   });
   ipcMain.handle(IPC.enterpriseParkCarpoolGet, async () => {
     loadEnterpriseSession();

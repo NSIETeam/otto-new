@@ -10,6 +10,7 @@ import {
   type ParkServiceFormField,
 } from './parkServiceFormSchema.js';
 import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
+import { validateParkFields } from '../main/parkConversationPlan.js';
 
 export const PARK_SERVICE_ACTION_TTL_MS = 30 * 60 * 1_000;
 const MAX_DRAFTS = 10_000;
@@ -88,6 +89,7 @@ interface BaseDraft {
   updatedAt: number;
   expiresAt: number;
   phase: 'collecting' | 'awaiting_confirmation';
+  submissionAttempted?: boolean;
 }
 
 export interface ParkTicketActionDraft extends BaseDraft {
@@ -109,6 +111,9 @@ export interface ParkSurveyActionDraft extends BaseDraft {
 export type ParkServiceActionDraft = ParkTicketActionDraft | ParkSurveyActionDraft;
 
 export interface ParkServiceActionConversationInput {
+  isCurrent?: () => boolean;
+  beforeSubmit?: () => Promise<void>;
+  semantic?: { intent: ConversationalParkServiceId | 'satisfaction'; fields: Record<string, string> };
   text: string;
   sessionId: string;
   accountId: string;
@@ -408,7 +413,7 @@ function baseDraft(input: {
   kind: 'ticket' | 'survey'; sessionId: string; accountId: string; now: number;
 }): BaseDraft {
   return {
-    id: `${input.kind}:${input.accountId}:${input.sessionId}:${input.now}`,
+    id: `${input.kind}:${input.accountId}:${input.sessionId}:${crypto.randomUUID()}`,
     sessionId: input.sessionId,
     accountId: input.accountId,
     createdAt: input.now,
@@ -514,6 +519,10 @@ export class ParkServiceActionDraftRegistry {
   private readonly drafts = new Map<string, ParkServiceActionDraft>();
   private readonly submitting = new Set<string>();
 
+  isSubmitting(sessionId: string, accountId: string): boolean {
+    return this.submitting.has(this.key(sessionId, accountId));
+  }
+
   private key(sessionId: string, accountId: string): string {
     return `${accountId}:${sessionId}`;
   }
@@ -561,7 +570,7 @@ export class ParkServiceActionDraftRegistry {
       id: draft.id,
       source: 'park-service',
       title: draft.kind === 'ticket' ? `${SERVICE_NAMES[draft.serviceId]}申请` : draft.surveyTitle,
-      phase: submitting ? 'submitting' : draft.phase,
+      phase: submitting ? 'submitting' : draft.submissionAttempted ? 'failed' : draft.phase,
       updatedAt: draft.updatedAt,
       expiresAt: draft.expiresAt,
       missingFields: missing,
@@ -655,7 +664,8 @@ async function createDraft(
     const draft: ParkSurveyActionDraft = {
       ...baseDraft({ kind: 'survey', sessionId: input.sessionId, accountId: input.accountId, now }),
       kind: 'survey', surveyId: publication.id, surveyTitle: clean(publication.title),
-      surveyBody: clean(publication.body), fields: applySurveyText(defaults, input.text),
+      surveyBody: clean(publication.body), fields: input.semantic
+        ? { ...defaults, ...validateParkFields('satisfaction', input.semantic.fields) } : applySurveyText(defaults, input.text),
     };
     draft.phase = surveyMissing(draft).length ? 'collecting' : 'awaiting_confirmation';
     return draft;
@@ -663,7 +673,7 @@ async function createDraft(
   let draft: ParkTicketActionDraft = {
     ...baseDraft({ kind: 'ticket', sessionId: input.sessionId, accountId: input.accountId, now }),
     kind: 'ticket', serviceId: intent, idempotencyKey: `park:${crypto.randomUUID()}`,
-    fields: applyTicketText(intent, defaults, input.text),
+    fields: input.semantic ? { ...defaults, ...validateParkFields(intent, input.semantic.fields) } : applyTicketText(intent, defaults, input.text),
   };
   if (intent === 'meeting-room') draft = resolveMeeting(draft, await input.loadMeetingResources(), now);
   draft.phase = ticketMissing(draft).length ? 'collecting' : 'awaiting_confirmation';
@@ -678,14 +688,16 @@ async function updateDraft(
 ): Promise<ParkServiceActionDraft> {
   if (draft.kind === 'survey') {
     const next: ParkSurveyActionDraft = {
-      ...draft, fields: applySurveyText(draft.fields, text), updatedAt: now,
+      ...draft, fields: input.semantic ? { ...draft.fields, ...validateParkFields('satisfaction', input.semantic.fields) }
+        : applySurveyText(draft.fields, text), updatedAt: now,
       expiresAt: now + PARK_SERVICE_ACTION_TTL_MS,
     };
     next.phase = surveyMissing(next).length ? 'collecting' : 'awaiting_confirmation';
     return next;
   }
   let next: ParkTicketActionDraft = {
-    ...draft, fields: applyTicketText(draft.serviceId, draft.fields, text), updatedAt: now,
+    ...draft, fields: input.semantic ? { ...draft.fields, ...validateParkFields(draft.serviceId, input.semantic.fields) }
+      : applyTicketText(draft.serviceId, draft.fields, text), updatedAt: now,
     expiresAt: now + PARK_SERVICE_ACTION_TTL_MS,
   };
   if (next.serviceId === 'meeting-room') next = resolveMeeting(next, await input.loadMeetingResources(), now);
@@ -709,18 +721,33 @@ export async function handleParkServiceActionConversation(
     input.postMessage('assistant', '该园区服务草稿已变化或过期，本次没有提交。请检查当前草稿后重新确认。');
     return true;
   }
-  const intent = draft ? null : parkIntent(input.text);
+  const intent = draft ? null : input.semantic?.intent ?? parkIntent(input.text);
   if (!draft && !intent) return false;
   input.postMessage('user', input.text.trim());
 
-  if (draft && isCancellation(input.text)) {
+  if (input.registry.isSubmitting(input.sessionId, input.accountId)) {
+    input.postMessage('assistant', '该园区申请正在提交，请等结果后再修改或取消。'); return true;
+  }
+  if (draft?.submissionAttempted && (input.semantic || !isConfirmation(input.text))) {
+    if (!input.semantic && isCancellation(input.text)) {
+      input.registry.clear(input.sessionId, input.accountId);
+      input.postMessage('assistant', '已停止本地重试，上次申请可能已成功，请查看“我的申请”核对；这不代表撤销已创建的申请。');
+    } else input.postMessage('assistant', '上次提交结果尚未核实，申请内容已冻结。请核对“我的申请”，或回复“确认提交”按原内容重试，避免同一幂等键对应不同申请。');
+    return true;
+  }
+  if (input.semantic && draft && input.semantic.intent !== (draft.kind === 'survey' ? 'satisfaction' : draft.serviceId)) {
+    input.postMessage('assistant', '补充信息与当前事项不匹配，草稿未修改。'); return true;
+  }
+
+  if (draft && !input.semantic && isCancellation(input.text)) {
     input.registry.clear(input.sessionId, input.accountId);
     input.postMessage('assistant', '已取消本次园区服务草稿，信息不会提交给园区工作人员。');
     return true;
   }
 
   try {
-    draft = draft
+    // A confirmation authorizes the already displayed snapshot, not a silently refreshed one.
+    draft = draft && (draft.submissionAttempted || (!input.semantic && isConfirmation(input.text))) ? draft : draft
       ? await updateDraft(draft, input.text, input, now)
       : await createDraft(input, intent!, now);
   } catch (error) {
@@ -731,28 +758,51 @@ export async function handleParkServiceActionConversation(
     input.postMessage('assistant', '当前没有待填写的满意度调查。');
     return true;
   }
+  if (input.isCurrent && !input.isCurrent()) return true;
+  if (input.registry.isSubmitting(input.sessionId, input.accountId)) return true;
   input.registry.save(draft);
   const missing = draft.kind === 'ticket' ? ticketMissing(draft) : surveyMissing(draft);
-  if (missing.length > 0 || !isConfirmation(input.text)) {
+  if (missing.length > 0 || input.semantic || !isConfirmation(input.text)) {
     input.postMessage('assistant', missing.length > 0 ? collectionMessage(draft) : confirmationMessage(draft));
     return true;
   }
 
   // A meeting may have been booked after the summary was shown. Re-check the
   // server resource snapshot immediately before the real write.
-  if (draft.kind === 'ticket' && draft.serviceId === 'meeting-room') {
-    draft = resolveMeeting(draft, await input.loadMeetingResources(), now);
+  if (!draft.submissionAttempted && draft.kind === 'ticket' && draft.serviceId === 'meeting-room') {
+    const approvedFields = { ...draft.fields };
+    try {
+      draft = resolveMeeting(draft, await input.loadMeetingResources(), now);
+    } catch {
+      input.postMessage('assistant', '会议室可用性复核暂时失败，草稿已保留，尚未发送预约。请稍后重新确认。'); return true;
+    }
+    if (input.isCurrent && !input.isCurrent()) return true;
     if (ticketMissing(draft).length > 0) {
+      draft.phase = 'collecting';
+      draft.updatedAt = now;
       input.registry.save(draft);
       input.postMessage('assistant', collectionMessage(draft));
       return true;
     }
+    const refreshedFields = draft.fields;
+    if (Object.keys({ ...approvedFields, ...refreshedFields }).some((key) => approvedFields[key] !== refreshedFields[key])) {
+      draft.phase = 'awaiting_confirmation';
+      draft.updatedAt = now;
+      input.registry.save(draft);
+      input.postMessage('assistant', `会议室资源或计费信息已变化，尚未发送预约，请检查新摘要并重新确认。\n\n${confirmationMessage(draft)}`);
+      return true;
+    }
   }
+  if (input.isCurrent && !input.isCurrent()) return true;
   if (!input.registry.beginSubmission(input.sessionId, input.accountId)) {
     input.postMessage('assistant', '这项园区服务正在提交，请勿重复操作。');
     return true;
   }
   try {
+    draft.submissionAttempted = true;
+    input.registry.save(draft);
+    await input.beforeSubmit?.();
+    if (input.isCurrent && !input.isCurrent()) return true;
     if (draft.kind === 'survey') {
       await input.submitSurvey(draft.surveyId, {
         ...draft.fields,

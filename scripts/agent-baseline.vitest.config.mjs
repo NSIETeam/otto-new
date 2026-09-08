@@ -7,6 +7,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 // Exact aliases prevent shared dependency-directory workspace links from loading
 // another checkout's stale dist. This profile intentionally has no generated JS.
 const aliases = [
+  ['otto-core/recurring-tasks', 'packages/core/src/recurringTasks.ts'],
   ['otto-core', 'packages/core/src/index.ts'],
   ['otto-server', 'packages/server/src/index.ts'],
   ['otto-workflow', 'packages/workflow/src/index.ts'],

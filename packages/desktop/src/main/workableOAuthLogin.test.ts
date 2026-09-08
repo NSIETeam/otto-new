@@ -1,8 +1,10 @@
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 import { WorkableDesktopLogin } from './workableOAuthLogin.js';
 import type { WorkableConnectionAction, WorkableConnectionView } from 'otto-server';
 const state = 's'.repeat(43);
 const view: WorkableConnectionView = { revision: 2, authorizationAvailable: true, status: 'binding_required', targets: [] };
+afterEach(() => vi.restoreAllMocks());
 function fixture() {
   let redirectUri = '';
   const connection = vi.fn(async (action: WorkableConnectionAction) => {
@@ -55,5 +57,15 @@ it('refuses completion after switching enterprise and does not send codes to the
     await fetch(`${f.callback()}?state=${state}&code=one-time`);
     f.assertCurrent.mockImplementation(() => { throw new Error('changed'); });
   } })).rejects.toThrow();
+  expect(f.connection.mock.calls.some(([action]) => action.kind === 'oauth_complete')).toBe(false);
+});
+it('registers a free session watcher and stops it after an account change without a callback', async () => {
+  const register = vi.spyOn(RecurringTaskRegistry.prototype, 'register');
+  const f = fixture();
+  await expect(f.controller.start({ ...f, timeoutMs: 2_000, openExternal: async () => {
+    f.assertCurrent.mockImplementation(() => { throw new Error('changed'); });
+  } })).rejects.toThrow(/取消/);
+  expect(register).toHaveBeenCalledWith(expect.objectContaining({ intervalMs: 500, estimatedCostUsdPerRun: 0 }));
+  expect((register.mock.contexts[0] as RecurringTaskRegistry).list()).toEqual([]);
   expect(f.connection.mock.calls.some(([action]) => action.kind === 'oauth_complete')).toBe(false);
 });

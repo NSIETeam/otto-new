@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 import { withRecruitmentIntakeContext } from '../recruitmentIntakeContext.js';
 
 import type { RecruitmentModuleTarget } from '../moduleCatalog.js';
@@ -326,10 +327,14 @@ export function RecruitmentWorkbenchDialog({
 
   useEffect(() => {
     if (!open || candidates.length === 0) return;
-    const timer = window.setInterval(() => {
-      workspaceStore.purgeExpired(Date.now());
-    }, 60_000);
-    return () => window.clearInterval(timer);
+    return new RecurringTaskRegistry().register({
+      name: 'desktop.recruitment-retention',
+      source: 'packages/desktop/src/renderer/components/RecruitmentWorkbenchDialog.tsx',
+      intervalMs: 60_000,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => String(Date.now()),
+      run: () => { workspaceStore.purgeExpired(Date.now()); },
+    });
   }, [candidates, open, workspaceStore]);
 
   if (!open) return null;

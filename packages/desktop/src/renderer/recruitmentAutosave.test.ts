@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RecruitmentAutosave } from './recruitmentAutosave.js';
 import { RecruitmentWorkspaceStore } from './recruitmentWorkspaceStore.js';
 import { recruitmentArchiveFingerprint } from './recruitmentArchive.js';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 import type { RecruitmentJobResponse, RecruitmentSharedJob, RecruitmentSyncMetadata } from 'otto-server';
 
 function setup() {
@@ -17,8 +18,22 @@ function setup() {
   const auto = new RecruitmentAutosave(store, 500, 30_000); const stop = auto.start(call);
   return { store, call, auto, stop };
 }
-afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 describe('account-scoped recruitment autosave lifecycle', () => {
+  it('owns a free registered poll and removes it on pause or account teardown', async () => {
+    const register = vi.spyOn(RecurringTaskRegistry.prototype, 'register');
+    const { auto, call, stop } = setup();
+    auto.enable(true);
+    expect(register).toHaveBeenCalledWith(expect.objectContaining({ intervalMs: 30_000, estimatedCostUsdPerRun: 0 }));
+    const registry = register.mock.contexts[0] as RecurringTaskRegistry;
+    expect(registry.list()).toHaveLength(1);
+    auto.pause();
+    expect(registry.list()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(call).not.toHaveBeenCalled();
+    auto.enable(true); stop();
+    expect((register.mock.contexts[1] as RecurringTaskRegistry).list()).toEqual([]);
+  });
   it('does not save or poll before explicit confirmation and refuses legacy servers', async () => {
     const { store, auto, call } = setup(); store.setJobTitle('改动'); await vi.advanceTimersByTimeAsync(60_000); expect(call).not.toHaveBeenCalled();
     expect(() => auto.enable(false)).toThrow('确认');

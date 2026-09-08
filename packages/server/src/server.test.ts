@@ -1719,9 +1719,9 @@ describe('OttoServer runtimeFactory（非 mock 路径）', () => {
   let baseUrl: string;
 
   beforeEach(() => {
-    // shouldMock() = mock || loadCustomModels().length===0。要走 runtimeFactory，
-    // 必须让机器「看起来配了 BYO-key 模型」，否则空 HOME 会降级到 mockEcho。
-    const dir = path.join(tmpHome, '.otto-user');
+    // 非 mock runtime 必须从本测试显式设置的 OTTO_USER_DIR 读取 BYOK 模型。
+    // 不能写入默认 HOME 路径，否则测试会被「未配置模型」的真实授权边界拒绝。
+    const dir = path.join(tmpHome, 'user');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, 'custom-models.json'),
@@ -3042,7 +3042,7 @@ describe('OttoServer set_model 真实生效语义', () => {
   let store: InMemorySessionStore;
 
   beforeEach(async () => {
-    const dir = path.join(tmpHome, '.otto-user');
+    const dir = path.join(tmpHome, 'user');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, 'custom-models.json'),
@@ -3180,7 +3180,7 @@ describe('OttoServer set_model 真实生效语义', () => {
 
     // saveCustomModels 固定先写 custom-models.json.tmp；同名目录让落盘稳定失败，
     // 模拟磁盘/权限故障，又不依赖当前进程是否以高权限运行。
-    fs.mkdirSync(path.join(tmpHome, '.otto-user', 'custom-models.json.tmp'));
+    fs.mkdirSync(path.join(tmpHome, 'user', 'custom-models.json.tmp'));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     client.send({

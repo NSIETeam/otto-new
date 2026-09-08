@@ -1,5 +1,6 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { createServer } from 'node:http';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 import type { WorkableConnectionAction, WorkableConnectionView } from 'otto-server';
 
 /** Loopback callback never carries an Otto session token. Codes stay in main, not renderer. */
@@ -41,7 +42,14 @@ export class WorkableDesktopLogin {
     });
     server.requestTimeout = 10_000; server.headersTimeout = 10_000; server.maxConnections = 8;
     const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 600_000);
-    const sessionCheck = setInterval(() => { try { options.assertCurrent(); } catch { controller.abort(); } }, 500);
+    const sessionCheck = new RecurringTaskRegistry().register({
+      name: 'desktop.workable-oauth-session',
+      source: 'packages/desktop/src/main/workableOAuthLogin.ts',
+      intervalMs: 500,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => String(Date.now()),
+      run: () => { try { options.assertCurrent(); } catch { controller.abort(); } },
+    });
     const abort = () => { rejectCode(new Error('Workable 授权已取消或超时')); server.closeAllConnections(); void server.close(); };
     controller.signal.addEventListener('abort', abort, { once: true });
     try {
@@ -70,7 +78,7 @@ export class WorkableDesktopLogin {
       if (error instanceof Error && /Workable|服务器未返回|本机授权/.test(error.message)) throw error;
       throw new Error('Workable 授权未完成，请刷新状态后重试');
     } finally {
-      clearTimeout(timer); clearInterval(sessionCheck); controller.signal.removeEventListener('abort', abort);
+      clearTimeout(timer); sessionCheck?.(); controller.signal.removeEventListener('abort', abort);
       server.closeAllConnections(); await new Promise<void>((resolve) => { server.close(() => resolve()); });
       if (!completed && state) {
         try { options.assertCurrent(); await options.connection({ kind: 'oauth_cancel', state, confirmed: true }); } catch { /* Do not send the old flow to a new enterprise. Server TTL bounds abandoned flows. */ }

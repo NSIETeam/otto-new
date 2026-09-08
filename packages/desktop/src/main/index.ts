@@ -78,6 +78,7 @@ import {
   clampDesktopPetToWorkArea,
   createDesktopPetDragState,
   rebaseDesktopPetDrag,
+  startDesktopPetDragPolling,
   type DesktopPetDragState,
 } from './desktop-pet-drag.js';
 import {
@@ -653,7 +654,7 @@ let videoEditorWindow: BrowserWindow | undefined;
 let desktopPetWindow: BrowserWindow | undefined;
 let desktopPetEnabled = false;
 let desktopPetMoveSaveTimer: ReturnType<typeof setTimeout> | undefined;
-let desktopPetDragTimer: ReturnType<typeof setInterval> | undefined;
+let stopDesktopPetDragPoll: (() => void) | undefined;
 let desktopPetDragState: DesktopPetDragState | undefined;
 let desktopPetDragMoved = false;
 let desktopPetNativeReleaseMoved: boolean | undefined;
@@ -2539,9 +2540,8 @@ function saveDesktopPetPosition(win: BrowserWindow): void {
 }
 
 function stopDesktopPetDragTracking(): void {
-  if (!desktopPetDragTimer) return;
-  clearInterval(desktopPetDragTimer);
-  desktopPetDragTimer = undefined;
+  stopDesktopPetDragPoll?.();
+  stopDesktopPetDragPoll = undefined;
 }
 
 function updateDesktopPetDragPosition(): void {
@@ -5207,7 +5207,7 @@ function registerIpc(): void {
     // Poll the native cursor while the button is held. Renderer pointer events
     // can pause when a transparent BrowserWindow crosses its old bounds; native
     // polling keeps the pet attached to the cursor across the whole work area.
-    desktopPetDragTimer = setInterval(updateDesktopPetDragPosition, 16);
+    stopDesktopPetDragPoll = startDesktopPetDragPolling(desktopRecurringTasks, updateDesktopPetDragPosition);
   });
   ipcMain.handle(IPC.desktopPetDragEnd, (event) => {
     if (!isDesktopPetSender(event.sender)) return false;

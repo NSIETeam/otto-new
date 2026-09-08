@@ -15,17 +15,22 @@ import {
 } from './turnExecutionGuardStore.js';
 export { installTurnExecutionGuard } from './turnExecutionGuardStore.js';
 export type { GuardedToolCall } from './turnExecutionGuardStore.js';
-const nativePrototypes = [
-  WriteFileTool,
-  EditTool,
-  ReadFileTool,
-  ReadManyFilesTool,
-  LSTool,
-  GlobTool,
-  GrepTool,
-  AskUserQuestionTool,
-  GenerateSafeDocumentTool,
-].map((tool) => ({ name: tool.Name, prototype: tool.prototype }));
+// Tools also reach the executor through Config. Resolve this fixed allow-list
+// only at dispatch, after the module graph has initialized; eagerly reading a
+// class here breaks callers that import a tool before importing the executor.
+function nativePrototypes() {
+  return [
+    WriteFileTool,
+    EditTool,
+    ReadFileTool,
+    ReadManyFilesTool,
+    LSTool,
+    GlobTool,
+    GrepTool,
+    AskUserQuestionTool,
+    GenerateSafeDocumentTool,
+  ].map((tool) => ({ name: tool.Name, prototype: tool.prototype }));
+}
 export function assertTurnExecutionAllowed(
   config: object,
   call: GuardedToolCall,
@@ -37,7 +42,7 @@ export function assertTurnExecutionAllowed(
     implementation
       ? {
           ...call,
-          nativeSafe: nativePrototypes.some(
+          nativeSafe: nativePrototypes().some(
             ({ name, prototype }) =>
               call.name === name &&
               Object.getPrototypeOf(implementation) === prototype &&

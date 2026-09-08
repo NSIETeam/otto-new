@@ -2,7 +2,7 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App.js';
 import type {
@@ -35,6 +35,8 @@ const harness = vi.hoisted(() => ({
   settingsActions: {
     clearExportMessage: vi.fn(),
     exportConversation: vi.fn(),
+    refreshMcpServers: vi.fn(),
+    refreshTools: vi.fn(),
   },
   updateActions: { silentCheck: vi.fn() },
   moduleCapabilityRetry: vi.fn(),
@@ -112,7 +114,8 @@ vi.mock('./state/useOttoStore.js', () => ({
 
 vi.mock('./state/useSettingsData.js', () => ({
   useSettingsData: () => ({
-    state: { exportMessage: null },
+    // Match the real hook's initial contract even before an older server replies.
+    state: { exportMessage: null, mcpServers: [], tools: [] },
     actions: harness.settingsActions,
   }),
 }));
@@ -490,6 +493,28 @@ function rightPanelPreferenceKey(account: EnterpriseAccount): string {
   ].map(encodeURIComponent).join(':');
 }
 
+function configureParkConversationBridge() {
+  const bridge = {
+    conversationDraftLoad: vi.fn<Window['otto']['conversationDraftLoad']>(async () => null),
+    conversationDraftSave: vi.fn<Window['otto']['conversationDraftSave']>(async () => undefined),
+    conversationDraftRemove: vi.fn<Window['otto']['conversationDraftRemove']>(async () => undefined),
+    // Script the semantic IPC response, not the draft/confirmation implementation.
+    // These integration tests do not make paid model calls or assess model quality.
+    parkConversationPlan: vi.fn<Window['otto']['parkConversationPlan']>(async (request) => {
+      if (request.text === '会议室顶灯不亮，普通') {
+        return { items: [{ intent: 'repair', mode: 'update', quote: request.text,
+          fields: { issue: '会议室顶灯不亮', category: '灯具维修', urgency: '普通' } }] };
+      }
+      if (request.text === '查看最新园区公告') {
+        return { items: [{ intent: 'query:announcements', mode: 'new', quote: request.text, fields: {} }] };
+      }
+      throw new Error(`Unexpected park planning request: ${request.text}`);
+    }),
+  };
+  Object.assign(window.otto, bridge);
+  return bridge;
+}
+
 beforeEach(() => {
   localStorage.clear();
   harness.auth.current = authFor(accountA, 'signed-in');
@@ -556,6 +581,8 @@ describe('App workspace UI integration', () => {
 
   it('always starts in the unified workspace UI without a legacy mode selector', () => {
     render(<App />);
+    expect(harness.settingsActions.refreshMcpServers).not.toHaveBeenCalled();
+    expect(harness.settingsActions.refreshTools).not.toHaveBeenCalled();
 
     expect(document.querySelector('.otto-app')).toBeTruthy();
     expect(screen.getByTestId('work-panel')).toBeTruthy();
@@ -603,6 +630,8 @@ describe('App workspace UI integration', () => {
   it('routes workspace modules through the existing App-level activation chains', () => {
     harness.centralIdentity.current = { edition: 'enterprise', role: 'member', profiles: [] };
     render(<App />);
+    expect(harness.settingsActions.refreshMcpServers).toHaveBeenCalledOnce();
+    expect(harness.settingsActions.refreshTools).toHaveBeenCalledWith('session_1');
 
     fireEvent.click(screen.getByRole('button', { name: 'activate-park' }));
     expect(openParkServices).toHaveBeenCalledWith('announcement');
@@ -619,6 +648,7 @@ describe('App workspace UI integration', () => {
 
   it('connects the main conversation to property repair and submits only after confirmation', async () => {
     configureEnterpriseWorkspace();
+    const bridge = configureParkConversationBridge();
     const enterpriseParkView = vi.fn(async () => ({ tenantRoomNumber: 'A座1203室' }));
     const enterpriseTicketSubmit = vi.fn(async () => ({
       id: 'ticket-1',
@@ -628,7 +658,10 @@ describe('App workspace UI integration', () => {
       recipientCount: 1,
     }));
     Object.assign(window.otto, { enterpriseParkView, enterpriseTicketSubmit });
-    render(<App />);
+    await act(async () => { render(<App />); });
+    expect(bridge.conversationDraftLoad).toHaveBeenCalledWith(JSON.stringify([
+      'https://enterprise.example.com/', 'organization-a', 'account-a',
+    ]));
 
     fireEvent.click(screen.getByRole('button', { name: 'start-repair-chat' }));
     await waitFor(() => expect(enterpriseParkView).toHaveBeenCalledOnce());
@@ -643,6 +676,10 @@ describe('App workspace UI integration', () => {
       'assistant',
       expect.stringContaining('回复“确认提交”'),
     ));
+    expect(bridge.parkConversationPlan).toHaveBeenCalledWith(expect.objectContaining({
+      text: '会议室顶灯不亮，普通',
+      active: [expect.objectContaining({ intent: 'repair' })],
+    }));
     expect(enterpriseTicketSubmit).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'confirm-repair-chat' }));
@@ -652,14 +689,18 @@ describe('App workspace UI integration', () => {
       category: '灯具维修',
       urgency: '普通',
     })));
+    expect(bridge.conversationDraftSave).toHaveBeenCalled();
+    expect(bridge.conversationDraftSave.mock.invocationCallOrder.at(-1))
+      .toBeLessThan(enterpriseTicketSubmit.mock.invocationCallOrder[0]);
     expect(harness.storeActions.postLocalChatMessage).toHaveBeenCalledWith(
       'assistant',
       expect.stringContaining('BX-2026-0001'),
     );
   });
 
-  it('routes a park query through the main conversation without invoking the model', async () => {
+  it('routes a planned park query without invoking the main chat model', async () => {
     configureEnterpriseWorkspace();
+    const bridge = configureParkConversationBridge();
     const enterpriseParkPublications = vi.fn(async () => [{
       id: 'announcement-1',
       kind: 'announcement' as const,
@@ -670,15 +711,39 @@ describe('App workspace UI integration', () => {
       submittedAt: null,
     }]);
     Object.assign(window.otto, { enterpriseParkPublications });
-    render(<App />);
+    await act(async () => { render(<App />); });
 
     fireEvent.click(screen.getByRole('button', { name: 'query-announcement-chat' }));
 
     await waitFor(() => expect(enterpriseParkPublications).toHaveBeenCalledOnce());
+    expect(bridge.parkConversationPlan).toHaveBeenCalledWith(expect.objectContaining({
+      text: '查看最新园区公告', active: [],
+    }));
     expect(harness.storeActions.postLocalChatMessage).toHaveBeenCalledWith(
       'assistant',
       expect.stringContaining('园区停电通知'),
     );
+    expect(harness.storeActions.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(['pending', 'failed'] as const)('does not execute a park request while secure draft restoration is %s', async (status) => {
+    configureEnterpriseWorkspace();
+    const bridge = configureParkConversationBridge();
+    bridge.conversationDraftLoad.mockImplementation(() => status === 'pending'
+      ? new Promise(() => undefined)
+      : Promise.reject(new Error('secure storage unavailable')));
+    const enterpriseParkView = vi.fn();
+    const enterpriseTicketSubmit = vi.fn();
+    Object.assign(window.otto, { enterpriseParkView, enterpriseTicketSubmit });
+    await act(async () => { render(<App />); });
+
+    fireEvent.click(screen.getByRole('button', { name: 'start-repair-chat' }));
+    await waitFor(() => expect(harness.storeActions.postLocalChatMessage).toHaveBeenCalledWith(
+      'assistant', expect.stringContaining('安全草稿尚未恢复完成'),
+    ));
+    expect(enterpriseParkView).not.toHaveBeenCalled();
+    expect(enterpriseTicketSubmit).not.toHaveBeenCalled();
+    expect(bridge.conversationDraftSave).not.toHaveBeenCalled();
     expect(harness.storeActions.sendMessage).not.toHaveBeenCalled();
   });
 

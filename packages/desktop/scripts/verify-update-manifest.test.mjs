@@ -9,9 +9,9 @@ import { DEFAULT_UPDATE_ASSET_BASE_URL } from './update-mirror-config.mjs';
 import { verifyUpdateManifest } from './verify-update-manifest.mjs';
 
 const tempDirs = [];
-const scriptPath = fileURLToPath(
-  new URL('./verify-update-manifest.mjs', import.meta.url),
-);
+// Keep this a filesystem script path: Vite treats new URL('literal.mjs',
+// import.meta.url) as a browser asset and rewrites it to the jsdom HTTP origin.
+const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'verify-update-manifest.mjs');
 
 afterEach(async () => {
   await Promise.all(

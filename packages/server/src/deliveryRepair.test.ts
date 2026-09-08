@@ -42,7 +42,11 @@ describe('bounded repair in the already authorized file scope', () => {
     roots.push(root);
     const file = path.join(root, 'login.ts');
     writeFileSync(file, 'old');
-    const guard = new DeliveryRepairGuard();
+    const guard = new DeliveryRepairGuard({
+      workspacePath: root,
+      requestRevision: 1,
+      acceptanceKey: 'original',
+    });
     const edit = card('replace', file);
     expect(guard.reserve(edit)).toBe(false);
     guard.observe(edit, false);
@@ -65,7 +69,11 @@ describe('bounded repair in the already authorized file scope', () => {
     roots.push(root);
     const file = path.join(root, 'login.ts');
     writeFileSync(file, 'old');
-    const guard = new DeliveryRepairGuard();
+    const guard = new DeliveryRepairGuard({
+      workspacePath: root,
+      requestRevision: 1,
+      acceptanceKey: 'original',
+    });
     guard.observe(card('replace', file), false);
     guard.observe(failed(), true);
     guard.observe(card('read_file', file), true);
@@ -82,7 +90,11 @@ describe('bounded repair in the already authorized file scope', () => {
     roots.push(root);
     const file = path.join(root, 'login.ts');
     writeFileSync(file, 'old');
-    const guard = new DeliveryRepairGuard();
+    const guard = new DeliveryRepairGuard({
+      workspacePath: root,
+      requestRevision: 1,
+      acceptanceKey: 'original',
+    });
     guard.observe(card('replace', file), false);
     guard.observe(failed(), true);
     guard.observe(card('read_file', file), true);

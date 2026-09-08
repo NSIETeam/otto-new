@@ -517,9 +517,6 @@ function OttoWorkspaceApp({
   const policyScopeId = edition === 'enterprise'
     ? `${account.organizationId}:${account.id}`
     : account.id;
-  const policyMessages = usePolicyInbox(policyScopeId, edition === 'enterprise' && account.accountType !== 'personal' && !internalAdminPreview, mainView);
-  const [openedPolicyId, setOpenedPolicyId] = useState<string>();
-  const allEnterpriseUnreadCounts = { ...enterpriseUnreadCounts, 'enterprise:policy:inbox': policyMessages.inbox.unreadCount };
   const policySeedProfile = useMemo<PolicyEnterpriseProfile>(() => ({
     organizationName: account.organizationName,
   }), [account.organizationName]);
@@ -1101,6 +1098,9 @@ function OttoWorkspaceApp({
   // —— 统一消息中心：会话历史、未读状态与企业通知 ——
   const [allConvOpen, setAllConvOpen] = useState(false);
   const [mainView, setMainView] = useState<MainView>('chat');
+  const policyMessages = usePolicyInbox(policyScopeId, edition === 'enterprise' && account.accountType !== 'personal' && !internalAdminPreview, mainView);
+  const [openedPolicyId, setOpenedPolicyId] = useState<string>();
+  const allEnterpriseUnreadCounts = { ...enterpriseUnreadCounts, 'enterprise:policy:inbox': policyMessages.inbox.unreadCount };
   const workspacePreferenceScope = useMemo(() => ({
     serverUrl,
     organizationId: account.organizationId,

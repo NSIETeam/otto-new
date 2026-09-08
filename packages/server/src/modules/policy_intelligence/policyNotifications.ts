@@ -14,7 +14,7 @@ export interface PolicyMailbox {
   organizationId: string;
   watches: Record<
     string,
-    { fingerprint: string; deadline?: string; version: number }
+    { fingerprint: string; contentHash?: string; deadline?: string; version: number }
   >;
   notices: PolicyNotice[];
 }
@@ -50,6 +50,7 @@ export async function watchPolicy(
         );
       mailbox.watches[doc.id] = {
         fingerprint: fingerprint(doc),
+        contentHash: doc.contentHash,
         deadline: doc.deadline,
         version: doc.version,
       };
@@ -71,7 +72,13 @@ export function advancePolicyMailbox(
     body: string,
   ): void => {
     const id = policyHash([doc.id, kind, event]);
-    if (mailbox.notices.some((n) => n.id === id)) return;
+    const existing = mailbox.notices.find(n => n.id === id);
+    if (existing) {
+      // Interpretation can finish after the raw revision was announced. Update
+      // that notice, without creating another unread event for the same revision.
+      if (kind === 'changed' && doc.interpretationStatus === 'ready') existing.body = body;
+      return;
+    }
     mailbox.notices.push({
       id,
       policyId: doc.id,
@@ -86,16 +93,18 @@ export function advancePolicyMailbox(
   for (const doc of documents) {
     const watch = mailbox.watches[doc.id];
     if (!watch || doc.sourceStatus !== 'verified') continue;
+    if (doc.interpretationStatus !== 'ready' && watch.contentHash === doc.contentHash) continue;
     const next = fingerprint(doc);
     if (watch.fingerprint !== next) {
       add(
         doc,
         'changed',
-        next,
-        `关注的政策原文已更新（版本 ${watch.version} → ${doc.version}）。${watch.deadline !== doc.deadline ? `截止时间：${watch.deadline ?? '待核验'} → ${doc.deadline ?? '待核验'}。` : ''}请重新核对条件、材料和原文，旧诊断不能直接用于本批次申报。`,
+        `${doc.contentHash}:${doc.version}`,
+        `关注的政策原文已更新（当前版本 ${doc.version}）。${doc.deadline ? `当前已核验截止日期：${doc.deadline}。` : '截止日期待核验。'}${doc.governance ? '文件包含效力变更依据，请核对生效日期。' : ''}请重新核对条件、材料和原文，旧诊断不能直接用于本批次申报。`,
       );
       mailbox.watches[doc.id] = {
         fingerprint: next,
+        contentHash: doc.contentHash,
         version: doc.version,
         deadline: doc.deadline,
       };

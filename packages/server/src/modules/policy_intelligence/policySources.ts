@@ -421,7 +421,7 @@ export async function collectPolicySource(
       references: referencedLinks
         .filter((ref) => !attachmentLinks.some((a) => a.url === ref.url))
         .map((ref) => ({ label: ref.title, url: ref.url })),
-      sourceStatus: 'verified',
+      sourceStatus: attachments.some(a => a.status === 'failed') ? 'unavailable' : 'verified',
       interpretationStatus: 'pending',
     });
   }

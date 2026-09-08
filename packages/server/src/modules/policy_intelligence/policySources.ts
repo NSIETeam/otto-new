@@ -188,6 +188,26 @@ export function policyLinks(
     .map(([url, title]) => ({ url, title }))
     .slice(0, keepNavigation ? 500 : 100);
 }
+function policyArticle(html: string): string {
+  const marked = html.match(/<!--\s*enpcontent\s*-->([\s\S]*?)<!--\s*\/?enpcontent\s*-->/iu)?.[1];
+  if (marked) return marked;
+  const semantic = html.match(/<(?:article|main)\b[^>]*>([\s\S]*?)<\/(?:article|main)>/iu)?.[1];
+  if (semantic) return semantic;
+  // Common government publishing systems use nested DIVs, not <article>.
+  // Match balanced containers so a nested table/paragraph cannot truncate rules.
+  const open = html.match(/<(div|section)\b[^>]*(?:id|class)\s*=\s*["'][^"']*(?:UCAP-CONTENT|TRS_Editor|TRS_UEDITOR|artibody|article-content|article_content|content_body)[^"']*["'][^>]*>/iu);
+  if (open?.index !== undefined) {
+    const start = open.index + open[0].length;
+    const tags = new RegExp(`<\\/?${open[1]}\\b[^>]*>`, 'giu');
+    tags.lastIndex = start;
+    let depth = 1;
+    for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
+      depth += tag[0].startsWith('</') ? -1 : 1;
+      if (!depth) return html.slice(start, tag.index);
+    }
+  }
+  return html;
+}
 export async function collectPolicySource(
   source: PolicySource,
   fetcher: typeof fetch,
@@ -272,10 +292,7 @@ export async function collectPolicySource(
       onDetailFailure?.(link.url);
       continue;
     }
-    const main =
-      html.match(
-        /<(?:article|main)\b[^>]*>([\s\S]*?)<\/(?:article|main)>/iu,
-      )?.[1] ?? html;
+    const main = policyArticle(html);
     const referencedLinks = policyLinks(
       main,
       { ...source, listUrl: link.url },
@@ -306,7 +323,7 @@ export async function collectPolicySource(
     const attachmentLinks: OfficialPolicyDocument['attachments'] = [];
     // Unlike source discovery, attachment accounting must retain rejected links:
     // a blocked required attachment is missing evidence, never 'no attachment'.
-    for (const match of main.matchAll(
+    for (const match of html.matchAll(
       /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/giu,
     )) {
       const label = policyText(match[2]).slice(0, 250) || '未命名附件';

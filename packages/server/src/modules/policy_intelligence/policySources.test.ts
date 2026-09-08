@@ -15,6 +15,14 @@ const source = {
   region: { country: 'CN' as const, city: '深圳市' },
 };
 describe('policy source registry and collector', () => {
+  it('does not mistake changes to surrounding website recommendations for a policy revision', async () => {
+    const read = async (news: string) => collectPolicySource(source, async url => new Response(String(url).endsWith('/policies/') ? '<a href="/p.html">科技企业项目申报通知</a>' : `<h1>科技企业项目申报通知</h1><div id="UCAP-CONTENT">企业必须满足营业收入条件。<div>提交完整的申报材料。</div></div><div class="related">${news}</div>`), AbortSignal.timeout(5000));
+    const before = (await read('昨日新闻：帮助企业发展'))[0];
+    const after = (await read('今日新闻：最新会议报道'))[0];
+    expect(before.contentHash).toBe(after.contentHash);
+    expect(before.bodyText).toContain('完整的申报材料');
+    expect(before.bodyText).not.toContain('新闻');
+  });
   it('does not hide off-allowlist attachments when deciding the original is complete', async () => {
     const fetcher = vi.fn(
       async (url: string | URL | Request) =>

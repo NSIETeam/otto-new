@@ -44,6 +44,7 @@ export interface DeploymentRepositoryStore {
   defaultOrganizationId: string;
   licenseEnforcementEnabled(): boolean;
   licenseVerificationPublicKeys(): readonly string[];
+  deploymentGrantedFeatures?(): readonly OrganizationFeatureKey[];
   telemetryEndpoint(): string | null;
   telemetryIngestSecret(): string;
   telemetryRetentionDays?(): number;
@@ -1664,8 +1665,10 @@ export function isLicenseUsableForOrganizationFeature(
   organizationId?: string | null,
 ): boolean {
   const license = getDeploymentLicense(store);
-  if (!license.enforce && ['active', 'expiring', 'grace'].includes(license.status)) return true;
-  if (!['active', 'expiring', 'grace'].includes(license.status)) return false;
+  const usable = ['active', 'expiring', 'grace'].includes(license.status);
+  if (!usable) return false;
+  if (store.deploymentGrantedFeatures?.().includes(feature)) return true;
+  if (!license.enforce) return true;
   if (
     organizationId !== undefined &&
     (!organizationId || license.organizationId !== organizationId)

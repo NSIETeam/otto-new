@@ -84,6 +84,7 @@ import {
   createAuditLogSchemaContributor,
   createCommercialControlComposition,
   createCreditsSchemaContributor,
+  parseDeploymentFeatureGrants,
   parsePublicKeyList,
   PRIVATE_DEPLOYMENT_SCHEMA_CONTRIBUTOR,
 } from '../modules/commercial_control/index.js';
@@ -544,6 +545,10 @@ export const {
       process.env.OTTO_LICENSE_PUBLIC_KEYS ||
         process.env.OTTO_LICENSE_PUBLIC_KEY,
       process.env.OTTO_LICENSE_REVOKED_KEY_IDS,
+    ),
+  deploymentGrantedFeatures: () =>
+    parseDeploymentFeatureGrants(
+      process.env.OTTO_ENTERPRISE_DEPLOYMENT_GRANTS,
     ),
   telemetryEndpoint: () => process.env.OTTO_TELEMETRY_ENDPOINT || null,
   telemetryIngestSecret: () => process.env.OTTO_TELEMETRY_INGEST_SECRET || '',

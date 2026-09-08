@@ -14,7 +14,10 @@ import type {
 
 export interface OrganizationFeatureAccessDependencies {
   configuration: OrganizationFeatureConfigurationFacade;
-  isLicenseUsable(feature: OrganizationFeatureKey): boolean;
+  isLicenseUsable(
+    feature: OrganizationFeatureKey,
+    organizationId: string,
+  ): boolean;
 }
 
 export interface OrganizationFeatureAccessFacade {
@@ -52,12 +55,16 @@ export class OrganizationFeatureDeniedError extends Error {
 }
 
 function resolveEntitlements(
-  isLicenseUsable: (feature: OrganizationFeatureKey) => boolean,
+  organizationId: string,
+  isLicenseUsable: (
+    feature: OrganizationFeatureKey,
+    organizationId: string,
+  ) => boolean,
 ): OrganizationFeatures {
   const entitled = {} as OrganizationFeatures;
   for (const feature of ORGANIZATION_FEATURE_KEYS) {
     try {
-      entitled[feature] = isLicenseUsable(feature) === true;
+      entitled[feature] = isLicenseUsable(feature, organizationId) === true;
     } catch {
       entitled[feature] = false;
     }
@@ -66,10 +73,14 @@ function resolveEntitlements(
 }
 
 function resolveFeatureState(
+  organizationId: string,
   configured: OrganizationFeatures,
-  isLicenseUsable: (feature: OrganizationFeatureKey) => boolean,
+  isLicenseUsable: (
+    feature: OrganizationFeatureKey,
+    organizationId: string,
+  ) => boolean,
 ): OrganizationFeatureState {
-  const entitled = resolveEntitlements(isLicenseUsable);
+  const entitled = resolveEntitlements(organizationId, isLicenseUsable);
   const effective = {} as OrganizationFeatures;
   for (const feature of ORGANIZATION_FEATURE_KEYS) {
     effective[feature] = configured[feature] === true && entitled[feature] === true;
@@ -82,6 +93,7 @@ export function createOrganizationFeatureAccessFacade(
 ): OrganizationFeatureAccessFacade {
   const featureState = (organizationId: string): OrganizationFeatureState =>
     resolveFeatureState(
+      organizationId,
       dependencies.configuration.getConfiguredOrganizationFeatures(organizationId),
       dependencies.isLicenseUsable,
     );
@@ -101,7 +113,11 @@ export function createOrganizationFeatureAccessFacade(
           organizationId,
           patch,
         );
-      return resolveFeatureState(configured, dependencies.isLicenseUsable).effective;
+      return resolveFeatureState(
+        organizationId,
+        configured,
+        dependencies.isLicenseUsable,
+      ).effective;
     },
     isOrganizationFeatureEnabled(organizationId, feature) {
       return effectiveFeatures(organizationId)[feature] === true;

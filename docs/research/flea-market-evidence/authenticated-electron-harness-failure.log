@@ -1,0 +1,85 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:62034) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ integration/park-market/authenticated-flow.test.ts (1 test | 1 failed) 88482ms
+   × real enterprise login and membership authority drive cross-company publish / encrypted contact / reply / reserve / sale HTTP flow 88482ms
+     → electron.launch: Process failed to launch!
+Call log:
+[2m  - <launching> /Users/yang/Desktop/otto-carpool-fixed-91bc4e/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron -r /Users/yang/Desktop/otto-carpool-fixed-91bc4e/node_modules/playwright-core/lib/server/electron/loader.js --inspect=0 --remote-debugging-port=0 /var/folders/mg/ctd9153d5_g93y9n6w7tvmf80000gn/T/otto-market-ui-flow-lziPyv/main.cjs[22m
+[2m  - <launched> pid=62052[22m
+[2m  - [pid=62052][err] Debugger listening on ws://127.0.0.1:54432/fdffe3d7-61a5-4e0d-ae35-f5199491e7aa[22m
+[2m  - [pid=62052][err] For help, see: https://nodejs.org/learn/getting-started/debugging[22m
+[2m  - <ws connecting> ws://127.0.0.1:54432/fdffe3d7-61a5-4e0d-ae35-f5199491e7aa[22m
+[2m  - [pid=62052][err] Debugger attached.[22m
+[2m  - <ws connected> ws://127.0.0.1:54432/fdffe3d7-61a5-4e0d-ae35-f5199491e7aa[22m
+[2m  - [pid=62052][err] App threw an error during load[22m
+[2m  - [pid=62052][err] TypeError: Cannot read properties of undefined (reading 'setPath')[22m
+[2m  - [pid=62052][err]     at Object.<anonymous> (/private/var/folders/mg/ctd9153d5_g93y9n6w7tvmf80000gn/T/otto-market-ui-flow-lziPyv/main.cjs:1:110)[22m
+[2m  - [pid=62052][err]     at Module._compile (node:internal/modules/cjs/loader:1879:14)[22m
+[2m  - [pid=62052][err]     at Object..js (node:internal/modules/cjs/loader:2012:10)[22m
+[2m  - [pid=62052][err]     at Module.load (node:internal/modules/cjs/loader:1601:32)[22m
+[2m  - [pid=62052][err]     at node:internal/modules/cjs/loader:1403:12[22m
+[2m  - [pid=62052][err]     at Module._load (node:electron/js2c/node_init:2:18095)[22m
+[2m  - [pid=62052][err]     at wrapModuleLoad (node:internal/modules/cjs/loader:262:19)[22m
+[2m  - [pid=62052][err]     at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:378:15)[22m
+[2m  - [pid=62052][err]     at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:246:9)[22m
+[2m  - [pid=62052][err]     at ModuleJob.run (node:internal/modules/esm/module_job:439:25)[22m
+[2m  - [pid=62052] <kill>[22m
+[2m  - [pid=62052] <will force kill>[22m
+[2m  - [pid=62052] exception while trying to kill process: Error: kill EPERM[22m
+[2m  - <ws disconnected> ws://127.0.0.1:54432/fdffe3d7-61a5-4e0d-ae35-f5199491e7aa code=1006 reason=[22m
+[2m  - [pid=62052] <process did exit: exitCode=null, signal=SIGTERM>[22m
+[2m  - [pid=62052] starting temporary directories cleanup[22m
+[2m  - [pid=62052] finished temporary directories cleanup[22m
+; diagnostics /var/folders/mg/ctd9153d5_g93y9n6w7tvmf80000gn/T/otto-market-ui-flow-lziPyv
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  integration/park-market/authenticated-flow.test.ts > real enterprise login and membership authority drive cross-company publish / encrypted contact / reply / reserve / sale HTTP flow
+Error: electron.launch: Process failed to launch!
+Call log:
+[2m  - <launching> /Users/yang/Desktop/otto-carpool-fixed-91bc4e/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron -r /Users/yang/Desktop/otto-carpool-fixed-91bc4e/node_modules/playwright-core/lib/server/electron/loader.js --inspect=0 --remote-debugging-port=0 /var/folders/mg/ctd9153d5_g93y9n6w7tvmf80000gn/T/otto-market-ui-flow-lziPyv/main.cjs[22m
+[2m  - <launched> pid=62052[22m
+[2m  - [pid=62052][err] Debugger listening on ws://127.0.0.1:54432/fdffe3d7-61a5-4e0d-ae35-f5199491e7aa[22m
+[2m  - [pid=62052][err] For help, see: https://nodejs.org/learn/getting-started/debugging[22m
+[2m  - <ws connecting> ws://127.0.0.1:54432/fdffe3d7-61a5-4e0d-ae35-f5199491e7aa[22m
+[2m  - [pid=62052][err] Debugger attached.[22m
+[2m  - <ws connected> ws://127.0.0.1:54432/fdffe3d7-61a5-4e0d-ae35-f5199491e7aa[22m
+[2m  - [pid=62052][err] App threw an error during load[22m
+[2m  - [pid=62052][err] TypeError: Cannot read properties of undefined (reading 'setPath')[22m
+[2m  - [pid=62052][err]     at Object.<anonymous> (/private/var/folders/mg/ctd9153d5_g93y9n6w7tvmf80000gn/T/otto-market-ui-flow-lziPyv/main.cjs:1:110)[22m
+[2m  - [pid=62052][err]     at Module._compile (node:internal/modules/cjs/loader:1879:14)[22m
+[2m  - [pid=62052][err]     at Object..js (node:internal/modules/cjs/loader:2012:10)[22m
+[2m  - [pid=62052][err]     at Module.load (node:internal/modules/cjs/loader:1601:32)[22m
+[2m  - [pid=62052][err]     at node:internal/modules/cjs/loader:1403:12[22m
+[2m  - [pid=62052][err]     at Module._load (node:electron/js2c/node_init:2:18095)[22m
+[2m  - [pid=62052][err]     at wrapModuleLoad (node:internal/modules/cjs/loader:262:19)[22m
+[2m  - [pid=62052][err]     at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:378:15)[22m
+[2m  - [pid=62052][err]     at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:246:9)[22m
+[2m  - [pid=62052][err]     at ModuleJob.run (node:internal/modules/esm/module_job:439:25)[22m
+[2m  - [pid=62052] <kill>[22m
+[2m  - [pid=62052] <will force kill>[22m
+[2m  - [pid=62052] exception while trying to kill process: Error: kill EPERM[22m
+[2m  - <ws disconnected> ws://127.0.0.1:54432/fdffe3d7-61a5-4e0d-ae35-f5199491e7aa code=1006 reason=[22m
+[2m  - [pid=62052] <process did exit: exitCode=null, signal=SIGTERM>[22m
+[2m  - [pid=62052] starting temporary directories cleanup[22m
+[2m  - [pid=62052] finished temporary directories cleanup[22m
+; diagnostics /var/folders/mg/ctd9153d5_g93y9n6w7tvmf80000gn/T/otto-market-ui-flow-lziPyv
+ ❯ runMarketDesktopFlow integration/park-market/desktop-flow.mjs:72:9
+     70|  } catch(error) {
+     71|   if(app) for(let i=0;i<app.windows().length;i++)await writeFile(path.…
+     72|   throw new Error(`${error.message}; diagnostics ${temp}`);
+       |         ^
+     73|  } finally {await app?.close();if(completed)await rm(temp,{recursive:t…
+     74| }
+ ❯ integration/park-market/authenticated-flow.test.ts:290:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  16:30:14
+   Duration  91.33s (transform 1.77s, setup 0ms, collect 2.62s, tests 88.48s, environment 0ms, prepare 52ms)

@@ -259,6 +259,12 @@ function MarketContent({
   const uploadsRef = useRef(uploads);
   uploadsRef.current = uploads;
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (view === 'form' && Object.keys(fieldErrors).length)
+      dialog.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        ?.focus();
+  }, [fieldErrors, view]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -1126,6 +1132,7 @@ function MarketContent({
             <label>
               分类 *
               <select
+                aria-invalid={!!fieldErrors.category}
                 value={form.category}
                 onChange={(e) => update('category', e.target.value)}
               >
@@ -1180,6 +1187,7 @@ function MarketContent({
               <label key={key}>
                 {key === 'condition' ? '成色 *' : '功能状态 *'}
                 <select
+                  aria-invalid={!!fieldErrors[key]}
                   value={form[key]}
                   onChange={(e) => update(key, e.target.value)}
                 >
@@ -1205,6 +1213,7 @@ function MarketContent({
               图片（1–9 张，每张最多 20 MB）
               <input
                 type="file"
+                aria-invalid={!!fieldErrors.imageIds}
                 multiple
                 accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
                 onChange={(e) => {
@@ -1433,7 +1442,7 @@ function MarketContent({
             <p>
               {selected.cleanedAt
                 ? '详细内容已按保留期限清理；重新发布需补齐文字并上传新图片。'
-                : `详细说明和图片将在 ${new Date(selected.endedAt + 180 * 86400000).toLocaleDateString()} 后清理，最小发布记录按平台保留策略处理。`}
+                : `详细说明和图片将在 ${new Date(selected.endedAt + 180 * 86400000).toLocaleDateString('zh-CN')} 后清理，最小发布记录按平台保留策略处理。`}
             </p>
           )}
           <p>

@@ -1,8 +1,8 @@
 # 园区跳蚤市场自查报告（持续开发中）
 
-更新：2026-09-08 16:25。开发和逐项验收仍在继续；不能宣布全部验收通过，生产能力保持关闭。
+更新：2026-09-08 16:41。开发和逐项验收仍在继续；不能宣布全部验收通过，生产能力保持关闭。
 
-当前工作目录：`/Users/yang/Desktop/otto-carpool-fixed-91bc4e`；当前分支：`codex/blue-heron-7f3a9c`，基线 `1fca182e`。目标分支被另一项拼车修复工作移入新目录后，市场修改已再次迁入，并手动合并 main/index.ts 的账号切换装配，保留 ParkCarpoolStartup 修复。迁移副本在 `/tmp/otto-market-transfer-fixed-91bc4e`。本检查点仅本地提交市场代码；仍有下面列出的未完成验收，未推送、合并或部署。
+当前工作目录：`/Users/yang/Desktop/otto-carpool-fixed-91bc4e`；当前分支：`codex/blue-heron-7f3a9c`，基线 `1fca182e`。目标分支被另一项拼车修复工作移入新目录后，市场修改已再次迁入，并手动合并 main/index.ts 的账号切换装配，保留 ParkCarpoolStartup 修复。迁移副本在 `/tmp/otto-market-transfer-fixed-91bc4e`。市场实现检查点已本地提交 `1b3a05bf`；仍有下面列出的未完成验收，未推送、合并或部署。
 
 ## 当前验证证据
 
@@ -35,7 +35,7 @@
 
 |编号|实现位置|测试/操作证据|实际结果|状态|
 |---|---|---|---|---|
-|A01|[fleaMarketService.ts](/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketService.ts)|[fleaMarketContacts.test.ts](/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketContacts.test.ts)；详见汇总日志|真实企业登录 HTTP 发布→咨询→回复→预留→售出及跨园区/第三方/停用拒绝已通过；真实双桌面全流程仍未验收|局部验证，未整项验收|
+|A01|[fleaMarketService.ts](/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketService.ts)|[fleaMarketContacts.test.ts](/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketContacts.test.ts)；详见汇总日志|真实企业登录 HTTP 发布→咨询→回复→预留→售出及跨园区/第三方/停用拒绝已通过；两个 Electron 窗口＋真实登录/HTTP/加密组件的发布、咨询、回复、预留、售出已通过；完整安装包 IPC 矩阵未验收|局部验证，未整项验收|
 |A02|[fleaMarketAccess.ts](/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketAccess.ts)|[fleaMarketHttp.integration.test.ts](/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketHttp.integration.test.ts)；详见汇总日志|真实 HTTP/图片跨园区拒绝通过，分享链接解析与账号服务器隔离已测|局部验证，未整项验收|
 |A03|[fleaMarketValidation.ts](/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketValidation.ts)|[fleaMarketValidation.test.ts](/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketValidation.test.ts)；详见汇总日志|价格/图片字段服务校验和表单错误定位已实现；实机保留输入待验收|局部验证，未整项验收|
 |A04|[fleaMarketAttachments.ts](/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketAttachments.ts)|[fleaMarketImageProcessing.test.ts](/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketImageProcessing.test.ts)；详见汇总日志|九图限制、逐图上传失败恢复代码已接入；混合十图 UI 操作待验收|局部验证，未整项验收|
@@ -83,10 +83,10 @@
 |价格及必填|服务端整数分、出售/免费切换、显式成色/功能及故障说明已实现|完整表单边界与键盘验收|
 |图片|真实转码、受控 no-store 读取、移除后撤权、原子引用已实现|PostgreSQL 已接入既有共享字节额度；S3 实服务、HEIC GPS 与 Windows 安装包|
 |草稿|系统安全存储适配、账号/服务器隔离、单图恢复已实现|本机最多 20 份草稿及关闭即刻保存已测；完整平台矩阵未验收|
-|咨询|真实持久请求、快照、逐商品授权、分页与已读同步已实现|同企业私聊复用、native MLS 显式恢复与多页关联列表已验证；双桌面整链路未验收|
+|咨询|真实持久请求、快照、逐商品授权、分页与已读同步已实现|同企业私聊复用、native MLS 显式恢复与多页关联列表已验证；两账号 Electron 组件＋真实 HTTP/加密链路已通过；完整安装包另验|
 |治理|角色授权/审计、限制、恢复、申诉、图片和所选消息证据已实现|直接移除和处理中已实现；法律保全/既有强制保留策略需明确|
 |消息证据真实性|服务器核实所选消息的真实参与关系并冻结原始密文；原文标明 reporter-provided|不将用户提交原文宣称为服务端可独立解密验证的事实|
-|容量|使用全局写锁、HMAC 候选索引及明文精确核验、清理任务分批处理|本地查询容量指标已通过；网络首屏、100 并发聊天与清理负载仍未验证|
+|容量|使用全局写锁、HMAC 候选索引及明文精确核验、清理任务分批处理|本地查询容量指标已通过；网络首屏、100 个独立原生 MLS 客户端及清理负载仍未验证；本地 100 请求聊天读写专项已有证据|
 |桌面|真实 React/IPC/main 装配、个人记录入口和我的消息接入|首页模块卡片目录、真实双账号 Electron/macOS 操作、窄屏/缩放/焦点|
 |平台|本机 macOS Node/原生 OpenMLS 测试已有证据|Windows 测试机/CI 尚未提供，不虚报通过|
 |发布条件|生产 ready 回调仍为 false，既有 MLS 发布审计闸门未修改|功能验收、运营责任人规则、保留策略及外部发布条件满足后再开放|
@@ -100,3 +100,12 @@
 - `fixed-history-entitlement-red.log` → `fixed-history-entitlement-green.log`：模块移除后关联商品历史和受控图片 GET 的外层开关阻断已修复；42 项权限/真实图片 HTTP 回归通过。上传及续期仍受发布能力限制，内层身份和引用权限不变。
 - `fixed-mutation-red.log` → `fixed-mutation-green.log` / `fixed-governance-ui.log`：相同治理/状态操作超时重试复用请求标识，并合并并发双击；仅保留本账号当前界面的请求标识，跨重启通过服务端最新记录确认结果，未宣称本机持久化治理操作队列。
 - npm 工作区安装意外移除的既有 Windows 签名等 5 项 lock 条目已恢复；仅增加图片处理依赖。
+
+
+## 16:41 后续验证（检查点 1b3a05bf 之后）
+
+- `OTTO_MARKET_DESKTOP_FLOW=1 npx vitest run integration/park-market/authenticated-flow.test.ts`：通过。两个独立账号的实际 Electron 窗口使用真实企业登录令牌、HTTP 路由、SQLite 和 EnterpriseE2eeCrypto/ParkMarketMessaging，完成真实选图上传、发布、买家发问、卖家回复、预留和售出，并核对数据库售出状态。见 [日志](flea-market-evidence/authenticated-electron.log)、[范围元数据](flea-market-evidence/authenticated-electron.json)、[售出截图](flea-market-evidence/authenticated-electron-sold.png)。窗口使用测试桥接到真实服务端/加密实现，不是完整安装包和生产 IPC 安全验收；测试草稿适配器不代表 OS 加密证明，OS 安全存储已有独立 Electron 测试。
+- `OTTO_MARKET_CHAT_CAPACITY=1 npx vitest run integration/park-market/encrypted-flow.test.ts`：SQLite/PG × 信封/native MLS 四项通过。100 个并发发送调用，双方各 50 条，随后 100 个并发读取并核对 100 条消息可解密。信封路径 SQLite 写/读 P95 264/211 ms，PG 287/220 ms；native 路径分别 4/230 ms 和 5/248 ms。原生加密准备由客户端串行化，因此其写测量不是 100 次同时进入服务端，也不含客户端排队/加密和网络时间。没有把这个局部指标当成整体验收。测试临时把待发送存储上限设为 200，生产上限未修改。见 [日志](flea-market-evidence/chat-capacity.log) 和 chat-capacity-*.json。
+- 首次压力方案以同账号发送 100 条被既有每分钟 60 条限流正确拒绝，失败日志保留为 chat-capacity-rate-limit.log；未关闭限流以凑通过。
+- 表单校验失败后自动聚焦第一个错误字段；分类/成色/功能/图片字段补 aria-invalid，12 项组件通过。见 keyboard-focus-red.log → keyboard-focus-green.log。
+- 本机 Docker CLI 存在但 daemon 未运行、无 MinIO；S3 真服务配置与 Windows 环境、保留策略已向用户询问，尚未获得。

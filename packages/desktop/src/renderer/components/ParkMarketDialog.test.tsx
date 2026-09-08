@@ -609,3 +609,28 @@ it('reuses the governance receipt after timeout and refreshes the completed repo
     (writes[1][0] as { body?: unknown }).body,
   );
 });
+
+it('focuses the first invalid field after publication is rejected locally', async () => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute('open', '');
+  };
+  Object.assign(window.otto, {
+    enterpriseMarketDrafts: vi.fn(async () => []),
+    enterpriseParkMarket: vi.fn(async ({ path }: { path: string }) =>
+      path === '/settings'
+        ? { parkId: 'P', enabled: true, ready: true }
+        : { items: [] },
+    ),
+  });
+  render(<ParkMarketDialog open accountId="seller" onClose={() => {}} />);
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: '发布闲置' }).hasAttribute('disabled'),
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '发布闲置' }));
+  fireEvent.click(screen.getByRole('button', { name: '正式发布' }));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByLabelText(/^标题/)),
+  );
+});

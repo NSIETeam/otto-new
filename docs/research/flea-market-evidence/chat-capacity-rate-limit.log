@@ -1,0 +1,88 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:75769) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ integration/park-market/encrypted-flow.test.ts (4 tests | 4 failed) 33573ms
+   × sqlite/envelope: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server 445ms
+     → LIMIT_REACHED
+   × postgres/envelope: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server 1741ms
+     → LIMIT_REACHED
+   × sqlite/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server 15097ms
+     → LIMIT_REACHED
+   × postgres/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server 16289ms
+     → LIMIT_REACHED
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  integration/park-market/encrypted-flow.test.ts > sqlite/envelope: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server
+MarketError: LIMIT_REACHED
+ ❯ writeMessage packages/server/src/modules/park_services/flea_market/fleaMarketContacts.ts:183:13
+    181|     );
+    182|     if (Number(count) >= 60)
+    183|       throw new MarketError('LIMIT_REACHED', 'messageRate');
+       |             ^
+    184|     const clientMessageId = String(input.requestId);
+    185|     const messageId = clientMessageId;
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketContacts.ts:510:29
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketUnitOfWork.ts:55:24
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketSqliteRepository.ts:30:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  integration/park-market/encrypted-flow.test.ts > postgres/envelope: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server
+MarketError: LIMIT_REACHED
+ ❯ writeMessage packages/server/src/modules/park_services/flea_market/fleaMarketContacts.ts:183:13
+    181|     );
+    182|     if (Number(count) >= 60)
+    183|       throw new MarketError('LIMIT_REACHED', 'messageRate');
+       |             ^
+    184|     const clientMessageId = String(input.requestId);
+    185|     const messageId = clientMessageId;
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketContacts.ts:510:29
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketUnitOfWork.ts:55:24
+ ❯ transact packages/server/src/modules/park_services/flea_market/fleaMarketPostgresRepository.ts:37:22
+ ❯ Object.request integration/park-market/encrypted-flow.test.ts:194:30
+ ❯ ParkMarketMessaging.send packages/desktop/src/main/park-market-messaging.ts:195:16
+ ❯ integration/park-market/encrypted-flow.test.ts:344:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  integration/park-market/encrypted-flow.test.ts > sqlite/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server
+MarketError: LIMIT_REACHED
+ ❯ writeMessage packages/server/src/modules/park_services/flea_market/fleaMarketContacts.ts:183:13
+    181|     );
+    182|     if (Number(count) >= 60)
+    183|       throw new MarketError('LIMIT_REACHED', 'messageRate');
+       |             ^
+    184|     const clientMessageId = String(input.requestId);
+    185|     const messageId = clientMessageId;
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketContacts.ts:510:29
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketUnitOfWork.ts:55:24
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketSqliteRepository.ts:30:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  integration/park-market/encrypted-flow.test.ts > postgres/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server
+MarketError: LIMIT_REACHED
+ ❯ writeMessage packages/server/src/modules/park_services/flea_market/fleaMarketContacts.ts:183:13
+    181|     );
+    182|     if (Number(count) >= 60)
+    183|       throw new MarketError('LIMIT_REACHED', 'messageRate');
+       |             ^
+    184|     const clientMessageId = String(input.requestId);
+    185|     const messageId = clientMessageId;
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketContacts.ts:510:29
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketUnitOfWork.ts:55:24
+ ❯ transact packages/server/src/modules/park_services/flea_market/fleaMarketPostgresRepository.ts:37:22
+ ❯ Object.request integration/park-market/encrypted-flow.test.ts:194:30
+ ❯ ParkMarketMessaging.send packages/desktop/src/main/park-market-messaging.ts:195:16
+ ❯ integration/park-market/encrypted-flow.test.ts:344:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  16:36:22
+   Duration  36.26s (transform 1.19s, setup 0ms, collect 2.49s, tests 33.57s, environment 0ms, prepare 50ms)

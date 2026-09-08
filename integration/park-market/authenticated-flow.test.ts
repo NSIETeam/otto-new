@@ -1,5 +1,5 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
@@ -276,6 +276,118 @@ it('real enterprise login and membership authority drive cross-company publish /
     expect(
       (await clients[1].messages(first.conversationId)).items,
     ).toHaveLength(2);
+    if (process.env.OTTO_MARKET_DESKTOP_FLOW === '1') {
+      const uiBuyer = createMember('ui-buyer', true);
+      const uiToken = await login('market.ui-buyer');
+      const uiCrypto = new EnterpriseE2eeCrypto(
+        new EnterpriseE2eeKeyVault({
+          directory: join(root, 'ui-crypto'),
+          deviceName: () => 'UI buyer',
+          protect: (v) => Buffer.from(v).toString('base64'),
+          unprotect: (v) => Buffer.from(v, 'base64').toString(),
+        }),
+      );
+      const uiDevice = uiCrypto.localDevice('auth-market', uiBuyer.id);
+      const registered = await fetch(`${base}/enterprise/e2ee/devices`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${uiToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(uiDevice),
+      });
+      expect(registered.status).toBe(200);
+      const uiMessages = new ParkMarketMessaging({
+        context: () => ({
+          crypto: uiCrypto,
+          accountId: uiBuyer.id,
+          organizationId: uiBuyer.organizationId,
+          serverScope: 'auth-market',
+          serverUrl: base,
+          requiresMls: false,
+        }),
+        ensureDevice: async () => undefined,
+        request: request(uiToken),
+        pending: new MarketDraftStore(
+          join(root, 'ui-pending'),
+          (v) => Buffer.from(v),
+          (v) => v.toString(),
+        ),
+      });
+      const actors = [seller, uiBuyer];
+      const auth = [tokens.seller, uiToken];
+      const messengers = [clients[0], uiMessages];
+      const drafts = new MarketDraftStore(
+        join(root, 'ui-drafts'),
+        (v) => Buffer.from(v),
+        (v) => v.toString(),
+      );
+      const { runMarketDesktopFlow } = await import('./desktop-flow.mjs');
+      const result = await runMarketDesktopFlow({
+        accounts: actors.map((account) => ({
+          id: account.id,
+          scope: {
+            server: base,
+            organization: account.organizationId,
+            account: account.id,
+          },
+        })),
+        photo: bytes,
+        invoke: async (index: number, kind: string, input: unknown) => {
+          if (kind === 'send')
+            return messengers[index].send(
+              input as Parameters<ParkMarketMessaging['send']>[0],
+            );
+          if (kind === 'messages') {
+            const value = input as { id: string; before?: number };
+            return messengers[index].messages(value.id, value.before);
+          }
+          if (kind === 'drafts') {
+            const scope = {
+              server: base,
+              organization: actors[index].organizationId,
+              account: actors[index].id,
+            };
+            if (input !== undefined) drafts.save(scope, input);
+            return drafts.load(scope);
+          }
+          const value = input as {
+            path: string;
+            method: string;
+            body?: Record<string, unknown>;
+            imageBase64?: string;
+          };
+          if (value.imageBase64) {
+            const response = await fetch(
+              `${base}/enterprise/park-market${value.path}`,
+              {
+                method: 'POST',
+                headers: {
+                  authorization: `Bearer ${auth[index]}`,
+                  'content-type': 'application/octet-stream',
+                },
+                body: new Uint8Array(Buffer.from(value.imageBase64, 'base64')),
+              },
+            );
+            const body = await response.json();
+            if (!response.ok) throw new Error(JSON.stringify(body));
+            return body;
+          }
+          return request(auth[index])(value.path, value.method, value.body);
+        },
+      });
+      const mine = await runtime.market.mine(seller.id);
+      expect(
+        mine.find((record) => record.title === '双桌面验收台灯')?.state,
+      ).toBe('sold');
+      writeFileSync(
+        join(
+          process.cwd(),
+          'docs/research/flea-market-evidence/authenticated-electron.json',
+        ),
+        JSON.stringify(result, null, 2),
+      );
+    }
     db.getDB()
       .prepare("UPDATE accounts SET status='disabled' WHERE id=?")
       .run(buyer.id);
@@ -293,4 +405,4 @@ it('real enterprise login and membership authority drive cross-company publish /
     else process.env.OTTO_ENTERPRISE_DIR = previous;
     rmSync(root, { recursive: true, force: true });
   }
-}, 60000);
+}, 120000);

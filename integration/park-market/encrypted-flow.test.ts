@@ -1,7 +1,8 @@
 import { ParkMarketMls } from '../../packages/desktop/src/main/park-market-mls.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
@@ -153,6 +154,8 @@ for (const nativeMls of [false, true])
           requestId: 'publish',
         });
         let loseResponse = true;
+        let measureWrites = false;
+        const writeTimes: number[] = [];
         const client = (actor: 'buyer' | 'seller', forceEnvelope = false) => {
           const context = () => ({
             crypto: actor === 'buyer' ? buyer.crypto : seller.crypto,
@@ -185,10 +188,14 @@ for (const nativeMls of [false, true])
             }
             if (parts[0] === 'contacts')
               return app.contacts.resolve(actor, parts[1], body);
-            if (parts[0] === 'conversations')
-              return method === 'GET'
-                ? app.contacts.messages(actor, parts[1])
-                : app.contacts.send(actor, parts[1], body);
+            if (parts[0] === 'conversations') {
+              if (method === 'GET')
+                return app.contacts.messages(actor, parts[1]);
+              const started = performance.now();
+              const result = await app.contacts.send(actor, parts[1], body);
+              if (measureWrites) writeTimes.push(performance.now() - started);
+              return result;
+            }
             throw new Error('unexpected route');
           };
           const mls = nativeMls
@@ -214,6 +221,7 @@ for (const nativeMls of [false, true])
               join(root, `pending-${actor}`),
               (text) => Buffer.from(text),
               (bytes) => bytes.toString(),
+              process.env.OTTO_MARKET_CHAT_CAPACITY === '1' ? 200 : 20,
             ),
           });
         };
@@ -332,10 +340,71 @@ for (const nativeMls of [false, true])
             envelope: foreignCrypto,
           }),
         ).rejects.toThrow(nativeMls ? 'FORBIDDEN' : 'signature');
+        if (process.env.OTTO_MARKET_CHAT_CAPACITY === '1') {
+          measureWrites = true;
+          const attempts = await Promise.allSettled(
+            Array.from({ length: 100 }, (_, i) =>
+              (i % 2 ? clients.seller : clients.buyer).send({
+                kind: 'conversation',
+                id: receipt.conversationId,
+                question: `并发消息 ${i}`,
+                requestId: `capacity-${i}`,
+              }),
+            ),
+          );
+          for (const attempt of attempts)
+            expect(
+              attempt.status,
+              attempt.status === 'rejected' ? String(attempt.reason) : '',
+            ).toBe('fulfilled');
+          measureWrites = false;
+          expect(writeTimes).toHaveLength(100);
+          const readTimes: number[] = [];
+          await Promise.all(
+            Array.from({ length: 100 }, async () => {
+              const started = performance.now();
+              const result = await app.contacts.messages(
+                'seller',
+                receipt.conversationId,
+              );
+              expect(result.items.length).toBeGreaterThanOrEqual(103);
+              readTimes.push(performance.now() - started);
+            }),
+          );
+          const p95 = (values: number[]) =>
+            Math.round([...values].sort((a, b) => a - b)[94]);
+          const result = {
+            backend,
+            encryption: nativeMls ? 'native MLS' : 'envelope',
+            concurrency: 100,
+            writeP95Ms: p95(writeTimes),
+            readP95Ms: p95(readTimes),
+            scope:
+              'Real signed/encrypted messages and database; one hot conversation with 50 sends per account (below each account rate limit). 100 in-flight client sends; native coordinators serialize encryption preparation, so native server writes are not 100 simultaneously. Timings measure server service entry to completion, excluding client encryption, HTTP/network and UI. Test-only pending capacity 200, production unchanged.',
+            targetP95Ms: 1000,
+          };
+          writeFileSync(
+            join(
+              process.cwd(),
+              `docs/research/flea-market-evidence/chat-capacity-${backend}-${nativeMls ? 'mls' : 'envelope'}.json`,
+            ),
+            JSON.stringify(result, null, 2),
+          );
+          expect(result.writeP95Ms).toBeLessThanOrEqual(1000);
+          expect(result.readP95Ms).toBeLessThanOrEqual(1000);
+          const decrypted = await clients.seller.messages(
+            receipt.conversationId,
+          );
+          expect(
+            decrypted.items.filter((message) =>
+              message.content?.startsWith('并发消息 '),
+            ),
+          ).toHaveLength(100);
+        }
       } finally {
         for (const native of nativeClients) await native.close();
         await h.close();
         rmSync(root, { recursive: true });
       }
-    }, 30000);
+    }, 120000);
   }

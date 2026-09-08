@@ -2,9 +2,44 @@ import { describe, expect, it } from 'vitest';
 import { Database } from '../data_platform/sqliteCompat.js';
 import { createEncryptedFieldCipher } from '../data_platform/encryptedFieldCipher.js';
 import type { PostgresPoolLike } from '../data_platform/postgresDatabaseLifecycle.js';
-import { createPostgresWorkableConnectionStore, createSqliteWorkableConnectionStore, type WorkableConnectionRecord } from './workableConnectionStore.js';
+import { createPostgresWorkableConnectionStore, createSqliteWorkableConnectionStore, revokeSqliteWorkableConnectionsForAccount, type WorkableConnectionRecord } from './workableConnectionStore.js';
 
 const cipher = createEncryptedFieldCipher({ keyProvider: { getKey: () => Buffer.alloc(32, 17), clear() {} } });
+it('does not initialize Workable storage when deleting an account without a connection', () => {
+  const db = new Database(':memory:');
+  try {
+    revokeSqliteWorkableConnectionsForAccount(db, 'org', 'hr');
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()).toEqual([]);
+  } finally { db.close(); }
+});
+
+it('revokes only the exact owner, blocks stale callbacks and stays inside the account deletion transaction', async () => {
+  const db = new Database(':memory:');
+  const store = createSqliteWorkableConnectionStore(() => db, cipher);
+  const entry: WorkableConnectionRecord = {
+    revision: 1,
+    grant: { id: 'grant', accessToken: 'private-token', expiresAt: '2099-01-01T00:00:00Z', targets: [] },
+    bindings: [],
+  };
+  try {
+    for (const [org, account] of [['org', 'hr'], ['org', 'other'], ['other', 'hr']]) {
+      expect(await store.compareAndSet(org, account, 0, entry)).toBe(true);
+    }
+    db.exec('BEGIN');
+    revokeSqliteWorkableConnectionsForAccount(db, 'org', 'hr');
+    expect(await store.get('org', 'hr')).toEqual({ revision: 2, grant: null, bindings: [] });
+    db.exec('ROLLBACK');
+    expect(await store.get('org', 'hr')).toEqual(entry);
+
+    revokeSqliteWorkableConnectionsForAccount(db, 'org', 'hr');
+    expect(await store.get('org', 'hr')).toEqual({ revision: 2, grant: null, bindings: [] });
+    expect(await store.compareAndSet('org', 'hr', 1, { ...entry, revision: 2 })).toBe(false);
+    expect(await store.get('org', 'other')).toEqual(entry);
+    expect(await store.get('other', 'hr')).toEqual(entry);
+    expect(db.prepare('SELECT payload FROM enterprise_workable_connections_v1 WHERE organization_id=? AND account_id=?').get('org', 'hr')).toEqual({ payload: '' });
+  } finally { db.close(); }
+});
+
 describe.each(['sqlite', 'postgres SQL contract'])('Workable encrypted connection: %s', (backend) => {
   it('encrypts tokens and account catalogs, isolates owners, persists tombstones and rejects stale writes', async () => {
     const db = new Database(':memory:');

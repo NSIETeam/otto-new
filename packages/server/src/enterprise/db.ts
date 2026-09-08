@@ -23,7 +23,7 @@ import {
 } from '../modules/data_platform/index.js';
 import { createAuthorizationComposition } from '../modules/authorization/index.js';
 import { createSqlitePolicyStore } from '../modules/policy_intelligence/policyStore.js';
-import { createSqliteRecruitmentJobStore, RecruitmentJobService, createSqliteWorkableConnectionStore, WorkableConnectionService, createWorkableOAuthClient, createWorkableSourceRuntime, createSqliteRecruitmentSourceStore, deleteSqliteRecruitmentSearchesForAccount } from '../modules/recruitment_intelligence/index.js';
+import { createSqliteRecruitmentJobStore, RecruitmentJobService, createSqliteWorkableConnectionStore, WorkableConnectionService, createWorkableOAuthClient, createWorkableSourceRuntime, createSqliteRecruitmentSourceStore, deleteSqliteRecruitmentSearchesForAccount, revokeSqliteWorkableConnectionsForAccount } from '../modules/recruitment_intelligence/index.js';
 import { startRecruitmentCacheMaintenance } from '../modules/recruitment_intelligence/recruitmentCacheMaintenance.js';
 import { RecruitmentIntakeWorker, type RecruitmentSourceRuntime } from '../modules/recruitment_intelligence/index.js';
 import { RecruitmentBackgroundWorker, resolveRecruitmentBackgroundModel, RecruitmentUsageLedger, createSqliteRecruitmentUsageStore } from '../modules/recruitment_intelligence/index.js';
@@ -968,9 +968,7 @@ export const {
   createAccountEntityId: (prefix: 'acc' | 'emp') => `${prefix}_${randomUUID()}`,
   deleteAccountIntegrationData(database, organizationId, accountId) {
     deleteSqliteRecruitmentSearchesForAccount(database, fieldCipher, organizationId, accountId);
-    if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='enterprise_workable_connections_v1'").get()) {
-      database.prepare("UPDATE enterprise_workable_connections_v1 SET revision=revision+1,payload='' WHERE organization_id=? AND account_id=?").run(organizationId, accountId);
-    }
+    revokeSqliteWorkableConnectionsForAccount(database, organizationId, accountId);
   },
   createDeletionPasswordHash: () =>
     passwordHash(randomBytes(32).toString('base64url')),

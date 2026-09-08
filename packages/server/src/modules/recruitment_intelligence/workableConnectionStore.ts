@@ -40,6 +40,13 @@ function codec(cipher: EncryptedFieldCipher) {
     },
   };
 }
+/** Runs on the caller's account-deletion transaction and retains the CAS fence. */
+export function revokeSqliteWorkableConnectionsForAccount(database: Database, organizationId: string, accountId: string): void {
+  if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='enterprise_workable_connections_v1'").get()) {
+    database.prepare("UPDATE enterprise_workable_connections_v1 SET revision=revision+1,payload='' WHERE organization_id=? AND account_id=?").run(organizationId, accountId);
+  }
+}
+
 export function createSqliteWorkableConnectionStore(db: () => Database, cipher: EncryptedFieldCipher): WorkableConnectionStore {
   const c = codec(cipher);
   const ready = () => { const database = db(); database.exec(SCHEMA); return database; };

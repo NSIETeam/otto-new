@@ -163,7 +163,7 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
   },
   {
     id: 'park-enterprise-star-map', label: '企业星链图', category: 'park', icon: 'park-overview',
-    description: '根据同园区企业主动公开的能力、产品与合作需求，生成可解释的合作线索。',
+    description: '探索园区企业与同行业关系，拖动图谱并查看企业公开资料。',
     activation: { kind: 'dialog', dialog: 'park', target: 'enterprise-star-map' },
     availabilityRule: 'park',
   },

@@ -31,7 +31,7 @@ import {
   ticketIdempotencyResourceId,
   ticketRequestFingerprint,
 } from './ticketIdempotency.js';
-import { inferParkPartnerships } from '../modules/park_services/parkPartnershipInference.js';
+import { buildIndustryGraph, normalizePrimaryIndustry, readPrimaryIndustry } from '../modules/park_services/enterpriseIndustry.js';
 import type {
   EnterprisePublicProfile,
   EnterprisePublicProfileInput,
@@ -1069,6 +1069,7 @@ function enterprisePublicProfileView(
     organizationName,
     summary: record?.payload.summary ?? '',
     website: record?.payload.website ?? '',
+    ...readPrimaryIndustry(record?.payload),
     industryTags: record?.payload.industryTags ?? [],
     productsServices: record?.payload.productsServices ?? [],
     capabilities: record?.payload.capabilities ?? [],
@@ -1117,7 +1118,16 @@ async function handleEnterprisePublicProfile(
     return true;
   }
   const body = await input.readBody(input.req);
+  let industry: ReturnType<typeof normalizePrimaryIndustry>;
+  try {
+    industry = body.primaryIndustryCode === undefined
+      ? readPrimaryIndustry(current?.payload) : normalizePrimaryIndustry(body.primaryIndustryCode);
+  } catch (error) {
+    input.sendJson(input.res, 400, {error: error instanceof Error ? error.message : '主营行业无效'});
+    return true;
+  }
   const payload: EnterprisePublicProfilePayload = {
+    ...industry,
     summary: text(body.summary, 'organization summary', 1000, false) ?? '',
     website: text(body.website, 'organization website', 300, false) ?? '',
     industryTags: textList(body.industryTags, 'industry tag'),
@@ -1543,7 +1553,7 @@ async function handlePark(
 
   if (input.path === '/enterprise/park/star-map' && input.method === 'GET') {
     const authority = await parkAuthority(input);
-    if (!authority.park) {
+    if (!authority.park || authority.park.status !== 'active') {
       input.sendJson(input.res, 404, { error: 'park not found' });
       return true;
     }
@@ -1554,7 +1564,7 @@ async function handlePark(
     const organizationIds = Array.from(
       new Set([
         authority.park.payload.adminOrganizationId,
-        ...memberships.map((membership) => membership.organizationId),
+        ...memberships.filter((membership) => membership.status === 'active' && membership.payload.parkId === authority.park!.resourceId).map((membership) => membership.organizationId),
       ]),
     );
     const profiles = (
@@ -1593,7 +1603,8 @@ async function handlePark(
         currentOrganizationId: organizationId,
         generatedAt: new Date().toISOString(),
         nodes: profiles,
-        edges: inferParkPartnerships(profiles),
+        edges: [],
+        ...buildIndustryGraph(profiles),
       },
     });
     return true;

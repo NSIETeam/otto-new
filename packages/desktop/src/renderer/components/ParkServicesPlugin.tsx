@@ -43,6 +43,7 @@ import {
   IconUtensils,
   IconWrench,
 } from './icons.js';
+import { confirmProfileLeave } from '../starMap/profileLeaveGuard.js';
 import { EnterpriseStarMapView } from './EnterpriseStarMapView.js';
 
 // Preserve the historical public helper while its source of truth lives in a
@@ -364,8 +365,8 @@ function baseDefaultServices(park: string): ParkService[] {
       ],
     },
     {
-      id: 'enterprise-star-map', icon: IconNetwork, name: '企业星链图', desc: '发现园区内可核实的合作线索',
-      prompt: `打开${park}企业星链图，根据企业主动公开的能力、产品与合作需求查看合作线索。`,
+      id: 'enterprise-star-map', icon: IconNetwork, name: '企业星链图', desc: '发现园区同行，了解企业公开业务',
+      prompt: `打开${park}企业星链图，按主营行业查看园区企业与同行公开资料。`,
     },
   ];
 }
@@ -1208,8 +1209,7 @@ function ParkServiceWindow({
     event.currentTarget.releasePointerCapture?.(event.pointerId);
   };
 
-  if (mode === 'minimized') {
-    return <button
+  const minimizedControl = mode === 'minimized' ? <button
       type="button"
       className="otto-park-window-minimized otto-park-window-minimized--stacked"
       style={{ bottom: 18 + dockIndex * 50, zIndex: 121 + stackOrder }}
@@ -1221,12 +1221,14 @@ function ParkServiceWindow({
     >
       <IconBuilding size={17} />
       <span>{entry.service.name}</span>
-    </button>;
-  }
+    </button> : null;
 
-  return <div
+  if (mode === 'minimized' && entry.service.id !== 'enterprise-star-map') return <>{minimizedControl}</>;
+
+  return <>{minimizedControl}<div
+    data-service-window-id={entry.id}
     className={`otto-park-overlay otto-park-overlay--service-window ${mode === 'maximized' ? 'is-maximized' : ''}`}
-    style={{ zIndex: 90 + stackOrder }}
+    style={{ zIndex: 90 + stackOrder, display: mode === 'minimized' ? 'none' : undefined }}
     onPointerDown={() => onActivate(entry.id)}
   >
     <div
@@ -1276,7 +1278,7 @@ function ParkServiceWindow({
         onComplete={(ticket) => onComplete(entry.id, ticket)}
       />
     </div>
-  </div>;
+  </div></>;
 }
 
 export interface ParkTicketUnreadCounts {
@@ -1870,8 +1872,11 @@ export function ParkServicesPlugin({
     }
     close();
   };
-  const closeServiceWindow = useCallback((id: string): void => {
+  const closeServiceWindow = useCallback((id: string): boolean => {
+    const surface = Array.from(document.querySelectorAll("[data-service-window-id]")).find(element => element.getAttribute("data-service-window-id") === id);
+    if (!confirmProfileLeave(surface ?? null)) return false;
     setServiceWindows((current) => current.filter((entry) => entry.id !== id));
+    return true;
   }, []);
   const activateServiceWindow = useCallback((id: string): void => {
     setServiceWindows((current) => {
@@ -1881,8 +1886,7 @@ export function ParkServicesPlugin({
     });
   }, []);
   const returnFromServiceWindow = useCallback((id: string): void => {
-    closeServiceWindow(id);
-    setOpen(true);
+    if (closeServiceWindow(id)) setOpen(true);
   }, [closeServiceWindow]);
   const completeServiceWindow = useCallback((
     id: string,
@@ -2089,7 +2093,7 @@ export function ParkServicesPlugin({
                 : selected?.id === 'satisfaction'
                   ? '实名填写园区发布的调查问卷，提交后不能修改。'
                   : selected?.id === 'enterprise-star-map'
-                    ? '用企业主动公开资料发现合作线索，并逐条核实推理依据。'
+                    ? '按主营行业发现园区企业，拖动、聚焦并查看公开资料。'
                   : selected?.id === 'repair'
                     ? '提交报修、查看进度，并确认最终维修结果。'
                   : selected

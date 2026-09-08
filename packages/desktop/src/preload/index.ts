@@ -1,3 +1,5 @@
+import type { ParkMarketMessaging } from '../main/park-market-messaging.js';
+import type { MarketDesktopRequest, MarketDraft, MarketDraftScope } from '../shared/park-market.js';
 import type { ParkChatView } from '../main/park-carpool-chat.js';
 /**
  * @license
@@ -1511,6 +1513,10 @@ const IPC = {
   enterpriseParkCarpoolChatSend: 'otto:enterprise-park-carpool-chat-send',
   enterpriseParkCarpoolWorkflowGet: 'otto:enterprise-park-carpool-workflow-get',
   enterpriseParkCarpoolWorkflowExecute: 'otto:enterprise-park-carpool-workflow-execute',
+  enterpriseMarketSend: 'otto:enterprise-market-send',
+  enterpriseMarketMessages: 'otto:enterprise-market-messages',
+  enterpriseParkMarket: 'otto:enterprise-park-market',
+  enterpriseMarketDrafts: 'otto:enterprise-market-drafts',
   enterpriseParkCarpoolGet: 'otto:enterprise-park-carpool-get',
   enterpriseParkCarpoolSearchPlaces: 'otto:enterprise-park-carpool-search-places',
   enterpriseParkCarpoolPublish: 'otto:enterprise-park-carpool-publish',
@@ -2265,6 +2271,14 @@ export interface OttoBridge {
   enterpriseParkCarpoolChatSend(conversationId: string, text: string, eventId: string): Promise<ParkChatView>;
   enterpriseParkCarpoolWorkflowGet(): Promise<CarpoolWorkflowView>;
   enterpriseParkCarpoolWorkflowExecute(command: CarpoolWorkflowCommand): Promise<CarpoolWorkflowView>;
+  enterpriseMarketRecover?(id:string): Promise<{recovered:boolean}>;
+  enterpriseMarketLink?(listingId?: string): Promise<{ listingId?: string; error?: string; copied?: boolean } | null>;
+  enterpriseMarketSend?(input: Parameters<ParkMarketMessaging['send']>[0]): ReturnType<ParkMarketMessaging['send']>;
+  enterpriseMarketMessages?(id: string, beforeSequence?: number): ReturnType<ParkMarketMessaging['messages']>;
+  enterpriseMarketUploadCancel?(id: string): Promise<boolean>;
+  onMarketImageProgress?(listener: (progress: {uploadId:string;loaded:number;total:number}) => void): () => void;
+  enterpriseParkMarket?(input: MarketDesktopRequest): Promise<unknown>;
+  enterpriseMarketDrafts?(drafts?: MarketDraft[], scope?: MarketDraftScope): Promise<MarketDraft[]>;
   enterpriseParkCarpoolGet(): Promise<EnterpriseParkCarpoolState>;
   enterpriseParkCarpoolSearchPlaces(
     query: string,
@@ -3894,6 +3908,18 @@ const bridge: OttoBridge = {
   enterpriseParkCarpoolWorkflowExecute(command: CarpoolWorkflowCommand): Promise<CarpoolWorkflowView> {
     return ipcRenderer.invoke(IPC.enterpriseParkCarpoolWorkflowExecute, command) as Promise<CarpoolWorkflowView>;
   },
+  enterpriseMarketRecover(id:string): Promise<{recovered:boolean}> { return ipcRenderer.invoke('otto:enterprise-market-recover',id); },
+  enterpriseMarketLink(listingId?: string): Promise<{ listingId?: string; error?: string; copied?: boolean } | null> { return ipcRenderer.invoke('otto:enterprise-market-link', listingId); },
+  enterpriseMarketSend(input: Parameters<ParkMarketMessaging['send']>[0]): ReturnType<ParkMarketMessaging['send']> { return ipcRenderer.invoke(IPC.enterpriseMarketSend, input); },
+  enterpriseMarketMessages(id: string, beforeSequence?: number): ReturnType<ParkMarketMessaging['messages']> { return ipcRenderer.invoke(IPC.enterpriseMarketMessages, id, beforeSequence); },
+  enterpriseMarketUploadCancel(id: string): Promise<boolean> {return ipcRenderer.invoke('otto:enterprise-market-upload-cancel',id);},
+  onMarketImageProgress(listener: (progress: {uploadId:string;loaded:number;total:number}) => void) {
+    const handler=(_event: unknown, progress: {uploadId:string;loaded:number;total:number}) => listener(progress);
+    ipcRenderer.on('otto:enterprise-market-upload-progress',handler);
+    return () => {ipcRenderer.removeListener('otto:enterprise-market-upload-progress',handler);};
+  },
+  enterpriseParkMarket(input: MarketDesktopRequest): Promise<unknown> { return ipcRenderer.invoke(IPC.enterpriseParkMarket, input); },
+  enterpriseMarketDrafts(drafts?: MarketDraft[], scope?: MarketDraftScope): Promise<MarketDraft[]> { return ipcRenderer.invoke(IPC.enterpriseMarketDrafts, drafts, scope); },
   enterpriseParkCarpoolGet(): Promise<EnterpriseParkCarpoolState> {
     return ipcRenderer.invoke(IPC.enterpriseParkCarpoolGet) as Promise<EnterpriseParkCarpoolState>;
   },

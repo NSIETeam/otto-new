@@ -1479,6 +1479,16 @@ export class EnterpriseE2eeCrypto {
     return {timestamp,signature:sign(null,bytes,active.identitySigningPrivateKey).toString('base64')};
   }
 
+  signParkMarketMls(input: {
+    serverScope: string; accountId: string;
+    action: 'package' | 'state' | 'activate' | 'message';
+    payload: Record<string, unknown>;
+  }) {
+    const active = this.vault.loadOrCreate(input.serverScope, input.accountId).active;
+    const bytes = Buffer.from(JSON.stringify(['otto:park-market-mls:v1', input.action, input.accountId, active.deviceId, input.payload]));
+    return { deviceId: active.deviceId, signature: sign(null, bytes, active.identitySigningPrivateKey).toString('base64') };
+  }
+
   signDeviceApproval(input: {
     serverScope: string;
     organizationId: string;

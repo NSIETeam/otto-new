@@ -1138,6 +1138,7 @@ export function startEnterpriseServer(
   };
   let stopTicketNotificationRuntime: () => void = () => undefined;
   let stopPolicyIntelligenceRuntime: () => void = () => undefined;
+  let stopFleaMarketRuntime: () => void = () => undefined;
   let stopCarpoolRuntime: () => void = () => undefined;
   try {
     stopTicketNotificationRuntime = canaryMode
@@ -1151,6 +1152,7 @@ export function startEnterpriseServer(
         });
     stopPolicyIntelligenceRuntime = canaryMode ? () => undefined : db.startPolicyIntelligenceRuntime(taskRegistry);
     stopCarpoolRuntime = canaryMode ? () => undefined : startCarpoolMaintenance({run:db.maintainParkCarpool,taskRegistry,onError:error=>console.error('[Otto Enterprise] carpool maintenance failed',error)});
+    stopFleaMarketRuntime = canaryMode ? () => undefined : (db.getFleaMarketApplication().start(taskRegistry) ?? (() => undefined));
   } catch (error) {
     clearInitialMlsCleanup();
     stopMlsCleanup();
@@ -1160,6 +1162,7 @@ export function startEnterpriseServer(
     stopDataProtectionRuntime();
     stopTicketNotificationRuntime();
     stopPolicyIntelligenceRuntime();
+    stopFleaMarketRuntime();
     stopCarpoolRuntime();
     server.close();
     throw error;
@@ -1172,6 +1175,7 @@ export function startEnterpriseServer(
     if (runtimesCleaned) return;
     runtimesCleaned = true;
     stopPolicyIntelligenceRuntime();
+    stopFleaMarketRuntime();
     stopCarpoolRuntime();
     stopMlsCleanup();
     stopPrivateDeploymentRuntime();
@@ -1206,6 +1210,7 @@ export function startEnterpriseServer(
     if (gracefulClosePromise) return gracefulClosePromise;
     closeInitiated = true;
     stopPolicyIntelligenceRuntime();
+    stopFleaMarketRuntime();
     stopCarpoolRuntime();
     clearInitialMlsCleanup();
     // Stop accepting requests and stop scheduling resident work at the same
@@ -1241,6 +1246,7 @@ export function startEnterpriseServer(
   server.once('close', () => {
     if (closeInitiated) return;
     stopPolicyIntelligenceRuntime();
+    stopFleaMarketRuntime();
     stopCarpoolRuntime();
     // Defensive path for an unexpected transport close that did not enter the
     // wrapped close method. There is no caller to await, but resident work is

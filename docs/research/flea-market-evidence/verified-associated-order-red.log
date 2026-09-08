@@ -1,0 +1,45 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c
+
+(node:34346) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts (6 tests | 2 failed) 2982ms
+   × sqlite: A14/A32/A38 keep grants per item and retry existing-conversation consultations without changing snapshots 54ms
+     → expected [ …(2) ] to deeply equal [ …(2) ]
+   ✓ sqlite: A16/A17 serialize sale/contact and expiry/renewal races without resurrecting requests or expiring renewed content 28ms
+   × postgres: A14/A32/A38 keep grants per item and retry existing-conversation consultations without changing snapshots 1074ms
+     → expected [ …(2) ] to deeply equal [ …(2) ]
+   ✓ postgres: A16/A17 serialize sale/contact and expiry/renewal races without resurrecting requests or expiring renewed content  910ms
+   ✓ sqlite: A10 concurrent reverse consultations share one conversation and one pending request 26ms
+   ✓ postgres: A10 concurrent reverse consultations share one conversation and one pending request  889ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts > sqlite: A14/A32/A38 keep grants per item and retry existing-conversation consultations without changing snapshots
+ FAIL  packages/server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts > postgres: A14/A32/A38 keep grants per item and retry existing-conversation consultations without changing snapshots
+AssertionError: expected [ …(2) ] to deeply equal [ …(2) ]
+
+- Expected
++ Received
+
+  [
+-   "3646ee04-59eb-432b-a132-a7deaa0e4902",
+    "583ecef2-2616-4c92-81e3-6eee9ed7c156",
++   "3646ee04-59eb-432b-a132-a7deaa0e4902",
+  ]
+
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts:116:52
+    114|       const repeat=await contacts.contact('buyer',a.id,{requestId:'qa-…
+    115|       const latest=await contacts.associated('buyer',first.conversatio…
+    116|       expect(latest.items.map(row=>row.listingId)).toEqual([a.id,b.id]…
+       |                                                    ^
+    117|       expect(latest.items[0]).toMatchObject({messageId:repeat.messageI…
+    118|       await h.repository.transaction(tx=>tx.run("UPDATE test_market_ac…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 4 passed (6)
+   Start at  12:45:02
+   Duration  5.85s (transform 1.19s, setup 0ms, collect 2.64s, tests 2.98s, environment 0ms, prepare 55ms)

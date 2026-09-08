@@ -1,4 +1,6 @@
 import { carpoolCommunicationCapabilities } from '../modules/park_carpool/parkCarpoolConfig.js';
+import { handleMarketHttp } from '../modules/park_services/flea_market/fleaMarketHttp.js';
+import type { MarketApplication } from '../modules/park_services/flea_market/fleaMarketApplication.js';
 import { startCarpoolMaintenance } from '../modules/park_carpool/parkCarpoolRuntime.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
@@ -15,7 +17,7 @@ import {
   type Server,
   type ServerResponse,
 } from 'node:http';
-import { createAliyunLoginSmsFromEnv } from 'otto-core';
+import { createAliyunLoginSmsFromEnv, RecurringTaskRegistry } from 'otto-core';
 
 import {
   ORGANIZATION_FEATURE_KEYS,
@@ -744,6 +746,7 @@ export function createClusteredEnterpriseServer(
     topologyDescription?: Record<string, unknown>;
     sharedState?: ClusteredEnterpriseSharedState;
     attachmentStorage?: AttachmentStorageService;
+    fleaMarketApplication?: MarketApplication;
     publicUrl?: string;
     smsSender?: ClusteredEnterpriseSmsSender | null;
     licensePublicKeys?: readonly string[];
@@ -1867,6 +1870,11 @@ export function createClusteredEnterpriseServer(
         }
       }
 
+      if (path === '/enterprise/park-market' || path.startsWith('/enterprise/park-market/')) {
+        if (!options.fleaMarketApplication) { sendJson(res, 503, { error: 'DEPENDENCY_UNAVAILABLE' }); return; }
+        await handleMarketHttp({ path, method, url, req, res, memberAccount: member, application: options.fleaMarketApplication, readBody: readJsonBody, sendJSON: sendJson });
+        return;
+      }
       if (await handlePolicyRoute({ path, method, req, res, accountId: member.id, service: getPolicyService, readBody: readJsonBody, sendJSON: sendJson })) return;
       if (
         await handleClusteredBusinessRoute({
@@ -2949,6 +2957,7 @@ export async function startClusteredEnterpriseServer(
       topologyDescription: infrastructure.topologyDescription,
       sharedState: infrastructure.sharedState,
       attachmentStorage: infrastructure.attachmentStorage,
+      fleaMarketApplication: infrastructure.fleaMarketApplication,
       publicUrl: options.publicUrl ?? process.env.OTTO_ENTERPRISE_PUBLIC_URL,
       licensePublicKeys: options.licensePublicKeys,
       edgeGatewayLeaseToken: options.edgeGatewayLeaseToken,
@@ -2981,11 +2990,15 @@ export async function startClusteredEnterpriseServer(
       },
     });
     const stopCarpoolMaintenance=startCarpoolMaintenance({run:createClusteredCarpoolService(infrastructure.repository).maintain,cache:infrastructure.cache,onError:error=>console.error(`[Otto Enterprise] carpool maintenance failed: ${safeRouteError(error)}`)});
+    const marketTasks = new RecurringTaskRegistry({ allowPaidBackground: true, onError: () => console.error('[Otto Enterprise] market maintenance failed') });
+    const stopMarket = infrastructure.fleaMarketApplication?.start(marketTasks);
     created.server.once('close', () => {
+      stopMarket?.();
+      const drainMarket = marketTasks.shutdown({ timeoutMs: 30_000 });
       maintenance.close();
       stopCarpoolMaintenance();
       mlsMaintenance.close();
-      void infrastructure.close();
+      void drainMarket.finally(() => infrastructure.close());
     });
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => reject(error);

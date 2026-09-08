@@ -1,0 +1,41 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ❯ src/renderer/components/ParkMarketDialog.test.tsx (9 tests | 1 failed) 1352ms
+   ✓ keeps own records and drafts reachable when the market is paused and validates publication without dropping fields 65ms
+   ✓ flushes the last input on save-and-close with the originating account scope 45ms
+   ✓ remounts private form state when the same account id switches server or organization 24ms
+   ✓ preserves expired draft text and identifies the failed photo with an independent retry 27ms
+   ✓ shows per-image transfer progress and allows cancelling without dropping form text 45ms
+   ✓ flushes unsaved text when switching away from the form without closing the market 41ms
+   ✓ closes directly after the current form is durably saved  1031ms
+   ✓ retains search, loaded cards and scroll position when returning from detail 47ms
+   × blocks publication while a restored draft image is unreadable and allows removing it 26ms
+     → expected false to be true // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/components/ParkMarketDialog.test.tsx > blocks publication while a restored draft image is unreadable and allows removing it
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/renderer/components/ParkMarketDialog.test.tsx:315:77
+    313|   fireEvent.click(await screen.findByRole('button',{name:/图片失效草稿/}));
+    314|   await screen.findByText(/第 1 张图片暂时无法加载/);
+    315|   expect(screen.getByRole('button',{name:'正式发布'}).hasAttribute('disabl…
+       |                                                                             ^
+    316|   fireEvent.click(screen.getByRole('button',{name:'移除第 1 张图片'}));
+    317|   await waitFor(()=>expect(screen.getByRole('button',{name:'正式发布'}).ha…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 passed (9)
+   Start at  13:31:37
+   Duration  1.88s (transform 116ms, setup 47ms, collect 139ms, tests 1.35s, environment 165ms, prepare 32ms)

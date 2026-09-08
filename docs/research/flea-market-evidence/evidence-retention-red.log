@@ -1,0 +1,35 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+(node:38458) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/modules/park_services/flea_market/fleaMarketModeration.test.ts (1 test | 1 failed) 23ms
+   × deduplicates reports, forbids ordinary administrators and removes with audit and result event 23ms
+     → expected false to be true // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketModeration.test.ts > deduplicates reports, forbids ordinary administrators and removes with audit and result event
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/modules/park_services/flea_market/fleaMarketModeration.test.ts:64:87
+     62|     });
+     63|     const refs = await h.repository.read(tx => tx.all("SELECT expires_…
+     64|     expect(refs.every(ref => Number(ref.expires_at) === base.now() + 1…
+       |                                                                                       ^
+     65|     expect((await service.mine('seller'))[0].state).toBe('removed');
+     66|     await expect(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  09:46:02
+   Duration  2.25s (transform 1.09s, setup 0ms, collect 2.08s, tests 23ms, environment 0ms, prepare 35ms)

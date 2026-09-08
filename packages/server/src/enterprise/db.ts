@@ -1,3 +1,6 @@
+import { E2EE_PRODUCTION_RELEASE_POLICY } from './e2eeProductionReleasePolicy.js';
+import { createMarketSqliteRuntime } from '../modules/park_services/flea_market/fleaMarketSqliteRuntime.js';
+import { PARK_FLEA_MARKET_SCHEMA_CONTRIBUTOR } from '../modules/park_services/flea_market/fleaMarketSchema.js';
 /**
  * @license Copyright 2026 Felix SPDX-License-Identifier: Apache-2.0
  *
@@ -299,6 +302,7 @@ function initSchema(d: Database): void {
     }),
     PARK_RESOURCE_SCHEMA_CONTRIBUTOR,
     PARK_CARPOOL_SCHEMA_CONTRIBUTOR,
+    PARK_FLEA_MARKET_SCHEMA_CONTRIBUTOR,
     createCreditsSchemaContributor({
       defaultOrganizationId: DEFAULT_ORGANIZATION_ID,
     }),
@@ -1218,6 +1222,17 @@ export function getPolicyIntelligenceService(): EnterprisePolicyService {
 }
 export function startPolicyIntelligenceRuntime(registry: RecurringTaskRegistry): () => void {
   return startPolicyRuntime(getPolicyIntelligenceService(), policyIntelligenceStore, registry);
+}
+
+let fleaMarketApplication: ReturnType<typeof createMarketSqliteRuntime> | undefined;
+export function getFleaMarketApplication() {
+  return fleaMarketApplication ??= createMarketSqliteRuntime({
+    database: getDB(), cipher: fieldCipher, objects: attachmentObjectStore,
+    enterpriseEnabled: organizationId => getOrganizationFeatures(organizationId).park_service,
+    // Enable only after the complete encrypted contact and desktop acceptance gate passes.
+    ready: () => false,
+    requiresMls: () => E2EE_PRODUCTION_RELEASE_POLICY.enabled,
+  });
 }
 
 const parkCarpoolStore = createParkCarpoolSqliteStore({

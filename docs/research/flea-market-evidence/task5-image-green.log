@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+ ✓ src/modules/park_services/flea_market/fleaMarketImageProcessing.test.ts (2 tests) 123ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  09:34:40
+   Duration  347ms (transform 26ms, setup 0ms, collect 98ms, tests 123ms, environment 0ms, prepare 33ms)

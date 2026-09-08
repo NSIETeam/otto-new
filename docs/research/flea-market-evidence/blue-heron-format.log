@@ -1,0 +1,87 @@
+packages/server/src/modules/park_services/flea_market/fixtures/README.md 20ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts 48ms
+packages/server/src/modules/park_services/flea_market/fleaMarketAccess.test.ts 7ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketAccess.ts 7ms
+packages/server/src/modules/park_services/flea_market/fleaMarketApplication.ts 16ms
+packages/server/src/modules/park_services/flea_market/fleaMarketAttachments.test.ts 5ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketAttachments.ts 14ms
+packages/server/src/modules/park_services/flea_market/fleaMarketBusinessContract.test.ts 8ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketContacts.test.ts 9ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketContacts.ts 28ms
+packages/server/src/modules/park_services/flea_market/fleaMarketDiscovery.test.ts 5ms
+packages/server/src/modules/park_services/flea_market/fleaMarketDiscovery.ts 12ms
+packages/server/src/modules/park_services/flea_market/fleaMarketGovernance.test.ts 7ms
+packages/server/src/modules/park_services/flea_market/fleaMarketGovernance.ts 22ms
+packages/server/src/modules/park_services/flea_market/fleaMarketHttp.integration.test.ts 9ms
+packages/server/src/modules/park_services/flea_market/fleaMarketHttp.ts 11ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketImageProcessing.test.ts 3ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketImageProcessing.ts 3ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketInbox.test.ts 3ms
+packages/server/src/modules/park_services/flea_market/fleaMarketInbox.ts 4ms
+packages/server/src/modules/park_services/flea_market/fleaMarketJobs.test.ts 3ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketJobs.ts 10ms
+packages/server/src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts 7ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketLifecycle.ts 5ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketMessageEvidence.test.ts 4ms
+packages/server/src/modules/park_services/flea_market/fleaMarketMessageEvidence.ts 3ms
+packages/server/src/modules/park_services/flea_market/fleaMarketMigration.test.ts 1ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketMls.test.ts 7ms
+packages/server/src/modules/park_services/flea_market/fleaMarketModeration.test.ts 3ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketModeration.ts 11ms
+packages/server/src/modules/park_services/flea_market/fleaMarketObjectStore.ts 2ms
+packages/server/src/modules/park_services/flea_market/fleaMarketPersonalRecords.test.ts 3ms
+packages/server/src/modules/park_services/flea_market/fleaMarketPostgresRepository.ts 2ms
+packages/server/src/modules/park_services/flea_market/fleaMarketPostgresRuntime.ts 3ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketPrivateReuse.test.ts 3ms
+packages/server/src/modules/park_services/flea_market/fleaMarketPublication.test.ts 3ms
+packages/server/src/modules/park_services/flea_market/fleaMarketRepository.ts 1ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketRepositoryContract.test.ts 4ms
+packages/server/src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts 2ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketRequestLifecycle.ts 1ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketRoles.test.ts 2ms
+packages/server/src/modules/park_services/flea_market/fleaMarketRoles.ts 3ms
+packages/server/src/modules/park_services/flea_market/fleaMarketSchema.ts 1ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts 3ms
+packages/server/src/modules/park_services/flea_market/fleaMarketSearchIndex.ts 4ms
+packages/server/src/modules/park_services/flea_market/fleaMarketService.ts 13ms
+packages/server/src/modules/park_services/flea_market/fleaMarketServiceLifecycle.test.ts 2ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketSettings.test.ts 3ms
+packages/server/src/modules/park_services/flea_market/fleaMarketSettings.ts 5ms
+packages/server/src/modules/park_services/flea_market/fleaMarketSqliteRepository.test.ts 2ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketSqliteRepository.ts 2ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketSqliteRuntime.ts 2ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketStorageQuota.test.ts 2ms
+packages/server/src/modules/park_services/flea_market/fleaMarketStorageQuota.ts 2ms
+packages/server/src/modules/park_services/flea_market/fleaMarketTestSupport.ts 6ms
+packages/server/src/modules/park_services/flea_market/fleaMarketTypes.ts 4ms
+packages/server/src/modules/park_services/flea_market/fleaMarketUnitOfWork.ts 5ms
+packages/server/src/modules/park_services/flea_market/fleaMarketValidation.test.ts 4ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketValidation.ts 5ms (unchanged)
+packages/server/src/modules/park_services/flea_market/index.ts 1ms (unchanged)
+packages/server/src/modules/collaboration/parkContactCiphertext.ts 5ms (unchanged)
+packages/server/src/modules/collaboration/parkContactDirectory.ts 3ms (unchanged)
+packages/server/src/modules/collaboration/parkContactMls.ts 13ms
+packages/server/src/modules/collaboration/parkContactPrivateAuthority.ts 2ms
+packages/desktop/src/main/park-market-links.test.ts 2ms (unchanged)
+packages/desktop/src/main/park-market-links.ts 3ms (unchanged)
+packages/desktop/src/main/park-market-messaging.ts 13ms
+packages/desktop/src/main/park-market-mls.ts 14ms
+packages/desktop/src/main/park-market.test.ts 7ms
+packages/desktop/src/main/park-market.ts 6ms
+packages/desktop/src/renderer/components/MarketContactCenter.tsx 30ms
+packages/desktop/src/renderer/components/MarketImageViewer.test.tsx 18ms
+packages/desktop/src/renderer/components/MarketImageViewer.tsx 21ms
+packages/desktop/src/renderer/components/MarketNotifications.test.tsx 4ms
+packages/desktop/src/renderer/components/MarketNotifications.tsx 15ms
+packages/desktop/src/renderer/components/MarketReportForm.tsx 8ms
+packages/desktop/src/renderer/components/MarketRoles.tsx 8ms (unchanged)
+packages/desktop/src/renderer/components/ParkMarketDialog.css 26ms
+packages/desktop/src/renderer/components/ParkMarketDialog.test.tsx 5ms
+packages/desktop/src/renderer/components/ParkMarketDialog.tsx 58ms
+packages/desktop/src/renderer/components/ParkMarketModel.test.ts 2ms (unchanged)
+packages/desktop/src/renderer/components/ParkMarketModel.ts 3ms (unchanged)
+packages/desktop/src/renderer/parkMarketApi.ts 1ms (unchanged)
+packages/desktop/src/renderer/useMarketLinks.ts 3ms (unchanged)
+integration/park-market/authenticated-flow.test.ts 12ms
+integration/park-market/capacity.test.ts 5ms
+integration/park-market/encrypted-flow.test.ts 12ms

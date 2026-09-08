@@ -1,0 +1,36 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ❯ src/renderer/components/MarketNotifications.test.tsx (3 tests | 1 failed) 125ms
+   ✓ drops prior account notices on scope change 64ms
+   ✓ loads older pages while preserving locally confirmed read receipts 55ms
+   × refreshes read receipts from another device on already loaded older pages 5ms
+     → expected null to be 1000 // Object.is equality
+ ✓ src/renderer/components/ParkMarketDialog.test.tsx (4 tests) 142ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/components/MarketNotifications.test.tsx > refreshes read receipts from another device on already loaded older pages
+AssertionError: expected null to be 1000 // Object.is equality
+
+- Expected:
+1000
+
++ Received:
+null
+
+ ❯ src/renderer/components/MarketNotifications.test.tsx:80:74
+     78|   remoteRead=1000;
+     79|   await act(async()=>{await vi.advanceTimersByTimeAsync(8001);});
+     80|   expect(result.current.state.items.find(item=>item.id==='old')?.readA…
+       |                                                                          ^
+     81|   unmount();
+     82|  } finally {vi.useRealTimers();}
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 6 passed (7)
+   Start at  12:37:24
+   Duration  646ms (transform 117ms, setup 94ms, collect 170ms, tests 267ms, environment 353ms, prepare 83ms)

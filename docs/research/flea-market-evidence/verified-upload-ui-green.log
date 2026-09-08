@@ -1,0 +1,10 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ✓ src/renderer/components/ParkMarketDialog.test.tsx (5 tests) 1227ms
+   ✓ keeps own records and drafts reachable when the market is paused and validates publication without dropping fields  656ms
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  13:16:21
+   Duration  2.31s (transform 228ms, setup 95ms, collect 275ms, tests 1.23s, environment 359ms, prepare 68ms)

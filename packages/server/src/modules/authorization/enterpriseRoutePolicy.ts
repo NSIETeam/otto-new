@@ -100,6 +100,8 @@ export function isAdminRoute(path: string): boolean {
 export function isMemberRoute(path: string): boolean {
   return (
     MEMBER_ROUTES.has(path) ||
+    path === '/enterprise/park-market' ||
+    path.startsWith('/enterprise/park-market/') ||
     path.startsWith('/enterprise/policy-intelligence/') ||
     path.startsWith('/enterprise/skills/') ||
     path.startsWith('/enterprise/customer-modules/') ||

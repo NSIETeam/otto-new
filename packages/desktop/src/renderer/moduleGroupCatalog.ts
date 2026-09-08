@@ -61,6 +61,7 @@ export const HONGCHUANG_PARK_SERVICE_MODULE_IDS = [
   'park-vehicle-visit',
   'park-enterprise-star-map',
   'park-carpool',
+  'park-flea-market',
 ] as const;
 
 export const SMART_RECRUITMENT_MODULE_IDS = [
@@ -84,7 +85,7 @@ export const OFFICIAL_MODULE_GROUP_TEMPLATES: readonly ModuleGroupTemplateDefini
     },
     groupId: 'park-services',
     name: '宏创园区服务',
-    description: '面向北控宏创科技园的十一项官方能力，新增隐私友好的拼车匹配助手。',
+    description: '面向北控宏创科技园的十二项官方能力，包含拼车匹配与园区跳蚤市场。',
     icon: 'park-overview',
     editions: ['enterprise'],
     rows: 3,

@@ -145,23 +145,27 @@ export function useModuleWorkspaceCapabilities(input: {
           }
           let canViewStaffTasks = false;
           let canUseCarpool = false;
+          let canUseMarket = false;
           if (hasParkContext) {
-            const [ticketResult, carpoolResult] = await Promise.allSettled([
+            const [ticketResult, carpoolResult, marketResult] = await Promise.allSettled([
               window.otto.enterpriseTicketList(),
               typeof window.otto.enterpriseParkCarpoolGet === 'function'
                 ? window.otto.enterpriseParkCarpoolGet()
                 : Promise.reject(new Error('park carpool capability unavailable')),
+              typeof window.otto.enterpriseParkMarket === 'function' ? window.otto.enterpriseParkMarket({ path: '/settings', method: 'GET' }) : Promise.reject(new Error('market capability unavailable')),
             ]);
             if (ticketResult.status === 'fulfilled') {
               canViewStaffTasks = ticketResult.value.some((ticket) => ticket.isRecipient === true);
             }
             if (carpoolResult.status === 'fulfilled') canUseCarpool = true;
+            if (marketResult.status === 'fulfilled') { const market = marketResult.value as { parkId?: string; enabled?: boolean; ready?: boolean }; canUseMarket = !!market.parkId && market.enabled === true && market.ready === true; }
           }
           parkAuthorization = {
             hasParkContext,
             canViewStatistics: hasParkContext && Boolean(park?.isAdminOrganization),
             canViewStaffTasks,
             canUseCarpool,
+            canUseMarket,
             disabledReason: hasParkContext ? undefined : '当前企业尚未绑定园区服务空间',
           };
         } catch (cause) {

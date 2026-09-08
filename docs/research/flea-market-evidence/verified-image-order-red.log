@@ -1,0 +1,28 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ❯ src/renderer/components/ParkMarketModel.test.ts (3 tests | 1 failed) 16ms
+   ✓ requires explicit condition and function, preserves sale price and validates visible characters 13ms
+   ✓ accepts remaining image slots in selection order and names only overflow files 0ms
+   × reorders a selected photo without losing or duplicating the other image references 2ms
+     → (0 , moveMarketImage) is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/components/ParkMarketModel.test.ts > reorders a selected photo without losing or duplicating the other image references
+TypeError: (0 , moveMarketImage) is not a function
+ ❯ src/renderer/components/ParkMarketModel.test.ts:58:9
+     56| });
+     57| it('reorders a selected photo without losing or duplicating the other …
+     58|  expect(moveMarketImage(['a','b','c'],'c','a')).toEqual(['c','a','b']);
+       |         ^
+     59|  expect(moveMarketImage(['a','b','c'],'a','c')).toEqual(['b','c','a']);
+     60|  expect(moveMarketImage(['a','b'],'unknown','a')).toEqual(['a','b']);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  13:09:38
+   Duration  625ms (transform 43ms, setup 87ms, collect 9ms, tests 16ms, environment 333ms, prepare 56ms)

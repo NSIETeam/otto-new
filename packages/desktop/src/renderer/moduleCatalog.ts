@@ -59,7 +59,7 @@ export type RecruitmentModuleTarget =
 export type ModuleActivation =
   | { kind: 'dialog'; dialog: 'park'; target: ParkModuleTarget }
   | { kind: 'dialog'; dialog: 'recruitment'; target: RecruitmentModuleTarget }
-  | { kind: 'dialog'; dialog: 'enterprise-memory' | 'auto-skill' | 'policy-intelligence' | 'park-carpool' }
+  | { kind: 'dialog'; dialog: 'enterprise-memory' | 'auto-skill' | 'policy-intelligence' | 'park-carpool' | 'park-flea-market' }
   | { kind: 'route'; route: 'skill-zone' }
   | { kind: 'agent'; profileId: string; customAgentId?: string }
   | { kind: 'customer-module'; moduleId: string; version: string };
@@ -69,6 +69,7 @@ export interface ParkModuleAuthorization {
   canViewStatistics: boolean;
   canViewStaffTasks: boolean;
   canUseCarpool?: boolean;
+  canUseMarket?: boolean;
   disabledReason?: string;
 }
 
@@ -98,6 +99,7 @@ type StaticAvailabilityRule =
   | 'park-statistics'
   | 'park-staff'
   | 'park-carpool'
+  | 'park-flea-market'
   | 'recruitment'
   | 'enterprise-memory'
   | 'auto-skill'
@@ -164,6 +166,12 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
     description: '根据同园区企业主动公开的能力、产品与合作需求，生成可解释的合作线索。',
     activation: { kind: 'dialog', dialog: 'park', target: 'enterprise-star-map' },
     availabilityRule: 'park',
+  },
+  {
+    id: 'park-flea-market', label: '跳蚤市场', category: 'park', icon: 'park-flea-market',
+    description: '发现同园区个人闲置，带问题联系卖家，线下协商交接。',
+    activation: { kind: 'dialog', dialog: 'park-flea-market' },
+    availabilityRule: 'park-flea-market',
   },
   {
     id: 'park-carpool', label: '拼车助手', category: 'park', icon: 'park-carpool',
@@ -301,6 +309,7 @@ function staticAvailability(
   if (rule === 'park-staff' && !context.parkAuthorization.canViewStaffTasks) {
     return 'hidden';
   }
+  if (rule === 'park-flea-market' && context.parkAuthorization.canUseMarket !== true) return 'hidden';
   if (rule === 'park-carpool' && context.parkAuthorization.canUseCarpool !== true) {
     return 'hidden';
   }

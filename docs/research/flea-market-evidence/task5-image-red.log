@@ -1,0 +1,26 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+ ❯ src/modules/park_services/flea_market/fleaMarketImageProcessing.test.ts (2 tests | 1 failed) 7ms
+   × decodes real JPEG pixels, auto-orients, strips EXIF and generates thumbnail 6ms
+     → INVALID_INPUT
+   ✓ rejects invalid bytes, SVG and files over 20 MB 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketImageProcessing.test.ts > decodes real JPEG pixels, auto-orients, strips EXIF and generates thumbnail
+Error: INVALID_INPUT
+ ❯ processMarketImage src/modules/park_services/flea_market/fleaMarketImageProcessing.ts:2:145
+      1| /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
+      2| export async function processMarketImage(_content: Buffer): Promise<{d…
+       |                                                                                                                                                 ^
+      3|
+ ❯ src/modules/park_services/flea_market/fleaMarketImageProcessing.test.ts:7:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  09:34:17
+   Duration  1.29s (transform 22ms, setup 0ms, collect 1.15s, tests 7ms, environment 0ms, prepare 35ms)

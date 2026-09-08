@@ -1,0 +1,45 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+(node:55034) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:55033) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:55036) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketImageProcessing.test.ts (5 tests) 526ms
+(node:55047) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketAttachments.test.ts (2 tests) 118ms
+ ✓ src/modules/park_services/flea_market/fleaMarketDiscovery.test.ts (2 tests) 145ms
+(node:56394) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56392) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketJobs.test.ts (1 test) 32ms
+ ✓ src/modules/park_services/flea_market/fleaMarketPublication.test.ts (2 tests) 46ms
+(node:56452) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:56457) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketServiceLifecycle.test.ts (1 test) 41ms
+ ✓ src/modules/park_services/flea_market/fleaMarketModeration.test.ts (1 test) 26ms
+(node:56516) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketValidation.test.ts (25 tests) 5ms
+ ✓ src/modules/park_services/flea_market/fleaMarketRepositoryContract.test.ts (4 tests) 2935ms
+   ✓ PostgreSQL real storage contract > serializes simultaneous retries and restores encrypted receipts after database restart  1702ms
+   ✓ PostgreSQL real storage contract > rolls back failed commands including their quota and receipt  1148ms
+ ✓ src/modules/park_services/flea_market/fleaMarketBusinessContract.test.ts (4 tests) 2993ms
+   ✓ PostgreSQL business contract > enforces the last daily quota under parallel requests and atomically binds every successful image  1455ms
+   ✓ PostgreSQL business contract > preserves state/version/privacy on conflicting writes, market pause and database restart  1379ms
+ ✓ src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts (8 tests) 4ms
+ ✓ src/modules/park_services/flea_market/fleaMarketMigration.test.ts (1 test) 2ms
+ ✓ src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts (11 tests) 1ms
+ ✓ src/modules/park_services/flea_market/fleaMarketSqliteRepository.test.ts (3 tests) 6ms
+ ✓ src/modules/park_services/flea_market/fleaMarketAccess.test.ts (4 tests) 1ms
+
+ Test Files  15 passed (15)
+      Tests  74 passed (74)
+   Start at  09:49:31
+   Duration  8.68s (transform 2.26s, setup 0ms, collect 22.89s, tests 6.88s, environment 1ms, prepare 710ms)

@@ -1,3 +1,4 @@
+import { validateMarketRequest } from './park-market.js';
 /**
  * @license Copyright 2026 Felix SPDX-License-Identifier: Apache-2.0
  *
@@ -2450,7 +2451,7 @@ export class EnterpriseClient {
         ...init,
         method: init.method ?? 'GET',
         headers,
-        signal: controller.signal,
+        signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
       });
       const body = (await response.json().catch(() => ({}))) as {
         error?: string;
@@ -2473,6 +2474,7 @@ export class EnterpriseClient {
       return body;
     } catch (error) {
       if (error instanceof EnterpriseRequestError) throw error;
+      if (init.signal?.aborted) throw new Error('请求已取消');
       if (error instanceof Error && error.name === 'AbortError')
         throw new Error('连接企业服务器超时');
       const message = error instanceof Error ? error.message : String(error);
@@ -3504,6 +3506,29 @@ export class EnterpriseClient {
   async executeParkCarpoolWorkflow(command: CarpoolWorkflowCommand): Promise<CarpoolWorkflowView> {
     if (!this.token) throw new Error('登录已失效，请重新登录');
     return (await this.request<{ workflow: CarpoolWorkflowView }>('/enterprise/park-carpool/workflow', { method: 'POST', body: JSON.stringify(command) })).workflow;
+  }
+
+  marketMessagingContext() {
+    const { crypto, account, serverScope } = this.requireE2eeContext();
+    return { crypto, accountId: account.id, organizationId: account.organizationId, serverScope, serverUrl: this.serverUrl, requiresMls: this.supportsMlsPrivateMessages() };
+  }
+  async requestParkMarket(value: unknown, upload: {signal?: AbortSignal; onProgress?: (loaded: number, total: number) => void} = {}): Promise<unknown> {
+    const input = validateMarketRequest(value);
+    if (input.imageBase64 !== undefined) {
+      const bytes = Buffer.from(input.imageBase64, 'base64');
+      if (!bytes.length || bytes.length > 20 * 1024 * 1024 || bytes.toString('base64') !== input.imageBase64) throw new Error('图片内容无效');
+      if (upload.signal?.aborted) throw new Error('图片上传已取消');
+      let offset = 0;
+      const body = new ReadableStream<Uint8Array>({pull(controller) {
+        if (offset === bytes.length) {controller.close();return;}
+        const end = Math.min(offset + 64 * 1024, bytes.length);
+        controller.enqueue(new Uint8Array(bytes.subarray(offset,end)));
+        offset = end;
+        upload.onProgress?.(offset,bytes.length);
+      }});
+      return this.request(`/enterprise/park-market${input.path}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'content-length':String(bytes.length) }, body, duplex:'half', signal:upload.signal } as RequestInit & {duplex:'half'}, { timeoutMs: 30_000 });
+    }
+    return this.request(`/enterprise/park-market${input.path}`, { method: input.method, body: input.body === undefined ? undefined : JSON.stringify(input.body) });
   }
 
   async getParkCarpoolState(): Promise<EnterpriseParkCarpoolState> {

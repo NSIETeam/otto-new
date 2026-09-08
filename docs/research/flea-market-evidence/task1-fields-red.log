@@ -1,0 +1,165 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+ ❯ src/modules/park_services/flea_market/fleaMarketValidation.test.ts (25 tests | 13 failed) 11ms
+   ✓ sale prices > 0.01 converts exactly 1ms
+   ✓ sale prices > 12.3 converts exactly 0ms
+   ✓ sale prices > 999999.99 converts exactly 0ms
+   ✓ sale prices > rejects 0 1ms
+   ✓ sale prices > rejects -1 0ms
+   ✓ sale prices > rejects 1e3 0ms
+   ✓ sale prices > rejects 1.001 0ms
+   ✓ sale prices > rejects 1000000 0ms
+   ✓ sale prices > rejects 面议 0ms
+   ✓ sale prices > rejects  0ms
+   ✓ sale prices > rejects +1 0ms
+   ✓ sale prices > rejects NaN 0ms
+   × listing fields > normalizes free price and negotiability 5ms
+     → expected { title: '办公椅', …(9) } to match object { priceCents: +0, negotiable: false }
+(9 matching properties omitted from actual)
+   × listing fields > counts graphemes, trims title and preserves description newlines 1ms
+     → expected { …(9) } to match object { …(2) }
+(7 matching properties omitted from actual)
+   × listing fields > requires explicit category 0ms
+     → expected [Function] to throw an error
+   × listing fields > requires explicit condition 0ms
+     → expected [Function] to throw an error
+   × listing fields > requires explicit functionStatus 0ms
+     → expected [Function] to throw an error
+   × listing fields > rejects a single visible character 0ms
+     → expected [Function] to throw an error
+   × listing fields > requires 2–500 fault characters 0ms
+     → expected [Function] to throw an error
+   × listing fields > requires 2–500 fault characters 0ms
+     → expected [Function] to throw an error
+   × listing fields > requires 2–500 fault characters 0ms
+     → expected [Function] to throw an error
+   × listing fields > rejects invalid images %j 0ms
+     → expected [Function] to throw an error
+   × listing fields > rejects invalid images "image-0" 0ms
+     → expected [Function] to throw an error
+   × listing fields > rejects invalid images "image-1" 0ms
+     → expected [Function] to throw an error
+   × listing fields > does not accept identity or private fields from public form 0ms
+     → expected { title: '办公椅', …(11) } to not have property "ownerId"
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > normalizes free price and negotiability
+AssertionError: expected { title: '办公椅', …(9) } to match object { priceCents: +0, negotiable: false }
+(9 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "negotiable": false,
+-   "priceCents": 0,
++   "negotiable": true,
+  }
+
+ ❯ src/modules/park_services/flea_market/fleaMarketValidation.test.ts:12:143
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/13]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > counts graphemes, trims title and preserves description newlines
+AssertionError: expected { …(9) } to match object { …(2) }
+(7 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "description": "第一行
+  第二行",
+-   "title": "👨‍👩‍👧‍👦椅",
++   "title": " 👨‍👩‍👧‍👦椅 ",
+  }
+
+ ❯ src/modules/park_services/flea_market/fleaMarketValidation.test.ts:13:168
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/13]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > requires explicit category
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > requires explicit condition
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > requires explicit functionStatus
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/modules/park_services/flea_market/fleaMarketValidation.test.ts:14:153
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/13]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > rejects a single visible character
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/modules/park_services/flea_market/fleaMarketValidation.test.ts:15:116
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/13]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > requires 2–500 fault characters
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > requires 2–500 fault characters
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > requires 2–500 fault characters
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/modules/park_services/flea_market/fleaMarketValidation.test.ts:16:182
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/13]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > rejects invalid images %j
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > rejects invalid images "image-0"
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > rejects invalid images "image-1"
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/modules/park_services/flea_market/fleaMarketValidation.test.ts:17:188
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/13]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketValidation.test.ts > listing fields > does not accept identity or private fields from public form
+AssertionError: expected { title: '办公椅', …(11) } to not have property "ownerId"
+
+- Expected:
+undefined
+
++ Received:
+"other"
+
+ ❯ src/modules/park_services/flea_market/fleaMarketValidation.test.ts:18:200
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/13]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  13 failed | 12 passed (25)
+   Start at  09:29:08
+   Duration  193ms (transform 27ms, setup 0ms, collect 21ms, tests 11ms, environment 0ms, prepare 44ms)

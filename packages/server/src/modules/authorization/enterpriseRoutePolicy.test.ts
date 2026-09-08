@@ -23,3 +23,8 @@ describe('enterprise public profile and partnership route authorization', () => 
     expect(isAdminRoute('/enterprise/park/star-map')).toBe(false);
   });
 });
+
+it('authenticates every market route as an account before market-scoped authorization', () => {
+  for (const path of ['/enterprise/park-market','/enterprise/park-market/settings/P','/enterprise/park-market/listings/L/contact','/enterprise/park-market/mine']) expect(isMemberRoute(path)).toBe(true);
+  expect(isMemberRoute('/enterprise/park-marketplace')).toBe(false);
+});

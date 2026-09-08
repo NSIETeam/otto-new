@@ -256,3 +256,9 @@ describe('installed customer modules', () => {
       .toBe('customer-module');
   });
 });
+
+it('keeps the flea market hidden until its own server capability and park switch are ready', () => {
+  const context = enterpriseContext();
+  expect(buildModuleCatalog(context).find(module => module.id === 'park-flea-market')?.availability).toBe('hidden');
+  expect(buildModuleCatalog({ ...context, parkAuthorization: { ...context.parkAuthorization, canUseMarket: true } }).find(module => module.id === 'park-flea-market')).toMatchObject({ availability: 'available', activation: { kind: 'dialog', dialog: 'park-flea-market' } });
+});

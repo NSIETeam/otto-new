@@ -1,0 +1,31 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/components/MarketAssociatedItems.test.tsx [ src/renderer/components/MarketAssociatedItems.test.tsx ]
+Error: Failed to resolve import "./MarketAssociatedItems.js" from "src/renderer/components/MarketAssociatedItems.test.tsx". Does the file exist?
+  Plugin: vite:import-analysis
+  File: /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop/src/renderer/components/MarketAssociatedItems.test.tsx:3:38
+  2  |  import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+  3  |  import { it, expect, vi } from "vitest";
+  4  |  import { MarketAssociatedItems } from "./MarketAssociatedItems.js";
+     |                                         ^
+  5  |  it("loads consulted items independently from the visible message page and locates their original messages", async () ...
+  6  |    const request = vi.fn().mockResolvedValueOnce({ items: [{ listingId: "new", messageId: "m2", sequence: 220, title: ...
+ ❯ TransformPluginContext._formatLog ../../node_modules/vite/dist/node/chunks/config.js:29079:43
+ ❯ TransformPluginContext.error ../../node_modules/vite/dist/node/chunks/config.js:29076:14
+ ❯ normalizeUrl ../../node_modules/vite/dist/node/chunks/config.js:27199:18
+ ❯ ../../node_modules/vite/dist/node/chunks/config.js:27257:32
+ ❯ TransformPluginContext.transform ../../node_modules/vite/dist/node/chunks/config.js:27225:4
+ ❯ EnvironmentPluginContainer.transform ../../node_modules/vite/dist/node/chunks/config.js:28877:14
+ ❯ loadAndTransform ../../node_modules/vite/dist/node/chunks/config.js:22746:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  12:24:20
+   Duration  629ms (transform 21ms, setup 75ms, collect 0ms, tests 0ms, environment 297ms, prepare 36ms)

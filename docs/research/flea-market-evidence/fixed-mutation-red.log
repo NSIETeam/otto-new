@@ -1,0 +1,44 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ❯ src/renderer/parkMarketMutation.test.ts (2 tests | 2 failed) 6ms
+   × retries an unknown mutation using the exact original receipt and retires it after success 5ms
+     → expected '571dd0b3-ce54-4338-b14d-bdfa00129b1a' to be '01a2d860-1b26-4d2b-b76f-4b6659cc2d7f' // Object.is equality
+   × coalesces double clicks instead of sending concurrent copies 1ms
+     → expected "spy" to be called once, but got 2 times
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/parkMarketMutation.test.ts > retries an unknown mutation using the exact original receipt and retires it after success
+AssertionError: expected '571dd0b3-ce54-4338-b14d-bdfa00129b1a' to be '01a2d860-1b26-4d2b-b76f-4b6659cc2d7f' // Object.is equality
+
+Expected: "01a2d860-1b26-4d2b-b76f-4b6659cc2d7f"
+Received: "571dd0b3-ce54-4338-b14d-bdfa00129b1a"
+
+ ❯ src/renderer/parkMarketMutation.test.ts:10:50
+      8|  await expect(mutation.run('/reports/r/decide','POST',body)).rejects.t…
+      9|  await mutation.run('/reports/r/decide','POST',body);
+     10|  expect(request.mock.calls[0][0].body.requestId).toBe(request.mock.cal…
+       |                                                  ^
+     11|  await mutation.run('/reports/r/decide','POST',body);
+     12|  expect(request.mock.calls[2][0].body.requestId).not.toBe(request.mock…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/renderer/parkMarketMutation.test.ts > coalesces double clicks instead of sending concurrent copies
+AssertionError: expected "spy" to be called once, but got 2 times
+ ❯ src/renderer/parkMarketMutation.test.ts:21:18
+     19|  const one=mutation.run('/listings/a/sold','POST',{expectedVersion:1});
+     20|  const two=mutation.run('/listings/a/sold','POST',{expectedVersion:1});
+     21|  expect(request).toHaveBeenCalledOnce();finish({version:2});
+       |                  ^
+     22|  expect(await one).toEqual(await two);
+     23| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  13:38:56
+   Duration  522ms (transform 35ms, setup 66ms, collect 10ms, tests 6ms, environment 250ms, prepare 50ms)

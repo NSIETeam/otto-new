@@ -1,0 +1,5 @@
+
+> otto-ai@1.18.0 code-map:check
+> node scripts/generate-code-map.mjs --check
+
+Code map is current.

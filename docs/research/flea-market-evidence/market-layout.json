@@ -1,0 +1,47 @@
+{
+  "platform": "darwin",
+  "fixtures": "read-only marketplace settings; no publishing or authentication simulated as acceptance",
+  "results": [
+    {
+      "zoom": 1,
+      "geometry": {
+        "x": 45,
+        "y": 590.8671875,
+        "right": 124.59375,
+        "bottom": 628.3671875,
+        "clipped": false,
+        "width": 1024,
+        "height": 736,
+        "overflow": false
+      }
+    },
+    {
+      "zoom": 1.25,
+      "geometry": {
+        "x": 44.79999923706055,
+        "y": 443.8500061035156,
+        "right": 124.00000381469727,
+        "bottom": 481.450008392334,
+        "clipped": false,
+        "width": 819,
+        "height": 589,
+        "overflow": false
+      }
+    },
+    {
+      "zoom": 1.5,
+      "geometry": {
+        "x": 45,
+        "y": 345.078125,
+        "right": 124.60417175292969,
+        "bottom": 383.078125,
+        "clipped": false,
+        "width": 682,
+        "height": 490,
+        "overflow": false
+      }
+    }
+  ],
+  "osEncryptedDraftFlush": true,
+  "otherAccountEmpty": true
+}

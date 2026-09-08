@@ -1,0 +1,9 @@
+
+> otto-ai@1.18.0 validate:boundaries
+> node scripts/validate-boundaries.mjs
+
+Otto package boundary validation
+FAIL packages/desktop/src/renderer/policyIntelligencePresentation.test.ts imports ../../../server/src/modules/policy_intelligence/policyDomain.js
+  desktop must not import server source deep paths
+
+Boundary validation failed: 1 new violation(s).

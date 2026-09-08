@@ -1,0 +1,561 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ❯ src/renderer/components/ParkMarketDialog.test.tsx (10 tests | 1 failed) 4339ms
+   ✓ keeps own records and drafts reachable when the market is paused and validates publication without dropping fields 58ms
+   ✓ flushes the last input on save-and-close with the originating account scope 39ms
+   ✓ remounts private form state when the same account id switches server or organization 20ms
+   ✓ preserves expired draft text and identifies the failed photo with an independent retry 26ms
+   ✓ shows per-image transfer progress and allows cancelling without dropping form text 37ms
+   ✓ flushes unsaved text when switching away from the form without closing the market 34ms
+   ✓ closes directly after the current form is durably saved  1033ms
+   ✓ retains search, loaded cards and scroll position when returning from detail 52ms
+   ✓ blocks publication while a restored draft image is unreadable and allows removing it 27ms
+   × filters own records by state with counts while keeping drafts reachable 3013ms
+     → Unable to find role="button" and name "已售出（1）"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<dialog[39m
+      [33maria-labelledby[39m=[32m"park-market-title"[39m
+      [33mclass[39m=[32m"park-market-dialog"[39m
+      [33mopen[39m=[32m""[39m
+    [36m>[39m
+      [36m<header>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mid[39m=[32m"park-market-title"[39m
+          [36m>[39m
+            [0m园区跳蚤市场[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0m仅本园区成员可见，交易由双方线下协商[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<button[39m
+          [33maria-label[39m=[32m"关闭跳蚤市场"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m关闭[0m
+        [36m</button>[39m
+      [36m</header>[39m
+      [36m<nav[39m
+        [33maria-label[39m=[32m"市场页面"[39m
+      [36m>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m逛市场[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33maria-current[39m=[32m"page"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m我的发布记录[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m我的收藏[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mdisabled[39m=[32m""[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m发布闲置[0m
+        [36m</button>[39m
+      [36m</nav>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m园区市场已暂停。[0m
+        [0m本人发布记录仍可管理。[0m
+      [36m</p>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m原园区：[0m
+          [0mP[0m
+        [36m</h3>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"park-market-grid"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"park-market-card"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<strong>[39m
+              [0m在售台灯[0m
+            [36m</strong>[39m
+            [36m<span>[39m
+              [0m¥1.00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m在售[0m
+            [36m</span>[39m
+            [36m<small>[39m
+              [0m原园区：[0m
+              [0mP[0m
+            [36m</small>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m原园区：[0m
+          [0mQ[0m
+        [36m</h3>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"park-market-grid"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"park-market-card"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<strong>[39m
+              [0m已售椅子[0m
+            [36m</strong>[39m
+            [36m<span>[39m
+              [0m¥2.00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m已售出[0m
+            [36m</span>[39m
+            [36m<small>[39m
+              [0m原园区：[0m
+              [0mQ[0m
+            [36m</small>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m本机草稿[0m
+        [36m</h3>[39m
+        [36m<div>[39m
+          [36m<button>[39m
+            [0m未发出的草稿[0m
+          [36m</button>[39m
+          [36m<button>[39m
+            [0m删除草稿[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+    [36m</dialog>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<dialog[39m
+      [33maria-labelledby[39m=[32m"park-market-title"[39m
+      [33mclass[39m=[32m"park-market-dialog"[39m
+      [33mopen[39m=[32m""[39m
+    [36m>[39m
+      [36m<header>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mid[39m=[32m"park-market-title"[39m
+          [36m>[39m
+            [0m园区跳蚤市场[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0m仅本园区成员可见，交易由双方线下协商[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<button[39m
+          [33maria-label[39m=[32m"关闭跳蚤市场"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m关闭[0m
+        [36m</button>[39m
+      [36m</header>[39m
+      [36m<nav[39m
+        [33maria-label[39m=[32m"市场页面"[39m
+      [36m>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m逛市场[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33maria-current[39m=[32m"page"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m我的发布记录[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m我的收藏[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mdisabled[39m=[32m""[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m发布闲置[0m
+        [36m</button>[39m
+      [36m</nav>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m园区市场已暂停。[0m
+        [0m本人发布记录仍可管理。[0m
+      [36m</p>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m原园区：[0m
+          [0mP[0m
+        [36m</h3>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"park-market-grid"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"park-market-card"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<strong>[39m
+              [0m在售台灯[0m
+            [36m</strong>[39m
+            [36m<span>[39m
+              [0m¥1.00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m在售[0m
+            [36m</span>[39m
+            [36m<small>[39m
+              [0m原园区：[0m
+              [0mP[0m
+            [36m</small>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m原园区：[0m
+          [0mQ[0m
+        [36m</h3>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"park-market-grid"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"park-market-card"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<strong>[39m
+              [0m已售椅子[0m
+            [36m</strong>[39m
+            [36m<span>[39m
+              [0m¥2.00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m已售出[0m
+            [36m</span>[39m
+            [36m<small>[39m
+              [0m原园区：[0m
+              [0mQ[0m
+            [36m</small>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m本机草稿[0m
+        [36m</h3>[39m
+        [36m<div>[39m
+          [36m<button>[39m
+            [0m未发出的草稿[0m
+          [36m</button>[39m
+          [36m<button>[39m
+            [0m删除草稿[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+    [36m</dialog>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/components/ParkMarketDialog.test.tsx > filters own records by state with counts while keeping drafts reachable
+TestingLibraryElementError: Unable to find role="button" and name "已售出（1）"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<dialog[39m
+      [33maria-labelledby[39m=[32m"park-market-title"[39m
+      [33mclass[39m=[32m"park-market-dialog"[39m
+      [33mopen[39m=[32m""[39m
+    [36m>[39m
+      [36m<header>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mid[39m=[32m"park-market-title"[39m
+          [36m>[39m
+            [0m园区跳蚤市场[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0m仅本园区成员可见，交易由双方线下协商[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<button[39m
+          [33maria-label[39m=[32m"关闭跳蚤市场"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m关闭[0m
+        [36m</button>[39m
+      [36m</header>[39m
+      [36m<nav[39m
+        [33maria-label[39m=[32m"市场页面"[39m
+      [36m>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m逛市场[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33maria-current[39m=[32m"page"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m我的发布记录[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m我的收藏[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mdisabled[39m=[32m""[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m发布闲置[0m
+        [36m</button>[39m
+      [36m</nav>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m园区市场已暂停。[0m
+        [0m本人发布记录仍可管理。[0m
+      [36m</p>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m原园区：[0m
+          [0mP[0m
+        [36m</h3>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"park-market-grid"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"park-market-card"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<strong>[39m
+              [0m在售台灯[0m
+            [36m</strong>[39m
+            [36m<span>[39m
+              [0m¥1.00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m在售[0m
+            [36m</span>[39m
+            [36m<small>[39m
+              [0m原园区：[0m
+              [0mP[0m
+            [36m</small>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m原园区：[0m
+          [0mQ[0m
+        [36m</h3>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"park-market-grid"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"park-market-card"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<strong>[39m
+              [0m已售椅子[0m
+            [36m</strong>[39m
+            [36m<span>[39m
+              [0m¥2.00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m已售出[0m
+            [36m</span>[39m
+            [36m<small>[39m
+              [0m原园区：[0m
+              [0mQ[0m
+            [36m</small>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m本机草稿[0m
+        [36m</h3>[39m
+        [36m<div>[39m
+          [36m<button>[39m
+            [0m未发出的草稿[0m
+          [36m</button>[39m
+          [36m<button>[39m
+            [0m删除草稿[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+    [36m</dialog>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<dialog[39m
+      [33maria-labelledby[39m=[32m"park-market-title"[39m
+      [33mclass[39m=[32m"park-market-dialog"[39m
+      [33mopen[39m=[32m""[39m
+    [36m>[39m
+      [36m<header>[39m
+        [36m<div>[39m
+          [36m<h2[39m
+            [33mid[39m=[32m"park-market-title"[39m
+          [36m>[39m
+            [0m园区跳蚤市场[0m
+          [36m</h2>[39m
+          [36m<p>[39m
+            [0m仅本园区成员可见，交易由双方线下协商[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<button[39m
+          [33maria-label[39m=[32m"关闭跳蚤市场"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m关闭[0m
+        [36m</button>[39m
+      [36m</header>[39m
+      [36m<nav[39m
+        [33maria-label[39m=[32m"市场页面"[39m
+      [36m>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m逛市场[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33maria-current[39m=[32m"page"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m我的发布记录[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m我的收藏[0m
+        [36m</button>[39m
+        [36m<button[39m
+          [33mdisabled[39m=[32m""[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m发布闲置[0m
+        [36m</button>[39m
+      [36m</nav>[39m
+      [36m<p[39m
+        [33mrole[39m=[32m"status"[39m
+      [36m>[39m
+        [0m园区市场已暂停。[0m
+        [0m本人发布记录仍可管理。[0m
+      [36m</p>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m原园区：[0m
+          [0mP[0m
+        [36m</h3>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"park-market-grid"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"park-market-card"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<strong>[39m
+              [0m在售台灯[0m
+            [36m</strong>[39m
+            [36m<span>[39m
+              [0m¥1.00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m在售[0m
+            [36m</span>[39m
+            [36m<small>[39m
+              [0m原园区：[0m
+              [0mP[0m
+            [36m</small>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m原园区：[0m
+          [0mQ[0m
+        [36m</h3>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"park-market-grid"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"park-market-card"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<strong>[39m
+              [0m已售椅子[0m
+            [36m</strong>[39m
+            [36m<span>[39m
+              [0m¥2.00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m已售出[0m
+            [36m</span>[39m
+            [36m<small>[39m
+              [0m原园区：[0m
+              [0mQ[0m
+            [36m</small>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<section>[39m
+        [36m<h3>[39m
+          [0m本机草稿[0m
+        [36m</h3>[39m
+        [36m<div>[39m
+          [36m<button>[39m
+            [0m未发出的草稿[0m
+          [36m</button>[39m
+          [36m<button>[39m
+            [0m删除草稿[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+    [36m</dialog>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/renderer/components/ParkMarketDialog.test.tsx:513:32
+    511|   });
+    512|   render(<ParkMarketDialog open accountId="seller" initialView="mine" …
+    513|   fireEvent.click(await screen.findByRole('button',{name:'已售出（1）'}));
+       |                                ^
+    514|   expect(screen.getByText('已售椅子')).toBeTruthy();
+    515|   expect(screen.queryByText('在售台灯')).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 passed (10)
+   Start at  13:36:09
+   Duration  5.01s (transform 107ms, setup 65ms, collect 119ms, tests 4.34s, environment 273ms, prepare 53ms)

@@ -1,3 +1,4 @@
+import { MarketContactCenter, MarketPrivateConversation } from './MarketContactCenter.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -173,6 +174,7 @@ function FederationVerificationQr({ payload }: { payload: string }): React.JSX.E
 
 export interface InboxPageProps {
   onOpenCarpool?: () => void;
+  marketNotifications?: React.ReactNode;
   enterpriseAccount?: EnterpriseAccount;
   /** Commercial Federation entitlement. Undefined is deliberately fail-closed. */
   effectiveDirectMessages?: boolean;
@@ -231,6 +233,7 @@ type UnifiedInboxConversation =
 
 export function InboxPage({
   onOpenCarpool,
+  marketNotifications,
   enterpriseAccount,
   effectiveDirectMessages = false,
   baselineDirectMessagesAvailable,
@@ -1041,6 +1044,8 @@ export function InboxPage({
         <button type="button" onClick={onBack}>返回对话</button>
       </header>
 
+      {marketNotifications}
+      {enterpriseAccount?.id && <MarketContactCenter key={enterpriseAccount.id} accountId={enterpriseAccount.id} onOpenPrivate={peer => { setSelectedPeer(peer); setSelectedFederationContactId(null); setSelectedParkTicketId(null); }} />}
       {effectiveParkService ? <CarpoolRequestCenter onOpenCarpool={onOpenCarpool} /> : null}
 
       <div className="otto-inbox-page__filters" role="tablist" aria-label="消息过滤">
@@ -1313,6 +1318,7 @@ export function InboxPage({
               </header>
               {renderMessages(`开始与 ${selectedMember.name} 对话`)}
               {renderReply(`回复 ${selectedMember.name}…`)}
+              {enterpriseAccount?.id && <MarketPrivateConversation key={selectedPeer} accountId={enterpriseAccount.id} peerId={selectedPeer} />}
             </>
           ) : (
             <div className="otto-inbox-page__empty otto-inbox-page__empty--detail">

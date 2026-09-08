@@ -1,0 +1,27 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ❯ src/main/park-market.test.ts (2 tests | 1 failed) 7ms
+   ✓ confines market requests and isolates encrypted drafts by server, organization and account 4ms
+   × renews every local draft independently and retains text when an image lease cannot be renewed 2ms
+     → (0 , renewMarketDraftLeases) is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-market.test.ts > renews every local draft independently and retains text when an image lease cannot be renewed
+TypeError: (0 , renewMarketDraftLeases) is not a function
+ ❯ src/main/park-market.test.ts:84:9
+     82|   store.save(scope,[{id:'old',form:{title:'保留旧草稿',imageIds:['missing']…
+     83|   const called:string[]=[];
+     84|   await renewMarketDraftLeases(store,scope,()=>true,async(id)=>{called…
+       |         ^
+     85|   expect(called).toEqual(['old','valid']);
+     86|   expect(store.load(scope)).toMatchObject([{id:'old',form:{title:'保留旧草…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  12:56:57
+   Duration  576ms (transform 37ms, setup 69ms, collect 14ms, tests 7ms, environment 275ms, prepare 49ms)

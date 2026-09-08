@@ -1,3 +1,8 @@
+import { MarketLinkIntents, marketLink } from './park-market-links.js';
+import { MarketUploadManager } from './park-market-uploads.js';
+import { ParkMarketMls } from './park-market-mls.js';
+import { ParkMarketMessaging } from './park-market-messaging.js';
+import { MarketDraftStore, assertMarketDraftScope, renewMarketDraftLeases } from './park-market.js';
 import { ParkCarpoolChat } from './park-carpool-chat.js';
 import { ParkCarpoolStartup } from './park-carpool-startup.js';
 /**
@@ -865,6 +870,10 @@ const IPC = {
   enterpriseParkCarpoolChatSend: 'otto:enterprise-park-carpool-chat-send',
   enterpriseParkCarpoolWorkflowGet: 'otto:enterprise-park-carpool-workflow-get',
   enterpriseParkCarpoolWorkflowExecute: 'otto:enterprise-park-carpool-workflow-execute',
+  enterpriseMarketSend: 'otto:enterprise-market-send',
+  enterpriseMarketMessages: 'otto:enterprise-market-messages',
+  enterpriseParkMarket: 'otto:enterprise-park-market',
+  enterpriseMarketDrafts: 'otto:enterprise-market-drafts',
   enterpriseParkCarpoolGet: 'otto:enterprise-park-carpool-get',
   enterpriseParkCarpoolSearchPlaces: 'otto:enterprise-park-carpool-search-places',
   enterpriseParkCarpoolPublish: 'otto:enterprise-park-carpool-publish',
@@ -1002,11 +1011,21 @@ async function synchronizeAuthenticatedEnterpriseAccount(
     serverManager.setAuthenticatedEnterpriseAccount(next),
   );
   parkCarpoolStartup.update(null);
+  marketUploadManager.cancelAll();
   if (!account) {
+    await parkMarketMls.close();
     await enterpriseMlsOutboxRetry.stop();
     await enterpriseMlsInboundPoll.stop();
     await enterpriseMls.close();
     return;
+  }
+  await parkMarketMls.close();
+  const marketScope = {server: enterpriseClient.snapshot().serverUrl, organization: account.organizationId, account: account.id};
+  if (safeStorage.isEncryptionAvailable()) {
+    void renewMarketDraftLeases(createMarketDraftStore(), marketScope, () => {
+      const current = enterpriseClient.authenticatedAccountSnapshot();
+      return current?.id === marketScope.account && current.organizationId === marketScope.organization && enterpriseClient.snapshot().serverUrl === marketScope.server;
+    }, (id, imageIds) => enterpriseClient.requestParkMarket({path:`/drafts/${id}`,method:'PUT',body:{imageIds}})).catch(() => undefined);
   }
   let e2eeDevice: Awaited<
     ReturnType<EnterpriseClient['ensureE2eeDeviceReady']>
@@ -1020,6 +1039,10 @@ async function synchronizeAuthenticatedEnterpriseAccount(
     console.warn('[otto-desktop] E2EE device registration failed:', error);
   }
   if (e2eeDevice) {
+    if (e2eeDevice.approvalState === 'approved' && enterpriseClient.marketMessagingContext().requiresMls) {
+      try { await parkMarketMls.activate(); }
+      catch { await parkMarketMls.close(); /* Foreground contact reports unavailable encryption. */ }
+    }
     if (enterpriseClient.supportsMlsTransportFoundation()) {
       await enterpriseMlsOutboxRetry.stop();
       await enterpriseMlsInboundPoll.stop();
@@ -1182,6 +1205,18 @@ const parkCarpoolStartup = new ParkCarpoolStartup(() => (parkCarpoolChat = creat
   const workflow = await enterpriseClient.getParkCarpoolWorkflow();
   return workflow.capabilities.includes('park_carpool_mls_v1') || workflow.conversations.length > 0;
 }, error => console.warn('[otto-desktop] Park carpool encryption unavailable:', error));
+const parkMarketMls = new ParkMarketMls({
+  directory: path.join(app.getPath('userData'), 'park-market-mls'),
+  binaryPath: packagedOpenMlsBinaryPath(),
+  context: () => enterpriseClient.marketMessagingContext(),
+  request: body => enterpriseClient.requestParkMarket({ path: '/mls', method: 'POST', body }),
+  protect(value) { assertEnterpriseE2eeSecureStorage(); return safeStorage.encryptString(value).toString('base64'); },
+  unprotect(value) { assertEnterpriseE2eeSecureStorage(); return safeStorage.decryptString(Buffer.from(value, 'base64')); },
+});
+const marketUploadManager = new MarketUploadManager(() => {
+  const account = enterpriseClient.authenticatedAccountSnapshot();
+  return account ? JSON.stringify([enterpriseClient.snapshot().serverUrl, account.organizationId, account.id]) : '';
+}, (input, options) => enterpriseClient.requestParkMarket(input, options));
 const enterpriseMlsCoordinator = new EnterpriseMlsSessionCoordinator(
   enterpriseMls,
   enterpriseClient,
@@ -1256,6 +1291,7 @@ const enterpriseSkillUsageReporter = new EnterpriseSkillUsageReporter({
     );
   },
 });
+const marketLinkIntents = new MarketLinkIntents();
 const enterpriseRegistrationIntents = new EnterpriseRegistrationIntentStore();
 let enterpriseSessionLoaded = false;
 let enterpriseIntentRendererReady = false;
@@ -3079,6 +3115,11 @@ async function authenticatedSkillScope(): Promise<EnterpriseSkillScope | null> {
   return teamId ? { teamId } : null;
 }
 
+function createMarketDraftStore() {
+  return new MarketDraftStore(path.join(app.getPath('userData'), 'park-market-drafts'),
+    text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，草稿尚未保存'); return safeStorage.encryptString(text); },
+    bytes => safeStorage.decryptString(bytes));
+}
 function registerIpc(): void {
   const enterpriseSkillLibrary = new EnterpriseSkillLibrary(
     path.join(process.cwd(), '.otto', 'org', 'skill-shares.json'),
@@ -4379,6 +4420,51 @@ function registerIpc(): void {
     loadEnterpriseSession();
     if (!command || typeof command !== 'object' || typeof (command as {type?: unknown}).type !== 'string') throw new Error('同行操作无效');
     return enterpriseClient.executeParkCarpoolWorkflow(command as Parameters<EnterpriseClient['executeParkCarpoolWorkflow']>[0]);
+  });
+  const marketDraftStore = createMarketDraftStore();
+  ipcMain.handle('otto:enterprise-market-link', async (event, listingId?: string) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow?.webContents.mainFrame) throw new Error('市场窗口无效');
+    loadEnterpriseSession();
+    const account = enterpriseClient.authenticatedAccountSnapshot();
+    if (!account) throw new Error('请先登录');
+    const server = enterpriseClient.snapshot().serverUrl;
+    if (listingId === undefined) return marketLinkIntents.take(server);
+    await enterpriseClient.requestParkMarket({ path: `/listings/${listingId}`, method: 'GET' });
+    const link = marketLink(server, listingId); clipboard.writeText(link); return { copied: true };
+  });
+  const marketMessaging = new ParkMarketMessaging({ mls: parkMarketMls, context: () => enterpriseClient.marketMessagingContext(), ensureDevice: () => enterpriseClient.ensureE2eeDeviceReady(), request: (path, method = 'GET', body) => enterpriseClient.requestParkMarket({ path, method, body }), pending: new MarketDraftStore(path.join(app.getPath('userData'), 'park-market-pending'), text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，消息未发送'); return safeStorage.encryptString(text); }, bytes => safeStorage.decryptString(bytes), 50) });
+  ipcMain.handle(IPC.enterpriseMarketSend, async (event, input: Parameters<ParkMarketMessaging['send']>[0]) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许发送市场消息');
+    loadEnterpriseSession(); return marketMessaging.send(input);
+  });
+  ipcMain.handle('otto:enterprise-market-recover', async (event, id: string) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许恢复市场会话');
+    loadEnterpriseSession(); return marketMessaging.recover(id);
+  });
+  ipcMain.handle(IPC.enterpriseMarketMessages, async (event, id: string, beforeSequence?: number) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许读取市场消息');
+    loadEnterpriseSession(); return marketMessaging.messages(id, beforeSequence);
+  });
+  ipcMain.handle(IPC.enterpriseParkMarket, async (event, input: unknown) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许访问市场');
+    loadEnterpriseSession();
+    const upload = input as {imageBase64?: unknown; uploadId?: string};
+    if (upload?.imageBase64 !== undefined && upload.uploadId !== undefined)
+      return marketUploadManager.start(upload.uploadId, input, progress => {if(!event.sender.isDestroyed())event.sender.send('otto:enterprise-market-upload-progress',progress);});
+    return enterpriseClient.requestParkMarket(input);
+  });
+  ipcMain.handle('otto:enterprise-market-upload-cancel', (event, id: string) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许取消图片上传');
+    return marketUploadManager.cancel(id);
+  });
+  ipcMain.handle(IPC.enterpriseMarketDrafts, async (event, drafts?: unknown, expectedScope?: unknown) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许访问草稿');
+    loadEnterpriseSession(); const session = enterpriseClient.snapshot();
+    const account = enterpriseClient.authenticatedAccountSnapshot();
+    if (!account) throw new Error('请先登录账号');
+    const scope = { server: session.serverUrl, organization: account.organizationId, account: account.id };
+    if (drafts !== undefined) { assertMarketDraftScope(scope, expectedScope); marketDraftStore.save(scope, drafts); }
+    return marketDraftStore.load(scope);
   });
   ipcMain.handle(IPC.enterpriseParkCarpoolGet, async () => {
     loadEnterpriseSession();
@@ -6448,9 +6534,11 @@ if (isolatedUserDataDir) app.setPath('userData', isolatedUserDataDir);
 // Windows/Linux cold start 会把协议 URL 放进 argv；macOS 则通过 open-url 事件送达。
 // 解析器只接受中心企业邀请码链接，旧 token+key 链接不会改变登录状态。
 enterpriseRegistrationIntents.acceptArgv(process.argv);
+for (const argument of process.argv) marketLinkIntents.accept(argument);
 app.on('open-url', (event, url) => {
   event.preventDefault();
-  acceptEnterpriseRegistrationUrl(url);
+  if (marketLinkIntents.accept(url)) { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); } }
+  else acceptEnterpriseRegistrationUrl(url);
 });
 
 // 在窗口、托盘和 Notification 创建前注册稳定 AUMID。部分 Windows 机器若注册过晚，
@@ -6475,6 +6563,7 @@ if (!gotLock) {
   let quitCleanupStarted = false;
   let quitCleanupFinished = false;
   app.on('second-instance', (_event, commandLine) => {
+    for (const argument of commandLine) marketLinkIntents.accept(argument);
     const accepted = enterpriseRegistrationIntents.acceptArgv(commandLine);
     if (
       accepted &&

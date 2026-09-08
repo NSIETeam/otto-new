@@ -1,0 +1,13 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new-carpool
+
+(node:87574) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts (4 tests) 1857ms
+   ✓ postgres: A14/A32/A38 keep grants per item and retry existing-conversation consultations without changing snapshots  917ms
+   ✓ postgres: A16/A17 serialize sale/contact and expiry/renewal races without resurrecting requests or expiring renewed content  880ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  12:11:42
+   Duration  3.94s (transform 973ms, setup 0ms, collect 1.88s, tests 1.86s, environment 0ms, prepare 50ms)

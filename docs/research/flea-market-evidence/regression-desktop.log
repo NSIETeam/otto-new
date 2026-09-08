@@ -1,0 +1,15 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/desktop
+
+ ✓ src/renderer/enterpriseUnreadNotifications.test.ts (8 tests) 8ms
+ ✓ src/main/enterprise-mls-private-messages.test.ts (6 tests) 104ms
+ ✓ src/renderer/components/InboxPage.test.tsx (12 tests) 690ms
+ ✓ src/renderer/components/ParkServicesPlugin.test.tsx (58 tests) 2096ms
+ ✓ src/renderer/components/AccountManagementPage.test.tsx (33 tests) 3490ms
+   ✓ 企业管理分区导航 > 使用五个清晰分区并默认进入成员目录  396ms
+   ✓ 企业账号目录 > 新增成员会把头像地址和职位提交到真实账号接口  389ms
+
+ Test Files  5 passed (5)
+      Tests  117 passed (117)
+   Start at  09:44:47
+   Duration  5.17s (transform 887ms, setup 570ms, collect 1.56s, tests 6.39s, environment 3.46s, prepare 744ms)

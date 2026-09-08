@@ -1,4 +1,7 @@
+import { useMarketLinks } from './useMarketLinks.js';
 import {CarpoolConfirmation} from './components/CarpoolConfirmation.js';
+import { MarketNotifications, useMarketNotifications } from './components/MarketNotifications.js';
+import { ParkMarketDialog } from './components/ParkMarketDialog.js';
 /**
  * @license
  * Copyright 2025 Otto
@@ -1063,6 +1066,10 @@ function OttoWorkspaceApp({
   // —— 统一消息中心：会话历史、未读状态与企业通知 ——
   const [allConvOpen, setAllConvOpen] = useState(false);
   const [mainView, setMainView] = useState<MainView>('chat');
+  const [marketRecordsOpen, setMarketRecordsOpen] = useState(false);
+  const marketLink = useMarketLinks(!!account && !internalAdminPreview);
+  const marketDraftScope = useMemo(() => ({ server: serverUrl || 'local', organization: account.organizationId, account: account.id }), [serverUrl, account.organizationId, account.id]);
+  const marketNotifications = useMarketNotifications(!!account.id && !internalAdminPreview, JSON.stringify(marketDraftScope));
   const workspacePreferenceScope = useMemo(() => ({
     serverUrl,
     organizationId: account.organizationId,
@@ -1123,6 +1130,7 @@ function OttoWorkspaceApp({
   }>();
   const openNotificationSession = useCallback((sessionId: string): void => {
     if (sessionId === 'enterprise:carpool') {setMainView('inbox');return;}
+    if (sessionId === 'enterprise:market') { setMainView('inbox'); return; }
     const federationPrefix = 'enterprise:federation:';
     if (sessionId.startsWith(federationPrefix)) {
       const contactId = sessionId.slice(federationPrefix.length);
@@ -2049,6 +2057,7 @@ function OttoWorkspaceApp({
         recentWorkspacePaths={workspaceDirectories.recentPaths}
         onOpenHub={() => openHub('prefs')}
         onOpenAccounts={() => setMainView('accounts')}
+        onOpenMarketRecords={() => setMarketRecordsOpen(true)}
         onNavigate={(view) => {
           if (view === 'hub') openHub('prefs');
           else setMainView(view);
@@ -2057,7 +2066,7 @@ function OttoWorkspaceApp({
         onRename={actions.renameSession}
         onDelete={actions.deleteSession}
         enterpriseAccount={account}
-        enterpriseUnreadCounts={{ ...enterpriseUnreadCounts, 'enterprise:carpool':carpoolUnreadCount }}
+        enterpriseUnreadCounts={{ ...enterpriseUnreadCounts, 'enterprise:market': marketNotifications.state.unread, 'enterprise:carpool':carpoolUnreadCount }}
         parkTicketUnreadCount={parkTicketUnreadCounts.actionableCount}
         parkCreatorUpdateUnreadCount={parkTicketUnreadCounts.creatorUpdateCount}
         onJoinEnterprise={onJoinEnterprise}
@@ -2100,6 +2109,8 @@ function OttoWorkspaceApp({
         />
       ) : mainView === 'inbox' ? (
         <InboxPage
+          key={JSON.stringify(marketDraftScope)}
+          marketNotifications={<MarketNotifications state={marketNotifications.state} error={marketNotifications.error} onRead={marketNotifications.markRead} onLoadMore={marketNotifications.loadMore} loadingMore={marketNotifications.loadingMore} onOpen={() => setMarketRecordsOpen(true)} />}
           onOpenCarpool={() => setModuleModal({ kind: 'park-carpool' })}
           enterpriseAccount={account}
           effectiveDirectMessages={
@@ -2351,6 +2362,7 @@ function OttoWorkspaceApp({
         onClose={() => setModuleModal(null)}
       />
       {pendingCarpoolRemoval?<CarpoolConfirmation label="移除拼车入口" onCancel={()=>setPendingCarpoolRemoval(null)}><p>移除模块不会停止寻找、退出同行组或删除聊天。你仍可在“我的消息”的“当前同行状态”中管理，也可以从模块超市重新添加。</p><button type="button" autoFocus onClick={()=>setPendingCarpoolRemoval(null)}>保留入口</button><button type="button" onClick={()=>{const pending=pendingCarpoolRemoval;setPendingCarpoolRemoval(null);if(pending.visible)moduleWorkspace.setVisibleLayout(pending.layout);else moduleWorkspace.setLayout(pending.layout);}}>仅移除入口</button></CarpoolConfirmation>:null}
+      <ParkMarketDialog draftScope={marketDraftScope} open={marketRecordsOpen || !!marketLink.intent || moduleModal?.kind === 'park-flea-market'} accountId={account.id} initialView={moduleModal?.kind === 'park-flea-market' ? 'market' : 'mine'} initialListingId={marketLink.intent?.listingId} initialError={marketLink.intent?.error} onClose={() => { setMarketRecordsOpen(false); marketLink.clear(); if (moduleModal?.kind === 'park-flea-market') setModuleModal(null); moduleCapabilities.retry(); }} />
       <ParkCarpoolDialog
         key={`${moduleWorkspaceScopeKey}:park-carpool`}
         open={moduleModal?.kind === 'park-carpool'}

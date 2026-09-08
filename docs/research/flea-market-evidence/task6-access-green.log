@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+ ✓ src/modules/park_services/flea_market/fleaMarketAttachments.test.ts (1 test) 1ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  09:35:42
+   Duration  168ms (transform 37ms, setup 0ms, collect 48ms, tests 1ms, environment 0ms, prepare 31ms)

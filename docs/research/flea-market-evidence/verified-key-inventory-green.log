@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ✓ src/main/park-market-mls.test.ts (1 test) 2ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  12:44:07
+   Duration  463ms (transform 79ms, setup 46ms, collect 70ms, tests 2ms, environment 167ms, prepare 49ms)

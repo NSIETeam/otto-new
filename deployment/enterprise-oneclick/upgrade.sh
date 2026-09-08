@@ -89,6 +89,7 @@ fi
 otto_load_config "$CONFIG_PATH"
 OTTO_ALLOW_SMS_DISABLED="${OTTO_ALLOW_SMS_DISABLED:-0}"
 OTTO_DATABASE_ENCRYPTION_KEY_FILE="${OTTO_DATABASE_ENCRYPTION_KEY_FILE:-}"
+OTTO_DATABASE_ENCRYPTION_KEY_ID="${OTTO_DATABASE_ENCRYPTION_KEY_ID:-offline-database-key}"
 case "$OTTO_ALLOW_SMS_DISABLED" in
   0|1) ;;
   *) otto_die "OTTO_ALLOW_SMS_DISABLED 只能是 0 或 1" ;;
@@ -435,6 +436,7 @@ cp -p "$OLD_DATA_BACKUP" "$NEW_DATA"
 CANARY_DIR="${TXN_DIR}/canary"
 mkdir -p "$CANARY_DIR"
 cp -p "$NEW_DATA" "${CANARY_DIR}/data.db"
+otto_prepare_upgrade_canary_keys "$DATA_DIR" "$CANARY_DIR"
 if [ "$RESIDENT_STATE_EXISTED" -eq 1 ]; then
   install -o root -g root -m 0600 \
     "$OLD_RESIDENT_STATE_BACKUP" \
@@ -450,6 +452,7 @@ if [ -z "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" ]; then
     "import { randomBytes } from 'node:crypto'; import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[1], randomBytes(32), { flag: 'wx', mode: 0o600 });" \
     "$CANARY_DATABASE_KEY"
   OTTO_DATABASE_ENCRYPTION_KEY_FILE="$CANARY_DATABASE_KEY"
+  OTTO_DATABASE_ENCRYPTION_KEY_ID="oneclick-offline-database-key"
   DATABASE_KEY_MANAGED=1
 else
   [[ "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" = /* ]] \
@@ -460,7 +463,7 @@ else
 fi
 export OTTO_DATABASE_ENCRYPTION="required"
 export OTTO_DATABASE_ENCRYPTION_KEY_FILE
-export OTTO_DATABASE_ENCRYPTION_KEY_ID="oneclick-offline-database-key"
+export OTTO_DATABASE_ENCRYPTION_KEY_ID
 export OTTO_DATABASE_ENCRYPTION_KEY_READONLY="true"
 export OTTO_SQLCIPHER_NATIVE_BINDING="$SQLCIPHER_RELEASE_BINDING"
 
@@ -661,7 +664,7 @@ while (retained.at(-1) === '') retained.pop();
 for (const [key, value] of [
   ['OTTO_DATABASE_ENCRYPTION', 'required'],
   ['OTTO_DATABASE_ENCRYPTION_KEY_FILE', keyPath],
-  ['OTTO_DATABASE_ENCRYPTION_KEY_ID', 'oneclick-offline-database-key'],
+  ['OTTO_DATABASE_ENCRYPTION_KEY_ID', process.env.OTTO_DATABASE_ENCRYPTION_KEY_ID],
   ['OTTO_DATABASE_ENCRYPTION_KEY_READONLY', 'true'],
   ['OTTO_SQLCIPHER_NATIVE_BINDING', bindingPath],
   ['OTTO_APP_VERSION', appVersion],

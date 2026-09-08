@@ -30,6 +30,7 @@ describe('SkillLoader', () => {
 
     // Isolate user-global skills from the developer machine.
     vi.spyOn(os, 'homedir').mockReturnValue(testRoot);
+    vi.stubEnv('OTTO_USER_DIR', '');
 
     // Mock SkillsPaths
     vi.spyOn(SkillsPaths, 'OTTO_HOME', 'get').mockReturnValue(testRoot);
@@ -63,6 +64,7 @@ describe('SkillLoader', () => {
     // 清理测试目录
     await fs.remove(testRoot);
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   /**
@@ -139,6 +141,19 @@ description: Test Skill 2
   }
 
   describe('loadEnabledSkills', () => {
+    it('loads user-global skills from the explicit profile without loading another home', async () => {
+      const isolated = path.join(testRoot, 'isolated');
+      for (const [root, name] of [[isolated, 'profile-skill'], [path.join(testRoot, '.otto-user'), 'other-skill']]) {
+        const directory = path.join(root, 'skills', name);
+        await fs.ensureDir(directory);
+        await fs.writeFile(path.join(directory, 'SKILL.md'), `---\nname: ${name}\ndescription: isolated fixture\n---\n`);
+      }
+      vi.stubEnv('OTTO_USER_DIR', isolated);
+      const isolatedLoader = new SkillLoader(settingsManager, marketplaceManager, undefined, testRoot);
+      const skills = await isolatedLoader.loadEnabledSkills(SkillLoadLevel.METADATA);
+      expect(skills.map((skill) => skill.name)).toEqual(['profile-skill']);
+    });
+
     it('should load all enabled skills with metadata level', async () => {
       await createTestMarketplace();
 

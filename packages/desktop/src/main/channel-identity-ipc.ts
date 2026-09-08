@@ -1,7 +1,7 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 export type ChannelIdentityMutationBody = {
-  action: 'bind' | 'revoke';
+  action: 'claim-owner' | 'bind' | 'revoke';
   providerUserId: string;
   canonicalUserId?: string;
   approvalId: string;
@@ -10,7 +10,7 @@ export type ChannelIdentityMutationBody = {
 
 export function isChannelInstallationId(value: unknown): value is string {
   return typeof value === 'string'
-    && /^channel_(feishu|lark|wecom)_[a-f0-9]{24}$/.test(value);
+    && /^channel_(feishu|lark|wecom|dingtalk)_[a-f0-9]{24}$/.test(value);
 }
 
 export function parseChannelIdentityMutationIpc(
@@ -29,9 +29,9 @@ export function parseChannelIdentityMutationIpc(
   const canonicalUserId = readText('canonicalUserId');
   const approvalId = readText('approvalId');
   const expectedRevision = candidate.expectedRevision;
-  if ((action !== 'bind' && action !== 'revoke') || !providerUserId || providerUserId.length > 200
+  if ((action !== 'claim-owner' && action !== 'bind' && action !== 'revoke') || !providerUserId || providerUserId.length > 200
     || (action === 'bind' && (!canonicalUserId || canonicalUserId.length > 200))
-    || !approvalId || approvalId.length > 200
+    || (action !== 'claim-owner' && (!approvalId || approvalId.length > 200))
     || !Number.isSafeInteger(expectedRevision) || (expectedRevision as number) < 0) {
     return { ok: false, error: '身份绑定字段不完整或不合法。' };
   }
@@ -42,7 +42,7 @@ export function parseChannelIdentityMutationIpc(
       action,
       providerUserId,
       ...(action === 'bind' ? { canonicalUserId } : {}),
-      approvalId,
+      ...(action !== 'claim-owner' ? { approvalId } : { approvalId: 'local-owner-claim' }),
       expectedRevision: expectedRevision as number,
     },
   };

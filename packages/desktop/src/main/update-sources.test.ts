@@ -21,6 +21,87 @@ import {
 } from './update-core.js';
 
 describe('桌面应用更新源', () => {
+  it.each([
+    ['win32', 'x64', 'win-x64', 'Otto-Setup-1.9.15-win-x64.exe'],
+    ['darwin', 'arm64', 'mac-arm64', 'Otto-1.9.15-arm64.dmg'],
+    ['darwin', 'x64', 'mac-x64', 'Otto-1.9.15-x64.dmg'],
+  ])(
+    '保留旧版 %s/%s 到 1.9.15 的完整安装包升级协议',
+    (platform, arch, key, name) => {
+      for (const currentVersion of ['1.9.0', '1.9.10', '1.9.13', '1.9.14']) {
+        for (const manifestUrl of [
+          PRIMARY_MANIFEST_URL,
+          GITHUB_MANIFEST_URL,
+          LEGACY_GITHUB_MANIFEST_URL,
+        ]) {
+          const origin =
+            manifestUrl === PRIMARY_MANIFEST_URL
+              ? `${OFFICIAL_UPDATE_MIRROR_ORIGIN}/downloads`
+              : 'https://github.com/NSIETeam/otto-new/releases/download/v1.9.15';
+          const asset = {
+            name,
+            url: `${origin}/${name}`,
+            size: 128_032_671,
+            sha256: 'a'.repeat(64),
+          };
+          const parsed = parseManifest(
+            { version: '1.9.15', assets: { [key]: asset } },
+            resolveManifestAssetOrigins(manifestUrl),
+          );
+          expect(parsed.ok).toBe(true);
+          if (!parsed.ok) continue;
+          expect(
+            resolveCheckOutcome(
+              parsed.manifest,
+              currentVersion,
+              platformAssetKey(platform, arch),
+              RELEASE_PAGE_URL,
+            ),
+          ).toMatchObject({
+            status: 'update-available',
+            currentVersion,
+            version: '1.9.15',
+            asset,
+          });
+        }
+      }
+    },
+  );
+
+  it.each(['not-a-sha256', ''])(
+    '不因 1.9.15 是未签名桌面版而接受无效摘要：%s',
+    (sha256) => {
+      const parsed = parseManifest(
+        {
+          version: '1.9.15',
+          assets: {
+            'win-x64': {
+              name: 'Otto-Setup-1.9.15-win-x64.exe',
+              url: 'https://github.com/NSIETeam/otto-new/releases/download/v1.9.15/Otto-Setup-1.9.15-win-x64.exe',
+              size: 128,
+              sha256,
+            },
+          },
+        },
+        resolveManifestAssetOrigins(LEGACY_GITHUB_MANIFEST_URL),
+      );
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(
+        resolveCheckOutcome(
+          parsed.manifest,
+          '1.9.13',
+          'win-x64',
+          RELEASE_PAGE_URL,
+        ),
+      ).toMatchObject({
+        status: 'update-available',
+        asset: null,
+        releasePageUrl: RELEASE_PAGE_URL,
+      });
+    },
+  );
+
   it('主源使用企业 HTTPS 镜像，避开 GitHub release 资产直链不稳定', () => {
     const url = new URL(PRIMARY_MANIFEST_URL);
     expect(url.protocol).toBe('https:');
@@ -199,7 +280,9 @@ describe('桌面应用更新源', () => {
   });
 
   it('允许把显式 HTTPS 企业镜像放在 GitHub 前面，并自动去重', () => {
-    expect(resolveManifestUrls('https://updates.example.com/otto/latest.json')).toEqual([
+    expect(
+      resolveManifestUrls('https://updates.example.com/otto/latest.json'),
+    ).toEqual([
       'https://updates.example.com/otto/latest.json',
       PRIMARY_MANIFEST_URL,
       GITHUB_MANIFEST_URL,

@@ -105,8 +105,8 @@
     ]
   },
   "release": {
-    "clientVersion": "1.9.14",
-    "serverVersion": "1.9.14",
+    "clientVersion": "1.9.15",
+    "serverVersion": "1.9.15",
     "serverPackageVersion": "0.1.0",
     "apiVersion": 4,
     "enterpriseSchemaVersion": 26,
@@ -121,6 +121,7 @@
     "capabilities": [
       "policy_intelligence_v2",
       "policy_intelligence_v3",
+      "policy_intelligence_inbox_v1",
       "password_auth",
       "sms_login",
       "sms_registration",
@@ -202,7 +203,7 @@
       "id": "latest_internal_parent",
       "status": "verified",
       "evidence": [
-        "The candidate contains the fetched origin/internal tip cfc17d3fa434b0265b8803dd6b51436b2cc6d1af as an ancestor; authority baseline 1874681db2f108aa6a9b6d47ee62578d4ce37ac2 remains the historical integration anchor."
+        "The 1.9.15 candidate is based on origin/internal 9d65ad94; authority baseline 1874681db2f108aa6a9b6d47ee62578d4ce37ac2 remains the historical integration anchor. Live branch ancestry is enforced separately by validate:integration-baseline --verify-git-refs."
       ]
     },
     {
@@ -216,7 +217,7 @@
       "id": "version_schema_capability_mapping",
       "status": "verified",
       "evidence": [
-        "The validator binds product version 1.9.14, Enterprise API 4, schema 26, capabilities and product modules to source constants. This source mapping does not attest to a production migration or release."
+        "The validator binds product version 1.9.15, Enterprise API 4, schema 26, capabilities and product modules to source constants, including policy_intelligence_inbox_v1. This source mapping does not attest to a production migration or release."
       ]
     },
     {

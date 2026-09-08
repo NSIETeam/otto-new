@@ -42,7 +42,7 @@ async function cmdStart(): Promise<void> {
   const port = Number(process.env.OTTO_SERVER_PORT ?? DEFAULT_PORT);
   const enableFeishu = feishuCredentialsExist();
   console.log(`[otto-server] feishu gateway: ${enableFeishu ? 'enabled' : 'disabled (no credentials)'}`);
-  const server = new OttoServer({ host: DEFAULT_HOST, port, enableFeishu });
+  const server = new OttoServer({ host: DEFAULT_HOST, port, enableFeishu, enableOfficialChannels: true });
   await server.start();
   const { host, port: boundPort, clientToken } = server.endpoint;
   writeEndpoint(host, boundPort, clientToken, server.controlToken);
@@ -130,13 +130,14 @@ async function main(): Promise<void> {
     case 'feishu':
     case 'lark':
     case 'wecom':
+    case 'dingtalk':
       process.exitCode = await runChannelCli(cmd, process.argv.slice(3), {
         readEndpointRecord,
       });
       break;
     default:
 
-      console.error(`未知命令: ${cmd}（用 start | stop | status | feishu | lark | wecom）`);
+      console.error(`未知命令: ${cmd}（用 start | stop | status | feishu | lark | wecom | dingtalk）`);
       process.exitCode = 2;
   }
 }

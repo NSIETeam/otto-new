@@ -23,9 +23,11 @@ import {
   confirmAndSaveSkill,
   confirmPendingSkill,
   generateSkillCandidates,
+  generateLegacySkillContent,
   listPendingSkillCandidates,
   rejectPendingSkill,
   resolveAutoSkillSkillsDir,
+  resolveAutoSkillUserDir,
   scanAndStageSkillCandidates,
   startAutoSkillScanner,
   stopAutoSkillScanner,
@@ -95,6 +97,15 @@ afterEach(async () => {
 });
 
 describe('AutoSkillGenerator 个人 Skill 候选闭环', () => {
+  it('resolves a relative profile consistently while retaining portable generated skill names', () => {
+    process.env['OTTO_USER_DIR'] = 'relative-profile';
+    expect(resolveAutoSkillUserDir()).toBe(path.resolve('relative-profile'));
+    const content = generateLegacySkillContent('检测到 → 整理资料 → 输出报告', [], 3);
+    const name = content.match(/^name:\s*(.+)$/mu)?.[1];
+    expect(name).toMatch(/^auto-[a-z0-9-]+$/u);
+    expect(name!.length).toBeLessThanOrEqual(63);
+  });
+
   it('候选默认指向用户级 ~/.otto-user/skills，而不是当前项目', async () => {
     const candidates = await generateSkillCandidates(fakeConfig);
 

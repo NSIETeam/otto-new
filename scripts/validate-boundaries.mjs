@@ -20,6 +20,20 @@ const ALLOWED_CORE_SOURCE_IMPORTS = new Set([
   'packages/core/src/a2a/atoaProtocol.js',
 ]);
 
+// Only named package entry points are public contracts. A catch-all export
+// retained for runtime compatibility must not permit new source/deep imports.
+const SERVER_PUBLIC_SUBPATHS = new Set();
+try {
+  const serverPackage = JSON.parse(readFileSync(path.join(PACKAGES_DIR, 'server/package.json'), 'utf8'));
+  for (const [subpath, target] of Object.entries(serverPackage.exports ?? {})) {
+    if (subpath.startsWith('./') && !subpath.includes('*') && target) {
+      SERVER_PUBLIC_SUBPATHS.add(`otto-server/${subpath.slice(2)}`);
+    }
+  }
+} catch {
+  // A missing or malformed export contract fails closed for server subpaths.
+}
+
 function toRel(file) {
   return path.relative(ROOT, file).split(path.sep).join('/');
 }
@@ -73,7 +87,7 @@ function violationFor(fromRel, specifier) {
   if (fromPackage === 'desktop' && resolved?.startsWith('packages/server/src/')) {
     return 'desktop must not import server source deep paths';
   }
-  if (fromPackage === 'desktop' && specifier.startsWith('otto-server/')) {
+  if (fromPackage === 'desktop' && specifier.startsWith('otto-server/') && !SERVER_PUBLIC_SUBPATHS.has(specifier)) {
     return 'desktop must import otto-server through public package exports';
   }
   return null;

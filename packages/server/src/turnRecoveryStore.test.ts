@@ -4,8 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -19,10 +26,19 @@ import { TaskGraphCoordinator } from './taskGraph.js';
 import { TaskContinuityLedger } from './taskContinuity.js';
 import { TurnConstraintGuard } from './turnConstraints.js';
 
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, rename: vi.fn(actual.rename) };
+});
+
 let root: string;
 let store: FileTurnRecoveryStore;
 
 beforeEach(async () => {
+  const actual = await vi.importActual<typeof import('node:fs/promises')>(
+    'node:fs/promises',
+  );
+  vi.mocked(rename).mockReset().mockImplementation(actual.rename);
   root = await mkdtemp(path.join(os.tmpdir(), 'otto-turn-recovery-'));
   store = new FileTurnRecoveryStore(root);
 });
@@ -32,6 +48,71 @@ afterEach(async () => {
 });
 
 describe('FileTurnRecoveryStore', () => {
+  it.each(['EPERM', 'EACCES', 'EBUSY'])(
+    'preserves the started record while retrying a transient %s replacement',
+    async (code) => {
+      const record = await store.begin({
+        sessionId: 'retry',
+        turnId: 'turn',
+        intentHash: 'intent',
+      });
+      const operation = {
+        name: 'send_message',
+        fingerprint: 'send-once',
+        replayClass: 'never_replay' as const,
+      };
+      await store.recordStarted(record, operation);
+      const actual = await vi.importActual<typeof import('node:fs/promises')>(
+        'node:fs/promises',
+      );
+      vi.mocked(rename)
+        .mockClear()
+        .mockImplementationOnce(async () => {
+          expect((await store.load('retry'))?.tools[0]?.state).toBe('started');
+          throw Object.assign(new Error('replacement temporarily busy'), { code });
+        })
+        .mockImplementation(actual.rename);
+      await store.recordSucceeded(record, {
+        ...operation,
+        resultSummary: 'receipt-1',
+      });
+      expect(rename).toHaveBeenCalledTimes(2);
+      expect((await store.load('retry'))?.tools[0]).toMatchObject({
+        state: 'succeeded',
+        resultSummary: 'receipt-1',
+      });
+      expect((await readdir(root)).some((file) => file.endsWith('.tmp'))).toBe(false);
+    },
+  );
+
+  it.each([
+    ['EPERM', 5],
+    ['ENOSPC', 1],
+  ] as const)(
+    'fails closed after bounded %s replacement failure without losing the started record',
+    async (code, attempts) => {
+      const record = await store.begin({
+        sessionId: 'blocked',
+        turnId: 'turn',
+        intentHash: 'intent',
+      });
+      const operation = {
+        name: 'send_message',
+        fingerprint: 'send-once',
+        replayClass: 'never_replay' as const,
+      };
+      await store.recordStarted(record, operation);
+      const failure = Object.assign(new Error('replacement failed'), { code });
+      vi.mocked(rename).mockClear().mockRejectedValue(failure);
+      await expect(store.recordSucceeded(record, operation)).rejects.toBe(failure);
+      expect(rename).toHaveBeenCalledTimes(attempts);
+      const saved = (await store.load('blocked'))!;
+      expect(saved.tools[0]?.state).toBe('started');
+      expect(store.decisionForTool(saved, operation).action).toBe('reconcile');
+      expect((await readdir(root)).some((file) => file.endsWith('.tmp'))).toBe(false);
+    },
+  );
+
   it('persists repair spending across restart and rejects attempts to reset that budget', async () => {
     const record = await store.begin({ sessionId: 'repair', turnId: 'turn', intentHash: 'intent' });
     const ledger = new TaskContinuityLedger('turn', { version: 1, text: '修复登录', source: 'local' });

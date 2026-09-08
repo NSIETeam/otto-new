@@ -10,6 +10,7 @@ const installation = {
   tenantId: 'corp-1',
   tenantName: '示例企业',
   botName: 'Otto Bot',
+  requestedScopes: ['message.send', 'message.receive'],
   grantedScopes: ['message.send'],
   connectedAtMs: 1,
 };
@@ -35,6 +36,9 @@ describe('ChannelInstallationList', () => {
               running: true,
               state: 'connected',
               reconnectCount: 1,
+              missingScopes: ['message.receive'],
+              startedAtMs: Date.now() - 120_000,
+              lastReceivedAtMs: Date.now() - 30_000,
             },
             error: null,
           }
@@ -65,6 +69,8 @@ describe('ChannelInstallationList', () => {
     expect(await screen.findByText('Otto Bot')).toBeTruthy();
     expect(screen.getByText('示例企业')).toBeTruthy();
     expect(screen.getByText(/权限：message.send · 重连 1 次/)).toBeTruthy();
+    expect(screen.getByText(/缺少已授权权限：message.receive/)).toBeTruthy();
+    expect(screen.getByText(/运行 2 分钟 · 最近接收 30 秒前 · 最近发送 从未/)).toBeTruthy();
     expect(screen.getByText('connected')).toBeTruthy();
     expect(channelInstallationAction).toHaveBeenCalledWith(
       installation.installationId,

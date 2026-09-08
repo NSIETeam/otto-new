@@ -299,15 +299,19 @@ function readBody(
 ): Promise<RouteBody> {
   if (req.readableEnded || req.complete) return Promise.resolve({});
   return new Promise((resolve) => {
-    let body = '';
+    const chunks: Buffer[] = [];
+    let bodyLength = 0;
     let tooLarge = false;
     req.on('data', (chunk) => {
       if (tooLarge) return;
-      body += chunk;
-      if (body.length > maxLength) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bodyLength += bytes.length;
+      if (bodyLength > maxLength) {
         tooLarge = true;
-        body = '';
+        chunks.length = 0;
+        return;
       }
+      chunks.push(bytes);
     });
     req.on('end', () => {
       if (tooLarge) {
@@ -315,6 +319,7 @@ function readBody(
         return;
       }
       try {
+        const body = Buffer.concat(chunks, bodyLength).toString('utf8');
         resolve(body ? (JSON.parse(body) as RouteBody) : {});
       } catch {
         resolve({});

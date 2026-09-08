@@ -64,8 +64,16 @@ export type ChannelPairingBrokerStatus = (
   | { status: 'denied'; reason?: string }
 ) & { pollAfterMs?: number };
 
+export interface ChannelPairingRegistrationResult {
+  /** Provider-owned authorization URL that replaces the generic Broker QR. */
+  qrPayload?: string;
+  pollAfterMs?: number;
+}
+
 export interface ChannelPairingBrokerV1 {
-  register(registration: ChannelBrokerPairingRegistration): Promise<void>;
+  register(
+    registration: ChannelBrokerPairingRegistration,
+  ): Promise<void | ChannelPairingRegistrationResult>;
   poll(pairingId: string): Promise<ChannelPairingBrokerStatus>;
   cancel(pairingId: string): Promise<void>;
 }
@@ -109,12 +117,23 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
     const { session, registration } =
       await this.options.coordinator.beginForBroker(input);
     try {
-      await this.options.broker.register(registration);
+      const registered = await this.options.broker.register(registration);
+      if (registered?.qrPayload) {
+        const url = new URL(registered.qrPayload);
+        if (url.protocol !== 'https:' || url.username || url.password) {
+          throw new Error('channel broker returned an unsafe QR payload');
+        }
+        session.qrPayload = url.toString();
+      }
+      if (registered?.pollAfterMs !== undefined) {
+        session.pollAfterMs = Math.min(30_000, Math.max(1_000, registered.pollAfterMs));
+      }
     } catch (error) {
       await this.options.coordinator.deny(
         session.pairingId,
         'pairing broker registration failed',
       );
+      await this.options.broker.cancel(session.pairingId).catch(() => undefined);
       throw error;
     }
     this.brokerRegistrations.set(session.pairingId, registration);
@@ -192,12 +211,34 @@ export class ManagedChannelConnectorV1 implements ChannelConnectorV1 {
   ): Promise<ChannelInstallation> {
     const credential = this.pendingCredentials.get(pairingId);
     if (!credential) throw new Error('provider credential is unavailable');
-    const installation = await this.options.coordinator.complete(
-      pairingId,
-      proof,
-      ({ installation: pendingInstallation }) =>
-        this.options.vault.commit(pendingInstallation, credential),
-    );
+    let pendingInstallation: ChannelInstallation | undefined;
+    let installation: ChannelInstallation;
+    try {
+      installation = await this.options.coordinator.complete(
+        pairingId,
+        proof,
+        ({ installation: pending }) => {
+          pendingInstallation = pending;
+          return this.options.vault.commit(pending, credential);
+        },
+      );
+    } catch (error) {
+      const pairing = await this.options.coordinator.get(pairingId);
+      if (pendingInstallation && ['denied', 'expired', 'failed', 'revoked'].includes(pairing.status)) {
+        // Cancellation may finish before an in-flight vault write becomes visible.
+        // Remove that late write before allowing any later resident restore.
+        await this.options.vault.remove({
+          installationId: pendingInstallation.installationId,
+          provider: pendingInstallation.provider,
+          tenantId: pendingInstallation.tenantId,
+        });
+        this.clearLocalPairingState(pairingId);
+      }
+      throw error;
+    }
+    // Installation is not user-visible as successful until the provider has
+    // accepted the credential and the long connection is actually ready.
+    await this.options.runtime.start(installation, credential);
     this.clearLocalPairingState(pairingId);
     await this.options.broker.cancel(pairingId).catch(() => undefined);
     return installation;

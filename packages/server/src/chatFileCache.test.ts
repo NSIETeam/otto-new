@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -12,6 +12,28 @@ import { cacheChatFiles } from './chatFileCache.js';
 import type { MessageContent } from './protocol.js';
 
 describe('cacheChatFiles', () => {
+  it('places the default cache beneath the isolated profile', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'otto-chat-root-'));
+    try {
+      vi.stubEnv('HOME', root);
+      vi.stubEnv('USERPROFILE', root);
+      vi.stubEnv('OTTO_USER_DIR', path.join(root, 'isolated'));
+      const source = path.join(root, 'source.txt');
+      await fs.writeFile(source, 'profile-local attachment');
+      const result = await cacheChatFiles('session-isolated', [{
+        type: 'file_reference', value: { fileName: 'source.txt', filePath: source },
+      }]);
+      const part = result.content[0];
+      if (part.type !== 'file_reference') throw new Error('Expected cached attachment');
+      expect(part.value.filePath.startsWith(path.join(root, 'isolated/chat-files/session-isolated') + path.sep)).toBe(true);
+      await expect(fs.readFile(part.value.filePath, 'utf8')).resolves.toBe('profile-local attachment');
+      await expect(fs.stat(path.join(root, '.otto-user'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      vi.unstubAllEnvs();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('copies file references into the server cache and rewrites filePath', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'otto-chat-cache-'));
     const sourcePath = path.join(root, 'report.md');

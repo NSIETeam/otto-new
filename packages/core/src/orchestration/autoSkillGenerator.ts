@@ -15,11 +15,12 @@ import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import { createHash } from 'node:crypto';
-import { homedir, tmpdir } from 'os';
+import { tmpdir } from 'os';
 import { getWorkLogger, type WorkLogEntry } from './workLog.js';
 import type { Config } from '../config/config.js';
 import { SceneType, SceneManager } from '../core/sceneManager.js';
 import { getResponseText } from '../utils/partUtils.js';
+import { resolveOttoUserDir } from '../utils/paths.js';
 import type { AutoSkillRealtimeWatcher as AutoSkillRealtimeWatcherType } from './autoSkillEnhance.js';
 import {
   rankAutoSkillCandidates,
@@ -109,11 +110,11 @@ const DEFAULT_OPTIONS: PatternDetectionOptions = {
  */
 export function resolveAutoSkillUserDir(): string {
   const configured = process.env['OTTO_USER_DIR']?.trim();
-  if (configured) return configured;
+  if (configured) return resolveOttoUserDir();
   if (process.env['NODE_ENV'] === 'test' || process.env['VITEST']) {
     return path.join(tmpdir(), 'otto-auto-skill-tests', String(process.pid));
   }
-  return path.join(homedir(), '.otto-user');
+  return resolveOttoUserDir();
 }
 
 /** 用户级 Skill 安装目录（与 SkillLoader 的 USER_GLOBAL 来源一致）。 */

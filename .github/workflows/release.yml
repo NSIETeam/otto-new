@@ -22,6 +22,16 @@ on:
         required: false
         type: boolean
         default: false
+      unsigned_desktop_stable:
+        description: 'Explicitly release stable desktop installers without Windows/Apple signing; enterprise signatures and all publication gates remain required.'
+        required: false
+        type: boolean
+        default: false
+      allow_unverified_legacy_mutability:
+        description: 'Explicitly skip only legacy repository administrative mutability checks; record unknown and retain exact latest-pointer compensation.'
+        required: false
+        type: boolean
+        default: false
       release_channel:
         description: 'Enterprise package release channel.'
         required: false
@@ -59,37 +69,28 @@ jobs:
     name: Validate release mode boundary
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      contents: read
+    outputs:
+      unsigned_desktop: ${{ steps.mode.outputs.unsigned_desktop }}
     steps:
+      - name: Checkout release mode validator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Reject unsafe transition parameter combinations
+        id: mode
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           REPOSITORY: ${{ github.repository }}
           UNSIGNED_MAC_TRANSITION: ${{ inputs.unsigned_mac_transition && 'true' || 'false' }}
+          UNSIGNED_DESKTOP_STABLE: ${{ inputs.unsigned_desktop_stable && 'true' || 'false' }}
+          ALLOW_UNVERIFIED_LEGACY_MUTABILITY: ${{ inputs.allow_unverified_legacy_mutability && 'true' || 'false' }}
           RELEASE_CHANNEL: ${{ inputs.release_channel || 'stable' }}
           DRAFT_RELEASE: ${{ inputs.draft && 'true' || 'false' }}
           PRERELEASE: ${{ inputs.prerelease && 'true' || 'false' }}
         run: |
           set -euo pipefail
-          if [ "$REPOSITORY" != "NSIETeam/otto-new" ]; then
-            echo "Release workflow may only run in NSIETeam/otto-new, not $REPOSITORY." >&2
-            exit 1
-          fi
-          if [ "$UNSIGNED_MAC_TRANSITION" = "true" ] || [ "$RELEASE_CHANNEL" = "transition" ]; then
-            if [ "$EVENT_NAME" != "workflow_dispatch" ] \
-              || [ "$UNSIGNED_MAC_TRANSITION" != "true" ] \
-              || [ "$RELEASE_CHANNEL" != "transition" ] \
-              || [ "$DRAFT_RELEASE" != "true" ] \
-              || [ "$PRERELEASE" != "true" ]; then
-              echo "Unsigned transition builds require workflow_dispatch, unsigned_mac_transition=true, release_channel=transition, draft=true, and prerelease=true." >&2
-              exit 1
-            fi
-          fi
-          if [ "$PRERELEASE" = "true" ] && [ "$DRAFT_RELEASE" != "true" ]; then
-            echo "Prerelease artifacts must remain draft-only and cannot deploy or update existing users." >&2
-            exit 1
-          fi
+          node scripts/validate-release-mode.mjs
 
   validate-source:
     name: Validate immutable release source
@@ -102,6 +103,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
       source_commit: ${{ steps.source.outputs.commit }}
+      unsigned_desktop: ${{ needs.validate-mode.outputs.unsigned_desktop }}
     steps:
       - name: Checkout source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -283,6 +285,7 @@ jobs:
       tag: ${{ needs.validate-source.outputs.tag }}
       source_commit: ${{ needs.validate-source.outputs.source_commit }}
       package_identity: ${{ steps.artifacts.outputs.package_identity }}
+      unsigned_desktop: ${{ needs.validate-source.outputs.unsigned_desktop }}
 
     steps:
       - name: Checkout source
@@ -443,7 +446,7 @@ jobs:
           test -n "$LICENSE_PUBLIC_KEYS"
 
       - name: Require desktop signing and notarization custody
-        if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
+        if: ${{ needs.validate-source.outputs.unsigned_desktop != 'true' }}
         shell: bash
         env:
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -453,8 +456,6 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          ENTERPRISE_SIGNING_PRIVATE_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PRIVATE_KEY }}
-          ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           test -n "$MAC_CSC_LINK"
@@ -464,6 +465,15 @@ jobs:
           test -n "$APPLE_ID"
           test -n "$APPLE_APP_SPECIFIC_PASSWORD"
           test -n "$APPLE_TEAM_ID"
+
+      - name: Require enterprise package signing custody
+        if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
+        shell: bash
+        env:
+          ENTERPRISE_SIGNING_PRIVATE_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PRIVATE_KEY }}
+          ENTERPRISE_SIGNING_PUBLIC_KEY: ${{ secrets.OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
           test -n "$ENTERPRISE_SIGNING_PRIVATE_KEY"
           test -n "$ENTERPRISE_SIGNING_PUBLIC_KEY"
 
@@ -474,7 +484,9 @@ jobs:
           npm run typecheck
           npm run test:ci
           npm run test:scripts -- --run \
-            scripts/tests/enterprise-runtime-dependencies.test.js
+            scripts/tests/enterprise-runtime-dependencies.test.js \
+            scripts/tests/release-mode.test.js \
+            scripts/tests/legacy-release-mutability.test.js
 
       - name: Focused regression tests
         run: |
@@ -491,7 +503,7 @@ jobs:
             packages/server/src/server.test.ts \
             packages/server/src/enterprise/server.test.ts
 
-      - name: Verify V1.9.13 to V1.9.14 upgrade acceptance
+      - name: Verify legacy desktop and V1.9.13 database upgrade acceptance
         run: npm run release:upgrade:verify
 
       - name: Build desktop release artifacts
@@ -508,7 +520,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          OTTO_ALLOW_UNSIGNED_MAC: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}
+          OTTO_ALLOW_UNSIGNED_MAC: ${{ needs.validate-source.outputs.unsigned_desktop == 'true' && '1' || '0' }}
 
       - name: Enforce packaged content and installer size budget
         run: npm run release:gate --workspace=packages/desktop
@@ -517,18 +529,23 @@ jobs:
           OTTO_DESKTOP_BASELINE_INSTALLER_BYTES: '128032671'
           OTTO_DESKTOP_MAX_INSTALLER_GROWTH_MB: '8'
           OTTO_DESKTOP_MAX_INSTALLER_MB: '140'
+          OTTO_DESKTOP_MAX_DMG_MB: '140'
 
-      - name: Verify signed macOS disk images
-        if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
+      - name: Verify macOS disk images and application seals
         shell: bash
+        env:
+          DESKTOP_UNSIGNED_BUILD: ${{ needs.validate-source.outputs.unsigned_desktop == 'true' && '1' || '0' }}
         run: |
           set -euo pipefail
           VERSION="${{ needs.validate-source.outputs.version }}"
           for arch in arm64 x64; do
             dmg="packages/desktop/release/Otto-${VERSION}-${arch}.dmg"
-            codesign --verify --verbose=2 "$dmg"
-            spctl --assess --type open --context context:primary-signature \
-              --verbose=4 "$dmg"
+            hdiutil verify "$dmg"
+            if [ "$DESKTOP_UNSIGNED_BUILD" != '1' ]; then
+              codesign --verify --verbose=2 "$dmg"
+              spctl --assess --type open --context context:primary-signature \
+                --verbose=4 "$dmg"
+            fi
             mount_point="$(mktemp -d)"
             hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "$dmg" >/dev/null
             app="$mount_point/Otto.app"
@@ -725,6 +742,8 @@ jobs:
         shell: bash
         env:
           DESKTOP_TEST_BUILD: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}
+          DESKTOP_UNSIGNED_BUILD: ${{ needs.validate-source.outputs.unsigned_desktop == 'true' && '1' || '0' }}
+          ALLOW_UNVERIFIED_LEGACY_MUTABILITY: ${{ inputs.allow_unverified_legacy_mutability && 'true' || 'false' }}
         run: |
           set -euo pipefail
           VERSION="${{ needs.validate-source.outputs.version }}"
@@ -755,8 +774,16 @@ jobs:
               echo
               echo "SHA256: \`${INSTALLER_SHA}\`"
               echo
-              echo "Windows Authenticode and macOS Developer ID/notarization are mandatory release gates."
+              if [ "$DESKTOP_UNSIGNED_BUILD" = '1' ]; then
+                echo "Release channel: stable. Windows installers do not carry Authenticode signatures; macOS applications use ad-hoc seals without Developer ID or notarization."
+                echo "Windows SmartScreen or macOS Gatekeeper may require user action or block installation under device policy. Existing clients retain the same update manifest, installer names and SHA-256 checks; unattended installation on every device is not guaranteed."
+              else
+                echo "Windows Authenticode and macOS Developer ID/notarization are mandatory release gates."
+              fi
               echo "The release workflow also verifies SHA-256 checksums, build provenance, SQLCipher provenance and SBOMs, the desktop update manifest, the enterprise Ed25519 package signature, and the License public-key trust anchor."
+              if [ "$ALLOW_UNVERIFIED_LEGACY_MUTABILITY" = 'true' ]; then
+                echo "Legacy repository mutability: unknown. The operator explicitly waived its administrative settings check. Published assets and tags will not be changed; exact latest-pointer compensation and server rollback prerequisites remain required."
+              fi
               echo
               echo "Desktop installers, update manifest, and enterprise one-click package are attached to this release."
             } > "$NOTES_FILE"
@@ -783,7 +810,7 @@ jobs:
       contents: read
       attestations: read
     env:
-      DESKTOP_TEST_BUILD: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}
+      DESKTOP_UNSIGNED_BUILD: ${{ needs.build.outputs.unsigned_desktop == 'true' && '1' || '0' }}
     steps:
       - name: Checkout source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -809,7 +836,7 @@ jobs:
           path: release-download
 
       - name: Require a valid Authenticode chain
-        if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
+        if: ${{ needs.build.outputs.unsigned_desktop != 'true' }}
         shell: pwsh
         run: |
           $installer = Get-ChildItem -Path release-download -Recurse `
@@ -841,7 +868,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $electron)) { throw 'Installed Otto.exe is missing' }
           if (-not (Test-Path -LiteralPath $binding)) { throw 'Installed SQLCipher binding is missing' }
           if (-not (Test-Path -LiteralPath $nativeRuntime)) { throw 'Installed Otto native runtime is missing' }
-          if ($env:DESKTOP_TEST_BUILD -ne '1') {
+          if ($env:DESKTOP_UNSIGNED_BUILD -ne '1') {
             $nativeSignature = Get-AuthenticodeSignature -LiteralPath $nativeRuntime
             if ($nativeSignature.Status -ne 'Valid' -or -not $nativeSignature.SignerCertificate) {
               throw "Otto native Authenticode verification failed: $($nativeSignature.Status) $($nativeSignature.StatusMessage)"
@@ -893,7 +920,7 @@ jobs:
             '--probe-native',
             '--probe-server-bin'
           )
-          if ($env:DESKTOP_TEST_BUILD -ne '1') {
+          if ($env:DESKTOP_UNSIGNED_BUILD -ne '1') {
             $verificationArguments += '--require-native-authenticode'
           }
           $runtimeVerificationExitCode = Invoke-NativeProcess `
@@ -1090,6 +1117,7 @@ jobs:
         env:
           CANONICAL_ADMIN_TOKEN: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) && secrets.OTTO_CANONICAL_ADMIN_READ_TOKEN || '' }}
           LEGACY_ADMIN_TOKEN: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) && secrets.OTTO_LEGACY_ADMIN_READ_TOKEN || '' }}
+          ALLOW_UNVERIFIED_LEGACY_MUTABILITY: ${{ inputs.allow_unverified_legacy_mutability && 'true' || 'false' }}
         run: |
           set -euo pipefail
           RESPONSE_FILE="$(mktemp)"
@@ -1138,7 +1166,11 @@ jobs:
             --repo-public "$RELEASES_REPO"
           if [ "$DESKTOP_TEST_BUILD" != '1' ]; then
             require_mutable_releases "$RELEASES_REPO" "$CANONICAL_ADMIN_TOKEN"
-            require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
+            if [ "$ALLOW_UNVERIFIED_LEGACY_MUTABILITY" = 'true' ]; then
+              printf '%s\n' 'Legacy repository mutability: unknown (administrative verification explicitly waived). Published assets/tags remain unchanged; exact latest-pointer compensation is required.' >> "$GITHUB_STEP_SUMMARY"
+            else
+              require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
+            fi
             node scripts/verify-anonymous-github-release-assets.mjs \
               --repo-public "$LEGACY_RELEASES_REPO"
           fi
@@ -2094,6 +2126,7 @@ jobs:
         env:
           CANONICAL_ADMIN_TOKEN: ${{ secrets.OTTO_CANONICAL_ADMIN_READ_TOKEN }}
           LEGACY_ADMIN_TOKEN: ${{ secrets.OTTO_LEGACY_ADMIN_READ_TOKEN }}
+          ALLOW_UNVERIFIED_LEGACY_MUTABILITY: ${{ inputs.allow_unverified_legacy_mutability && 'true' || 'false' }}
         run: |
           set -euo pipefail
           RESPONSE_FILE="$(mktemp)"
@@ -2139,7 +2172,11 @@ jobs:
             esac
           }
           require_mutable_releases "$RELEASES_REPO" "$CANONICAL_ADMIN_TOKEN"
-          require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
+          if [ "$ALLOW_UNVERIFIED_LEGACY_MUTABILITY" = 'true' ]; then
+            printf '%s\n' 'Legacy repository mutability: unknown (administrative verification explicitly waived). Published assets/tags remain unchanged; exact latest-pointer compensation is required.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
+          fi
           node scripts/verify-anonymous-github-release-assets.mjs \
             --repo-public "$RELEASES_REPO"
           node scripts/verify-anonymous-github-release-assets.mjs \
@@ -2437,6 +2474,7 @@ jobs:
         env:
           CANONICAL_ADMIN_TOKEN: ${{ secrets.OTTO_CANONICAL_ADMIN_READ_TOKEN }}
           LEGACY_ADMIN_TOKEN: ${{ secrets.OTTO_LEGACY_ADMIN_READ_TOKEN }}
+          ALLOW_UNVERIFIED_LEGACY_MUTABILITY: ${{ inputs.allow_unverified_legacy_mutability && 'true' || 'false' }}
         run: |
           set -euo pipefail
           RESPONSE_FILE="$(mktemp)"
@@ -2481,7 +2519,11 @@ jobs:
             esac
           }
           require_mutable_releases "$RELEASES_REPO" "$CANONICAL_ADMIN_TOKEN"
-          require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
+          if [ "$ALLOW_UNVERIFIED_LEGACY_MUTABILITY" = 'true' ]; then
+            printf '%s\n' 'Legacy repository mutability: unknown (administrative verification explicitly waived). Published assets/tags remain unchanged; exact latest-pointer compensation is required.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
+          fi
           node scripts/verify-anonymous-github-release-assets.mjs \
             --repo-public "$RELEASES_REPO"
           node scripts/verify-anonymous-github-release-assets.mjs \
@@ -3015,6 +3057,7 @@ jobs:
         env:
           CANONICAL_ADMIN_TOKEN: ${{ secrets.OTTO_CANONICAL_ADMIN_READ_TOKEN }}
           LEGACY_ADMIN_TOKEN: ${{ secrets.OTTO_LEGACY_ADMIN_READ_TOKEN }}
+          ALLOW_UNVERIFIED_LEGACY_MUTABILITY: ${{ inputs.allow_unverified_legacy_mutability && 'true' || 'false' }}
         run: |
           set -euo pipefail
           RESPONSE_FILE="$(mktemp)"
@@ -3059,9 +3102,15 @@ jobs:
                 ;;
             esac
           }
-          # Prove both endpoints are mutable before changing either endpoint.
+          # Canonical remains verified. Explicit legacy waiver records unknown;
+          # compensation still preserves all published assets/tags and requires
+          # exact restoration of both latest pointers before server rollback.
           require_mutable_releases "$RELEASES_REPO" "$CANONICAL_ADMIN_TOKEN"
-          require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
+          if [ "$ALLOW_UNVERIFIED_LEGACY_MUTABILITY" = 'true' ]; then
+            printf '%s\n' 'Legacy repository mutability: unknown (administrative verification explicitly waived). Published assets/tags remain unchanged; exact latest-pointer compensation is required.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            require_mutable_releases "$LEGACY_RELEASES_REPO" "$LEGACY_ADMIN_TOKEN"
+          fi
 
       - name: Checkout locked release visibility compensation helper
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

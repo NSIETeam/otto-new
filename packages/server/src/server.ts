@@ -88,6 +88,7 @@ import {
   type FeishuRegisterDeps,
   type FeishuRegistration,
 } from './feishu/register.js';
+import { FeishuDeviceRegistrationManager } from './feishu/deviceRegistration.js';
 import { isFeishuAutoReplyEnabledForOpenId } from './enterprise/db.js';
 import {
   loadCredentials,
@@ -121,8 +122,12 @@ import {
   createJsonChannelIdentityAuditSink,
   type ChannelIdentityRegistryV1,
 } from './modules/integration_adapters/channelIdentityRegistry.js';
-import type { ManagedChannelPlatformV1 } from './modules/integration_adapters/managedChannelPlatform.js';
-import type { ResidentWorkflowSupervisor } from 'otto-workflow';
+import { ManagedChannelPlatformV1 } from './modules/integration_adapters/managedChannelPlatform.js';
+import {
+  type ClaimedWorkflowStep,
+  type ResidentWorkflowSupervisor,
+} from 'otto-workflow';
+import { createLocalOfficialChannelPlatform } from './modules/integration_adapters/localOfficialChannelPlatform.js';
 import {
   loadUserSettingsSubset,
   patchUserSettings,
@@ -469,6 +474,8 @@ export interface OttoServerOptions {
   channelIdentityRegistry?: ChannelIdentityRegistryV1;
   /** Fully composed managed-channel runtime; deployment supplies secure stores and workflow backend. */
   managedChannelPlatform?: ManagedChannelPlatformV1;
+  /** Compose local official WeCom/DingTalk QR + Stream channels for Desktop/CLI. */
+  enableOfficialChannels?: boolean;
   /** Authoritative durable workflow worker used by Desktop and remote channels. */
   residentWorkflowSupervisor?: ResidentWorkflowSupervisor;
 }
@@ -476,7 +483,7 @@ export interface OttoServerOptions {
 /** 飞书凭证存取接口（可注入；默认实现走 feishu/vendor/credentials.ts）。 */
 export interface FeishuCredentialsStore {
   load(): Promise<FeishuCredentials | null>;
-  save(creds: FeishuCredentials): Promise<void>;
+  save(creds: FeishuCredentials, assertActive?: () => void): Promise<void>;
   clear(): Promise<void>;
 }
 
@@ -575,6 +582,7 @@ export class OttoServer {
   private readonly feishuDeps?: OttoServerOptions['feishuDeps'];
   /** 飞书凭证存取（/feishu/config 端点用）。 */
   private readonly credentialsStore: FeishuCredentialsStore;
+  private readonly feishuDeviceRegistration: FeishuDeviceRegistrationManager;
   /** 运行期飞书启停的单飞锁：并发 POST 复用同一次操作，防重复 register。 */
   private feishuOpLock: Promise<unknown> = Promise.resolve();
   private readonly conns = new Set<ClientConn>();
@@ -603,6 +611,8 @@ export class OttoServer {
   private stopChannelWorkflowMilestones?: () => void;
   private readonly channelIdentityRegistry: ChannelIdentityRegistryV1;
   private readonly channelPairingProviders = new Map<string, ChannelProvider>();
+  /** Canonical local user who explicitly started each QR pairing. Never sent to the broker. */
+  private readonly channelPairingInitiators = new Map<string, { userId: string; isCurrent: () => boolean }>();
   /** Inert catalogue records only; never persisted and never treated as trusted. */
   private readonly mcpSearchCandidates = new Map<string, {
     ownerId: string;
@@ -645,6 +655,17 @@ export class OttoServer {
     this.mock = opts.mock ?? process.env.OTTO_SERVER_MOCK === '1';
     this.feishuDeps = opts.feishuDeps;
     this.credentialsStore = opts.credentialsStore ?? defaultCredentialsStore;
+    this.feishuDeviceRegistration = new FeishuDeviceRegistrationManager({
+      onAuthorized: async (credentials, assertActive) => {
+        const result = await this.runtimeFeishuSaveConfig({
+          appId: credentials.appId,
+          appSecret: credentials.appSecret,
+          domain: credentials.domain,
+          ownerOpenId: credentials.ownerOpenId,
+        }, assertActive);
+        if (!result.ok) throw new Error(result.error ?? '飞书网关启动失败。');
+      },
+    });
     this.productWorkspace =
       opts.productWorkspaceStore ?? new ProductWorkspaceStore();
     this.chatFileCacheDir = opts.chatFileCacheDir;
@@ -658,20 +679,105 @@ export class OttoServer {
         console.warn(`[ResidentTask] ${taskName} failed:`, error);
       },
     });
-    this.managedChannelPlatform = opts.managedChannelPlatform;
-    this.residentWorkflowSupervisor = opts.residentWorkflowSupervisor;
+    this.channelIdentityRegistry = opts.channelIdentityRegistry
+      ?? new JsonChannelIdentityRegistryV1({ audit: createJsonChannelIdentityAuditSink() });
+    const localOfficialChannels = !opts.managedChannelPlatform && opts.enableOfficialChannels
+      ? createLocalOfficialChannelPlatform({
+          userDirectory: process.env.OTTO_USER_DIR?.trim() || path.join(homedir(), '.otto-user'),
+          identityRegistry: this.channelIdentityRegistry,
+          executeWorkflowStep: (input) => this.executeChannelWorkflowStep(input),
+        })
+      : undefined;
+    this.residentWorkflowSupervisor = opts.residentWorkflowSupervisor
+      ?? localOfficialChannels?.supervisor;
+    this.managedChannelPlatform = opts.managedChannelPlatform
+      ?? localOfficialChannels?.platform;
     this.channelConnectors = {
       ...opts.managedChannelPlatform?.connectors,
+      ...this.managedChannelPlatform?.connectors,
       ...opts.channelConnectors,
     };
-    this.channelIdentityRegistry =
-      opts.channelIdentityRegistry ??
-      new JsonChannelIdentityRegistryV1({
-        audit: createJsonChannelIdentityAuditSink(),
-      });
     getHabitAnalyzer().setTaskRegistry(this.recurringTaskRegistry);
     this.globalAuthorizationMode =
       loadUserSettingsSubset().authorizationMode ?? 'manual';
+  }
+
+  private captureChannelIdentity(): { userId: string; isCurrent: () => boolean } {
+    const generation = this.enterpriseIdentityGeneration;
+    const { userId, companyId, edition, role } = this.productWorkspace.snapshot().context;
+    return {
+      userId,
+      isCurrent: () => {
+        try {
+          const next = this.productWorkspace.snapshot().context;
+          return generation === this.enterpriseIdentityGeneration && next.userId === userId
+            && next.companyId === companyId && next.edition === edition && next.role === role;
+        } catch { return false; }
+      },
+    };
+  }
+
+  private async executeChannelWorkflowStep(input: ClaimedWorkflowStep): Promise<unknown> {
+    if (input.step.kind !== 'agent' || input.step.stepId !== 'execute-request') {
+      throw new Error('unsupported remote channel workflow step');
+    }
+    const request = input.step.input.request;
+    const origin = input.step.input.origin;
+    if (typeof request !== 'string' || !request.trim() || request.length > 4_000) {
+      throw new Error('remote channel workflow request is invalid');
+    }
+    if (!origin || typeof origin !== 'object' || Array.isArray(origin)) {
+      throw new Error('remote channel workflow origin is missing');
+    }
+    const channelOrigin = origin as Record<string, unknown>;
+    const currentUserId = this.productWorkspace.snapshot().context.userId;
+    if (channelOrigin.userId !== currentUserId) {
+      throw new Error('remote channel task owner changed');
+    }
+    const { provider, installationId, tenantId, providerUserId } = channelOrigin;
+    if ((provider !== 'feishu' && provider !== 'lark' && provider !== 'wecom' && provider !== 'dingtalk')
+      || typeof installationId !== 'string' || !installationId.trim()
+      || typeof tenantId !== 'string' || !tenantId.trim()
+      || typeof providerUserId !== 'string' || !providerUserId.trim()) {
+      throw new Error('remote channel workflow origin is invalid');
+    }
+    const binding = await this.channelIdentityRegistry.resolve({
+      provider, installationId, tenantId, providerUserId,
+    });
+    if (this.productWorkspace.snapshot().context.userId !== currentUserId) {
+      throw new Error('remote channel task owner changed');
+    }
+    if (!binding?.active || binding.canonicalUserId !== currentUserId) {
+      throw new Error('remote channel identity binding is no longer active');
+    }
+    if (!this.shouldMock() && this.modelInfos().every((model) => !model.enabled)) {
+      throw new Error('请先在设置中绑定个人 API，再执行远程任务。');
+    }
+
+    const session = this.createSessionForCurrentIdentity({
+      source: 'enterprise',
+      title: `来自${provider}的已批准任务`,
+      productEdition: this.productWorkspace.snapshot().context.edition,
+    });
+    this.broadcastAll({ type: 'session_upsert', payload: { session } });
+    const content: MessageContent = [{ type: 'text', value: request.trim() }];
+    const message = this.store.appendMessage(session.sessionId, {
+      role: 'user',
+      content,
+      source: 'enterprise',
+    });
+    this.store.publish(session.sessionId, {
+      type: 'message_start',
+      payload: { message },
+    });
+    if (this.shouldMock()) {
+      await this.mockEcho(session.sessionId);
+      return { sessionId: session.sessionId, mock: true };
+    }
+    const runtime = await this.ensureRuntime(session.sessionId);
+    if (!runtime) throw new Error('远程任务运行时未就绪。');
+    await runtime.run(content, 'enterprise');
+    return { sessionId: session.sessionId };
   }
 
   /** mock 只允许测试显式开启；真实用户没有个人 API 时必须明确报错。 */
@@ -808,6 +914,17 @@ export class OttoServer {
         ...this.feishuDeps,
       });
     }
+    if (this.managedChannelPlatform) {
+      void this.managedChannelPlatform.startInstalled().then((results) => {
+        for (const result of results) {
+          if (result.state === 'failed') {
+            console.warn(`[Channel] ${result.provider}/${result.installationId}: ${result.message ?? '启动失败'}`);
+          }
+        }
+      }).catch((error) => {
+        console.warn(`[Channel] 已安装机器人恢复失败：${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
 
     // WorkflowRegistry 是进程级单例（与会话无关），订阅其变化并广播给所有连接，
     // 让「Workflow 面板」实时看到进度（agent 开始/结束/token 更新），无需轮询。
@@ -876,6 +993,7 @@ export class OttoServer {
 
   /** 停止服务（取消并释放所有活跃 runtime，再关 WS、HTTP、飞书）。 */
   async stop(): Promise<void> {
+    this.feishuDeviceRegistration.stopAll();
     this.stopMemoryMaintenance?.();
     this.stopMemoryMaintenance = undefined;
     this.stopAutoCompression?.();
@@ -3005,6 +3123,46 @@ export class OttoServer {
       };
       return sendJsonWithCors(res, 200, ok(pingResponse), req.headers.origin);
     }
+    if (path === HTTP_ROUTES.feishuDeviceRegistration) {
+      if (!matchesBearerToken(req.headers.authorization, this.localControlToken)) {
+        return sendJson(res, 401, err('unauthorized'));
+      }
+      const registrationId = url.searchParams.get('registrationId') ?? '';
+      if (req.method === 'POST') {
+        void readJsonBody(req)
+          .then((body) => {
+            const domain = typeof body === 'object' && body !== null
+              ? (body as { domain?: unknown }).domain
+              : undefined;
+            if (domain !== 'feishu' && domain !== 'lark') {
+              throw new Error('domain 必须是 feishu 或 lark。');
+            }
+            const identity = this.captureChannelIdentity();
+            return this.feishuDeviceRegistration.begin(domain, identity.isCurrent);
+          })
+          .then((result) => sendJson(res, 201, ok(result)))
+          .catch((error) => sendJson(res, 409, err(
+            error instanceof Error ? error.message : String(error),
+          )));
+        return;
+      }
+      if (!/^fdr_[a-f0-9]{24}$/u.test(registrationId)) {
+        return sendJson(res, 400, err('invalid_feishu_registration_id'));
+      }
+      if (req.method === 'GET') {
+        const result = this.feishuDeviceRegistration.get(registrationId);
+        return result
+          ? sendJson(res, 200, ok(result))
+          : sendJson(res, 404, err('feishu_registration_not_found'));
+      }
+      if (req.method === 'DELETE') {
+        const result = this.feishuDeviceRegistration.cancel(registrationId);
+        return result
+          ? sendJson(res, 200, ok(result))
+          : sendJson(res, 404, err('feishu_registration_not_found'));
+      }
+      return sendJson(res, 405, err('method_not_allowed'));
+    }
     if (path === HTTP_ROUTES.channelPairings && req.method === 'POST') {
       if (
         !matchesBearerToken(req.headers.authorization, this.localControlToken)
@@ -3023,8 +3181,17 @@ export class OttoServer {
             );
             return;
           }
+          const initiator = this.captureChannelIdentity();
           const pairing = await connector.beginPairing(input);
+          if (!initiator.isCurrent()) {
+            await connector.denyPairing(pairing.pairingId, 'local identity changed').catch(() => undefined);
+            throw new Error('channel pairing identity changed');
+          }
           this.channelPairingProviders.set(pairing.pairingId, input.provider);
+          this.channelPairingInitiators.set(
+            pairing.pairingId,
+            initiator,
+          );
           sendJson(res, 201, ok(pairing));
         })
         .catch((error) => {
@@ -3051,13 +3218,52 @@ export class OttoServer {
       const connector = provider ? this.channelConnectors[provider] : undefined;
       if (!connector)
         return sendJson(res, 404, err('channel_pairing_not_found'));
+      const initiator = this.channelPairingInitiators.get(pairingId);
+      const isCurrent = (): boolean => this.channelPairingInitiators.get(pairingId) === initiator
+        && Boolean(initiator?.isCurrent());
+      if (req.method !== 'DELETE' && !isCurrent()) {
+        void connector.denyPairing(pairingId, 'local identity changed').catch(() => undefined);
+        this.channelPairingProviders.delete(pairingId);
+        this.channelPairingInitiators.delete(pairingId);
+        return sendJson(res, 409, err('channel pairing identity changed'));
+      }
       let operation: Promise<unknown>;
       if (req.method === 'GET' && !action) {
         operation = connector.getPairingStatus(pairingId);
       } else if (req.method === 'POST' && action === 'install') {
         operation = readJsonBody(req)
           .then((body) => parseChannelInstallationProof(body))
-          .then((proof) => connector.completeInstallation(pairingId, proof));
+          .then((proof) => {
+            if (!isCurrent()) throw new Error('channel pairing identity changed');
+            return connector.completeInstallation(pairingId, proof);
+          })
+          .then(async (installation) => {
+            if (!isCurrent()) {
+              await connector.stop(installation.installationId).catch(() => undefined);
+              throw new Error('channel pairing identity changed');
+            }
+            const canonicalUserId = initiator?.userId;
+            const providerUserId = installation.ownerProviderUserId?.trim();
+            if (!canonicalUserId || !providerUserId) {
+              return { ...installation, ownerBindingState: 'manual_required' as const };
+            }
+            try {
+              await this.channelIdentityRegistry.bind({
+                provider: installation.provider,
+                installationId: installation.installationId,
+                tenantId: installation.tenantId,
+                providerUserId,
+                canonicalUserId,
+                approvalId: `channel-pairing:${pairingId}`,
+                approvedBy: canonicalUserId,
+                expectedRevision: 0,
+              });
+              return { ...installation, ownerBindingState: 'bound' as const };
+            } catch {
+              // Installation remains safe: unbound identities are rejected by the channel bridge.
+              return { ...installation, ownerBindingState: 'manual_required' as const };
+            }
+          });
       } else if (req.method === 'DELETE' && !action) {
         operation = connector.denyPairing(pairingId, 'cancelled by local user');
       } else {
@@ -3078,6 +3284,7 @@ export class OttoServer {
               ))
           ) {
             this.channelPairingProviders.delete(pairingId);
+            this.channelPairingInitiators.delete(pairingId);
           }
           sendJson(res, 200, ok(result));
         })
@@ -3105,7 +3312,7 @@ export class OttoServer {
       return sendJson(res, 200, ok(installations));
     }
     const channelInstallationMatch = path.match(
-      /^\/channels\/installations\/(channel_(feishu|lark|wecom)_[a-f0-9]{24})(?:\/(start|stop|health|send|identities))?$/,
+      /^\/channels\/installations\/(channel_(feishu|lark|wecom|dingtalk)_[a-f0-9]{24})(?:\/(start|stop|health|send|identities))?$/,
     );
     if (channelInstallationMatch) {
       if (
@@ -3140,7 +3347,18 @@ export class OttoServer {
         operation = readJsonBody(req)
           .then((body) => parseChannelIdentityMutation(body))
           .then((input) =>
-            input.action === 'bind'
+            input.action === 'claim-owner'
+              ? this.channelIdentityRegistry.bind({
+                  provider,
+                  installationId,
+                  tenantId: installation.tenantId,
+                  providerUserId: input.providerUserId,
+                  canonicalUserId: actor.userId,
+                  approvalId: `local-owner-claim:${Date.now()}`,
+                  approvedBy: actor.userId,
+                  expectedRevision: input.expectedRevision,
+                })
+              : input.action === 'bind'
               ? this.channelIdentityRegistry.bind({
                   provider,
                   installationId,
@@ -3416,7 +3634,9 @@ export class OttoServer {
   /** 保存凭证并立即让守护用上新凭证。 */
   private async runtimeFeishuSaveConfig(
     body: unknown,
+    assertActive: () => void = () => undefined,
   ): Promise<ApiResponse<FeishuConfigPublic>> {
+    assertActive();
     const parsed = parseFeishuConfigSaveRequest(body);
     if (typeof parsed === 'string') {
       return { ok: false, data: await this.feishuConfigView(), error: parsed };
@@ -3428,6 +3648,7 @@ export class OttoServer {
     } catch {
       existing = null;
     }
+    assertActive();
 
     const sameApp = existing?.appId === parsed.appId;
     const secret =
@@ -3460,9 +3681,11 @@ export class OttoServer {
           ? { ownerOpenId: existing.ownerOpenId }
           : {}),
     };
-    await this.credentialsStore.save(next);
+    await this.credentialsStore.save(next, assertActive);
+    assertActive();
 
     await this.runtimeFeishuStop().catch(() => undefined);
+    assertActive();
     const started = await this.runtimeFeishuStart().catch(
       (e): ApiResponse<FeishuHealthStatus | null> =>
         err(e instanceof Error ? e.message : String(e)),
@@ -5413,8 +5636,8 @@ function browserBridgeScript(clientToken: string): string {
     skillShareList: () => Promise.resolve({ text: '浏览器模式暂未接入部门共享 Skill。' }),
     skillMarketplace: () => Promise.resolve({ text: '浏览器模式暂未接入公司 Skill 市场。' }),
     setLocalTestUrl: () => Promise.resolve(),
-    appVersion: () => Promise.resolve('1.9.14'),
-    updateCheck: () => Promise.resolve({ status: 'up-to-date', currentVersion: '1.9.14', latestVersion: null }),
+    appVersion: () => Promise.resolve('1.9.15'),
+    updateCheck: () => Promise.resolve({ status: 'up-to-date', currentVersion: '1.9.15', latestVersion: null }),
     updateDownload: () => Promise.resolve({ ok: false, error: '浏览器模式不支持下载安装包。' }),
     updateCancel: () => Promise.resolve(),
     updateInstall: () => Promise.resolve({ ok: false, message: '浏览器模式不支持安装更新。' }),
@@ -5824,7 +6047,7 @@ function parseChannelPairingBeginRequest(
   }
   const input = body as Record<string, unknown>;
   const provider = input.provider;
-  if (provider !== 'feishu' && provider !== 'lark' && provider !== 'wecom') {
+  if (provider !== 'feishu' && provider !== 'lark' && provider !== 'wecom' && provider !== 'dingtalk') {
     throw new Error('unsupported channel provider');
   }
   const installationPublicKey =
@@ -5901,6 +6124,7 @@ type ChannelIdentityMutationCommon = {
   expectedRevision: number;
 };
 type ChannelIdentityMutation =
+  | (Omit<ChannelIdentityMutationCommon, 'approvalId'> & { action: 'claim-owner' })
   | (ChannelIdentityMutationCommon & {
       action: 'bind';
       canonicalUserId: string;
@@ -5912,7 +6136,7 @@ function parseChannelIdentityMutation(body: unknown): ChannelIdentityMutation {
     throw new Error('channel identity body must be a JSON object');
   }
   const input = body as Record<string, unknown>;
-  if (input.action !== 'bind' && input.action !== 'revoke') {
+  if (input.action !== 'claim-owner' && input.action !== 'bind' && input.action !== 'revoke') {
     throw new Error('channel identity action is invalid');
   }
   const readId = (name: string): string => {
@@ -5930,12 +6154,13 @@ function parseChannelIdentityMutation(body: unknown): ChannelIdentityMutation {
   const common = {
     action: input.action,
     providerUserId: readId('providerUserId'),
-    approvalId: readId('approvalId'),
     expectedRevision: expectedRevision as number,
   };
-  return input.action === 'bind'
-    ? { ...common, action: 'bind', canonicalUserId: readId('canonicalUserId') }
-    : { ...common, action: 'revoke' };
+  return input.action === 'claim-owner'
+    ? { ...common, action: 'claim-owner' }
+    : input.action === 'bind'
+    ? { ...common, action: 'bind', canonicalUserId: readId('canonicalUserId'), approvalId: readId('approvalId') }
+    : { ...common, action: 'revoke', approvalId: readId('approvalId') };
 }
 /** core WorkflowAgentRecord → 协议 WorkflowAgentSummary（裁掉 prompt/recentToolCalls 等大字段）。 */
 function toWorkflowAgentSummary(a: WorkflowAgentRecord): WorkflowAgentSummary {

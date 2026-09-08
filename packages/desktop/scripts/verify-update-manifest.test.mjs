@@ -3,12 +3,15 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_UPDATE_ASSET_BASE_URL } from './update-mirror-config.mjs';
 import { verifyUpdateManifest } from './verify-update-manifest.mjs';
 
 const tempDirs = [];
-const scriptPath = path.resolve(process.cwd(), 'scripts/verify-update-manifest.mjs');
+const scriptPath = fileURLToPath(
+  new URL('./verify-update-manifest.mjs', import.meta.url),
+);
 
 afterEach(async () => {
   await Promise.all(
@@ -67,14 +70,19 @@ describe('verify-update-manifest', () => {
       manifest.assets = { 'win-x64': manifest.assets['win-x64'] };
     });
 
-    expect(verifyUpdateManifest({
-      releaseDir: dir,
-      version,
-      requiredAssets: [{
-        key: 'win-x64',
-        fileName: (targetVersion) => `Otto-Setup-${targetVersion}-win-x64.exe`,
-      }],
-    })).toEqual({ version, assets: ['win-x64'] });
+    expect(
+      verifyUpdateManifest({
+        releaseDir: dir,
+        version,
+        requiredAssets: [
+          {
+            key: 'win-x64',
+            fileName: (targetVersion) =>
+              `Otto-Setup-${targetVersion}-win-x64.exe`,
+          },
+        ],
+      }),
+    ).toEqual({ version, assets: ['win-x64'] });
   });
 
   it('runs the verifier when invoked directly on Windows', async () => {
@@ -119,16 +127,16 @@ describe('verify-update-manifest', () => {
     await rewriteManifest(shaDir, (manifest) => {
       manifest.assets['win-x64'].sha256 = '0'.repeat(64);
     });
-    expect(() =>
-      verifyUpdateManifest({ releaseDir: shaDir, version }),
-    ).toThrow('win-x64 sha256 mismatch');
+    expect(() => verifyUpdateManifest({ releaseDir: shaDir, version })).toThrow(
+      'win-x64 sha256 mismatch',
+    );
 
     const { dir: urlDir } = await writeFixtureRelease();
     await rewriteManifest(urlDir, (manifest) => {
       manifest.assets['win-x64'].url = 'https://example.com/Otto.exe';
     });
-    expect(() =>
-      verifyUpdateManifest({ releaseDir: urlDir, version }),
-    ).toThrow('win-x64 url mismatch');
+    expect(() => verifyUpdateManifest({ releaseDir: urlDir, version })).toThrow(
+      'win-x64 url mismatch',
+    );
   });
 });

@@ -1,6 +1,6 @@
 # Otto 发布前检查清单与规范
 
-> 1.9.14 的自动化生产发布范围仅包含 `enterprise-oneclick` 单机企业服务配置。
+> 1.9.15 的自动化生产发布范围仅包含 `enterprise-oneclick` 单机企业服务配置。
 > PostgreSQL/Redis/S3 集群代码和迁移工具仍用于独立迁移演练与金丝雀验证，不属于本次
 > 稳定版自动部署配置，也不得使用本发布工作流直接提升为生产权威源。
 
@@ -22,7 +22,7 @@
 
 ## 0.1 长期稳定正式版门禁
 
-1.9.14 作为长期维护的正式版本，仍使用当前受支持的 `stable` 发布渠道；`lstc` 只用于验证和迁移历史包，不能生成新的正式包。除普通 patch 门禁外还必须满足：
+1.9.15 使用当前受支持的 `stable` 发布渠道；`lstc` 只用于验证和迁移历史包，不能生成新的正式包。除普通 patch 门禁外还必须满足：
 
 - 企业一键包 `manifest.json.releaseChannel` 必须是 `stable`。
 - 企业一键包 `manifest.json.database.schemaTo` 必须等于 `packages/server/src/enterprise/db.ts` 中的 `ENTERPRISE_SCHEMA_VERSION`。
@@ -117,10 +117,18 @@ npm run release --workspace=packages/desktop
 - mac x64 DMG 已生成
 - Windows x64 installer 已生成
 - `latest.json` 的 sha256 与实际资产一致
-- 正式 `stable` 的 Windows installer 和 Otto native 均通过 Authenticode；两个 macOS DMG 内应用均通过 Developer ID、notarization 和 stapler 验证。
-- 缺少任一签名/公证凭据时，只允许创建 `transition + draft + prerelease` 的测试产物；不得部署企业服务、公开 Release 或更新任何自动更新入口。
+- 默认 `stable` 的 Windows installer 和 Otto native 均通过 Authenticode；两个 macOS DMG 内应用均通过 Developer ID、notarization 和 stapler 验证。
+- 本次 1.9.15 已获产品所有者明确授权发布没有 Windows/Apple 平台签名的桌面版。此模式必须通过手动 `workflow_dispatch` 显式设置 `unsigned_desktop_stable=true`、`release_channel=stable`、`prerelease=false`、`unsigned_mac_transition=false`；`draft=false` 才进入正式公开事务。tag push 和未显式选择该开关的构建仍要求平台签名。
+- 这个桌面例外仍要求 macOS ad-hoc 应用封印和 DMG 完整性验证、Windows 安装及 SQLCipher/native/server-bin 探针、企业 Ed25519 包签名、签名清单、来源绑定、双仓和镜像事务以及服务器 canary/备份/回滚。不得将它扩展为企业签名豁免。
+- Windows SmartScreen 或 macOS Gatekeeper 可能要求用户操作，设备策略也可能阻止安装。保留旧版清单、安装包名称、NSIS 身份和 SHA-256 校验，不等于所有旧设备都能无提示自动安装。发布说明必须标明这个限制，实机升级仍是验收项。
+- 未获得稳定版未签名授权时，缺少签名只能使用 `unsigned_mac_transition=true + transition + draft + prerelease` 的隔离测试产物；该模式不得部署企业服务、公开 Release 或更新自动更新入口。
 
 必须记录桌面安装包体积；包体增长异常时先查 `app.asar`、Electron Framework、`node_modules` 最大项，不得为了体积删除运行时必需文件。
+
+1.9.15 的 Windows 安装器继续按已发布基线 128,032,671 bytes 加最多 8 MiB
+增长验收（约 130.1 MiB 上限）；两种 macOS DMG 各自不超过 140 MiB。
+这些是阻断上限，目标仍是 Windows 约 125 MB、macOS 略大；实际大小以
+`release:gate` 对最终文件输出的字节数为准，构建前不得声称已满足目标。
 
 ## 6. 企业服务器发布包
 
@@ -183,8 +191,8 @@ gh run list --limit 8
 - Release 资产名和本次实际部署包一致。
 - `.tar.gz`、`.sha256` 和 Ed25519 `.sig` 同时上传。
 - `NSIETeam/otto-new` 和 `Felix201209/otto-releases` 都不存在同名 Release；不得覆盖、删除后重传或修改已发布资产，内容变化必须发布新的 patch 版本。
-- 两个仓的 immutable releases 必须保持关闭，且两个独立细粒度令牌分别以 Metadata read + Administration read 访问 `/actions/permissions` 返回 200、访问 `/immutable-releases` 返回 404。无法证明权限或关闭状态即停止。
-- `production-automation` 已配置 `OTTO_CANONICAL_ADMIN_READ_TOKEN`、`OTTO_LEGACY_ADMIN_READ_TOKEN` 和兼容仓 Contents-write 令牌；这些令牌不得输出到日志。
+- 默认两仓均核验 immutable releases 关闭：独立细粒度令牌分别以 Metadata read + Administration read 访问 `/actions/permissions` 返回 200，再按工作流验证 `/immutable-releases`；无法证明时停止。本次用户明确取消旧仓管理员核验，可手动显式选择 `allow_unverified_legacy_mutability=true`，仅把旧仓状态记录为 `unknown`，不调用其管理 API；正式仓核验保持强制。未经权限证明的 404 不代表已关闭。
+- `production-automation` 已配置 `OTTO_CANONICAL_ADMIN_READ_TOKEN` 和兼容仓 Contents-write 令牌；没有显式选择上述例外时还必须配置 `OTTO_LEGACY_ADMIN_READ_TOKEN`。这些令牌不得输出到日志。
 - `production-automation` 已配置 `OTTO_ENTERPRISE_PUBLIC_URL`，值只能是企业服务真实公网 HTTPS origin（不得包含凭据、路径、查询或片段）；工作流必须从 GitHub runner 经真实 TLS 边界验证 `/enterprise/health`，不能用服务器 localhost 检查替代。
 - 如果 Actions job `steps: []` 且 runner id 为空，这是 runner/账单/额度层失败，不是脚本通过。
 
@@ -215,6 +223,12 @@ Release 不存在、名称、正文摘要、预发布标志、完整 14 资产�
 生产发布、企业部署、镜像发布和自动补偿 job 都禁止使用 GitHub **Re-run jobs**。失败或平台中断时，先按恢复手册确认/回滚企业部署、镜像与双仓 Release 状态；恢复闭环后，从届时最新且完全锁定的 `origin/internal` 源码创建新的 patch 版本并启动全新的 workflow run。不得重放原运行的部分 job，也不得复用已创建的版本 tag/Release。
 
 若中断留下网关上传目录，必须先确认原 workflow 已终止，并按签名包身份完成部署与镜像状态核对；随后只对原事务号执行 `cleanup-upload enterprise <original_transaction_id>` 和 `cleanup-upload mirror <original_transaction_id>`。不得提前清理仍可能被原运行使用的目录，也不得用新事务号规避待清理事务。
+
+[GitHub.com 当前文档](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
+说明不可变 Release 的资产和 tag 被锁定，但 latest/prerelease 状态仍可修改。
+因此取消旧仓管理员核验不等于取消指针补偿：旧仓已公开资产和 tag 必须保留，
+仍需复核两仓 latest 精确恢复后才允许继续回滚服务器。若该 API 写入或核验失败，
+保持公开包可下载、阻止进一步服务器自动回滚并报告事故；不把回滚能力未知写成验收通过。
 
 ## 8. 企业服务器升级
 

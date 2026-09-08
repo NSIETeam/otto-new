@@ -7,8 +7,8 @@
 /**
  * server 端点发现读写单测。
  *
- * endpoint.ts 在「模块顶层」用 os.homedir() 固化 CONFIG_DIR，所以必须在
- * 模块加载前 spy homedir，并用 resetModules + 动态 import 拿到隔离实例。
+ * endpoint.ts 在每次读写时解析 OTTO_USER_DIR，未设置时回退到用户目录。
+ * 测试用环境变量隔离目录，并覆盖模块加载后的配置切换。
  * 全程临时 HOME，不碰真实 ~/.otto-user。
  */
 
@@ -19,7 +19,7 @@ import * as path from 'node:path';
 
 let tmpHome: string;
 
-/** 在 spy 生效后动态加载 endpoint 模块（顶层路径随之指向 tmpHome）。 */
+/** 动态加载独立 endpoint 模块实例。 */
 async function loadEndpoint(): Promise<typeof import('./endpoint.js')> {
   vi.resetModules();
   return import('./endpoint.js');
@@ -27,10 +27,10 @@ async function loadEndpoint(): Promise<typeof import('./endpoint.js')> {
 
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-endpoint-'));
-  // 顶层 CONFIG_DIR 在模块加载时用 os.homedir() 固化，故 stubEnv 必须先于
-  // loadEndpoint 的动态 import 生效。ESM 下命名空间不可 spy，用 env 隔离。
+  // 隔离默认 HOME 和显式配置，确保所有读写仅触及本次临时目录。
   vi.stubEnv('HOME', tmpHome);
   vi.stubEnv('USERPROFILE', tmpHome);
+  vi.stubEnv('OTTO_USER_DIR', '');
 });
 
 afterEach(() => {
@@ -39,6 +39,21 @@ afterEach(() => {
 });
 
 describe('endpoint write/read round-trip', () => {
+  it('switches discovery and cleanup to OTTO_USER_DIR without touching the prior profile', async () => {
+    const ep = await loadEndpoint();
+    ep.writeEndpoint('127.0.0.1', 7637, 'prior-client-token');
+    const priorPath = ep.endpointFilePath();
+    const isolated = path.join(tmpHome, 'isolated');
+    vi.stubEnv('OTTO_USER_DIR', isolated);
+    expect(ep.endpointFilePath()).toBe(path.join(isolated, 'server-endpoint.json'));
+    expect(ep.readEndpoint()).toBeUndefined();
+    ep.writeEndpoint('127.0.0.1', 7638, 'isolated-client-token');
+    expect(ep.readEndpoint()?.port).toBe(7638);
+    ep.clearEndpoint();
+    expect(ep.readEndpoint()).toBeUndefined();
+    expect(JSON.parse(fs.readFileSync(priorPath, 'utf8')).clientToken).toBe('prior-client-token');
+  });
+
   it('write 后 read 一致', async () => {
     const ep = await loadEndpoint();
     const controlToken = 'a'.repeat(43);

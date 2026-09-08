@@ -39,8 +39,21 @@ describe('server integration baseline', () => {
     expect(
       validateServerIntegrationBaseline({ rootDir, ledger: changed }),
     ).toContain(
-      'release.clientVersion=99.0.0 does not match packages/desktop/package.json=1.9.14',
+      `release.clientVersion=99.0.0 does not match packages/desktop/package.json=${ledger.release.clientVersion}`,
     );
+  });
+
+  it('rejects capability additions or removals that are not in the source contract', () => {
+    const changed = structuredClone(ledger);
+    changed.release.capabilities = changed.release.capabilities.filter(
+      (capability) => capability !== 'policy_intelligence_inbox_v1',
+    );
+    expect(validateServerIntegrationBaseline({ rootDir, ledger: changed }))
+      .toContain('release.capabilities do not match ENTERPRISE_CAPABILITIES');
+
+    changed.release.capabilities = [...ledger.release.capabilities, 'unimplemented_capability'];
+    expect(validateServerIntegrationBaseline({ rootDir, ledger: changed }))
+      .toContain('release.capabilities do not match ENTERPRISE_CAPABILITIES');
   });
 
   it('fails when an integrated source has no valid disposition or integration evidence', () => {

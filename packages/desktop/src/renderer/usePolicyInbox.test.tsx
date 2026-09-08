@@ -4,6 +4,36 @@ import { usePolicyInbox } from './usePolicyInbox.js';
 import type { PolicyInbox } from '../preload/index.js';
 afterEach(() => vi.restoreAllMocks());
 describe('policy inbox read/refresh races', () => {
+  it('ignores an old account poll that completes after the new account loaded', async () => {
+    let finish!: (value: PolicyInbox) => void;
+    const pending = new Promise<PolicyInbox>((resolve) => {
+      finish = resolve;
+    });
+    Object.assign(window.otto, {
+      policyIntelligenceInbox: vi.fn(({ scopeId }: { scopeId: string }) =>
+        scopeId === 'org:a'
+          ? pending
+          : Promise.resolve({
+              notices: [],
+              unreadCount: 0,
+              watchedPolicyIds: ['b'],
+            }),
+      ),
+    });
+    const hook = renderHook(({ scope }) => usePolicyInbox(scope, true), {
+      initialProps: { scope: 'org:a' },
+    });
+    hook.rerender({ scope: 'org:b' });
+    await waitFor(() =>
+      expect(hook.result.current.inbox.watchedPolicyIds).toEqual(['b']),
+    );
+    await act(async () =>
+      finish({ notices: [], unreadCount: 1, watchedPolicyIds: ['a'] }),
+    );
+    expect(hook.result.current.inbox.watchedPolicyIds).toEqual(['b']);
+    expect(hook.result.current.inbox.unreadCount).toBe(0);
+    hook.unmount();
+  });
   it('explains an old server without exposing raw IPC error details', async () => {
     Object.assign(window.otto, {
       policyIntelligenceInbox: vi.fn(async () => {

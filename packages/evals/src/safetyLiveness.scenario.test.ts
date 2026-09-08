@@ -23,7 +23,12 @@ it.each(['read', 'document'] as const)(
   'actual constrained runtime: %s makes progress without lifting unsafe execution or delivery gates',
   async (mode) => {
     const root = mkdtempSync(
-      path.join(process.env.OTTO_BASELINE_OUTPUT ?? tmpdir(), 'otto-liveness-'),
+      // A publication word in an operand must not turn reads/local generation
+      // into an external operation, regardless of the machine's output folder.
+      path.join(
+        process.env.OTTO_BASELINE_OUTPUT ?? tmpdir(),
+        'otto-publish-liveness-',
+      ),
     );
     const workspace = path.join(root, 'workspace');
     mkdirSync(workspace);
@@ -117,6 +122,10 @@ it.each(['read', 'document'] as const)(
       const nativeRead = [...calls.values()].find(
         (c) => c.toolName === 'read_file',
       );
+      expect(turn?.control).toMatchObject({
+        intent: mode === 'read' ? 'answer' : 'create_artifact',
+        riskLevel: mode === 'read' ? 'read_only' : 'local_write',
+      });
       expect(nativeRead?.status, JSON.stringify(nativeRead)).toBe('success');
       if (mode === 'read')
         expect(turn?.status, JSON.stringify(turn?.verification)).toBe(

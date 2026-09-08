@@ -19,6 +19,53 @@ const require = createRequire(import.meta.url);
 const afterPack = require('./after-pack.cjs');
 
 describe('desktop packaging contract', () => {
+  it('explicitly carries the server notice and preserves upstream license Markdown', async () => {
+    const desktop = JSON.parse(
+      await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+    );
+    const server = JSON.parse(
+      await readFile(
+        path.join(repoRoot, 'packages/server/package.json'),
+        'utf8',
+      ),
+    );
+    expect(server.files).toContain('NOTICE');
+    expect(desktop.build.files).toContainEqual({
+      from: '../server',
+      to: 'node_modules/otto-server',
+      filter: ['NOTICE'],
+    });
+    const { FileMatcher } = require('app-builder-lib/out/fileMatcher.js');
+    // Exercise the installed electron-builder matcher, including its ordered
+    // negative patterns, rather than approximating its glob semantics.
+    const filter = new FileMatcher(packageRoot, packageRoot, (value) => value, [
+      '**/*',
+      ...desktop.build.files.filter(
+        (value) => typeof value === 'string' && value.startsWith('!'),
+      ),
+    ]).createFilter();
+    const metadata = { isDirectory: () => false };
+    for (const name of [
+      'LICENSE.md',
+      'license.md',
+      'License.markdown',
+      'NOTICE.md',
+      'COPYING.md',
+      'THIRD_PARTY_LICENSES.md',
+    ]) {
+      expect(
+        filter(path.join(packageRoot, 'node_modules/runtime-lib', name), metadata),
+        name,
+      ).toBe(true);
+    }
+    for (const name of ['README.md', 'guide.markdown', 'usage.md']) {
+      expect(
+        filter(path.join(packageRoot, 'node_modules/runtime-lib', name), metadata),
+        name,
+      ).toBe(false);
+    }
+  });
+
   it('pins one Electron version across packaging and native build workflows', async () => {
     const [
       rootPackageJson,
@@ -511,13 +558,17 @@ describe('desktop packaging contract', () => {
     );
   });
 
-  it('requires an explicit transition flag before disabling macOS signing', async () => {
+  it('requires a validated explicit mode before disabling desktop platform signing', async () => {
     const script = await readFile(
       path.join(packageRoot, 'scripts', 'make-delivery-zip.mjs'),
       'utf8',
     );
     const workflow = await readFile(
       path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+      'utf8',
+    );
+    const modeValidator = await readFile(
+      path.join(repoRoot, 'scripts', 'validate-release-mode.mjs'),
       'utf8',
     );
     expect(script).toContain("process.env.OTTO_ALLOW_UNSIGNED_MAC === '1'");
@@ -528,13 +579,13 @@ describe('desktop packaging contract', () => {
     expect(script).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'");
     expect(workflow).toContain('unsigned_mac_transition:');
     expect(workflow).toContain(
-      "OTTO_ALLOW_UNSIGNED_MAC: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}",
+      "OTTO_ALLOW_UNSIGNED_MAC: ${{ needs.validate-source.outputs.unsigned_desktop == 'true' && '1' || '0' }}",
     );
     expect(workflow).toContain('Validate release mode boundary');
-    expect(workflow).toContain(
+    expect(modeValidator).toContain(
       'Unsigned transition builds require workflow_dispatch, unsigned_mac_transition=true, release_channel=transition, draft=true, and prerelease=true.',
     );
-    expect(workflow).toContain(
+    expect(modeValidator).toContain(
       'Prerelease artifacts must remain draft-only and cannot deploy or update existing users.',
     );
     expect(workflow).toMatch(
@@ -545,10 +596,15 @@ describe('desktop packaging contract', () => {
       "if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}",
     );
     const signedMacStep = workflow.match(
-      /- name: Verify signed macOS disk images[\s\S]*?(?=\n\s+- name: Build enterprise server package)/,
+      /- name: Verify macOS disk images and application seals[\s\S]*?(?=\n\s+- name: Build enterprise server package)/,
     )?.[0];
     expect(signedMacStep).toContain(
-      "if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}",
+      'if [ "$DESKTOP_UNSIGNED_BUILD" != \'1\' ]; then',
+    );
+    expect(signedMacStep).not.toContain('if: ${{');
+    expect(signedMacStep).toContain('hdiutil verify "$dmg"');
+    expect(signedMacStep).toContain(
+      'codesign --verify --deep --strict --verbose=2 "$app"',
     );
     const windowsRuntimeJob = workflow.match(
       /\n  verify-windows-signature:[\s\S]*?(?=\n  create-release-drafts:)/,
@@ -558,10 +614,10 @@ describe('desktop packaging contract', () => {
     );
     expect(windowsRuntimeJob).not.toMatch(/timeout-minutes: 15\s+if:/);
     expect(windowsRuntimeJob).toContain(
-      "DESKTOP_TEST_BUILD: ${{ inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true && '1' || '0' }}",
+      "DESKTOP_UNSIGNED_BUILD: ${{ needs.build.outputs.unsigned_desktop == 'true' && '1' || '0' }}",
     );
     expect(windowsRuntimeJob).toContain(
-      "if ($env:DESKTOP_TEST_BUILD -ne '1') {",
+      "if ($env:DESKTOP_UNSIGNED_BUILD -ne '1') {",
     );
     expect(windowsRuntimeJob).toContain(
       "$verificationArguments += '--require-native-authenticode'",
@@ -595,6 +651,82 @@ describe('desktop packaging contract', () => {
     );
     expect(workflow).toContain(
       'The production update mirror and enterprise server remain on the previously published stable version.',
+    );
+  });
+
+  it('keeps unsigned stable on the enterprise signing and complete production transaction path', async () => {
+    const workflow = await readFile(
+      path.join(repoRoot, '.github', 'workflows', 'release.yml'),
+      'utf8',
+    );
+    expect(workflow).toContain('unsigned_desktop_stable:');
+    expect(workflow).toContain('node scripts/validate-release-mode.mjs');
+    for (const output of [
+      '${{ steps.mode.outputs.unsigned_desktop }}',
+      '${{ needs.validate-mode.outputs.unsigned_desktop }}',
+      '${{ needs.validate-source.outputs.unsigned_desktop }}',
+    ])
+      expect(workflow).toContain(`unsigned_desktop: ${output}`);
+    for (const stepName of [
+      'Require enterprise package signing custody',
+      'Validate enterprise license trust anchor',
+      'Build enterprise server package',
+      'Attest enterprise release candidate provenance',
+      'Attest signed release manifests',
+    ]) {
+      const step = workflow
+        .split(`      - name: ${stepName}\n`)[1]
+        ?.split('\n      - name:')[0];
+      expect(step).toBeDefined();
+      expect(step).toContain(
+        "if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}",
+      );
+      expect(step).not.toContain('unsigned_desktop');
+    }
+    expect(workflow).toContain('test -n "$ENTERPRISE_SIGNING_PRIVATE_KEY"');
+    expect(workflow).toContain('test -n "$ENTERPRISE_SIGNING_PUBLIC_KEY"');
+    // The new desktop-only mode must never select the reduced transition asset
+    // profile or bypass draft creation, server precommit, mirror or compensation.
+    const transactionJobs = workflow.slice(
+      workflow.indexOf('\n  prepare-release-creation-intent:'),
+    );
+    expect(transactionJobs).not.toContain('unsigned_desktop');
+    expect(transactionJobs).toContain('ASSET_PROFILE=production');
+    expect(transactionJobs).toContain('ASSET_PROFILE=unsigned-transition');
+    expect(workflow).toContain(
+      'Windows installers do not carry Authenticode signatures',
+    );
+    expect(workflow).toContain(
+      'unattended installation on every device is not guaranteed',
+    );
+  });
+
+  it('retains the installed application identity and NSIS upgrade entry point', async () => {
+    const desktop = JSON.parse(
+      await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+    );
+    const updater = await readFile(
+      path.join(packageRoot, 'src/main/update-service.ts'),
+      'utf8',
+    );
+    expect(desktop.name).toBe('otto-desktop');
+    expect(desktop.build.appId).toBe('ai.otto.desktop');
+    expect(desktop.build.productName).toBe('Otto');
+    expect(desktop.build.nsis).toMatchObject({
+      oneClick: false,
+      allowToChangeInstallationDirectory: true,
+      shortcutName: 'Otto',
+      artifactName: 'Otto-Setup-${version}-win-x64.${ext}',
+    });
+    expect(desktop.build.nsis.deleteAppDataOnUninstall).not.toBe(true);
+    expect(desktop.build.protocols[0].schemes).toContain('otto');
+    expect(updater).toContain("spawn(ready.filePath, ['/S', '--force-run']");
+    const verifyBeforeInstallIndex = updater.indexOf(
+      'await verifyBeforeInstall(ready.filePath, ready.sha256)',
+    );
+    expect(verifyBeforeInstallIndex).toBeGreaterThanOrEqual(0);
+    expect(verifyBeforeInstallIndex).toBeLessThan(
+      updater.indexOf("spawn(ready.filePath, ['/S', '--force-run']"),
     );
   });
 
@@ -747,9 +879,12 @@ describe('desktop packaging contract', () => {
     );
     expect(windowsVerificationJobStart).toBeLessThan(prepareCreationJobStart);
     expect(prepareCreationJobStart).toBeLessThan(createDraftsJobStart);
-    expect(workflow).toContain(
-      'Release workflow may only run in NSIETeam/otto-new',
-    );
+    expect(
+      await readFile(
+        path.join(repoRoot, 'scripts', 'validate-release-mode.mjs'),
+        'utf8',
+      ),
+    ).toContain('Release workflow may only run in NSIETeam/otto-new');
     expect(workflow).toContain(
       'git diff --quiet "$INTERNAL_COMMIT" "$SOURCE_COMMIT" -- .github/workflows',
     );
@@ -1327,6 +1462,9 @@ describe('desktop packaging contract', () => {
     expect(budget).toContain('baselineBytes + growthBytes');
     expect(budget).toContain('absoluteMaxBytes');
     expect(gate).toContain('resolveWindowsInstallerBudget()');
+    expect(gate).toContain('resolveMacInstallerBudget()');
+    expect(gate).toContain("for (const arch of ['arm64', 'x64'])");
+    expect(gate).toContain('size > maxMacInstallerBytes');
     expect(workflow).toContain(
       'name: Enforce packaged content and installer size budget',
     );
@@ -1334,7 +1472,9 @@ describe('desktop packaging contract', () => {
       workflow.indexOf(
         '      - name: Enforce packaged content and installer size budget',
       ),
-      workflow.indexOf('      - name: Verify signed macOS disk images'),
+      workflow.indexOf(
+        '      - name: Verify macOS disk images and application seals',
+      ),
     );
     expect(releaseGateStep).toContain(
       'OTTO_UPDATE_ASSET_BASE_URL: https://github.com/${{ env.RELEASES_REPO }}/releases/download/v${{ needs.validate-source.outputs.version }}',
@@ -1367,6 +1507,7 @@ describe('desktop packaging contract', () => {
     );
     expect(workflow).toContain("OTTO_DESKTOP_MAX_INSTALLER_GROWTH_MB: '8'");
     expect(workflow).toContain("OTTO_DESKTOP_MAX_INSTALLER_MB: '140'");
+    expect(workflow).toContain("OTTO_DESKTOP_MAX_DMG_MB: '140'");
   });
 
   it('explicitly ad-hoc signs every nonstandard macOS loose binary before sealing the app', async () => {

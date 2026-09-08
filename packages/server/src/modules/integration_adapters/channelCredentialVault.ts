@@ -8,11 +8,52 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { ChannelInstallation, ChannelProvider } from './channelConnector.js';
 
 export interface ChannelCredentialProtectorV1 {
   protect(plaintext: string): string | Promise<string>;
   unprotect(protectedValue: string): string | Promise<string>;
+}
+
+/** Local authenticated encryption for Desktop-managed channel credentials. */
+export class FileKeyChannelCredentialProtectorV1 implements ChannelCredentialProtectorV1 {
+  constructor(private readonly keyFilePath: string) {}
+
+  protect(plaintext: string): string {
+    const key = this.key();
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', key, iv);
+    const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+    return `gcm:${iv.toString('hex')}:${cipher.getAuthTag().toString('hex')}:${encrypted.toString('hex')}`;
+  }
+
+  unprotect(protectedValue: string): string {
+    const [prefix, ivHex, tagHex, payloadHex] = protectedValue.split(':');
+    if (prefix !== 'gcm' || !ivHex || !tagHex || !payloadHex) {
+      throw new Error('channel credential ciphertext is invalid');
+    }
+    const decipher = createDecipheriv('aes-256-gcm', this.key(), Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(payloadHex, 'hex')),
+      decipher.final(),
+    ]).toString('utf8');
+  }
+
+  private key(): Buffer {
+    fs.mkdirSync(path.dirname(this.keyFilePath), { recursive: true, mode: 0o700 });
+    try {
+      const key = fs.readFileSync(this.keyFilePath);
+      if (key.length !== 32) throw new Error('channel credential key is invalid');
+      return key;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const key = randomBytes(32);
+      fs.writeFileSync(this.keyFilePath, key, { mode: 0o600, flag: 'wx' });
+      return key;
+    }
+  }
 }
 
 interface StoredChannelCredentialV1 {
@@ -43,7 +84,7 @@ export interface ChannelCredentialVaultV1 {
   listInstallations(): ChannelInstallation[];
 }
 
-const INSTALLATION_ID_PATTERN = /^channel_(feishu|lark|wecom)_[a-f0-9]{24}$/;
+const INSTALLATION_ID_PATTERN = /^channel_(feishu|lark|wecom|dingtalk)_[a-f0-9]{24}$/;
 
 function sameInstallation(
   left: ChannelInstallation,
@@ -86,6 +127,9 @@ export class JsonChannelCredentialVaultV1 implements ChannelCredentialVaultV1 {
         schemaVersion: 1,
         installation: {
           ...installation,
+          ...(installation.requestedScopes
+            ? { requestedScopes: [...installation.requestedScopes] }
+            : {}),
           grantedScopes: [...installation.grantedScopes],
         },
         protectedCredential,
@@ -132,6 +176,9 @@ export class JsonChannelCredentialVaultV1 implements ChannelCredentialVaultV1 {
   listInstallations(): ChannelInstallation[] {
     return Object.values(this.readRegistry().entries).map((entry) => ({
       ...entry.installation,
+      ...(entry.installation.requestedScopes
+        ? { requestedScopes: [...entry.installation.requestedScopes] }
+        : {}),
       grantedScopes: [...entry.installation.grantedScopes],
     }));
   }

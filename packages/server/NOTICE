@@ -1,0 +1,46 @@
+Otto official channel adapters - third-party notices
+
+@wecom/aibot-node-sdk 1.0.7
+Source: https://github.com/WecomTeam/aibot-node-sdk
+License declared in the published package.json and upstream README: MIT.
+Published 1.0.7 metadata:
+https://registry.npmjs.org/@wecom%2Faibot-node-sdk/1.0.7
+Published gitHead: ea48edf7c99be0609fe9740050f4942f897a5d95
+Official repository snapshot checked on 2026-09-09:
+https://github.com/WecomTeam/aibot-node-sdk/tree/80615b987ef69c6028ad764924609247c0725955
+That public snapshot identifies itself as 1.0.6 and declares MIT:
+https://github.com/WecomTeam/aibot-node-sdk/blob/80615b987ef69c6028ad764924609247c0725955/package.json
+https://github.com/WecomTeam/aibot-node-sdk/blob/80615b987ef69c6028ad764924609247c0725955/README.md#-license
+The official repository exposes no tags or releases, and the published 1.0.7
+gitHead was not resolvable there at the time of this check. The public tree
+contains no LICENSE file, and the official LICENSE-path history is empty.
+The published 1.0.7 package does not supply a separate LICENSE or copyright
+notice. Otto preserves that declaration without inventing a copyright holder
+or borrowing a notice from a different SDK. Upstream notices, if supplied in
+a later release, must be retained when updating this dependency.
+
+dingtalk-stream 2.1.7-beta.1
+Source: https://github.com/open-dingtalk/dingtalk-stream-sdk-nodejs
+The following license is reproduced from the published package's LICENSE:
+
+MIT License
+
+Copyright (c) 2023 钉钉开放平台团队
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

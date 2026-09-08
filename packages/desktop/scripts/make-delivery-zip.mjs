@@ -97,6 +97,8 @@ if (PUBLISH_REQUESTED) {
     '本地 --publish 已禁用；只能通过受保护的 .github/workflows/release.yml 创建或公开 Release。',
   );
 }
+// Historical name retained for existing local transition invocations. In the
+// release workflow this is set only by the validated desktop signing mode.
 const ALLOW_UNSIGNED_MAC = process.env.OTTO_ALLOW_UNSIGNED_MAC === '1';
 const GITHUB_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
 const NPM_BIN = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -111,7 +113,12 @@ const UNSIGNED_MAC_BUILD_ARGS = ALLOW_UNSIGNED_MAC
     ]
   : [];
 const MAC_BUILD_ENV = ALLOW_UNSIGNED_MAC
-  ? { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' }
+  ? {
+      ...process.env,
+      CSC_LINK: '',
+      CSC_KEY_PASSWORD: '',
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+    }
   : process.env;
 
 // ── 辅助函数 ──────────────────────────────────────────────────────────────
@@ -538,8 +545,15 @@ async function build(sourceCommit) {
   log('BUILD', '构建 Windows x64...');
   const windowsSigningEnv = {
     ...process.env,
-    CSC_LINK: process.env.WIN_CSC_LINK,
-    CSC_KEY_PASSWORD: process.env.WIN_CSC_KEY_PASSWORD,
+    CSC_LINK: ALLOW_UNSIGNED_MAC ? '' : process.env.WIN_CSC_LINK,
+    CSC_KEY_PASSWORD: ALLOW_UNSIGNED_MAC
+      ? ''
+      : process.env.WIN_CSC_KEY_PASSWORD,
+    WIN_CSC_LINK: ALLOW_UNSIGNED_MAC ? '' : process.env.WIN_CSC_LINK,
+    WIN_CSC_KEY_PASSWORD: ALLOW_UNSIGNED_MAC
+      ? ''
+      : process.env.WIN_CSC_KEY_PASSWORD,
+    ...(ALLOW_UNSIGNED_MAC ? { CSC_IDENTITY_AUTO_DISCOVERY: 'false' } : {}),
   };
   runBuildStep(NPM_BIN, ['run', 'dist:win'], 'win-unpacked', windowsSigningEnv);
 

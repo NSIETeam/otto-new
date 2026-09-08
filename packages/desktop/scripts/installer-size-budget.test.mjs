@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   LAST_PUBLIC_WINDOWS_INSTALLER_BYTES,
   MEBIBYTE,
+  resolveMacInstallerBudget,
   resolveWindowsInstallerBudget,
 } from './installer-size-budget.mjs';
 
@@ -36,4 +37,22 @@ describe('Windows installer size budget', () => {
       }),
     ).toThrow('OTTO_DESKTOP_MAX_INSTALLER_GROWTH_MB');
   });
+});
+
+describe('macOS disk image size budget', () => {
+  it('bounds both architectures slightly above the Windows growth ceiling', () => {
+    expect(resolveMacInstallerBudget({})).toEqual({ maxBytes: 140 * MEBIBYTE });
+    expect(
+      resolveMacInstallerBudget({ OTTO_DESKTOP_MAX_DMG_MB: '130' }),
+    ).toEqual({ maxBytes: 130 * MEBIBYTE });
+  });
+
+  it.each(['0', '-1', 'Infinity', 'NaN', '9007199254740991'])(
+    'rejects an invalid DMG budget: %s',
+    (value) => {
+      expect(() =>
+        resolveMacInstallerBudget({ OTTO_DESKTOP_MAX_DMG_MB: value }),
+      ).toThrow();
+    },
+  );
 });

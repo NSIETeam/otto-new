@@ -4,15 +4,17 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   loadUserSettingsSubset,
   patchUserSettings,
+  userSettingsFilePath,
 } from './userSettings.js';
 
 const temporaryHomes: string[] = [];
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const home of temporaryHomes.splice(0)) {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -25,6 +27,19 @@ function temporaryHome(): string {
 }
 
 describe('background model task user setting', () => {
+  it('uses OTTO_USER_DIR by default while preserving an explicit home argument', () => {
+    const root = temporaryHome();
+    const isolated = path.join(root, 'isolated');
+    vi.stubEnv('OTTO_USER_DIR', isolated);
+    vi.stubEnv('HOME', root);
+    vi.stubEnv('USERPROFILE', root);
+    patchUserSettings({ backgroundModelTasksEnabled: true });
+    expect(userSettingsFilePath()).toBe(path.join(isolated, 'settings.json'));
+    expect(loadUserSettingsSubset().backgroundModelTasksEnabled).toBe(true);
+    expect(loadUserSettingsSubset(root).backgroundModelTasksEnabled).toBe(false);
+    expect(fs.existsSync(path.join(root, '.otto-user'))).toBe(false);
+  });
+
   it('defaults to disabled when the setting is absent', () => {
     expect(
       loadUserSettingsSubset(temporaryHome()).backgroundModelTasksEnabled,

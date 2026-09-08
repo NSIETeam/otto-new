@@ -40,6 +40,32 @@ const DESTRUCTIVE_PATTERN =
 const ENTERPRISE_ACTION_PATTERN =
   /(?:提交|发送|配置|授权|邀请|办理|审批|创建|修改|删除|更新|submit|send|configure|grant|invite|approve|create|modify|delete|update)/iu;
 
+/** Resource operands are not requested actions. Keep the extension so explicit
+ * output filenames still select artifact delivery. Actual dispatch permissions
+ * continue to be enforced independently by the native tool policy. */
+function intentText(text: string): string {
+  const resourceStart =
+    /^(?:https?:\/\/|[a-z]:[\\/]|\\\\|\/|\.{1,2}[\\/]|[\w.-]+[\\/])/iu;
+  const mask = (resource: string) =>
+    `resource${resource.match(/\.[a-z0-9]{1,10}$/iu)?.[0] ?? ''}`;
+  const unquoted = text.replace(
+    /([`"'])([^\n]*?)\1/gu,
+    (match, _quote: string, value: string) =>
+      resourceStart.test(value) ? mask(value) : match,
+  );
+  return unquoted.replace(
+    /(^|[\s(（:：])((?:https?:\/\/|[a-z]:[\\/]|\\\\|\/|\.{1,2}[\\/]|[\w.-]+[\\/])[^\s`"'<>|&，,。；;）)\]】]+)/giu,
+    (_match, prefix: string, resource: string) => {
+      // A bare path may touch Chinese prose without whitespace. Keep a trailing
+      // sequencing clause conservatively; quoted paths have explicit bounds.
+      const clause = resource.search(/(?:然后|之后|并且|并|再)(?=[^\\/]*$)/u);
+      return clause < 0
+        ? `${prefix}${mask(resource)}`
+        : `${prefix}${mask(resource.slice(0, clause))} ${resource.slice(clause)}`;
+    },
+  );
+}
+
 function criteriaFor(
   intent: TurnIntent,
   evidenceRequirement: TurnEvidenceRequirement,
@@ -256,8 +282,9 @@ export function deriveTurnControlPolicy(
   input: TurnControlInput,
 ): TurnControlPolicy {
   const text = input.text.trim();
-  const intent = inferIntent(text, input.source);
-  const riskLevel = inferRisk(text, intent);
+  const actionText = intentText(text);
+  const intent = inferIntent(actionText, input.source);
+  const riskLevel = inferRisk(actionText, intent);
   const evidenceRequirement = evidenceFor(intent, riskLevel);
   const executionMode = executionFor(intent, riskLevel, input.toolFree);
   const complexity = routeTurnComplexity({
@@ -292,7 +319,7 @@ export function deriveTurnControlPolicy(
           : 'none',
     complexity,
     presentation: presentationFor(intent, complexity, text),
-    successCriteria: criteriaFor(intent, evidenceRequirement, text),
+    successCriteria: criteriaFor(intent, evidenceRequirement, actionText),
   };
 }
 

@@ -5,7 +5,10 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveWindowsInstallerBudget } from './installer-size-budget.mjs';
+import {
+  resolveMacInstallerBudget,
+  resolveWindowsInstallerBudget,
+} from './installer-size-budget.mjs';
 import { verifyUpdateManifest } from './verify-update-manifest.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -16,6 +19,7 @@ const {
   growthBytes: maxWindowsInstallerGrowthBytes,
   maxBytes: maxWindowsInstallerBytes,
 } = resolveWindowsInstallerBudget();
+const { maxBytes: maxMacInstallerBytes } = resolveMacInstallerBudget();
 
 const failures = [];
 const notes = [];
@@ -129,6 +133,29 @@ if (existsSync(winInstaller)) {
   note(
     'Windows installer not present; size gate will run after dist:win/package creates release artifact',
   );
+}
+
+for (const arch of ['arm64', 'x64']) {
+  const diskImage = path.join(
+    releaseDir,
+    `Otto-${desktopPkg.version}-${arch}.dmg`,
+  );
+  if (!existsSync(diskImage)) {
+    note(
+      `macOS ${arch} DMG not present; size gate will run after dist/package`,
+    );
+    continue;
+  }
+  const size = statSync(diskImage).size;
+  if (size > maxMacInstallerBytes) {
+    fail(
+      `macOS ${arch} DMG exceeds limit: ${size} bytes > ${maxMacInstallerBytes} bytes`,
+    );
+  } else {
+    note(
+      `macOS ${arch} DMG size ${size} bytes is within ${maxMacInstallerBytes}-byte budget`,
+    );
+  }
 }
 
 if (releaseAssetCandidates.some(existsSync)) {

@@ -729,4 +729,33 @@ sudo journalctl -u caddy -n 100 --no-pager
 
 ### 想把本包覆盖到已有不同版本
 
-不要修改安装脚本绕过检查。这个包是“新服务器迁入包”，不同版本升级需要单独的备份、canary、兼容矩阵和回滚计划。
+不要通过 `install.sh` 覆盖旧部署或绕过检查。已有 one-click `current` 布局使用签名包的
+`upgrade.sh`，必须先具备完整备份、canary、兼容矩阵和回滚计划。
+
+### 1.9.14 定制部署升级至 1.9.15
+
+`lstc` 仅可作为旧 release 的校验兼容通道；新包仍要求 stable/transition 的完整签名、来源与
+逐文件 SHA-256。旧目录名可包含 `all-enterprises-seven` 等定制后缀，但对应 manifest 中的
+版本、运行时包版本和每个文件 hash 必须吻合，不支持未登记的 hot patch。
+
+升级读取并保留 `OTTO_ENTERPRISE_DEPLOYMENT_GRANTS`、`OTTO_BACKUP_ENCRYPTION_KEY_FILE`、
+全部短信/飞书设置、公网 URL 和非托管配置行。七功能部署授权仍依赖可用的签名 License；
+有 grants 时健康验收额外要求 License 为 active/expiring/grace，不接受仅开启 enforce 的空授权。
+发布包必须继续信任签发旧 License 的公钥；企业部署包签名公钥不是 License 公钥。
+
+SQLCipher 的原密钥路径和 `OTTO_DATABASE_ENCRYPTION_KEY_ID` 保留，继续强制加密与只读密钥，
+只更新对应新 release 的原生 binding 路径。升级 canary 必须取得既有 account-sync、attachment、
+field 三把业务密钥：使用配置的外部文件，或数据目录内同名默认文件。仅把普通文件复制进
+root-only 事务目录并收紧为 0600；缺失、符号链接或目标已存在均拒绝，不为旧密文重新生成密钥。
+canary 的临时密钥路径不会写回生产 env；回滚恢复原 env 的完整字节、root:root 0600、旧 DB、
+resident checkpoint、current 与旧 deploy 工具，并要求旧 `verify.sh` 真正通过。
+
+正式升级按 stop/drain → DB 快照 → 隔离迁移 → loopback canary → 停止 canary → 切换顺序执行，
+不并行运行备份、迁移与 canary。canary 设置 `OTTO_ENTERPRISE_CANARY_MODE=1`，不注册工单
+SMS/飞书、政策收集/通知、招聘、遥测/License 同步、联邦和备份等后台任务；验收只 GET
+health、legal、deployment/status，不发短信、不重放历史 outbox、不抓取政策来源。
+这是受控健康检查模式，不是通用禁网沙箱；不要调用 canary 的业务写路由。
+
+上线前仍需真实隔离验证 schema 24 → 26、逐表行数/quick_check/foreign_key_check、旧 License
+可验证、现有多个企业的七功能鉴权（含未授权账号反例）、旧会话/登录、历史密文读取，以及
+独立备份恢复与失败回滚。不得把合成 fixture 或公开 health 成功当作这些真实验收已完成。

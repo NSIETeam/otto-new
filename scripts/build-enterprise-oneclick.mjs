@@ -24,6 +24,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { supportedEnterpriseSchemaVersions } from './enterprise-release-contract.mjs';
 import { copyEnterpriseRuntimeDependencies } from './enterprise-runtime-dependencies.mjs';
+import { copyEnterpriseServerNotice } from './server-notice.mjs';
 import {
   REQUIRED_SQLCIPHER_NODE_TARGETS,
   verifySqlCipherMatrixManifest,
@@ -316,6 +317,7 @@ const sourceScope = [
   'package-lock.json',
   'tsconfig.json',
   'packages/server/package.json',
+  'packages/server/NOTICE',
   'packages/server/tsconfig.json',
   'scripts/build_package.js',
   'scripts/copy_files.js',
@@ -329,6 +331,7 @@ const sourceScope = [
   'deployment/enterprise-oneclick',
   'scripts/build-enterprise-oneclick.mjs',
   'scripts/enterprise-runtime-dependencies.mjs',
+  'scripts/server-notice.mjs',
   'scripts/verify-enterprise-package-signature.mjs',
   'scripts/verify-sqlcipher-native-assets.mjs',
 ];
@@ -343,6 +346,7 @@ const sourceInputFiles = [
   'package-lock.json',
   'tsconfig.json',
   'packages/server/package.json',
+  'packages/server/NOTICE',
   'packages/server/tsconfig.json',
   'scripts/build_package.js',
   'scripts/copy_files.js',
@@ -361,6 +365,7 @@ const sourceInputFiles = [
   ),
   'scripts/build-enterprise-oneclick.mjs',
   'scripts/enterprise-runtime-dependencies.mjs',
+  'scripts/server-notice.mjs',
   'scripts/verify-enterprise-package-signature.mjs',
   'scripts/verify-sqlcipher-native-assets.mjs',
   ...filesBelow(sqlCipherNodeRoot).map((relative) =>
@@ -410,6 +415,7 @@ try {
   );
 
   const serverDist = path.join(repoRoot, 'packages', 'server', 'dist');
+  copyEnterpriseServerNotice(repoRoot, releaseRoot);
   const serverFiles = [
     ...filesBelow(path.join(serverDist, 'src'))
       .filter((relative) => relative.endsWith('.js'))

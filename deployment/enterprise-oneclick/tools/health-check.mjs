@@ -160,6 +160,12 @@ if (deploymentStatus.license?.enforce !== true) {
   fail('deployment License enforcement is not active');
 }
 if (
+  process.env.OTTO_ENTERPRISE_DEPLOYMENT_GRANTS?.trim() &&
+  !['active', 'expiring', 'grace'].includes(deploymentStatus.license?.status)
+) {
+  fail('configured deployment grants require a usable signed deployment License');
+}
+if (
   deploymentStatus.database?.ready !== true ||
   deploymentStatus.database?.schemaVersion !== expectedSchema
 ) {

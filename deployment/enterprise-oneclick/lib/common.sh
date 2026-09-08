@@ -191,7 +191,7 @@ otto_load_config() {
     [ -z "$line" ] && continue
     [[ "$line" == \#* ]] && continue
     [[ "$line" == export\ * ]] && line="${line#export }"
-    [[ "$line" == *=* ]] || otto_die "配置行必须是 KEY=VALUE：${raw}"
+    [[ "$line" == *=* ]] || otto_die "配置行必须是 KEY=VALUE（内容已隐藏）"
     key="${line%%=*}"
     value="${line#*=}"
     key="${key%"${key##*[![:space:]]}"}"
@@ -199,6 +199,7 @@ otto_load_config() {
       OTTO_PUBLIC_HOST|OTTO_PUBLIC_PORT|OTTO_ENTERPRISE_PUBLIC_URL|\
       OTTO_ENTERPRISE_DIR|OTTO_ENTERPRISE_HOST|OTTO_ENTERPRISE_PORT|\
       OTTO_ENTERPRISE_TRUST_PROXY_HOPS|OTTO_APP_VERSION|OTTO_BUILD_COMMIT|\
+      OTTO_ENTERPRISE_DEPLOYMENT_GRANTS|\
       OTTO_ENTERPRISE_ADMIN_TOKEN|OTTO_BOOTSTRAP_USERNAME|\
       OTTO_BOOTSTRAP_PASSWORD|OTTO_BOOTSTRAP_NAME|OTTO_CADDY_MODE|\
       OTTO_ALLOW_SMS_DISABLED|ALIYUN_SMS_PROVIDER|\
@@ -211,7 +212,7 @@ otto_load_config() {
       OTTO_DEFAULT_ORGANIZATION_NAME|OTTO_ENTERPRISE_USAGE_DAILY_LIMIT|\
       OTTO_CREDIT_TOKEN_RATE|OTTO_ESTIMATE_MANUAL_MULT|\
       OTTO_ESTIMATE_CNY_PER_HOUR|OTTO_ESTIMATE_LABOR_PER_TOKEN_CAP|\
-      OTTO_BACKUP_ENCRYPTION_KEY|OTTO_BACKUP_INTERVAL_HOURS|\
+      OTTO_BACKUP_ENCRYPTION_KEY|OTTO_BACKUP_ENCRYPTION_KEY_FILE|OTTO_BACKUP_INTERVAL_HOURS|\
       OTTO_BACKUP_ENCRYPTION_KEY_RECOVERY_FILE|\
       OTTO_BACKUP_RETENTION_DAYS|OTTO_BACKUP_MINIMUM_RETAINED|\
       OTTO_BACKUP_REPLICA_DIR|OTTO_DISK_MIN_FREE_MB|\
@@ -239,6 +240,48 @@ otto_load_config() {
         ;;
     esac
   done < "$config_path"
+}
+
+otto_prepare_upgrade_canary_keys() {
+  local source_dir="$1" canary_dir="$2" setting name key_path
+  [ -d "$source_dir" ] && [ ! -L "$source_dir" ] \
+    && [ -d "$canary_dir" ] && [ ! -L "$canary_dir" ] \
+    || otto_die "升级密钥快照目录不安全" 3
+  source_dir="$(readlink -f -- "$source_dir")"
+  canary_dir="$(readlink -f -- "$canary_dir")"
+  case "$canary_dir/" in
+    "$source_dir/"*) otto_die "升级 canary 必须位于生产数据目录之外" 3 ;;
+  esac
+  # Never generate replacement business keys for an existing encrypted DB.
+  # Copy even externally held keys into the root-only transaction: the canary
+  # must neither change external custody nor encrypt rows with a fresh key.
+  for setting in OTTO_ACCOUNT_SYNC_ENCRYPTION_KEY_FILE \
+    OTTO_ATTACHMENT_ENCRYPTION_KEY_FILE OTTO_FIELD_ENCRYPTION_KEY_FILE; do
+    case "$setting" in
+      OTTO_ACCOUNT_SYNC_ENCRYPTION_KEY_FILE) name=account-sync.key ;;
+      OTTO_ATTACHMENT_ENCRYPTION_KEY_FILE) name=attachment-storage.key ;;
+      OTTO_FIELD_ENCRYPTION_KEY_FILE) name=field-encryption.key ;;
+    esac
+    key_path="${!setting:-$source_dir/$name}"
+    [[ "$key_path" = /* ]] && [ -f "$key_path" ] && [ ! -L "$key_path" ] \
+      || otto_die "升级必须保留既有业务密钥：${setting}（普通文件、绝对路径）" 3
+    [ ! -e "$canary_dir/$name" ] && [ ! -L "$canary_dir/$name" ] \
+      || otto_die "拒绝覆盖既有 canary 密钥：${name}" 3
+    install -m 0600 -- "$key_path" "$canary_dir/$name"
+    printf -v "$setting" '%s' "$canary_dir/$name"
+    export "$setting"
+  done
+  for name in federation-signing-key.pem backup-encryption.key \
+    backup-key-custody.json privacy-deletions.key; do
+    key_path="$source_dir/$name"
+    if [ -e "$key_path" ] || [ -L "$key_path" ]; then
+      [ -f "$key_path" ] && [ ! -L "$key_path" ] \
+        || otto_die "升级身份快照只允许普通文件：${name}" 3
+      [ ! -e "$canary_dir/$name" ] && [ ! -L "$canary_dir/$name" ] \
+        || otto_die "拒绝覆盖既有 canary 身份快照：${name}" 3
+      install -m 0600 -- "$key_path" "$canary_dir/$name"
+    fi
+  done
 }
 
 otto_random_secret() {

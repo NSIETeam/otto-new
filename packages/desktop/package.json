@@ -1,6 +1,6 @@
 {
   "name": "otto-desktop",
-  "version": "1.9.14",
+  "version": "1.9.15",
   "description": "Otto Desktop - Electron app shell (main + preload + renderer reusing webview DOM UI)",
   "author": "Otto",
   "license": "Apache-2.0",
@@ -97,8 +97,13 @@
       "package.json",
       "node_modules/@otto/native/dist/index.js",
       "!**/*.map",
-      "!**/*.md",
-      "!**/*.markdown",
+      "!**/!(*LICENSE*|*license*|*License*|*LICENCE*|*licence*|*Licence*|*NOTICE*|*notice*|*Notice*|*COPYING*|*copying*|*Copying*).md",
+      "!**/!(*LICENSE*|*license*|*License*|*LICENCE*|*licence*|*Licence*|*NOTICE*|*notice*|*Notice*|*COPYING*|*copying*|*Copying*).markdown",
+      {
+        "from": "../server",
+        "to": "node_modules/otto-server",
+        "filter": ["NOTICE"]
+      },
       {
         "from": "../core/skills-seed",
         "to": "node_modules/otto-core/skills-seed",
@@ -110,6 +115,9 @@
         ]
       },
       "!**/*.ts",
+      "!**/*.tsx",
+      "!**/*.mts",
+      "!**/*.cts",
       "!**/*.d.ts",
       "!**/*.d.cts",
       "!**/*.d.mts",
@@ -165,6 +173,7 @@
       "!**/junit.xml",
       "!**/*.tsbuildinfo",
       "!**/*.test.*",
+      "!**/*.spec.*",
       "!**/tsconfig*.json",
       "!**/.last_build",
       "!**/__tests__/**"

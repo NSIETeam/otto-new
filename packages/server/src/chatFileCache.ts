@@ -6,9 +6,9 @@
 
 import { randomBytes } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import type { MessageContent } from './protocol.js';
+import { resolveServerUserDirectory } from './userDataRoot.js';
 
 export interface CacheChatFilesOptions {
   baseDir?: string;
@@ -23,7 +23,7 @@ export interface CacheChatFilesResult {
 }
 
 function defaultChatFileCacheDir(): string {
-  return path.join(os.homedir(), '.otto-user', 'chat-files');
+  return path.join(resolveServerUserDirectory(), 'chat-files');
 }
 
 function safeFileName(fileName: string): string {

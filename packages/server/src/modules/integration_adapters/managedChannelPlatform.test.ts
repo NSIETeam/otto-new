@@ -17,7 +17,7 @@ class FakeSocket extends EventEmitter implements BrokerChannelSocketV1 {
   }
 }
 
-const installation = {
+const baseInstallation = {
   installationId: 'channel_lark_0123456789abcdef01234567',
   provider: 'lark' as const,
   tenantId: 'tenant-1', tenantName: 'Acme', botName: 'Otto',
@@ -25,13 +25,14 @@ const installation = {
 };
 
 describe('ManagedChannelPlatformV1', () => {
-  it('connects an installed channel and routes an authenticated message through workflow and reply', async () => {
+  it.each(['lark', 'wecom'] as const)('preserves an existing managed %s channel and its workflow/reply route', async (provider) => {
+    const installation = { ...baseInstallation, provider, installationId: `channel_${provider}_0123456789abcdef01234567` };
     const socket = new FakeSocket();
     const task = {
       id: 'task-1', definitionId: 'daily-check', status: 'cancelled',
       updatedAt: new Date(2_000).toISOString(), steps: [{
         stepId: 'execute', status: 'running', input: { origin: {
-          provider: 'lark', installationId: installation.installationId,
+          provider, installationId: installation.installationId,
           tenantId: 'tenant-1', providerUserId: 'provider-user-1',
           userId: 'otto-user-1', deviceId: 'device-1',
         } },
@@ -43,9 +44,9 @@ describe('ManagedChannelPlatformV1', () => {
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     const createSocket = vi.fn(() => socket);
     const outboundRecord = {
-      idempotencyKey: 'channel-reply:lark:channel_lark_0123456789abcdef01234567:message-1',
+      idempotencyKey: `channel-reply:${provider}:${installation.installationId}:message-1`,
       installationId: installation.installationId,
-      provider: 'lark' as const,
+      provider,
       requestHash: 'a'.repeat(64), state: 'prepared' as const, attempts: 1, updatedAtMs: 1,
     };
     const platform = new ManagedChannelPlatformV1({
@@ -91,8 +92,8 @@ describe('ManagedChannelPlatformV1', () => {
       createSocket,
       now: () => 2_000,
     });
-    expect(Object.keys(platform.connectors).sort()).toEqual(['feishu', 'lark', 'wecom']);
-    const starting = platform.connectors.lark!.start(installation.installationId);
+    expect(Object.keys(platform.connectors).sort()).toEqual(['dingtalk', 'feishu', 'lark', 'wecom']);
+    const starting = platform.connectors[provider]!.start(installation.installationId);
     await vi.waitFor(() => expect(createSocket).toHaveBeenCalledOnce());
     socket.emit('open');
     await expect(starting).resolves.toMatchObject({ state: 'connected' });

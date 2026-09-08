@@ -61,6 +61,36 @@ describe('ChannelPairingCard', () => {
     expect(await screen.findByText('机器人连接成功。')).toBeTruthy();
   });
 
+  it('makes automatic owner binding visible after QR installation', async () => {
+    channelPairingBegin.mockResolvedValue({ ok: true, pairing: basePairing, error: null });
+    channelPairingInstall.mockResolvedValue({
+      ok: true,
+      data: { installationId: 'install-1', ownerBindingState: 'bound' },
+      error: null,
+    });
+    render(<ChannelPairingCard provider="feishu" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '生成飞书连接二维码' }));
+    fireEvent.click(await screen.findByRole('button', { name: '确认权限并安装' }));
+
+    expect(await screen.findByText('扫码账号已绑定为本机控制账号。')).toBeTruthy();
+  });
+
+  it('warns when a safe manual identity binding is still required', async () => {
+    channelPairingBegin.mockResolvedValue({ ok: true, pairing: basePairing, error: null });
+    channelPairingInstall.mockResolvedValue({
+      ok: true,
+      data: { installationId: 'install-1', ownerBindingState: 'manual_required' },
+      error: null,
+    });
+    render(<ChannelPairingCard provider="feishu" />);
+
+    fireEvent.click(screen.getByRole('button', { name: '生成飞书连接二维码' }));
+    fireEvent.click(await screen.findByRole('button', { name: '确认权限并安装' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('远程控制仍被阻止');
+  });
+
   it('waits for provider-confirmed admin approval without a local bypass button', async () => {
     channelPairingBegin.mockResolvedValue({
       ok: true,

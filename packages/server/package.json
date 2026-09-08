@@ -38,15 +38,18 @@
     "license:issue:usb": "npm run build && node scripts/issue-usb-license.mjs"
   },
   "files": [
-    "dist"
+    "dist",
+    "NOTICE"
   ],
   "dependencies": {
     "@aws-sdk/client-s3": "3.1100.0",
     "@aws-sdk/s3-request-presigner": "3.1100.0",
     "@google/genai": "1.35.0",
     "@larksuiteoapi/node-sdk": "^1.71.1",
+    "@wecom/aibot-node-sdk": "1.0.7",
     "@xmldom/xmldom": "0.8.15",
     "better-sqlite3": "12.11.1",
+    "dingtalk-stream": "2.1.7-beta.1",
     "otto-core": "file:../core",
     "pdf-parse": "1.1.4",
     "pg": "8.22.0",

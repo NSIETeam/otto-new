@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { AgentTaskGraphSnapshot } from './protocol.js';
 import { TaskContinuityLedger, type TaskContinuitySnapshot } from './taskContinuity.js';
 import { TurnConstraintGuard } from './turnConstraints.js';
@@ -226,7 +227,37 @@ export class FileTurnRecoveryStore {
       mode: 0o600,
       flush: true,
     });
-    await rename(temporary, target);
+    await this.replaceRecord(temporary, target);
+  }
+
+  private async replaceRecord(
+    temporary: string,
+    target: string,
+  ): Promise<void> {
+    try {
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await rename(temporary, target);
+          return;
+        } catch (error) {
+          // Windows can briefly deny replacement while the record is open.
+          // Retry only the same atomic rename, never the external operation or
+          // an unlink of the last durable record. Persistent failures still stop.
+          if (
+            attempt >= 4 ||
+            !['EPERM', 'EACCES', 'EBUSY'].includes(
+              (error as NodeJS.ErrnoException).code ?? '',
+            )
+          )
+            throw error;
+          await delay(25 * 2 ** attempt);
+        }
+      }
+    } finally {
+      // This exact temporary file belongs to this write. Preserve the original
+      // persistence error if cleanup itself cannot complete.
+      await unlink(temporary).catch(() => undefined);
+    }
   }
 
   async load(sessionId: string): Promise<TurnRecoveryRecord | null> {
@@ -504,7 +535,7 @@ export class FileTurnRecoveryStore {
         encoding: 'utf8',
         mode: 0o600,
       });
-      await rename(temporary, target);
+      await this.replaceRecord(temporary, target);
       await unlink(this.pathForSession(sessionId));
     });
   }

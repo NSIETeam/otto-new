@@ -7,6 +7,7 @@ import {
   type TaskRequirement,
 } from './taskRequirements.js';
 import type { TurnVerificationCheck } from './protocol.js';
+import { WorkspacePathIdentity } from './workspacePathIdentity.js';
 
 type Call = {
   callId: string;
@@ -48,9 +49,9 @@ const WRITES = new Set(['write_file', 'replace', 'generate_safe_document']);
 const hash = (value: string | Buffer) =>
   createHash('sha256').update(value).digest('hex');
 
-/** Canonicalize existing ancestors, including junctions. Reject rather than follow
- * aliases: a recheck runs at dispatch, after any approval wait. This is not an OS sandbox. */
-function localTarget(raw: unknown, root: string): string {
+/** Resolve the bound host root, then reject every descendant alias. A recheck
+ * runs at dispatch after any approval wait. This is not an OS sandbox. */
+function localTarget(raw: unknown, root: WorkspacePathIdentity): string {
   if (
     typeof raw !== 'string' ||
     !raw.trim() ||
@@ -58,7 +59,7 @@ function localTarget(raw: unknown, root: string): string {
     /^[a-z]:(?![\\/])/iu.test(raw)
   )
     throw new Error('无法核对文件目标');
-  const target = path.resolve(root, raw);
+  const target = root.resolveTarget(raw);
   for (let cursor = target; ; cursor = path.dirname(cursor)) {
     if (existsSync(cursor)) {
       const stat = lstatSync(cursor);
@@ -135,6 +136,7 @@ export class TurnConstraintGuard {
   readonly requirements: TaskRequirement[];
   private rules: Rule[];
   private root: string;
+  private readonly workspaceIdentity?: WorkspacePathIdentity;
   private started = false;
   private gap = false;
   private pending = new Set<string>();
@@ -159,9 +161,10 @@ export class TurnConstraintGuard {
       workspacePath?: string;
     },
   ) {
-    this.root = context.workspacePath
-      ? path.resolve(context.workspacePath)
-      : '';
+    this.workspaceIdentity = context.workspacePath
+      ? new WorkspacePathIdentity(context.workspacePath)
+      : undefined;
+    this.root = this.workspaceIdentity?.canonicalPath ?? '';
     this.requestDigest = hash(request);
     this.requirements = extractTaskRequirements(request);
     this.rules = this.requirements
@@ -220,7 +223,7 @@ export class TurnConstraintGuard {
           if (targets.length === 1 && this.root) {
             monitor = 'unresolved';
             try {
-              const candidate = localTarget(targets[0][1], this.root);
+              const candidate = localTarget(targets[0][1], this.workspaceIdentity!);
               if (within(this.root, candidate)) {
                 monitor = 'workspace';
                 allowedRoot = candidate;
@@ -243,7 +246,7 @@ export class TurnConstraintGuard {
         ) {
           for (const match of text.matchAll(/`([^`]+)`/gu)) {
             try {
-              const file = this.root ? localTarget(match[1], this.root) : '';
+              const file = this.root ? localTarget(match[1], this.workspaceIdentity!) : '';
               if (file && within(this.root, file))
                 files.push({ path: file, digest: fingerprint(file) });
             } catch {
@@ -350,7 +353,7 @@ export class TurnConstraintGuard {
     let target: string;
     try {
       if (!this.root) throw new Error('缺少可信工作目录');
-      target = localTarget(call.args.file_path, this.root);
+      target = localTarget(call.args.file_path, this.workspaceIdentity!);
     } catch {
       return deny(rules[0], '文件目标无法安全核对');
     }
@@ -398,7 +401,7 @@ export class TurnConstraintGuard {
       const raw = match[1];
       if (/^https?:\/\//iu.test(raw)) continue;
       try {
-        const file = this.root ? localTarget(raw, this.root) : '';
+        const file = this.root ? localTarget(raw, this.workspaceIdentity!) : '';
         if (!file || !within(this.root, file)) return undefined;
         const digest = fingerprint(file);
         if (['unobserved', 'absent'].includes(digest)) return undefined;

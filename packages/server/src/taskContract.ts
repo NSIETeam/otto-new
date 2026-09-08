@@ -3,6 +3,7 @@ import { Type, type FunctionDeclaration } from '@google/genai';
 import path from 'node:path';
 import { statSync, realpathSync } from 'node:fs';
 import { passedTestCases } from './testCaseEvidence.js';
+import { WorkspacePathIdentity } from './workspacePathIdentity.js';
 import { inspectTestSemantics, type TestSemanticReview } from './semanticAcceptance.js';
 import {
   auditTaskCoverage,
@@ -263,6 +264,7 @@ function nativeFilePath(tool: ToolCall, workspacePath?: string): NativeFileIdent
 /** Model proposes meanings; native receipts decide whether the proposed checks ran.
  * This is coverage of a reviewed contract, NOT an independent semantic quality judge. */
 export class TaskContractLedger {
+  private readonly workspaceIdentity?: WorkspacePathIdentity;
   private semanticCache = new Map<string, TestSemanticReview>();
   private semanticInputs(criterion: TaskAcceptance) {
     // Inspect native-observed verification inputs only, not model-provided paths.
@@ -275,7 +277,9 @@ export class TaskContractLedger {
         const observed = readVersionedFile(file);
         if (!observed || observed.bytes.length > 256000) return [];
         if (this.workspacePath) {
-          const relative = path.relative(this.workspacePath, observed.version.path);
+          const root = this.workspaceIdentity?.currentPath();
+          if (!root) return [];
+          const relative = path.relative(root, observed.version.path);
           if (relative.startsWith('..') || path.isAbsolute(relative)) return [];
         }
         if (unique.has(observed.version.fileId)) return [];
@@ -387,6 +391,7 @@ export class TaskContractLedger {
     snapshot?: TaskContractSnapshot,
     private readonly workspacePath?: string,
   ) {
+    this.workspaceIdentity = workspacePath ? new WorkspacePathIdentity(workspacePath) : undefined;
     if (snapshot) {
       if (
         snapshot.version !== 1 ||

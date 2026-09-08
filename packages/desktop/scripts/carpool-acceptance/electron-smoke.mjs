@@ -111,6 +111,12 @@ app.whenReady().then(async()=>{console.error('acceptance: app ready');
 `,
   );
   app = await electron.launch({
+    env: {
+      ...process.env,
+      OTTO_PARK_CARPOOL_REQUESTS_ENABLED: 'true',
+      OTTO_PARK_CARPOOL_INVITATIONS_ENABLED: 'true',
+      OTTO_PARK_CARPOOL_GROUPS_ENABLED: 'true',
+    },
     executablePath: require('electron'),
     args: [path.join(temp, 'main.cjs'), '--remote-allow-origins=*'],
     timeout: 30_000,

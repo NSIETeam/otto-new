@@ -132,7 +132,7 @@ describe('module workspace parsing and normalization', () => {
       ],
     }), enterpriseCapabilities);
 
-    expect(parsed.groups[0].moduleIds).toEqual(['park-announcement', 'park-repair', 'park-meeting-room', 'park-carpool']);
+    expect(parsed.groups[0].moduleIds).toEqual(['park-announcement', 'park-repair', 'park-meeting-room', 'park-satisfaction', 'park-renovation', 'park-parking', 'park-network-phone', 'park-carpool']);
   });
 
   it('migrates the official daily-office group once to add policy intelligence', () => {
@@ -209,7 +209,7 @@ describe('module workspace parsing and normalization', () => {
       {id: 'custom-other', name: '其他', rows: 2, moduleIds: ['park-meeting-room', 'agent-ppt']},
     ]};
     const migrated = parseModuleWorkspace(JSON.stringify(original), enterpriseCapabilities);
-    expect(migrated.groups[0].moduleIds).toEqual(['park-repair', 'park-announcement', 'park-carpool']);
+    expect(migrated.groups[0].moduleIds).toEqual(['park-repair', 'park-announcement', 'park-satisfaction', 'park-renovation', 'park-parking', 'park-network-phone', 'park-carpool']);
     expect(migrated.groups[1]).toMatchObject(original.groups[1]);
     const removed = {...migrated, groups: migrated.groups.map(g => ({...g, moduleIds: g.moduleIds.filter(id => id !== 'park-carpool')}))};
     expect(parseModuleWorkspace(JSON.stringify(removed), enterpriseCapabilities).groups.flatMap(g=>g.moduleIds)).not.toContain('park-carpool');
@@ -410,5 +410,56 @@ describe('module workspace storage scope', () => {
     expect(first).toBe(same);
     expect(first).not.toBe(personal);
     expect(first).toContain('https%3A%2F%2Fexample.com');
+  });
+});
+
+describe('legacy park module additive migration', () => {
+  it('adds newly authorized legacy entries once without moving existing or restoring removed entries', () => {
+    const input = {
+      version: 1,
+      groups: [
+        {
+          id: 'park-services',
+          name: '园区服务',
+          rows: 2,
+          moduleIds: ['park-repair', 'park-announcement'],
+        },
+        {
+          id: 'other',
+          name: '其他',
+          rows: 2,
+          moduleIds: ['park-meeting-room'],
+        },
+      ],
+    };
+    const limited = {
+      ...enterpriseCapabilities,
+      availableModuleIds: [
+        'park-announcement',
+        'park-repair',
+        'park-meeting-room',
+      ],
+    };
+    const first = parseModuleWorkspace(JSON.stringify(input), limited);
+    const upgraded = parseModuleWorkspace(JSON.stringify(first), {
+      ...limited,
+      availableModuleIds: [...limited.availableModuleIds, 'park-satisfaction'],
+    });
+    expect(upgraded.groups[0].moduleIds).toEqual([
+      'park-repair',
+      'park-announcement',
+      'park-satisfaction',
+    ]);
+    expect(upgraded.groups[1].moduleIds).toEqual(['park-meeting-room']);
+    const removed = removeModuleFromGroup(
+      upgraded,
+      'park-services',
+      'park-satisfaction',
+    );
+    const revoked = parseModuleWorkspace(JSON.stringify(removed), limited);
+    expect(
+      parseModuleWorkspace(JSON.stringify(revoked), enterpriseCapabilities)
+        .groups[0].moduleIds,
+    ).not.toContain('park-satisfaction');
   });
 });

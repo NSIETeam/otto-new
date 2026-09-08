@@ -101,6 +101,11 @@ export function CarpoolChat({
             : '正在等待同行设备准备加密密钥'}
       </p>
       {error ? <p role="alert">{error}</p> : null}
+      {view?.pendingSendError ? (
+        <p role="status">
+          待发送消息尚未提交：{view.pendingSendError}。已有历史仍可查看。
+        </p>
+      ) : null}
       {safetyStatus ? <p role="status">{safetyStatus}</p> : null}
       {safetyTarget ? (
         <CarpoolConfirmation

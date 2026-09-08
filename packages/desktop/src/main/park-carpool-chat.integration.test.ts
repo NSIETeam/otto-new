@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import {
   Database,
   createEncryptedFieldCipher,
@@ -59,6 +59,7 @@ it('desktop coordinators exchange, retry after lost response, and restore actual
     },
   });
   let loseResponse = false;
+  let pauseOnAppend = false;
   const create = (id: string) =>
     new ParkCarpoolChat({
       stateDirectory: directory,
@@ -71,6 +72,8 @@ it('desktop coordinators exchange, retry after lost response, and restore actual
       client: {
         getParkCarpoolWorkflow: () => service.getWorkflow(id),
         executeParkCarpoolTransport: async (command) => {
+          if (pauseOnAppend && command.type === 'append')
+            vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'false');
           const result = await service.executeTransport(id, command);
           if (loseResponse && command.type === 'append') {
             loseResponse = false;
@@ -120,6 +123,9 @@ it('desktop coordinators exchange, retry after lost response, and restore actual
       action: 'accept',
     });
     const id = (await service.getWorkflow('a')).conversations[0]!.id;
+    vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'false');
+    expect((await alice.read(id)).canSend).toBe(false);
+    vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'true');
     await alice.read(id);
     await bob.read(id);
     loseResponse = true;
@@ -129,6 +135,33 @@ it('desktop coordinators exchange, retry after lost response, and restore actual
     const recovered = await alice.read(id);
     expect(recovered.messages).toHaveLength(1);
     expect((await bob.read(id)).messages[0]?.text).toBe('真实桌面加密消息');
+    pauseOnAppend = true;
+    await expect(
+      alice.send(id, '暂停中的待发送消息', 'pause-pending'),
+    ).rejects.toThrow(/暂停/);
+    const paused = await alice.read(id);
+    expect(paused.canSend).toBe(false);
+    expect(
+      paused.messages.find((m) => m.id === 'stable-message-id')?.text,
+    ).toBe('真实桌面加密消息');
+    expect(paused.messages.find((m) => m.id === 'pause-pending')?.pending).toBe(
+      true,
+    );
+    vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'true');
+    const rejectedRetry = await alice.read(id);
+    expect(rejectedRetry.pendingSendError).toMatch(/暂停/);
+    expect(
+      rejectedRetry.messages.find((m) => m.id === 'stable-message-id')?.text,
+    ).toBe('真实桌面加密消息');
+    pauseOnAppend = false;
+    vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'true');
+    expect(
+      (await alice.read(id)).messages.find((m) => m.id === 'pause-pending')
+        ?.pending,
+    ).toBe(false);
+    expect(
+      (await bob.read(id)).messages.filter((m) => m.id === 'pause-pending'),
+    ).toHaveLength(1);
     const transport = await service.executeTransport('a', {
       type: 'state',
       deviceId: 'device-a',
@@ -170,7 +203,7 @@ it('desktop coordinators exchange, retry after lost response, and restore actual
     await alice.send(id, '恢复后新消息', 'after-recovery');
     const restored = await bob.read(id);
     expect(restored.messages.map((m) => m.text)).toEqual(['恢复后新消息']);
-    expect(restored.unavailableHistoryCount).toBe(3);
+    expect(restored.unavailableHistoryCount).toBe(4);
     await service.executeWorkflow('b', { type: 'block', targetAccountId: 'a' });
     await expect(alice.send(id, '不能发送', 'blocked-message')).rejects.toThrow(
       /屏蔽/,
@@ -178,6 +211,7 @@ it('desktop coordinators exchange, retry after lost response, and restore actual
   } finally {
     await alice.close();
     await bob.close();
+    vi.unstubAllEnvs();
     db.close();
     await rm(directory, { recursive: true, force: true });
   }

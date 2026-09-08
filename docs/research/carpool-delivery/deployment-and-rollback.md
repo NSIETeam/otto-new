@@ -8,7 +8,7 @@
 
 `node scripts/otto-native-runtime.mjs build --target darwin-arm64 --probe` 已在本机完成。Windows 及其他目标架构仍需各自编译/探测/签名/安装包验收，不能将本机 ARM64 二进制用于它们。本地测试的原生产物未纳入源代码提交。
 
-配置与默认值见 [设计决策](design-decisions.md)。服务端保管 `OTTO_AMAP_WEB_SERVICE_KEY`，沿用 `OTTO_PARK_CARPOOL_MINIMUM_OVERLAP`。密钥不得进桌面、日志或版本库。请求、邀请、多人开关在代码中默认 true，但部署方应在验收前显式设为 false：
+配置与默认值见 [设计决策](design-decisions.md)。服务端保管 `OTTO_AMAP_WEB_SERVICE_KEY`，沿用 `OTTO_PARK_CARPOOL_MINIMUM_OVERLAP`。密钥不得进桌面、日志或版本库。请求、邀请、多人开关在 production 或未声明 NODE_ENV 时默认 false；test/development 才默认开启。部署方仍应在验收前显式设为 false：
 
 ```
 OTTO_PARK_CARPOOL_REQUESTS_ENABLED=false

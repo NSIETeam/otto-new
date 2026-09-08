@@ -20,6 +20,7 @@ export interface ParkChatView {
   canSend: boolean;
   unavailableHistoryCount: number;
   failedMessageCount: number;
+  pendingSendError?: string;
   messages: Array<{
     id: string;
     text: string;
@@ -64,8 +65,10 @@ export class ParkCarpoolChat {
   }
   async activate(
     scope: MlsDeviceScope & { approvalState: string },
+    signal?: AbortSignal,
   ): Promise<void> {
     await this.close();
+    signal?.throwIfAborted();
     if (scope.approvalState !== 'approved')
       throw new Error('同行加密设备尚未获批准');
     this.options.secureStorage.assertAvailable();
@@ -88,7 +91,7 @@ export class ParkCarpoolChat {
       })),
       this.options.binaryPath,
     );
-    await this.serial(() => this.inventory());
+    await this.serial(() => this.inventory(signal));
   }
   async clearLocalData(): Promise<void> {
     const scope = this.scope;
@@ -152,10 +155,16 @@ export class ParkCarpoolChat {
       throw new Error('同行加密尚未就绪，请登录并批准当前设备');
     return { kernel: this.kernel, scope: this.scope };
   }
-  private async inventory(): Promise<void> {
+  private async inventory(signal?: AbortSignal): Promise<void> {
     const { kernel, scope } = this.ready();
+    const epoch = this.identityEpoch;
+    const assertCurrent = () => {
+      signal?.throwIfAborted();
+      if (epoch !== this.identityEpoch) throw new Error('同行设备初始化已取消');
+    };
     let usable = 0;
     for (const key of await kernel.listKeyPackages()) {
+      assertCurrent();
       const result = await this.options.client.executeParkCarpoolTransport({
         type: 'publish_key',
         deviceId: scope.deviceId,
@@ -169,7 +178,9 @@ export class ParkCarpoolChat {
         await kernel.retireKeyPackages([key.reference]);
     }
     while (usable < 5) {
+      assertCurrent();
       const key = await kernel.createKeyPackage();
+      assertCurrent();
       await this.options.client.executeParkCarpoolTransport({
         type: 'publish_key',
         deviceId: scope.deviceId,
@@ -204,7 +215,7 @@ export class ParkCarpoolChat {
           g.authority.conversation_id === conversationId &&
           g.authority.generation === session.authority.generation,
       );
-      if (session.initialization) {
+      if (session.initialization && remote.writeEnabled) {
         // Native create is idempotent, including a restart after Welcome persistence.
         const invitation = await kernel.create(
           session.authority,
@@ -270,6 +281,7 @@ export class ParkCarpoolChat {
         s.authority.generation === remote.generation && s.status === 'active',
     );
     const messages: ParkChatView['messages'] = [];
+    let pendingSendError: string | undefined;
     for (const session of remote.sessions) {
       if (
         !local.some(
@@ -285,21 +297,26 @@ export class ParkCarpoolChat {
           !event &&
           message.sender === kernel.deviceScope &&
           session === active &&
-          remote.status === 'active'
+          remote.status === 'active' &&
+          remote.writeEnabled
         ) {
-          const receipt = await this.options.client.executeParkCarpoolTransport(
-            {
-              type: 'append',
-              deviceId: scope.deviceId,
-              conversationId,
-              generation: session.authority.generation,
-              eventId: message.event_id,
-              groupId: message.group_id,
-              epoch: message.epoch,
-              ciphertext: message.ciphertext,
-            },
-          );
-          if ('event' in receipt) event = receipt.event;
+          try {
+            const receipt =
+              await this.options.client.executeParkCarpoolTransport({
+                type: 'append',
+                deviceId: scope.deviceId,
+                conversationId,
+                generation: session.authority.generation,
+                eventId: message.event_id,
+                groupId: message.group_id,
+                epoch: message.epoch,
+                ciphertext: message.ciphertext,
+              });
+            if ('event' in receipt) event = receipt.event;
+          } catch (error) {
+            pendingSendError =
+              error instanceof Error ? error.message : '待发送消息暂时无法提交';
+          }
         }
         if (!event && message.sender !== kernel.deviceScope) continue;
         messages.push({
@@ -346,6 +363,7 @@ export class ParkCarpoolChat {
       messages,
       unavailableHistoryCount,
       failedMessageCount,
+      pendingSendError,
     };
   }
   recover(

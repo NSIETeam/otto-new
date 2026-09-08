@@ -1,4 +1,5 @@
 import { ParkCarpoolChat } from './park-carpool-chat.js';
+import { ParkCarpoolStartup } from './park-carpool-startup.js';
 /**
  * @license
  * Copyright 2025 Otto
@@ -1000,14 +1001,13 @@ async function synchronizeAuthenticatedEnterpriseAccount(
   await enterpriseNotificationIdentityBoundary.synchronize(account, (next) =>
     serverManager.setAuthenticatedEnterpriseAccount(next),
   );
+  parkCarpoolStartup.update(null);
   if (!account) {
-    await parkCarpoolChat.close();
     await enterpriseMlsOutboxRetry.stop();
     await enterpriseMlsInboundPoll.stop();
     await enterpriseMls.close();
     return;
   }
-  await parkCarpoolChat.close();
   let e2eeDevice: Awaited<
     ReturnType<EnterpriseClient['ensureE2eeDeviceReady']>
   > | null = null;
@@ -1020,13 +1020,6 @@ async function synchronizeAuthenticatedEnterpriseAccount(
     console.warn('[otto-desktop] E2EE device registration failed:', error);
   }
   if (e2eeDevice) {
-    try {
-      await parkCarpoolChat.activate({ serverUrl: enterpriseClient.snapshot().serverUrl, organizationId: account.organizationId, accountId: account.id, deviceId: e2eeDevice.deviceId, approvalState: e2eeDevice.approvalState });
-      parkCarpoolChat.start();
-    } catch (error) {
-      await parkCarpoolChat.close();
-      console.warn('[otto-desktop] Park carpool encryption unavailable:', error);
-    }
     if (enterpriseClient.supportsMlsTransportFoundation()) {
       await enterpriseMlsOutboxRetry.stop();
       await enterpriseMlsInboundPoll.stop();
@@ -1063,7 +1056,7 @@ async function synchronizeAuthenticatedEnterpriseAccount(
     await enterpriseMlsInboundPoll.stop();
     await enterpriseMls.close();
   }
-  parkCarpoolChat.start();
+  if(e2eeDevice)parkCarpoolStartup.update({serverUrl:enterpriseClient.snapshot().serverUrl,organizationId:account.organizationId,accountId:account.id,deviceId:e2eeDevice.deviceId,approvalState:e2eeDevice.approvalState});
   const identity = accountDataSyncIdentity(account);
   if (!identity) return;
   try {
@@ -1170,7 +1163,7 @@ const enterpriseClient = new EnterpriseClient(
   enterpriseE2ee,
 );
 let carpoolLocationGrantUntil = 0;
-const parkCarpoolChat = new ParkCarpoolChat({
+function createParkCarpoolChat(): ParkCarpoolChat { return new ParkCarpoolChat({
   onWorkflow(workflow){
     if(enterpriseClient.authenticatedAccountSnapshot()?.id!==workflow.accountId)return;
     const unread=workflow.notices.filter(notice=>!notice.readAt);const latest=unread.at(-1);
@@ -1183,7 +1176,12 @@ const parkCarpoolChat = new ParkCarpoolChat({
     protect(value) { assertEnterpriseE2eeSecureStorage(); return safeStorage.encryptString(value).toString('base64'); },
     unprotect(value) { assertEnterpriseE2eeSecureStorage(); return safeStorage.decryptString(Buffer.from(value, 'base64')); },
   },
-});
+}); }
+let parkCarpoolChat = createParkCarpoolChat();
+const parkCarpoolStartup = new ParkCarpoolStartup(() => (parkCarpoolChat = createParkCarpoolChat()), async () => {
+  const workflow = await enterpriseClient.getParkCarpoolWorkflow();
+  return workflow.capabilities.includes('park_carpool_mls_v1') || workflow.conversations.length > 0;
+}, error => console.warn('[otto-desktop] Park carpool encryption unavailable:', error));
 const enterpriseMlsCoordinator = new EnterpriseMlsSessionCoordinator(
   enterpriseMls,
   enterpriseClient,

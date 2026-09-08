@@ -43,6 +43,7 @@ export interface ModuleWorkspaceLayout {
   version: typeof MODULE_WORKSPACE_SCHEMA_VERSION;
   groups: ModuleGroupLayout[];
   carpoolMigrationApplied?: true;
+  parkServicesMigrationIds?: string[];
 }
 
 export interface ModuleWorkspaceStorageScope {
@@ -143,7 +144,7 @@ export function createDefaultModuleWorkspace(
 
 export function normalizeModuleWorkspace(value: unknown): ModuleWorkspaceLayout {
   const record = value && typeof value === 'object'
-    ? value as { groups?: unknown; carpoolMigrationApplied?: unknown }
+    ? value as { groups?: unknown; carpoolMigrationApplied?: unknown; parkServicesMigrationIds?: unknown }
     : {};
   const rawGroups = Array.isArray(record.groups) ? record.groups : [];
   const usedGroupIds = new Set<string>();
@@ -170,7 +171,28 @@ export function normalizeModuleWorkspace(value: unknown): ModuleWorkspaceLayout 
     });
   });
 
-  return { version: MODULE_WORKSPACE_SCHEMA_VERSION, groups, ...(record.carpoolMigrationApplied === true ? {carpoolMigrationApplied: true as const} : {}) };
+  return {
+    version: MODULE_WORKSPACE_SCHEMA_VERSION,
+    groups,
+    ...(Array.isArray(record.parkServicesMigrationIds)
+      ? {
+          parkServicesMigrationIds: [
+            ...new Set(
+              record.parkServicesMigrationIds.filter(
+                (id): id is string =>
+                  typeof id === 'string' &&
+                  (
+                    PARK_SERVICES_GROUP_MODULE_IDS as readonly string[]
+                  ).includes(id),
+              ),
+            ),
+          ],
+        }
+      : {}),
+    ...(record.carpoolMigrationApplied === true
+      ? { carpoolMigrationApplied: true as const }
+      : {}),
+  };
 }
 
 function reconcileDailyOfficePolicyIntelligence(
@@ -211,6 +233,42 @@ function reconcileDailyOfficeMemoryIntelligence(
   return normalizeModuleWorkspace({ ...layout, groups });
 }
 
+function reconcileLegacyParkModules(
+  layout: ModuleWorkspaceLayout,
+  capabilities: ModuleWorkspaceCapabilities,
+): ModuleWorkspaceLayout {
+  if (capabilities.edition !== 'enterprise') return layout;
+  const target = layout.groups.find(
+    (group) =>
+      group.id === PARK_SERVICES_GROUP_ID ||
+      group.name === PARK_SERVICES_GROUP_NAME ||
+      group.package?.packageId === 'otto.group.hongchuang-park-services',
+  );
+  if (!target) return layout;
+  const considered = new Set(layout.parkServicesMigrationIds ?? []);
+  const installed = new Set(layout.groups.flatMap((group) => group.moduleIds));
+  const additions: string[] = [];
+  for (const id of PARK_SERVICES_GROUP_MODULE_IDS) {
+    if (installed.has(id)) {
+      considered.add(id);
+      continue;
+    }
+    if (!considered.has(id) && capabilities.availableModuleIds.includes(id)) {
+      additions.push(id);
+      considered.add(id);
+    }
+  }
+  return {
+    ...layout,
+    parkServicesMigrationIds: [...considered],
+    groups: layout.groups.map((group) =>
+      group === target
+        ? { ...group, moduleIds: [...group.moduleIds, ...additions] }
+        : group,
+    ),
+  };
+}
+
 function reconcileParkCarpool(
   layout: ModuleWorkspaceLayout,
   capabilities: ModuleWorkspaceCapabilities,
@@ -247,7 +305,7 @@ export function parseModuleWorkspace(
     const normalized = reconcileDailyOfficeMemoryIntelligence(
       reconcileDailyOfficePolicyIntelligence(
         reconcileParkCarpool(
-          normalizeModuleWorkspace(parsed),
+          reconcileLegacyParkModules(normalizeModuleWorkspace(parsed), capabilities),
           capabilities,
         ),
         capabilities,

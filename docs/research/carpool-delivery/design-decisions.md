@@ -1,6 +1,6 @@
 # 拼车设计、数据与接口决策
 
-最终源码目录 `/Users/yang/Desktop/otto-carpool-verified-7f3a9c`，分支 `codex/blue-heron-7f3a9c`。三个阶段共用真实服务、身份授权与数据库；本文件取代早期“仅基础纠错”的记录。生产许可、发布门禁和未实测项目见最终自查报告。
+最终源码目录 `/Users/yang/Desktop/otto-carpool-fixed-91bc4e`，分支 `codex/blue-heron-7f3a9c`。三个阶段共用真实服务、身份授权与数据库；本文件取代早期“仅基础纠错”的记录。生产许可、发布门禁和未实测项目见最终自查报告。
 
 ## 模型与状态
 
@@ -51,7 +51,7 @@
 
 | 环境变量 | 默认 |
 |---|---|
-| `OTTO_PARK_CARPOOL_REQUESTS_ENABLED` / `INVITATIONS_ENABLED` / `GROUPS_ENABLED`（后两项同样带 `OTTO_PARK_CARPOOL_` 前缀） | true |
+| `OTTO_PARK_CARPOOL_REQUESTS_ENABLED` / `INVITATIONS_ENABLED` / `GROUPS_ENABLED`（后两项同样带 `OTTO_PARK_CARPOOL_` 前缀） | production 或未声明 NODE_ENV：false；显式 test/development：true |
 | `OTTO_PARK_CARPOOL_STALE_MINUTES` / `PAUSE_MINUTES` | 120 / 360 |
 | `OTTO_PARK_CARPOOL_POSITION_RETENTION_HOURS` | 24 |
 | `OTTO_PARK_CARPOOL_COMMUNICATION_RETENTION_DAYS` | 30 |
@@ -60,4 +60,11 @@
 | `OTTO_PARK_CARPOOL_REQUEST_LIMIT_PER_HOUR` / `COOLDOWN_MINUTES` | 10 / 30 |
 | `OTTO_PARK_CARPOOL_MAX_TAXI_MEMBERS` | 4（允许 2–4 整数） |
 
-地图密钥及基础重合阈值沿用既有启动配置；无效开关、数值范围或容量配置直接报错。不得把默认 true 当成生产批准；实际发布需按部署门禁显式配置。
+地图密钥及基础重合阈值沿用既有启动配置；无效开关、数值范围或容量配置直接报错。不得把开发环境默认开启当成生产批准；实际发布需按部署门禁显式配置。
+
+## 2026-09-08 复审修复补充（优先于此前描述）
+
+- 消息写入关闭时，读取不初始化新密钥代次、不重试待发送消息；允许写入时的单条重试失败仅返回 pendingSendError，不阻断已有历史。密文及事件 ID 保留，恢复后幂等投递。
+- 原企业 MLS 先独立启动，拼车初始化在独立可取消任务中按服务器授权与能力执行；无权限不启动轮询，有保留历史时仍允许只读初始化。10 秒预算到期后取消启动，过期身份/迟到结果不启动后台轮询；已开始的 IO 按既有请求超时收束，不声称强制终止所有底层 IO。
+- 生产及 NODE_ENV 未声明时三个新阶段开关均默认 false。仅显式 test/development 保持开发默认开启；生产必须显式启用并满足上游阶段依赖。
+- 旧园区模块采用独立 parkServicesMigrationIds 记录已处理入口：只追加首次可用的缺失模块，保持所有原有顺序和分组，不搬回其他组的入口；记录存在后，主动移除或权限暂时撤销均不导致重加。没有历史标记的旧布局无法区分从未安装和更早的主动移除，本次兼容迁移对其执行一次补齐，之后遵守移除记录；拼车已有 carpoolMigrationApplied 规则保持独立。

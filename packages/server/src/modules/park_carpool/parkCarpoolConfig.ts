@@ -15,7 +15,8 @@ export function readCarpoolConfig(env: NodeJS.ProcessEnv = process.env) {
   };
   const flag = (key: string) => {
     const value = env[key];
-    if (value === undefined) return true;
+    if (value === undefined)
+      return env.NODE_ENV === 'test' || env.NODE_ENV === 'development';
     if (!['true', 'false', '1', '0'].includes(value))
       throw new Error(`${key} 配置无效`);
     return value === 'true' || value === '1';

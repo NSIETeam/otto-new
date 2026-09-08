@@ -1,0 +1,29 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-repair-91bc4e/packages/desktop
+
+ ❯ src/main/park-carpool-startup.test.ts (4 tests | 1 failed) 60ms
+   ✓ does not block private startup and never starts a stale identity 54ms
+   ✓ checks permission before activation and isolates failure from later identities 1ms
+   ✓ times out optional initialization and does not start it after a late completion 2ms
+   × releases a timed out permission check so a new login can start 3ms
+     → expected "spy" to be called 2 times, but got 1 times
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-carpool-startup.test.ts > releases a timed out permission check so a new login can start
+AssertionError: expected "spy" to be called 2 times, but got 1 times
+ ❯ src/main/park-carpool-startup.test.ts:88:20
+     86|   startup.update(scope);await vi.advanceTimersByTimeAsync(20);
+     87|   startup.update({...scope,accountId:'b'});await vi.advanceTimersByTim…
+     88|   expect(eligible).toHaveBeenCalledTimes(2);expect(chat.start).toHaveB…
+       |                    ^
+     89|  }finally{vi.useRealTimers();}
+     90| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  12:57:10
+   Duration  596ms (transform 32ms, setup 71ms, collect 10ms, tests 60ms, environment 278ms, prepare 48ms)

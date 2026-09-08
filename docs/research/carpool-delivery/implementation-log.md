@@ -39,3 +39,9 @@ Native 包装探测从仅 ping 增为同时检查 park MLS，实际固定 toolch
 测试使用虚构账号、显式地图 fixture 和临时数据库；生产代码使用真实 Provider，没有用 fixture 替代产品接口。真实高德服务、正式产品身份部署、Windows 和生产多节点未实测，详见最终自查。早期只完成基础修复的日志作为历史失败/阶段证据保留，不作为当前完整验收结论。
 
 未推送 GitHub、未合并 internal、未部署、未联系真实用户发送测试请求。最终提交可用 `git log -1 codex/blue-heron-7f3a9c` 查询。
+
+## 复审修复
+
+R1 历史读取/发送重试隔离、R2 初始化独立与取消、R3 生产默认关闭、R4 旧园区模块追加迁移已实施。先运行失败回归，再实现并重跑真实数据库/Native/组件/Electron与原功能检查；详见 [修复验收](review-repair-report.md)。修复从 7c4d016f 的独立副本执行，没有带入当前其他任务差异。
+
+修复后的目标分支工作目录为 `/Users/yang/Desktop/otto-carpool-fixed-91bc4e`；旧目录混合改动保存在 `codex/preserved-market-91bc4e`，不作清理或覆盖。

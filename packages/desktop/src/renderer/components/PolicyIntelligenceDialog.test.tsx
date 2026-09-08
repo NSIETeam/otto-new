@@ -45,6 +45,17 @@ const state = {
   ],
 };
 describe('全国企业政策服务界面', () => {
+  it('关闭重开保留已读政策，即使新的读取尚未结束', async () => {
+    const get = vi.fn().mockResolvedValueOnce(state).mockImplementation(() => new Promise(() => {}));
+    Object.assign(window.otto, { policyIntelligenceGet: get });
+    const props = { scopeId: 'org-1', seedProfile: {}, onClose: vi.fn() };
+    const view = render(<PolicyIntelligenceDialog open {...props} />);
+    await screen.findByText('绿色金融申报');
+    view.rerender(<PolicyIntelligenceDialog open={false} {...props} />);
+    view.rerender(<PolicyIntelligenceDialog open {...props} />);
+    expect(screen.getByText('绿色金融申报')).toBeTruthy();
+  });
+
   it('shows exclusion evidence, validity and a consent-gated feedback form', async () => {
     const quote = '失信企业不予支持，完成修复的除外。';
     const view = {

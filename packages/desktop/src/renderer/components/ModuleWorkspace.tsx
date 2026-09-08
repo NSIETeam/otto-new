@@ -1,3 +1,5 @@
+import { useModuleReadCache } from '../state/ModuleReadProvider.js';
+import { prefetchModule } from '../state/prefetchModule.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -134,6 +136,7 @@ export function ModuleWorkspace({
   onAddGroup,
   onLayoutChange,
 }: ModuleWorkspaceProps): React.JSX.Element {
+  const cache = useModuleReadCache();
   const [openPopover, setOpenPopover] = useState<WorkspacePopover>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [activeCondensedGroupId, setActiveCondensedGroupId] = useState<string | null>(
@@ -601,6 +604,8 @@ export function ModuleWorkspace({
                       type="button"
                       className={`otto-module-tile${disabled ? ' is-unavailable' : ''}`}
                       aria-label={`打开 ${module.label}`}
+                      onMouseEnter={() => { if (!editing) void prefetchModule(module, cache); }}
+                      onFocus={() => { if (!editing) void prefetchModule(module, cache); }}
                       aria-haspopup={disabled ? 'dialog' : undefined}
                       title={disabled ? module.disabledReason : editing ? '拖动调整模块顺序' : module.description}
                       onClick={() => {

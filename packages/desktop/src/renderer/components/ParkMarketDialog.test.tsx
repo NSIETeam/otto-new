@@ -638,3 +638,21 @@ it('focuses the first invalid field after publication is rejected locally', asyn
     expect(document.activeElement).toBe(screen.getByLabelText(/^标题/)),
   );
 });
+
+it('reopening preserves the previous list while settings refresh is pending', async () => {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+  const request = vi.fn(async (input: { path: string }) => {
+    if (input.path === '/settings') return { parkId: 'P', enabled: true, ready: true, search: { state: 'ready' }, rules: '规则', version: 1 };
+    return { items: [{ id: 'kept', parkId: 'P', title: '保留的办公桌', state: 'published', imageIds: [], priceCents: 1000, saleMode: 'sale' }] };
+  });
+  Object.assign(window.otto, { enterpriseParkMarket: request, enterpriseMarketDrafts: vi.fn(async () => []) });
+  const props = { accountId: 'seller', onClose: vi.fn() };
+  const view = render(<ParkMarketDialog open {...props} />);
+  await screen.findByText('保留的办公桌');
+  view.rerender(<ParkMarketDialog open={false} {...props} />);
+  request.mockImplementation(() => new Promise(() => {}));
+  view.rerender(<ParkMarketDialog open {...props} />);
+  expect(screen.getByText('保留的办公桌')).toBeTruthy();
+  view.rerender(<ParkMarketDialog open accountId="another-account" onClose={props.onClose} />);
+  expect(screen.queryByText('保留的办公桌')).toBeNull();
+});

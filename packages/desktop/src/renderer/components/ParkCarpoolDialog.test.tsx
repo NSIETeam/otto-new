@@ -1,3 +1,5 @@
+import React from 'react';
+import { ModuleReadProvider, useModuleReadCache } from '../state/ModuleReadProvider.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 import {
@@ -173,4 +175,31 @@ describe('拼车助手界面', () => {
     );
     expect(await screen.findByText(/意向已发布，但结果刷新失败/)).toBeTruthy();
   });
+});
+
+it('uses data warmed after the closed dialog mounted, while fresh reading remains pending', async () => {
+  function Prime({ ready }: { ready: boolean }) {
+    const cache = useModuleReadCache();
+    React.useEffect(() => { if (ready) cache.set('carpool', emptyState); }, [cache, ready]);
+    return null;
+  }
+  Object.assign(window.otto, { enterpriseParkCarpoolGet: vi.fn(() => new Promise(() => {})) });
+  const tree = (ready: boolean, open: boolean) => <ModuleReadProvider><Prime ready={ready} /><ParkCarpoolDialog open={open} onClose={() => {}} /></ModuleReadProvider>;
+  const view = render(tree(false, false));
+  view.rerender(tree(true, false));
+  view.rerender(tree(true, true));
+  expect(screen.getByLabelText('从哪里出发搜索').matches(':disabled')).toBe(false);
+});
+
+it('discarding an unpublished draft clears it before the next opening', async () => {
+  Object.assign(window.otto, { enterpriseParkCarpoolGet: vi.fn(async () => emptyState) });
+  const onClose = vi.fn();
+  const view = render(<ParkCarpoolDialog open onClose={onClose} />);
+  await waitFor(() => expect(screen.getByLabelText('从哪里出发搜索').matches(':disabled')).toBe(false));
+  fireEvent.change(screen.getByLabelText('从哪里出发搜索'), { target: { value: '放弃的出发地点' } });
+  fireEvent.click(screen.getByRole('button', { name: '关闭拼车助手' }));
+  fireEvent.click(screen.getByRole('button', { name: '放弃修改并关闭' }));
+  view.rerender(<ParkCarpoolDialog open={false} onClose={onClose} />);
+  view.rerender(<ParkCarpoolDialog open onClose={onClose} />);
+  expect((screen.getByLabelText('从哪里出发搜索') as HTMLInputElement).value).toBe('');
 });

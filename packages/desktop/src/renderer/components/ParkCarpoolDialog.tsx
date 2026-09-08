@@ -1,3 +1,5 @@
+import type { CarpoolMeetingPoint } from 'otto-server';
+import { useModuleReadCache } from '../state/ModuleReadProvider.js';
 import { CarpoolConfirmation } from './CarpoolConfirmation.js';
 import { CarpoolRouteComparison } from './CarpoolRouteComparison.js';
 import { CarpoolPointPicker } from './CarpoolPointPicker.js';
@@ -103,7 +105,7 @@ function PlacePicker({
   selected: EnterpriseParkCarpoolPlaceSuggestion | null;
   setSelected(value: EnterpriseParkCarpoolPlaceSuggestion | null): void;
   disabled: boolean;
-  meetingPoints?: Array<import('otto-server').CarpoolMeetingPoint>;
+  meetingPoints?: CarpoolMeetingPoint[];
 }): React.JSX.Element {
   const inputId = useId();
   const revision = useRef(0);
@@ -288,7 +290,10 @@ export function ParkCarpoolDialog({
   open: boolean;
   onClose(): void;
 }): React.JSX.Element | null {
-  const [state, setState] = useState<EnterpriseParkCarpoolState>(EMPTY_STATE);
+  const cache = useModuleReadCache();
+  const [state, setState] = useState<EnterpriseParkCarpoolState>(() => cache.peek<EnterpriseParkCarpoolState>('carpool') ?? EMPTY_STATE);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const [loading, setLoading] = useState(false);
   const [validationField, setValidationField] = useState('');
   const [error, setError] = useState('');
@@ -308,6 +313,8 @@ export function ParkCarpoolDialog({
   const [confirmStop, setConfirmStop] = useState(false);
   const [filter, setFilter] = useState('all');
   const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
   const [confirmClose, setConfirmClose] = useState(false);
   const [newCount, setNewCount] = useState(0);
   const formVersionRef = useRef<number | null>(null);
@@ -337,22 +344,28 @@ export function ParkCarpoolDialog({
   }, []);
   const load = useCallback(async (): Promise<void> => {
     const epoch = ++epochRef.current;
+    const cached = cache.peek<EnterpriseParkCarpoolState>('carpool');
+    if (cached && stateRef.current === EMPTY_STATE && !dirtyRef.current) {
+      setState(cached);
+      if (cached.currentIntent) hydrate(cached.currentIntent);
+    }
     setLoading(true);
     setError('');
     try {
-      const next = await window.otto.enterpriseParkCarpoolGet();
+      const next = await cache.read('carpool', () => window.otto.enterpriseParkCarpoolGet(), 0);
       if (epoch !== epochRef.current) return;
       setState(next);
-      formVersionRef.current = next.currentIntent?.version ?? null;
-      setDirty(false);
-      if (next.currentIntent) hydrate(next.currentIntent);
+      if (!dirtyRef.current) {
+        formVersionRef.current = next.currentIntent?.version ?? null;
+        if (next.currentIntent) hydrate(next.currentIntent);
+      }
     } catch (cause) {
       if (epoch === epochRef.current)
         setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (epoch === epochRef.current) setLoading(false);
     }
-  }, [hydrate]);
+  }, [cache, hydrate]);
   useEffect(() => {
     if (!open) {
       epochRef.current += 1;
@@ -580,7 +593,7 @@ export function ParkCarpoolDialog({
   if (!open) return null;
   return (
     <DialogFrame
-      title="拼车助手"
+      title="拼车助手" size="standard"
       onClose={() => {
         if (dirty) setConfirmClose(true);
         else onClose();
@@ -642,7 +655,7 @@ export function ParkCarpoolDialog({
           setQuery={setOriginQuery}
           selected={origin}
           setSelected={setOrigin}
-          disabled={loading || !state.mapConfigured}
+          disabled={!state.mapConfigured}
         />
         <PlacePicker
           validationError={
@@ -657,7 +670,7 @@ export function ParkCarpoolDialog({
           setQuery={setDestinationQuery}
           selected={destination}
           setSelected={setDestination}
-          disabled={loading || !state.mapConfigured}
+          disabled={!state.mapConfigured}
         />
         <div className="otto-carpool__row">
           <label>
@@ -867,6 +880,14 @@ export function ParkCarpoolDialog({
           <button
             type="button"
             onClick={() => {
+              if (state.currentIntent) hydrate(state.currentIntent);
+              else {
+                setOriginQuery(''); setDestinationQuery('');
+                setOrigin(null); setDestination(null);
+                setDepartureTime(`${shanghaiToday()}T18:30`);
+                setFlexibleMinutes(30); setTravelOptions([]);
+                formVersionRef.current = null;
+              }
               setDirty(false);
               setConfirmClose(false);
               onClose();

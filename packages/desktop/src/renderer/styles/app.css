@@ -14555,3 +14555,18 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
     transition: none;
   }
 }
+
+/* Task-sized module surfaces. Maximum mode keeps its explicit full viewport. */
+.otto-park-dialog:not(.is-maximized) { width: min(840px, calc(100vw - 48px)); }
+.otto-park-dialog--compact:not(.is-maximized) { width: min(620px, calc(100vw - 48px)); min-height: min(440px, calc(100vh - 48px)); }
+.otto-park-dialog--standard:not(.is-maximized) { width: min(840px, calc(100vw - 48px)); min-height: min(480px, calc(100vh - 48px)); }
+.otto-park-dialog--wide:not(.is-maximized) { width: min(1080px, calc(100vw - 48px)); }
+.otto-park-dialog__head { position: sticky; top: -20px; z-index: 2; background: var(--otto-bg); padding-block: 8px; }
+.otto-workspace-dialog--compact { width: min(620px, calc(100vw - 40px)); }
+.otto-workspace-dialog--standard { width: min(840px, calc(100vw - 40px)); }
+.otto-workspace-dialog--wide { width: min(1080px, calc(100vw - 40px)); }
+.otto-workspace-dialog-overlay { padding: 20px; }
+@media (max-width: 680px) {
+  .otto-park-dialog--compact .otto-park-form__grid { grid-template-columns: minmax(0, 1fr); }
+  .otto-park-dialog { box-sizing: border-box; }
+}

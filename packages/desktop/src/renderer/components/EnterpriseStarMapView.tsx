@@ -1,3 +1,5 @@
+import { useModuleReadCache } from '../state/ModuleReadProvider.js';
+import { loadStarMapCanvas } from '../starMap/loadCanvas.js';
 import { EnterpriseList } from '../starMap/EnterpriseList.js';
 import { clearLayouts } from '../starMap/layoutCache.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
@@ -28,11 +30,7 @@ import type {
 import './EnterpriseStarMapView.css';
 import { emitStarMapEvent } from '../starMap/telemetry.js';
 
-const Canvas = lazy(() =>
-  import('../starMap/EnterpriseGraphCanvas.js').then((module) => ({
-    default: module.EnterpriseGraphCanvas,
-  })),
-);
+const Canvas = lazy(loadStarMapCanvas);
 class GraphBoundary extends Component<
   { children: React.ReactNode; onFail: () => void },
   { failed: boolean }
@@ -73,8 +71,9 @@ export function EnterpriseStarMapView({
   onBack: () => void;
   initialSource?: 'real' | 'demo';
 }): React.JSX.Element {
+  const cache = useModuleReadCache();
   const [source, setSource] = useState(initialSource);
-  const [data, setData] = useState<StarMapData | null>(null);
+  const [data, setData] = useState<StarMapData | null>(() => initialSource === 'real' ? cache.peek<StarMapData>('star-map') ?? null : null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -155,6 +154,7 @@ export function EnterpriseStarMapView({
           ? `${session.serverUrl}:${session.account.id}:${session.account.organizationId}`
           : '';
         if (previousIdentity.current && previousIdentity.current !== identity) {
+          cache.remove('star-map');
           setData(null);
           resetExploration();
         }
@@ -167,7 +167,7 @@ export function EnterpriseStarMapView({
       const next: StarMapData =
         source === 'demo'
           ? structuredClone(demoMap)
-          : await window.otto.enterpriseParkStarMap();
+          : await cache.read('star-map', () => window.otto.enterpriseParkStarMap(), 0);
       if (!active.current || id !== requestId.current) return;
       if (next.dataSource === 'demo' && source === 'real') {
         setSource('demo');
@@ -208,6 +208,7 @@ export function EnterpriseStarMapView({
     } catch (cause) {
       if (!active.current || id !== requestId.current) return;
       if (accessDenied(cause)) {
+        cache.remove('star-map');
         setData(null);
         resetExploration();
         setCanEdit(false);
@@ -218,7 +219,7 @@ export function EnterpriseStarMapView({
     } finally {
       if (active.current && id === requestId.current) setLoading(false);
     }
-  }, [source, resetExploration]);
+  }, [cache, source, resetExploration]);
   useEffect(() => {
     active.current = true;
     void load();
@@ -231,6 +232,7 @@ export function EnterpriseStarMapView({
       if (sourceRef.current === 'real') void load();
     };
     const revoke = () => {
+      cache.remove('star-map');
       ++requestId.current;
       setData(null);
       resetExploration();
@@ -242,6 +244,7 @@ export function EnterpriseStarMapView({
     };
     const unsub = window.otto.onEnterpriseSessionInvalidated?.(revoke);
     const accountChanged = window.otto.onEnterpriseAccountUpdated?.(() => {
+      cache.remove('star-map');
       if (sourceRef.current === 'real') {
         ++requestId.current;
         setData(null);
@@ -265,7 +268,7 @@ export function EnterpriseStarMapView({
       window.removeEventListener('otto:enterprise-profile-updated', updated);
       if (frame.current) cancelAnimationFrame(frame.current);
     };
-  }, [load, resetExploration]);
+  }, [cache, load, resetExploration]);
   useEffect(() => {
     const timer = setTimeout(() => {
       setSearch(query);

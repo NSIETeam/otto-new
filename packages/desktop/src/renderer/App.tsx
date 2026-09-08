@@ -1,3 +1,4 @@
+import { ModuleReadProvider } from './state/ModuleReadProvider.js';
 import { useMarketLinks } from './useMarketLinks.js';
 import {CarpoolConfirmation} from './components/CarpoolConfirmation.js';
 import { MarketNotifications, useMarketNotifications } from './components/MarketNotifications.js';
@@ -270,7 +271,11 @@ export function App(): React.JSX.Element {
   );
 }
 
-function OttoWorkspaceApp({
+function OttoWorkspaceApp(props: React.ComponentProps<typeof WorkspaceContent>): React.JSX.Element {
+  return <ModuleReadProvider><WorkspaceContent {...props} /></ModuleReadProvider>;
+}
+
+function WorkspaceContent({
   account,
   serverUrl,
   onJoinEnterprise,

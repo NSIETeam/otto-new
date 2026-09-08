@@ -1,3 +1,4 @@
+import { ModuleReadProvider, useModuleReadCache } from '../state/ModuleReadProvider.js';
 import { MarketMutation } from '../parkMarketMutation.js';
 import { MarketImageViewer } from './MarketImageViewer.js';
 import { MarketReportForm } from './MarketReportForm.js';
@@ -173,7 +174,10 @@ interface Upload {
   loaded?: number;
   total?: number;
 }
-export function ParkMarketDialog({
+export function ParkMarketDialog(props: React.ComponentProps<typeof ParkMarketLauncher>) {
+  return <ModuleReadProvider><ParkMarketLauncher {...props} /></ModuleReadProvider>;
+}
+function ParkMarketLauncher({
   open,
   accountId,
   draftScope,
@@ -198,6 +202,7 @@ export function ParkMarketDialog({
         accountId,
         initialListingId ?? '',
       ])}
+      accountId={accountId}
       draftScope={draftScope}
       initialListingId={initialListingId}
       initialError={initialError}
@@ -207,26 +212,34 @@ export function ParkMarketDialog({
   ) : null;
 }
 function MarketContent({
+  accountId,
   draftScope,
   initialListingId,
   initialError,
   initialView,
   onClose,
 }: {
+  accountId: string;
   draftScope?: MarketDraftScope;
   initialView: 'market' | 'mine';
   initialListingId?: string;
   initialError?: string;
   onClose(): void;
 }) {
+  const cache = useModuleReadCache();
+  const scopeKey = `market:${JSON.stringify([draftScope, accountId])}:${initialView}`;
+  const [saved] = useState(() => cache.peek<{
+    query: string; appliedQuery: string; category: string; free: boolean; unreserved: boolean;
+    min: string; max: string; sort: string; ownFilter: string;
+  }>(`${scopeKey}:filters`));
   const dialog = useRef<HTMLDialogElement>(null);
   const mutation = useRef(new MarketMutation());
   const [view, setView] = useState<
     'market' | 'mine' | 'favorites' | 'form' | 'detail' | 'admin'
   >(initialView);
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [items, setItems] = useState<Item[]>([]);
-  const [ownFilter, setOwnFilter] = useState('all');
+  const [settings, setSettings] = useState<Settings | null>(() => cache.peek<Settings>(`${scopeKey}:settings`) ?? null);
+  const [items, setItems] = useState<Item[]>(() => cache.peek<Map<string, { items: Item[] }>>(`${scopeKey}:lists`)?.get(JSON.stringify([initialView, saved?.appliedQuery ?? '', saved?.category ?? '', saved?.sort ?? 'latest', saved?.free ?? false, saved?.unreserved ?? false, saved?.min ?? '', saved?.max ?? '']))?.items ?? []);
+  const [ownFilter, setOwnFilter] = useState(saved?.ownFilter ?? 'all');
   const visibleItems =
     view === 'mine'
       ? items.filter((item) => ownFilter === 'all' || item.state === ownFilter)
@@ -269,18 +282,18 @@ function MarketContent({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [query, setQuery] = useState('');
-  const [appliedQuery, setAppliedQuery] = useState('');
+  const [query, setQuery] = useState(saved?.query ?? '');
+  const [appliedQuery, setAppliedQuery] = useState(saved?.appliedQuery ?? '');
   const listCache = useRef(
-    new Map<string, { items: Item[]; cursor: string | null; scroll: number }>(),
+    cache.peek<Map<string, { items: Item[]; cursor: string | null; scroll: number; updatedAt: number }>>(`${scopeKey}:lists`) ?? new Map<string, { items: Item[]; cursor: string | null; scroll: number; updatedAt: number }>(),
   );
   const returnView = useRef<'market' | 'mine' | 'favorites'>(initialView);
-  const [category, setCategory] = useState('');
-  const [free, setFree] = useState(false);
-  const [unreserved, setUnreserved] = useState(false);
-  const [min, setMin] = useState('');
-  const [max, setMax] = useState('');
-  const [sort, setSort] = useState('latest');
+  const [category, setCategory] = useState(saved?.category ?? '');
+  const [free, setFree] = useState(saved?.free ?? false);
+  const [unreserved, setUnreserved] = useState(saved?.unreserved ?? false);
+  const [min, setMin] = useState(saved?.min ?? '');
+  const [max, setMax] = useState(saved?.max ?? '');
+  const [sort, setSort] = useState(saved?.sort ?? 'latest');
   const [cursor, setCursor] = useState<string | null>(null);
   const [reserveTime, setReserveTime] = useState('');
   const [reserveNote, setReserveNote] = useState('');
@@ -464,6 +477,15 @@ function MarketContent({
     min,
     max,
   ]);
+  useEffect(() => {
+    if (settings) cache.set(`${scopeKey}:settings`, settings);
+    cache.set(`${scopeKey}:filters`, { query, appliedQuery, category, free, unreserved, min, max, sort, ownFilter });
+    cache.set(`${scopeKey}:lists`, listCache.current);
+  }, [cache, scopeKey, settings, query, appliedQuery, category, free, unreserved, min, max, sort, ownFilter]);
+  useEffect(() => () => {
+    const savedList = listCache.current.get(listKey);
+    if (savedList && dialog.current) savedList.scroll = dialog.current.scrollTop;
+  }, [listKey]);
   const load = useCallback(
     async (more = false) => {
       if (!['market', 'mine', 'favorites'].includes(view)) return;
@@ -519,7 +541,9 @@ function MarketContent({
             ? null
             : (result.nextCursor ?? null);
           setCursor(cursorRef.current);
+          if (listCache.current.size >= 20 && !listCache.current.has(listKey)) listCache.current.delete(listCache.current.keys().next().value!);
           listCache.current.set(listKey, {
+            updatedAt: Date.now(),
             items: unique,
             cursor: cursorRef.current,
             scroll: more ? (dialog.current?.scrollTop ?? 0) : 0,
@@ -545,6 +569,7 @@ function MarketContent({
       const frame = requestAnimationFrame(() => {
         if (dialog.current) dialog.current.scrollTop = cached.scroll;
       });
+      if (Date.now() - cached.updatedAt > 30_000) void load();
       return () => cancelAnimationFrame(frame);
     }
     setItems([]);
@@ -849,6 +874,7 @@ function MarketContent({
   );
   return (
     <dialog
+      onScroll={(event) => { const entry = listCache.current.get(listKey); if (entry) entry.scroll = event.currentTarget.scrollTop; }}
       ref={dialog}
       className="park-market-dialog"
       onCancel={(event) => {

@@ -15,8 +15,42 @@ const source = {
   region: { country: 'CN' as const, city: '深圳市' },
 };
 describe('policy source registry and collector', () => {
+  it('ignores site download controls but retains sibling policy attachment blocks', async () => {
+    const fetcher = vi.fn(
+      async (url: string | URL | Request) =>
+        new Response(
+          String(url).endsWith('/policies/')
+            ? '<a href="/notice.html">科技企业项目申报通知</a>'
+            : '<header><a href="https://app.test/download">客户端下载</a></header><h1>科技企业项目申报通知</h1><article>完整条件及材料要求请查看下方的政策附件。</article><div class="othermessage"><a href="#">PDF格式下载</a></div><ul class="fujian"><li><a href="https://unapproved.test/form.docx">附件：申报材料</a></li></ul><footer><a href="/site-guide.pdf">网站使用指南</a></footer>',
+        ),
+    );
+    const [doc] = await collectPolicySource(
+      source,
+      fetcher,
+      AbortSignal.timeout(5000),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(doc.attachments).toHaveLength(1);
+    expect(doc.attachments[0]).toMatchObject({
+      label: '附件：申报材料',
+      status: 'unsupported',
+      parsed: false,
+    });
+    expect(doc.attachments[0].reason).toContain('白名单');
+    expect(doc.sourceStatus).toBe('verified');
+  });
   it('does not mistake changes to surrounding website recommendations for a policy revision', async () => {
-    const read = async (news: string) => collectPolicySource(source, async url => new Response(String(url).endsWith('/policies/') ? '<a href="/p.html">科技企业项目申报通知</a>' : `<h1>科技企业项目申报通知</h1><div id="UCAP-CONTENT">企业必须满足营业收入条件。<div>提交完整的申报材料。</div></div><div class="related">${news}</div>`), AbortSignal.timeout(5000));
+    const read = async (news: string) =>
+      collectPolicySource(
+        source,
+        async (url) =>
+          new Response(
+            String(url).endsWith('/policies/')
+              ? '<a href="/p.html">科技企业项目申报通知</a>'
+              : `<h1>科技企业项目申报通知</h1><div id="UCAP-CONTENT">企业必须满足营业收入条件。<div>提交完整的申报材料。</div></div><div class="related">${news}</div>`,
+          ),
+        AbortSignal.timeout(5000),
+      );
     const before = (await read('昨日新闻：帮助企业发展'))[0];
     const after = (await read('今日新闻：最新会议报道'))[0];
     expect(before.contentHash).toBe(after.contentHash);
@@ -61,31 +95,34 @@ describe('policy source registry and collector', () => {
         ),
     ).toBe(true);
   });
-  it('discovers bounded policy lists from a provincial portal without crawling news or other hosts', async () => {
-    const fetcher = vi.fn(
-      async (url: string | URL | Request) =>
-        new Response(
-          String(url).endsWith('/portal/')
-            ? '<nav><a href="/policy/">政策文件</a></nav><a href="https://evil.test/">政策文件库</a><a href="/news">领导活动</a>'
-            : String(url).endsWith('/policy/')
-              ? '<a href="/doc.html">关于支持企业科技创新的通知</a>'
-              : '<h1>关于支持企业科技创新的通知</h1><article>支持科技企业创新，具体要求见本次申报通知。</article>',
-        ),
-    );
-    const docs = await collectPolicySource(
-      {
-        ...source,
-        listUrl: 'https://www.sz.gov.cn/portal/',
-        discovery: 'portal',
-      },
-      fetcher,
-      AbortSignal.timeout(5000),
-    );
-    expect(docs).toHaveLength(1);
-    expect(
-      fetcher.mock.calls.some(([url]) => /evil|news/u.test(String(url))),
-    ).toBe(false);
-  });
+  it.each(['政策文件', '政策信息', '政策发布', '统一政策发布平台'])(
+    'discovers a bounded %s list without crawling news or other hosts',
+    async (navigation) => {
+      const fetcher = vi.fn(
+        async (url: string | URL | Request) =>
+          new Response(
+            String(url).endsWith('/portal/')
+              ? `<nav><a href="/policy/">${navigation}</a></nav><a href="https://evil.test/">政策文件库</a><a href="/news">领导活动</a>`
+              : String(url).endsWith('/policy/')
+                ? '<a href="/guide/">政府信息公开指南</a><a href="/disclosure/">政府信息公开条例</a><a href="/doc.html">关于支持企业科技创新的通知</a>'
+                : '<h1>关于支持企业科技创新的通知</h1><article>支持科技企业创新，具体要求见本次申报通知。</article>',
+          ),
+      );
+      const docs = await collectPolicySource(
+        {
+          ...source,
+          listUrl: 'https://www.sz.gov.cn/portal/',
+          discovery: 'portal',
+        },
+        fetcher,
+        AbortSignal.timeout(5000),
+      );
+      expect(docs).toHaveLength(1);
+      expect(
+        fetcher.mock.calls.some(([url]) => /evil|news/u.test(String(url))),
+      ).toBe(false);
+    },
+  );
   it('rechecks bounded historical and near-deadline pages without trusting arbitrary URLs', async () => {
     const now = new Date('2026-09-03T00:00:00Z');
     const old = {

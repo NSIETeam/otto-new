@@ -105,14 +105,34 @@ async function enabled(h: ReturnType<typeof harness>) {
 }
 describe('policy reminders use the persistent account-scoped inbox', () => {
   it('does not create duplicate change messages while the same source revision is being interpreted', async () => {
-    const h = harness(); await enabled(h);
-    await h.service.act('a', { action: 'watch', policyId: 'p1', enabled: true });
-    await h.store.update('document:p1', () => ({ ...document, deadline: undefined, interpretationStatus: 'pending' }));
+    const h = harness();
+    await enabled(h);
+    await h.service.act('a', {
+      action: 'watch',
+      policyId: 'p1',
+      enabled: true,
+    });
+    await h.store.update('document:p1', () => ({
+      ...document,
+      deadline: undefined,
+      interpretationStatus: 'pending',
+    }));
     await h.service.refreshNotifications();
     expect((await h.service.inbox('a')).notices).toHaveLength(0);
-    await h.store.update('document:p1', () => ({ ...document, contentHash: 'changed', version: 2, deadline: undefined, interpretationStatus: 'pending' }));
+    await h.store.update('document:p1', () => ({
+      ...document,
+      contentHash: 'changed',
+      version: 2,
+      deadline: undefined,
+      interpretationStatus: 'pending',
+    }));
     await h.service.refreshNotifications();
-    await h.store.update('document:p1', () => ({ ...document, contentHash: 'changed', version: 2, deadline: '2026-10-10' }));
+    await h.store.update('document:p1', () => ({
+      ...document,
+      contentHash: 'changed',
+      version: 2,
+      deadline: '2026-10-10',
+    }));
     await h.service.refreshNotifications();
     const notices = (await h.service.inbox('a')).notices;
     expect(notices).toHaveLength(1);

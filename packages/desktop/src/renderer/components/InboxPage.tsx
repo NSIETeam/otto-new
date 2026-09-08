@@ -1129,7 +1129,7 @@ export function InboxPage({
             </div>
           ) : filteredConversations.map((item) => {
             if (item.kind === 'policy') return (
-              <button key={item.key} type="button" role="listitem" aria-label={`政策助手，${item.unreadCount} 条未读`} className={`otto-inbox-page__conv${policySelected ? ' is-selected' : ''}`} onClick={() => {
+              <button key={item.key} type="button" role="listitem" aria-label={`政策助手，${item.unreadCount} 条未读`} className={`otto-inbox-page__conv${policySelected && !selectedPeer && !selectedParkTicketId && !selectedFederationContactId ? ' is-selected' : ''}`} onClick={() => {
                 setPolicySelected(true); setSelectedPeer(null); setSelectedParkTicketId(null); setSelectedFederationContactId(null);
                 const ids = (policyInbox?.notices ?? []).filter(n => !n.readAt).map(n => n.id);
                 if (ids.length) void onPolicyRead?.(ids);

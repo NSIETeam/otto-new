@@ -117,7 +117,10 @@ export function PolicyIntelligenceDialog({
     [state.assessments],
   );
   useEffect(() => {
-    if (open && selected) document.getElementById(`otto-policy-${selected}`)?.scrollIntoView?.({ block: 'start' });
+    if (open && selected)
+      document
+        .getElementById(`otto-policy-${selected}`)
+        ?.scrollIntoView?.({ block: 'start' });
   }, [open, selected, state.policies.length]);
   const policies = state.policies.filter(
     (doc) =>
@@ -886,7 +889,14 @@ export function PolicyIntelligenceDialog({
                           <p key={batch.policyId}>
                             <button
                               type="button"
-                              onClick={() => { setQuery(''); setLevel('all'); setCategory('all'); setStatus('all'); setTab('all'); setSelected(batch.policyId); }}
+                              onClick={() => {
+                                setQuery('');
+                                setLevel('all');
+                                setCategory('all');
+                                setStatus('all');
+                                setTab('all');
+                                setSelected(batch.policyId);
+                              }}
                             >
                               {batch.title}
                             </button>

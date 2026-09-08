@@ -14,7 +14,12 @@ export interface PolicyMailbox {
   organizationId: string;
   watches: Record<
     string,
-    { fingerprint: string; contentHash?: string; deadline?: string; version: number }
+    {
+      fingerprint: string;
+      contentHash?: string;
+      deadline?: string;
+      version: number;
+    }
   >;
   notices: PolicyNotice[];
 }
@@ -72,11 +77,12 @@ export function advancePolicyMailbox(
     body: string,
   ): void => {
     const id = policyHash([doc.id, kind, event]);
-    const existing = mailbox.notices.find(n => n.id === id);
+    const existing = mailbox.notices.find((n) => n.id === id);
     if (existing) {
       // Interpretation can finish after the raw revision was announced. Update
       // that notice, without creating another unread event for the same revision.
-      if (kind === 'changed' && doc.interpretationStatus === 'ready') existing.body = body;
+      if (kind === 'changed' && doc.interpretationStatus === 'ready')
+        existing.body = body;
       return;
     }
     mailbox.notices.push({
@@ -93,7 +99,11 @@ export function advancePolicyMailbox(
   for (const doc of documents) {
     const watch = mailbox.watches[doc.id];
     if (!watch || doc.sourceStatus !== 'verified') continue;
-    if (doc.interpretationStatus !== 'ready' && watch.contentHash === doc.contentHash) continue;
+    if (
+      doc.interpretationStatus !== 'ready' &&
+      watch.contentHash === doc.contentHash
+    )
+      continue;
     const next = fingerprint(doc);
     if (watch.fingerprint !== next) {
       add(

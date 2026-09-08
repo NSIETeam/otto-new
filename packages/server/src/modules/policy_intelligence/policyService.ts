@@ -1238,11 +1238,13 @@ export class EnterprisePolicyService {
           `source-status:${source.id}`,
           () => ({
             checkedAt,
-            status: failedUrls.length || documents.some(d => d.sourceStatus !== 'verified')
-              ? 'partial'
-              : documents.length
-                ? 'available'
-                : 'unavailable',
+            status:
+              failedUrls.length ||
+              documents.some((d) => d.sourceStatus !== 'verified')
+                ? 'partial'
+                : documents.length
+                  ? 'available'
+                  : 'unavailable',
             documentCount: documents.length,
           }),
         );

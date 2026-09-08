@@ -31,7 +31,7 @@ await Promise.all(
           sourceId: source.id,
           url: source.listUrl,
           status: docs.length
-            ? failures.length || docs.some(d => d.sourceStatus !== 'verified')
+            ? failures.length || docs.some((d) => d.sourceStatus !== 'verified')
               ? 'partial'
               : 'available'
             : 'unavailable',

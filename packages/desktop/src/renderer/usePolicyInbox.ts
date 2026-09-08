@@ -7,6 +7,16 @@ const empty = (): PolicyInbox => ({
   unreadCount: 0,
   watchedPolicyIds: [],
 });
+function validateInbox(inbox: PolicyInbox): void {
+  if (
+    !inbox ||
+    !Array.isArray(inbox.notices) ||
+    !Array.isArray(inbox.watchedPolicyIds) ||
+    !Number.isSafeInteger(inbox.unreadCount) ||
+    inbox.unreadCount < 0
+  )
+    throw new Error('Invalid policy inbox response');
+}
 export function usePolicyInbox(
   scopeId: string,
   enabled: boolean,
@@ -27,19 +37,18 @@ export function usePolicyInbox(
       const version = revision.current;
       try {
         const inbox = await window.otto.policyIntelligenceInbox({ scopeId });
-        if (
-          !inbox ||
-          !Array.isArray(inbox.notices) ||
-          !Array.isArray(inbox.watchedPolicyIds) ||
-          !Number.isFinite(inbox.unreadCount)
-        )
-          throw new Error('Invalid policy inbox response');
+        validateInbox(inbox);
         if (current !== epoch.current || version !== revision.current) return;
         setState({ scope: scopeId, inbox });
         setError('');
-      } catch {
-        if (current === epoch.current)
-          setError('政策提醒暂时无法加载，请稍后重试');
+      } catch (cause) {
+        if (current === epoch.current && version === revision.current)
+          setError(
+            cause instanceof Error &&
+              cause.message.includes('企业服务器版本过旧或功能不完整')
+              ? '企业服务器需升级才能使用政策提醒，其他消息不受影响'
+              : '政策提醒暂时无法加载，请稍后重试',
+          );
       }
     }, 15_000);
     return () => {
@@ -57,6 +66,7 @@ export function usePolicyInbox(
           scopeId,
           ids: ids.slice(0, 200),
         });
+        validateInbox(inbox);
         if (current === epoch.current && version === revision.current) {
           setState({ scope: scopeId, inbox });
           setError('');

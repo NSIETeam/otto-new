@@ -189,13 +189,19 @@ export function policyLinks(
     .slice(0, keepNavigation ? 500 : 100);
 }
 function policyArticle(html: string): string {
-  const marked = html.match(/<!--\s*enpcontent\s*-->([\s\S]*?)<!--\s*\/?enpcontent\s*-->/iu)?.[1];
+  const marked = html.match(
+    /<!--\s*enpcontent\s*-->([\s\S]*?)<!--\s*\/?enpcontent\s*-->/iu,
+  )?.[1];
   if (marked) return marked;
-  const semantic = html.match(/<(?:article|main)\b[^>]*>([\s\S]*?)<\/(?:article|main)>/iu)?.[1];
+  const semantic = html.match(
+    /<(?:article|main)\b[^>]*>([\s\S]*?)<\/(?:article|main)>/iu,
+  )?.[1];
   if (semantic) return semantic;
   // Common government publishing systems use nested DIVs, not <article>.
   // Match balanced containers so a nested table/paragraph cannot truncate rules.
-  const open = html.match(/<(div|section)\b[^>]*(?:id|class)\s*=\s*["'][^"']*(?:UCAP-CONTENT|TRS_Editor|TRS_UEDITOR|artibody|article-content|article_content|content_body)[^"']*["'][^>]*>/iu);
+  const open = html.match(
+    /<(div|section)\b[^>]*(?:id|class)\s*=\s*["'][^"']*(?:UCAP-CONTENT|TRS_Editor|TRS_UEDITOR|artibody|article-content|article_content|content_body)[^"']*["'][^>]*>/iu,
+  );
   if (open?.index !== undefined) {
     const start = open.index + open[0].length;
     const tags = new RegExp(`<\\/?${open[1]}\\b[^>]*>`, 'giu');
@@ -207,6 +213,34 @@ function policyArticle(html: string): string {
     }
   }
   return html;
+}
+function policyAttachmentContent(html: string, main: string): string {
+  // Download/print/app controls outside the article are not policy evidence.
+  // Some official publishers place genuine attachments after the body, so also
+  // retain explicitly named attachment containers (including blocked links).
+  const cleaned = html.replace(
+    /<(script|style|nav|header|footer)\b[^>]*>[\s\S]*?<\/\1>/giu,
+    '',
+  );
+  const blocks = [main === html ? cleaned : main];
+  const containers =
+    /<(div|section|ul|ol)\b[^>]*(?:id|class)\s*=\s*["'][^"']*(?:fujian|fjlist|attachment|attach-list|annex|download-list)[^"']*["'][^>]*>/giu;
+  for (const open of cleaned.matchAll(containers)) {
+    if (blocks.length > 16) break;
+    const start = open.index + open[0].length;
+    const tags = new RegExp(`<\\/?${open[1]}\\b[^>]*>`, 'giu');
+    tags.lastIndex = start;
+    let depth = 1;
+    for (let tag = tags.exec(cleaned); tag; tag = tags.exec(cleaned)) {
+      depth += tag[0].startsWith('</') ? -1 : 1;
+      if (!depth) {
+        const block = cleaned.slice(start, tag.index);
+        if (!main.includes(block)) blocks.push(block);
+        break;
+      }
+    }
+  }
+  return blocks.join('\n');
 }
 export async function collectPolicySource(
   source: PolicySource,
@@ -222,7 +256,7 @@ export async function collectPolicySource(
   let links = policyLinks(list, source).slice(0, 12);
   if (source.discovery === 'portal') {
     const listingTitle =
-      /^(?:(?:省|市)?政府(?:办公厅)?文件|政策文件库|政策文件|政策法规|行政规范性文件|最新政策|最新文件|法规文件|文件库|文件|政策)$/u;
+      /^(?:(?:省|市)?政府(?:办公厅)?文件|政策文件库|政策文件|政策法规|政策信息|政策发布|统一政策发布平台|行政规范性文件|最新政策|最新文件|法规文件|文件库|文件|政策)$/u;
     const portalLinks = policyLinks(list, source, 2, true);
     const listings = portalLinks
       .filter((link) => listingTitle.test(link.title))
@@ -237,6 +271,9 @@ export async function collectPolicySource(
         }))
           if (
             /通知|办法|细则|公告|通告|规定|条例|指南|批复|意见|决定|公示|申报/u.test(
+              link.title,
+            ) &&
+            !/^(?:(?:中华人民共和国)?政府信息公开(?:指南|条例|制度|年报)|政务公开目录)$/u.test(
               link.title,
             ) &&
             !/\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)/iu.test(link.url)
@@ -323,7 +360,7 @@ export async function collectPolicySource(
     const attachmentLinks: OfficialPolicyDocument['attachments'] = [];
     // Unlike source discovery, attachment accounting must retain rejected links:
     // a blocked required attachment is missing evidence, never 'no attachment'.
-    for (const match of html.matchAll(
+    for (const match of policyAttachmentContent(html, main).matchAll(
       /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/giu,
     )) {
       const label = policyText(match[2]).slice(0, 250) || '未命名附件';
@@ -421,7 +458,9 @@ export async function collectPolicySource(
       references: referencedLinks
         .filter((ref) => !attachmentLinks.some((a) => a.url === ref.url))
         .map((ref) => ({ label: ref.title, url: ref.url })),
-      sourceStatus: attachments.some(a => a.status === 'failed') ? 'unavailable' : 'verified',
+      sourceStatus: attachments.some((a) => a.status === 'failed')
+        ? 'unavailable'
+        : 'verified',
       interpretationStatus: 'pending',
     });
   }

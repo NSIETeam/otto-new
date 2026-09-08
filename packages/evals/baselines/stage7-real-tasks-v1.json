@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "dataset": "stage7-real-tasks-v1",
+  "status": "contracts_registered_adapters_not_live_validated",
+  "scope": "Disposable synthetic workspaces and test tenants only; these are task contracts, not achieved scores or executable GUI adapters.",
+  "repeats": 1,
+  "cases": [
+    {
+      "id": "login-retry",
+      "family": "code_repair",
+      "critical": true,
+      "request": "修复登录过期后的重试；支付的重试不能受影响。",
+      "oracle": [
+        "独立正常/异常/边界测试",
+        "源文件差异及当前哈希",
+        "用户未追加纠错时通过"
+      ],
+      "adapter": "not_implemented"
+    },
+    {
+      "id": "utc-display",
+      "family": "code_repair",
+      "critical": true,
+      "request": "将无时区 SQLite 时间按 UTC 解析后显示为本地时间，避免对带时区时间重复偏移。",
+      "oracle": ["跨午夜/带时区/无效时间测试", "真实源码修复与复验"],
+      "adapter": "not_implemented"
+    },
+    {
+      "id": "ppt-preview",
+      "family": "file_delivery",
+      "critical": true,
+      "request": "生成三页 PPT，点击后在 Otto 中预览；不要打开外部软件，不要裸露绝对路径。",
+      "oracle": [
+        "PPT 原始格式及内容解析",
+        "真实预览截图和点击回执",
+        "完整外部启动监测"
+      ],
+      "adapter": "not_implemented"
+    },
+    {
+      "id": "dual-artifact",
+      "family": "file_delivery",
+      "critical": true,
+      "request": "生成 PPT 和 PDF；修改一份后重新检查两份当前内容再交付。",
+      "oracle": [
+        "两种格式独立解析及内容检查",
+        "验证绑定当前哈希",
+        "故意损坏文件的负向对照"
+      ],
+      "adapter": "not_implemented"
+    },
+    {
+      "id": "inbox-read-return",
+      "family": "gui",
+      "critical": true,
+      "request": "读完消息，离开我的消息再返回，会话和历史仍存在。",
+      "oracle": ["真实 Otto 窗口点击及截图", "独立持久化记录", "无重复提醒"],
+      "adapter": "not_implemented"
+    },
+    {
+      "id": "project-delete",
+      "family": "gui",
+      "critical": true,
+      "request": "从右键菜单移除测试项目，保留项目文件和其他会话。",
+      "oracle": ["真实右键和确认交互", "文件目录前后哈希", "其他会话保留"],
+      "adapter": "not_implemented"
+    },
+    {
+      "id": "restart-known-receipt",
+      "family": "restart",
+      "critical": true,
+      "request": "已获发送回执后重启 Otto，继续工作但不要重复发送。",
+      "oracle": [
+        "真实进程终止/重启",
+        "隔离收件服务计数严格为一",
+        "重启后恢复记录"
+      ],
+      "adapter": "not_implemented"
+    },
+    {
+      "id": "restart-unknown-outcome",
+      "family": "restart",
+      "critical": true,
+      "request": "发送中断且结果未知时重启，先核对结果再决定下一步。",
+      "oracle": [
+        "真实进程终止/重启",
+        "未知结果不能假定失败或重放",
+        "明确请求核对"
+      ],
+      "adapter": "not_implemented"
+    },
+    {
+      "id": "steer-stop-backend",
+      "family": "steering",
+      "critical": true,
+      "request": "任务执行中追加：不要继续改后端，先说明已经改动的文件。",
+      "oracle": [
+        "安全点接受/应用修订时间",
+        "应用后没有新后端写入",
+        "有效旧成果保留"
+      ],
+      "adapter": "not_implemented"
+    },
+    {
+      "id": "steer-replace-artifact",
+      "family": "steering",
+      "critical": true,
+      "request": "执行中将输出从 PPT 改成 PDF，旧的发送动作取消，保留不打开外部应用的要求。",
+      "oracle": ["新任务版本及取消节点", "输出格式独立检查", "无旧发送副作用"],
+      "adapter": "not_implemented"
+    },
+    {
+      "id": "park-replies",
+      "family": "enterprise",
+      "critical": true,
+      "request": "测试企业提交报修，两个客服分别回复；申请人在我的消息中查看完整记录。",
+      "oracle": [
+        "隔离企业 API 与真实 UI",
+        "工单/会话关联",
+        "两个客服身份可追溯且无重复提醒"
+      ],
+      "adapter": "not_implemented"
+    },
+    {
+      "id": "tenant-boundary",
+      "family": "enterprise",
+      "critical": true,
+      "request": "企业管理员填写本企业资料；其他企业不能读取或修改未公开字段。",
+      "oracle": [
+        "隔离多租户 API 正反向请求",
+        "本企业内容落库",
+        "跨企业越权拒绝"
+      ],
+      "adapter": "not_implemented"
+    }
+  ],
+  "grading": {
+    "sourceOfTruth": "Native receipts, independent state/oracles and blind human review; never the product's completed flag alone.",
+    "denominator": "Every planned variant/case/repeat including timeouts, provider failures and not-run cases.",
+    "missing": "Unknown; never zero cost or verified success.",
+    "nudges": "Corrective follow-ups separate from planned steering, necessary clarification and approval.",
+    "admission": "All six families, two distinct cases per family, no candidate failures or critical regressions, complete metrics and human QA; at most manual pilot review, never automatic production release.",
+    "limits": "24 pilot runs cannot prove long-term reliability; a separately held-out human task set is still required."
+  }
+}

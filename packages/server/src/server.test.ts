@@ -27,6 +27,7 @@ import {
   type RuntimeFactory,
 } from './server.js';
 import { InMemorySessionStore } from './sessions.js';
+import { TaskContinuityLedger } from './taskContinuity.js';
 import { ProductWorkspaceStore } from './productWorkspaceStore.js';
 import type { AuthenticatedEnterpriseAccount } from './productWorkspaceStore.js';
 import type { SessionRuntime } from './sessions.js';
@@ -1658,6 +1659,34 @@ describe('OttoServer WS（mock 模式）', () => {
 
 describe('OttoServer runtimeFactory（非 mock 路径）', () => {
   let server: OttoServer;
+  it('routes versioned steering to the running turn, deduplicates messages and keeps legacy merge queued', async () => {
+    const store = new InMemorySessionStore(); const session = store.createSession();
+    let release!: () => void; const pending = new Promise<void>(resolve => { release = resolve; });
+    const ledger = new TaskContinuityLedger('ws-turn', { version: 1, source: 'local', text: '检查代码' });
+    const steer = vi.fn(async (input: Parameters<TaskContinuityLedger['accept']>[0]) => ledger.accept(input));
+    const run = vi.fn(async () => { store.setStatus(session.sessionId, 'thinking'); await pending; store.setStatus(session.sessionId, 'idle'); });
+    server = new OttoServer({ port: 0, mock: false, store, runtimeFactory: async () => ({ run, steer, cancel() { release(); }, setModel() {}, getConfig() { return undefined; }, async dispose() { release(); } }) });
+    baseUrl = await startServer(server); const client = await connectWs(baseUrl);
+    try {
+      const welcome = await client.waitFor(f => f.type === 'welcome');
+      expect(welcome.type === 'welcome' && welcome.payload.steeringVersion).toBe(1);
+      client.send({ type: 'subscribe', payload: { sessionId: session.sessionId } });
+      await client.waitFor(f => f.type === 'history');
+      client.send({ type: 'send_user_message', payload: { sessionId: session.sessionId, source: 'local', content: [{ type: 'text', value: '检查代码' }] } });
+      await client.waitFor(f => f.type === 'session_status' && f.payload.status === 'thinking');
+      const edit = { type: 'send_user_message', payload: { sessionId: session.sessionId, source: 'local', clientMessageId: 'ws-edit', content: [{ type: 'text', value: '不要修改后端' }], steering: { version: 1, turnId: 'ws-turn', expectedRevision: 1, mode: 'append' } } };
+      client.send(edit); await client.waitFor(f => f.type === 'turn_steering' && !f.payload.duplicate);
+      client.send(edit); await client.waitFor(f => f.type === 'turn_steering' && f.payload.duplicate === true);
+      expect(store.getHistory(session.sessionId).filter(m => m.id === 'ws-edit')).toHaveLength(1);
+      expect(run).toHaveBeenCalledTimes(1);
+      client.send({ ...edit, payload: { ...edit.payload, clientMessageId: 'stale', content: [{ type: 'text', value: '新的错误版本' }] } });
+      await client.waitFor(f => f.type === 'error' && f.payload.code === 'steering_rejected');
+      expect(store.getHistory(session.sessionId).some(m => m.id === 'stale')).toBe(false);
+      client.send({ ...edit, payload: { ...edit.payload, clientMessageId: 'legacy', steering: undefined, queueAction: 'merge' } });
+      await client.waitFor(f => f.type === 'message_queued' && f.payload.clientMessageId === 'legacy');
+      expect(steer).toHaveBeenCalledTimes(3);
+    } finally { release(); client.close(); }
+  });
   let baseUrl: string;
 
   beforeEach(() => {

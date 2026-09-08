@@ -232,10 +232,12 @@ interface ComposerProps {
   /** 禁用原因，显示在输入框与按钮提示中。 */
   disabledReason?: string;
   /**
-   * 流式生成中。busy 时 textarea 仍可输入下一条，发送按钮变「停止」按钮调 onCancel。
+   * 流式生成中。协商实时调整后可提交纯文本；否则发送按钮仍为「停止」。
    * 与 disabled 解耦：disabled 锁全部，busy 只改发送按钮形态。
    */
   busy?: boolean;
+  /** Version-negotiated native safe-point steering; bypasses ordinary task dispatch. */
+  onSteer?: (text: string, mode: 'append' | 'replace' | 'pause') => void | boolean | Promise<void | boolean>;
   onSend: (
     text: string,
     attachments: Attachment[],
@@ -301,6 +303,7 @@ export function Composer({
   disabled,
   disabledReason,
   busy = false,
+  onSteer,
   onSend,
   onCancel,
   onSetModel,
@@ -842,10 +845,11 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
   }, [sessionId, disabled]);
 
-  // 生成中（busy）不发送，但 textarea 仍可输入下一条；无会话（disabled）才整体锁死。
+  const [steeringMode, setSteeringMode] = useState<'append' | 'replace' | 'pause'>('append');
+  // Busy text-only adjustments enter the native safe-point lane, never the ordinary enterprise side-effect path.
   // 有文本或有图片附件即可发送。
   const canSend =
-    (text.trim().length > 0 || attachments.length > 0) && !disabled && !busy && !submitting;
+    (text.trim().length > 0 || attachments.length > 0) && !disabled && (!busy || (!!onSteer && !attachments.length)) && !submitting;
 
   const submit = (): void => {
     if (!canSend) return;
@@ -855,7 +859,7 @@ export function Composer({
       : authorizationKind === 'session'
         ? { mode: 'auto', scope: 'session' }
         : { mode: 'manual', scope: 'session' };
-    void Promise.resolve(onSend(text, attachments, authorization))
+    void Promise.resolve(busy ? onSteer?.(text, steeringMode) : onSend(text, attachments, authorization))
       .then((accepted) => {
         if (accepted === false) return;
         setText('');
@@ -1465,7 +1469,14 @@ export function Composer({
             ) : null}
           </div>
 
-          {busy && onCancel ? (
+          {busy && onSteer && text.trim() && !attachments.length ? (
+            <select className="otto-contextpill" aria-label="调整当前任务" value={steeringMode} onChange={event => setSteeringMode(event.target.value as typeof steeringMode)}>
+              <option value="append">补充当前任务</option>
+              <option value="replace">替换当前任务</option>
+              <option value="pause">安全点暂停</option>
+            </select>
+          ) : null}
+          {busy && onCancel && !canSend ? (
             <button
               type="button"
               className="otto-send otto-send--stop"

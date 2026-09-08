@@ -8,8 +8,8 @@
  * CoreSessionRuntime 流式落库/收口对账单测（修「切换会话后任务看似中断」三件套）。
  *
  * 用 fake Config + fake chat 流驱动 run()，不接真 core 模型：
- *   ① 流式中途 getHistory 就能拿到已累积文本——客户端切走（退订）再切回时
- *      靠 subscribe 回灌的 history 恢复正文，若 store 里还是空占位就会缺头；
+ *   ① 明确禁用工具的纯文本轮次可增量落库，切走后靠 history 恢复正文；
+ *      可调用工具的轮次先保留空占位，未验收的正文不通过 history 泄漏；
  *   ② 收口 chat_complete 帧带定稿全文 text（客户端对账自愈的数据来源）；
  *   ③ 定稿后 store 里正文完整、isStreaming=false。
  */
@@ -324,7 +324,7 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
     expect(assistant?.turn?.verification?.status).not.toBe('passed');
   });
 
-  it('同一只读失败只重试一次，随后向模型注入改路约束并保留审计记录', async () => {
+  it('同一只读失败只重试一次，随后原生阻止再次执行并保留审计记录', async () => {
     const requests: Array<{ message?: Array<{ text?: string }> }> = [];
     const turns = [
       () =>
@@ -334,6 +334,10 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
       () =>
         (async function* () {
           yield toolChunk('read_file', 'read-2');
+        })(),
+      () =>
+        (async function* () {
+          yield toolChunk('read_file', 'read-3');
         })(),
       () =>
         (async function* () {
@@ -382,7 +386,12 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
 
     await runtime.initialize();
     await runtime.run(
-      [{ type: 'text', value: '核对这个文件并给出结论' }],
+      [
+        {
+          type: 'text',
+          value: '全面核对多个文件并比较证据，给出经过验证的结论',
+        },
+      ],
       'local',
     );
 
@@ -393,10 +402,16 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
     const thirdDirective = requests[2]?.message
       ?.map((part) => part.text ?? '')
       .join('\n');
+    const fourthDirective = requests[3]?.message
+      ?.map((part) => part.text ?? '')
+      .join('\n');
     expect(secondDirective).toContain(
       'Retry the same read operation at most once',
     );
     expect(thirdDirective).toContain('Do not repeat an identical failed call');
+    expect(fourthDirective).toContain(
+      'A previously failed execution path was blocked before it could run again',
+    );
     const turn = store
       .getHistory(session.sessionId)
       .find((message) => message.turn)?.turn;
@@ -624,7 +639,7 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
       [{ type: 'text', value: '发布并部署到生产环境' }],
       'local',
     );
-    await requested;
+    await Promise.race([requested, running.then(() => { throw new Error('Run ended before confirmation: ' + JSON.stringify(store.getHistory(session.sessionId))); })]);
     expect(execute).not.toHaveBeenCalled();
     runtime.resolveToolConfirmation('deploy-confirmed', 'approved');
     await running;
@@ -1090,7 +1105,7 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
     );
   });
 
-  it('流式中途增量落库（getHistory 有已累积文本）+ chat_complete 带定稿全文', async () => {
+  it('明确禁用工具时流式增量落库 + chat_complete 带定稿全文', async () => {
     const store = new InMemorySessionStore();
     const session = store.createSession({ title: 't' });
     const frames: ServerToClient[] = [];
@@ -1115,6 +1130,7 @@ describe('CoreSessionRuntime 流式落库与收口对账', () => {
       session.sessionId,
       makeFakeConfig(stream),
       noOpWorkLogger,
+      { toolFree: true },
     );
     await runtime.initialize();
 
@@ -1288,19 +1304,9 @@ function startAskSession(config: Config) {
   const frames: ServerToClient[] = [];
   let onQuestion!: () => void;
   const questionAsked = new Promise<void>((r) => (onQuestion = r));
-  let onToolStarted!: () => void;
-  const toolStarted = new Promise<void>((r) => (onToolStarted = r));
   store.subscribe(session.sessionId, (f) => {
     frames.push(f);
     if (f.type === 'tool_confirmation_request') onQuestion();
-    if (
-      f.type === 'tool_calls_update' &&
-      f.payload.toolCalls.some(
-        (toolCall) => toolCall.status === ToolCallStatus.Executing,
-      )
-    ) {
-      onToolStarted();
-    }
   });
   const runtime = new CoreSessionRuntime(
     store,
@@ -1308,7 +1314,7 @@ function startAskSession(config: Config) {
     config,
     noOpWorkLogger,
   );
-  return { store, session, frames, questionAsked, toolStarted, runtime };
+  return { store, session, frames, questionAsked, runtime };
 }
 
 /** 普通工具调用 chunk（可省略 id），用于覆盖稳定 ID 与不配合取消的工具。 */
@@ -1495,13 +1501,12 @@ describe('CoreSessionRuntime · AskUserQuestion 交互闸门', () => {
           yield askChunk();
         })(),
     ]);
-    const { frames, toolStarted, runtime } = startAskSession(config);
+    const { frames, questionAsked, runtime } = startAskSession(config);
     await runtime.initialize();
 
     const running = runtime.run([{ type: 'text', value: '帮我选' }], 'local');
-    await toolStarted;
-    // 让 gateAskUserQuestion 有机会发布确认帧；旧实现会因二次生成随机 id 而找不到卡。
-    await Promise.resolve();
+    // Queued is not executing: wait for the actual question before cancelling.
+    await questionAsked;
     runtime.cancel();
     await running;
 
@@ -1790,7 +1795,7 @@ describe('CoreSessionRuntime · 工具状态收口', () => {
       [{ type: 'text', value: '执行操作' }],
       'feishu',
     );
-    await progress;
+    await Promise.race([progress, running.then(() => { throw new Error('Run ended before confirmation: ' + JSON.stringify(store.getHistory(session.sessionId))); })]);
     const requested = frames.some(
       (frame) => frame.type === 'tool_confirmation_request',
     );
@@ -1853,7 +1858,7 @@ describe('CoreSessionRuntime · 工具状态收口', () => {
       [{ type: 'text', value: '从桌面执行操作' }],
       'local',
     );
-    await confirmation;
+    await Promise.race([confirmation, running.then(() => { throw new Error('Run ended before confirmation: ' + JSON.stringify(store.getHistory(session.sessionId))); })]);
     expect(execute).not.toHaveBeenCalled();
     runtime.resolveToolConfirmation('local-confirm', 'approved');
     await running;

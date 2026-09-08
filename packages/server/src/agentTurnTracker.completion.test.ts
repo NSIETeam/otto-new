@@ -53,6 +53,81 @@ function setup(text = '修改代码并运行测试') {
 }
 
 describe('completion requires scoped execution evidence and a deliverable graph', () => {
+  it('blocks shallow source inspection even when the broad request quote and a generic test pass', () => {
+    const task = '修复登录并支持短信验证码、密码错误提示和会话过期处理';
+    const store = new InMemorySessionStore();
+    const session = store.createSession();
+    const tracker = new AgentTurnTracker(
+      store,
+      session.sessionId,
+      deriveTurnControlPolicy({ text: task, source: 'local', toolFree: false }),
+      { taskText: task },
+    );
+    const root = store.appendMessage(session.sessionId, {
+      role: 'assistant',
+      content: [],
+      source: 'local',
+    });
+    tracker.attachAssistantMessage(root.id);
+    tracker.completeAssistantMessage(true);
+    tracker.updateToolCalls([
+      call('edit', 'replace'),
+      {
+        ...call('read', 'read_file'),
+        result: {
+          success: true,
+          executionTime: 1,
+          toolName: 'read_file',
+          data: 'function login',
+        },
+      },
+      check('test', 'npm test'),
+    ]);
+    tracker.updateTaskContract({
+      expectedRevision: 0,
+      objectives: [
+        {
+          id: 'login',
+          description: task,
+          sourceQuote: task,
+          dependsOn: [],
+          criteria: [
+            {
+              id: 'exists',
+              kind: 'observation',
+              toolName: 'read_file',
+              description: '存在登录函数',
+            },
+          ],
+          evidence: [
+            {
+              criterionId: 'exists',
+              toolCallId: 'read',
+              quote: 'function login',
+            },
+          ],
+        },
+      ],
+    });
+    expect(
+      tracker
+        .deliveryReadiness()
+        .missing.some((c) => c.id.startsWith('coverage:')),
+    ).toBe(true);
+    expect(tracker.snapshot().status).toBe('in_progress');
+    tracker.complete();
+    expect(tracker.snapshot().status).toBe('incomplete');
+  });
+  it.each([
+    ToolCallStatus.Canceled,
+    ToolCallStatus.WaitingForConfirmation,
+    ToolCallStatus.BackgroundRunning,
+  ])('does not auto-close past %s', (status) => {
+    const tracker = setup();
+    tracker.updateToolCalls([{ ...call('blocked', 'replace'), status }]);
+    expect(tracker.deliveryReadiness().blocked).toBe(true);
+    expect(tracker.snapshot().status).toBe('in_progress');
+  });
   it.each([
     call('fake', 'read_file', { path: 'login.test.ts' }),
     call('fake', 'write_file', { content: 'test check build passed' }),

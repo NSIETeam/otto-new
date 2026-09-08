@@ -1,6 +1,9 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from 'vitest';
-import { verificationKind } from './verificationEvidence.js';
+import {
+  verificationKind,
+  hasFailedVerificationReceipt,
+} from './verificationEvidence.js';
 import { ToolCallStatus, type ToolCall } from './protocol.js';
 
 function shell(command: string): ToolCall {
@@ -13,6 +16,68 @@ function shell(command: string): ToolCall {
 }
 
 describe('verification runner classification', () => {
+  it('accepts only a matching terminal native failure, not assertion prose or a malformed receipt', () => {
+    const failed: ToolCall = {
+      ...shell('npm test'),
+      parameters: { command: 'npm test', directory: '/repo' },
+      status: ToolCallStatus.Error,
+      result: {
+        success: false,
+        toolName: 'run_shell_command',
+        executionTime: 1,
+        error: 'exit 403',
+        process: {
+          command: 'npm test',
+          directory: '/repo',
+          exitCode: 403,
+          signal: null,
+          status: 'exited',
+        },
+      },
+    };
+    expect(hasFailedVerificationReceipt(failed)).toBe(true);
+    for (const patch of [
+      { command: 'npm run deploy' },
+      { directory: '/elsewhere' },
+      { exitCode: 0 },
+      { exitCode: null },
+      { exitCode: -1 },
+      { exitCode: 0.5 },
+      { signal: 'SIGTERM' },
+      { status: 'timed_out' as const },
+    ]) {
+      expect(
+        hasFailedVerificationReceipt({
+          ...failed,
+          result: {
+            ...failed.result!,
+            process: { ...failed.result!.process!, ...patch },
+          },
+        }),
+      ).toBe(false);
+    }
+    expect(
+      hasFailedVerificationReceipt({
+        ...failed,
+        status: ToolCallStatus.Canceled,
+      }),
+    ).toBe(false);
+    expect(
+      hasFailedVerificationReceipt({
+        ...failed,
+        result: { ...failed.result!, success: true },
+      }),
+    ).toBe(false);
+    expect(
+      hasFailedVerificationReceipt({
+        ...failed,
+        result: { ...failed.result!, process: undefined },
+      }),
+    ).toBe(false);
+    expect(
+      hasFailedVerificationReceipt({ ...failed, toolName: 'send_message' }),
+    ).toBe(false);
+  });
   it.each([
     ['npm test', 'test'],
     ['npm run test:ci --workspace=packages/server', 'test'],

@@ -19,6 +19,16 @@ import type { ModelInfo } from 'otto-server';
 import { Composer, insertComposerDraft } from './Composer.js';
 import * as transport from '../transport.js';
 
+it('lets a user replace the running task without cancelling the active tool', async () => {
+  const onSteer = vi.fn(() => true); const onSend = vi.fn(); const onCancel = vi.fn();
+  render(<Composer models={[]} currentModel={null} sessionId="steer" busy onSteer={onSteer} onSend={onSend} onCancel={onCancel} onSetModel={vi.fn()} />);
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '先恢复文件，不要继续改后端' } });
+  fireEvent.change(screen.getByLabelText('调整当前任务'), { target: { value: 'replace' } });
+  fireEvent.click(screen.getByRole('button', { name: '发送' }));
+  await waitFor(() => expect(onSteer).toHaveBeenCalledWith('先恢复文件，不要继续改后端', 'replace'));
+  expect(onSend).not.toHaveBeenCalled(); expect(onCancel).not.toHaveBeenCalled();
+});
+
 /** 造 n 个模型（跨两个 provider），displayName 形如「模型-01」。 */
 function makeModels(n: number): ModelInfo[] {
   return Array.from({ length: n }, (_, i) => ({

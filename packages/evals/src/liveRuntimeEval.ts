@@ -16,9 +16,13 @@ import { isDeepStrictEqual } from 'node:util';
 import { CoreSessionRuntime } from '../../server/src/runtime.js';
 import { InMemorySessionStore } from '../../server/src/sessions.js';
 import type { TokenUsage } from '../../server/src/protocol.js';
+import { extractTaskRequirements } from '../../server/src/taskRequirements.js';
+import { LIVE_EVAL_EXECUTION_LIMITS } from './liveEvalGate.js';
 
 // Reuse the core tool contract without adding a second provider SDK dependency.
 type Schema = BaseTool['parameterSchema'];
+export const LIVE_ACCEPTANCE_COMMAND =
+  'node --test --test-reporter=tap acceptance.test.cjs';
 const Type = {
   OBJECT: 'OBJECT' as Schema['type'],
   STRING: 'STRING' as Schema['type'],
@@ -149,7 +153,7 @@ class FixtureTool extends BaseTool<Record<string, unknown>, ToolResult> {
       name,
       name,
       name === 'run_shell_command'
-        ? 'Run only the fixed acceptance command: node --test acceptance.test.cjs. No other commands are allowed.'
+        ? `Run only the fixed acceptance command: ${LIVE_ACCEPTANCE_COMMAND}. No other commands are allowed.`
         : 'Read input.json/result.json or write result.json in this isolated evaluation fixture only.',
       Icon.Tasks,
       schema,
@@ -174,6 +178,9 @@ function fixturePath(root: string, requested: unknown, write: boolean): string {
 }
 
 let activeEvaluation = false;
+export function liveCasePrompt(testCase: LiveCase, directory: string): string {
+  return `读取 input.json，${testCase.task}生成 result.json，并运行 ${LIVE_ACCEPTANCE_COMMAND} 验证。工作目录：${directory}`;
+}
 export async function executeLiveCase(
   testCase: LiveCase,
   model: CustomModelConfig,
@@ -210,7 +217,12 @@ async function executeIsolatedCase(
   // The model cannot read or modify this independent grader or execute model-written code.
   await writeFile(
     path.join(directory, 'acceptance.test.cjs'),
-    `const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');test('acceptance',()=>assert.deepEqual(JSON.parse(fs.readFileSync('result.json','utf8')),${JSON.stringify(testCase.expected)}));`,
+    // Each binding deliberately uses the full exact-output oracle. This is a
+    // deterministic data fixture, NOT independent UI/business scenario coverage.
+    `const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');\n` +
+      extractTaskRequirements(liveCasePrompt(testCase, directory)).flatMap(r => r.scenarios.map(s =>
+        `test(${JSON.stringify('acceptance-' + r.id + '-' + s)},()=>assert.deepEqual(JSON.parse(fs.readFileSync('result.json','utf8')),${JSON.stringify(testCase.expected)}));`,
+      )).join('\n'),
   );
   const store = new InMemorySessionStore();
   const session = store.createEphemeralSession({ workspacePath: directory });
@@ -229,9 +241,9 @@ async function executeIsolatedCase(
     usageStatisticsEnabled: false,
     silentMode: true,
     noBrowser: true,
-    maxSessionTurns: 10,
+    maxSessionTurns: LIVE_EVAL_EXECUTION_LIMITS.maxRounds,
     userRules:
-      'This is a synthetic isolated evaluation. Use only the provided tools. Never use external services, user memory, or other paths. Produce result.json, then run the fixed acceptance check. Do not claim success unless the check passes.',
+      'This is a synthetic isolated evaluation. Use only the provided tools. Never use external services, user memory, or other paths. Produce result.json, then run the fixed acceptance check. Native testCase names are acceptance- followed by the requirement id, a hyphen and the required scenario from update_task_plan. Each checks the full output oracle, not separate business scenario coverage. Do not claim success unless the check passes.',
   });
   const runtime = new CoreSessionRuntime(
     store,
@@ -242,11 +254,26 @@ async function executeIsolatedCase(
   );
   const usages: Array<TokenUsage | undefined> = [];
   let firstTokenMs: number | null = null;
+  let firstVisibleTextMs: number | null = null;
+  let unverifiedTextChunks = 0;
   let timedOut = false;
   const start = performance.now();
   const unsubscribe = store.subscribe(session.sessionId, (frame) => {
     if (frame.type === 'chat_chunk' && firstTokenMs === null)
       firstTokenMs = performance.now() - start;
+    if (
+      firstVisibleTextMs === null &&
+      ((frame.type === 'chat_chunk' && frame.payload.delta.trim()) ||
+        (frame.type === 'chat_complete' && frame.payload.text?.trim()))
+    )
+      firstVisibleTextMs = performance.now() - start;
+    if (
+      frame.type === 'chat_chunk' &&
+      store.getHistory(session.sessionId).find((m) => m.turn)?.turn?.status !==
+        'completed'
+    ) {
+      unverifiedTextChunks++;
+    }
     if (frame.type === 'chat_complete') usages.push(frame.payload.tokenUsage);
     if (frame.type === 'tool_confirmation_request') {
       // All actual implementations below enforce narrow fixture paths and a fixed command.
@@ -264,7 +291,7 @@ async function executeIsolatedCase(
   const timer = setTimeout(() => {
     timedOut = true;
     runtime.cancel();
-  }, 150_000);
+  }, LIVE_EVAL_EXECUTION_LIMITS.maxCaseMs);
   try {
     await runtime.initialize();
     if (timedOut) throw new Error('Evaluation initialization timed out');
@@ -316,7 +343,7 @@ async function executeIsolatedCase(
           required: ['command'],
         },
         async (params, signal) => {
-          const command = 'node --test acceptance.test.cjs';
+          const command = LIVE_ACCEPTANCE_COMMAND;
           if (
             params.command !== command ||
             (params.directory &&
@@ -326,7 +353,7 @@ async function executeIsolatedCase(
           return new Promise((resolve, reject) => {
             const child = spawn(
               process.execPath,
-              ['--test', 'acceptance.test.cjs'],
+              ['--test', '--test-reporter=tap', 'acceptance.test.cjs'],
               {
                 cwd: directory,
                 shell: false,
@@ -338,7 +365,7 @@ async function executeIsolatedCase(
             );
             let output = '';
             child.stdout.on('data', (data: Buffer) => {
-              output = (output + data.toString()).slice(0, 8000);
+              output = (output + data.toString()).slice(0, 128_000);
             });
             child.stderr.on('data', (data: Buffer) => {
               output = (output + data.toString()).slice(0, 8000);
@@ -365,7 +392,7 @@ async function executeIsolatedCase(
       [
         {
           type: 'text',
-          value: `读取 input.json，${testCase.task}生成 result.json，并运行 node --test acceptance.test.cjs 验证。工作目录：${directory}`,
+          value: liveCasePrompt(testCase, directory),
         },
       ],
       'local',
@@ -386,6 +413,7 @@ async function executeIsolatedCase(
     );
     return {
       id: testCase.id,
+      userInterventions: 0, // This harness sends exactly one user request, no nudges.
       kind: 'live_model_runtime' as const,
       model: model.modelId,
       provider: model.provider,
@@ -395,8 +423,11 @@ async function executeIsolatedCase(
       timedOut,
       durationMs: performance.now() - start,
       firstTokenMs,
+      firstVisibleTextMs,
+      unverifiedTextChunks,
       modelRounds: usages.length,
       toolCalls: tools.length,
+      closureAttempts: turn?.deliveryClosureAttempts ?? 0,
       ...summarizeLiveUsage(usages, rates),
       fixtureDirectory: directory,
       checks: turn?.verification?.checks.map((check) => ({

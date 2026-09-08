@@ -320,6 +320,7 @@ Supporting kernel-side modules that are **part of the kernel boundary** but not 
 | File | Role | Why kernel? |
 |---|---|---|
 | `policy/centralPolicy.ts` | Single policy decision point (feature flags + approval + audit) | Injected into `ToolExecutionEngine` as the first gate |
+| `policy/turnExecutionGuard.ts` | Host-owned per-turn execution restrictions | Rechecked at native dispatch, independent of approval; concrete user requirement monitors remain in server `turnConstraints.ts` |
 | `policy/policy-engine.ts` | In-memory session policy engine | Used by `CentralPolicy` for approval-mode gating |
 | `policy/policy-updater.ts` | Persist "always allow" decisions | Used by ACP layer to update persistent policy |
 | `orchestration/auditLog.ts` | Audit event emission | Injected into `CentralPolicy` and `ToolExecutionEngine` |
@@ -357,5 +358,21 @@ Supporting kernel-side modules that are **part of the kernel boundary** but not 
 ---
 
 ## Testing the Boundary
+
+### Claim evidence and semantic lower bounds (stage 5, 2026-09-08)
+
+Core WebFetch can emit bounded original-text receipts; the native executor strips this metadata from non-native implementations. Server `claimEvidence.ts` binds conclusions to those receipts and the current request/draft; `semanticAcceptance.ts` statically inspects native-observed test inputs using the existing pinned parser. Both participate in the existing runtime delivery gate, not a new planner, executor, permission system or model loop. Public retrieval is not source-authority or truth certification. See [stage 5 implementation and limits](agent-stage5-claim-evidence-20260908.md).
+
+### Bounded recovery strategies (stage 4, 2026-09-08)
+
+Server `adaptiveExecution.ts` compares a finite set of native failure responses. `deliveryRepair.ts` compares concrete, version-bound local repair scopes and prepares formatting with its pinned own dependency. `repairStrategyTools.ts` exposes host-only proposal/preparation contracts during delivery closure. None is a second executor or permission grant: actual edits continue through existing Core policy, confirmation, audit and pre-dispatch guard. The current recovery record stores monotonic spending, never executable repair permissions. Core does not import these Server modules. See [implementation, verification and limits](agent-stage4-repair-strategies-20260908.md).
+
+### Versioned task continuity (stage 3, 2026-09-08)
+
+`packages/server/src/taskContinuity.ts` owns accepted/applied user request revisions. It is a value object inside the existing `CoreSessionRuntime` and `FileTurnRecoveryStore`, not a second runner or scheduler. The recovery record atomically contains the authority ledger, its graph projection, native constraint baselines and bounded native evidence checkpoints. Compression is a model-context projection only: Server rehydrates the current native request/graph after context loss. Summaries and `update_task_plan` cannot rewrite authority.
+
+Desktop negotiates steering v1 and sends explicit append/replace/pause edits. Legacy `queueAction=merge` is still queued for compatibility. Server validates local user origin, session access, turn ID, revision and message identity. Acceptance installs the dispatch fence before persistence awaits; application waits for the current model/tool safe point. Existing Core native pre-execution guard is reused; no Server imports enter Core. An external operation already in progress is allowed to report its outcome, and unknown outcomes require reconciliation rather than automatic retry.
+
+Successful replay receipts prevent duplicate identical external operations; they are not new validation or permission. Only request-bound native tests with current file fingerprints and native artifact receipts can regain verification after restart. Manual approvals and model-authored summaries cannot. See [stage 3 implementation and limits](agent-stage3-continuity-20260908.md).
 
 A lightweight test at `packages/core/src/core/kernelBoundary.test.ts` verifies that kernel source files contain no banned imports. The test reads source text directly — no runtime dependency graph needed. See that file for details.

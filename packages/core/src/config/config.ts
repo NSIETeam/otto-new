@@ -1451,6 +1451,7 @@ export class Config {
     await registerLazyCoreTool('VideoEditorTool', 'video_editor', async () => (await import('../tools/video-editor.js')).VideoEditorTool, this); // 视频编辑器（OpenReel集成）
     await registerLazyCoreTool('ConvertDocumentTool', 'convert_document', async () => (await import('../tools/convert-document.js')).ConvertDocumentTool, this); // 文档格式转换（pandoc/LibreOffice）
     await registerLazyCoreTool('GenerateDocumentTool', 'generate_document', async () => (await import('../tools/generate-document.js')).GenerateDocumentTool, this); // 文档生成（Typst/Marp）
+    await registerLazyCoreTool('GenerateSafeDocumentTool', 'generate_safe_document', async () => (await import('../tools/generate-safe-document.js')).GenerateSafeDocumentTool, this);
     await registerLazyCoreTool('AnalyzeDataTool', 'analyze_data', async () => (await import('../tools/analyze-data.js')).AnalyzeDataTool, this); // 数据分析出图（DuckDB/gnuplot）
     await registerLazyCoreTool('DiagnoseSystemTool', 'diagnose_system', async () => (await import('../tools/diagnose-system.js')).DiagnoseSystemTool, this); // 系统诊断（macOS/Windows）
     await registerLazyCoreTool('WebAutomationTool', 'web_automation', async () => (await import('../tools/web-automation.js')).WebAutomationTool, this);

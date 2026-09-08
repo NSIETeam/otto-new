@@ -113,33 +113,46 @@ export function presentConversationMessages(
 
     const finalMessage =
       [...group].reverse().find((entry) => entry.phase === 'final_answer') ??
+      [...group].reverse().find((entry) => contentToText(entry.content).trim()) ??
       group[group.length - 1]!;
+    // Exact paragraph equality only. Never guess that similarly worded findings
+    // are equivalent; unknown/legacy prose is retained, not silently discarded.
+    const finalText = contentToText(finalMessage.content).trim();
+    const finalParagraphs = new Set(finalText.split(/\r?\n\s*\r?\n/u).map(p => p.trim()));
     const seen = new Set<string>();
-    const progressMessages = group.flatMap((entry) => {
-      const text = contentToText(entry.content).trim();
-      if (
-        entry.id === finalMessage.id ||
-        entry.phase !== 'commentary' ||
-        !text ||
-        seen.has(text)
-      )
-        return [];
-      seen.add(text);
-      return [{ id: entry.id, text, timestamp: entry.timestamp }];
-    });
+    const progressMessages: NonNullable<OttoMessage['progressMessages']> = [];
+    for (const entry of group) {
+      const candidates = [...(entry.progressMessages ?? []), ...(entry.id !== finalMessage.id
+        ? [{ id: entry.id, text: contentToText(entry.content), timestamp: entry.timestamp }] : [])];
+      for (const progress of candidates) {
+        const text = progress.text.trim();
+        const plain = text.replace(/^以下为尚未验收的过程说明：\s*/u, '').trim();
+        if (!plain || seen.has(plain) || /^(?:我先查一下|我来看看|好的|收到|正在处理|继续处理已完成)[。.!！…\s]*$/u.test(plain)) continue;
+        // Keep multi-paragraph entries intact unless their WHOLE body is repeated
+        // in the final. This preserves code fences, lists, qualifications, links.
+        if (plain === finalText || finalParagraphs.has(plain)) continue;
+        seen.add(plain);
+        progressMessages.push({ ...progress, text });
+      }
+    }
+    const latestTurn = group.reduce<OttoMessage['turn']>((latest, entry) =>
+      entry.turn?.turnId === turnId && (!latest || entry.turn.sequence >= latest.sequence)
+        ? entry.turn : latest, undefined);
     const reasoning = group
       .map((entry) => entry.reasoning?.trim() ?? '')
       .filter(Boolean)
       .join('\n\n');
+    const terminal = latestTurn && latestTurn.status !== 'in_progress';
     presented.push({
       ...finalMessage,
-      turn: message.turn,
+      turn: latestTurn,
       progressMessages,
       associatedToolCalls: combineToolCalls(group),
       ...(reasoning ? { reasoning } : {}),
-      isReasoning: group.some((entry) => entry.isReasoning),
-      isProcessingTools: group.some((entry) => entry.isProcessingTools),
-      toolsCompleted: group.every((entry) => entry.toolsCompleted !== false),
+      isStreaming: terminal ? false : finalMessage.isStreaming,
+      isReasoning: !terminal && group.some((entry) => entry.isReasoning),
+      isProcessingTools: !terminal && group.some((entry) => entry.isProcessingTools),
+      toolsCompleted: Boolean(terminal) || group.every((entry) => entry.toolsCompleted !== false),
     });
     index = cursor - 1;
   }
@@ -154,6 +167,7 @@ interface ChatViewProps {
   /** 用于区分默认目录中的普通会话与绑定真实目录的项目会话。 */
   defaultWorkspacePath?: string;
   busy: boolean;
+  onSteer?: (text: string, mode: 'append' | 'replace' | 'pause') => void | boolean | Promise<void | boolean>;
   onSend: (
     text: string,
     source: MessageSource,
@@ -218,6 +232,7 @@ export function ChatView({
   busy,
   onSend,
   onCancel,
+  onSteer,
   onSetModel,
   onSetWorkspace,
   onRegenerate,
@@ -466,9 +481,10 @@ export function ChatView({
         currentModel={currentModel}
         // 切换/新建会话后据此自动聚焦输入框。
         sessionId={session?.sessionId ?? null}
-        // 无会话才整体禁用；生成中（busy）由 Composer 把发送按钮换成停止，textarea 仍可输入。
+        // 无会话才整体禁用；运行中的纯文本可走协商后的安全点调整通道。
         disabled={!session}
         busy={busy}
+        onSteer={onSteer}
         draft={draft.text}
         draftNonce={draft.n}
         onSend={(text, attachments, authorization) =>

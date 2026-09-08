@@ -10,9 +10,11 @@ const cleanup: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    cleanup.splice(0).map((directory) =>
-      fs.promises.rm(directory, { recursive: true, force: true }),
-    ),
+    cleanup
+      .splice(0)
+      .map((directory) =>
+        fs.promises.rm(directory, { recursive: true, force: true }),
+      ),
   );
 });
 
@@ -35,6 +37,7 @@ describe('buildLocalArtifactPreview', () => {
     expect(preview.ok).toBe(true);
     expect(preview.kind).toBe('slides');
     expect(preview.fileName).toBe('经营汇报.pptx');
+    expect(preview.notice).toContain('未校验');
     expect(preview.slides.map((slide) => slide.fileName)).toEqual([
       'slide-2.png',
       'slide-10.png',
@@ -42,6 +45,23 @@ describe('buildLocalArtifactPreview', () => {
     expect(preview.slides[0]?.dataUrl).toBe(
       `data:image/png;base64,${Buffer.from('two').toString('base64')}`,
     );
+  });
+
+  it('does not display stale screenshots after the presentation has changed', async () => {
+    const root = await fs.promises.mkdtemp(
+      path.join(os.tmpdir(), 'otto-stale-preview-'),
+    );
+    cleanup.push(root);
+    const presentation = path.join(root, 'deck.pptx');
+    const shots = path.join(root, 'shots');
+    await fs.promises.mkdir(shots);
+    await fs.promises.writeFile(presentation, 'invalid pptx');
+    const slide = path.join(shots, 'slide-1.png');
+    await fs.promises.writeFile(slide, 'old picture');
+    await fs.promises.utimes(slide, new Date(0), new Date(0));
+    const result = await buildLocalArtifactPreview(presentation);
+    expect(result.ok).toBe(false);
+    expect(result.slides).toEqual([]);
   });
 
   it('does not treat an arbitrary non-presentation file as an internal slide deck', async () => {

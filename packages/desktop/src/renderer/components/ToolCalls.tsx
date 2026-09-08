@@ -22,6 +22,7 @@ import type {
   ToolConfirmationResponsePayload,
 } from 'otto-server';
 import { parseDiff, type DiffLine } from './diff.js';
+import { Prose } from './Prose.js';
 import { createQrMatrix } from '../lib/qrMatrix.js';
 import {
   IconFile,
@@ -826,6 +827,7 @@ function ConfirmationCard({
 }): React.JSX.Element {
   const [sent, setSent] = useState(false);
   const details = tool.confirmationDetails ?? {};
+  const isDeliveryReview = tool.toolName === 'otto_delivery_review' && tool.id.startsWith('constraint-review-');
   const target =
     details.command ??
     details.filePath ??
@@ -851,7 +853,9 @@ function ConfirmationCard({
           {details.title ?? '允许 Otto 执行此操作？'}
         </span>
       </div>
-      <div className="otto-confirm__target">{target}</div>
+      {isDeliveryReview ? (
+        <div className="otto-confirm__review"><Prose text={details.message ?? '待核对内容不可用，请暂不确认。'} /></div>
+      ) : <div className="otto-confirm__target">{target}</div>}
       <div className="otto-ask__actions">
         <button
           type="button"
@@ -859,7 +863,7 @@ function ConfirmationCard({
           disabled={sent || !onRespond}
           onClick={() => respond('rejected')}
         >
-          拒绝
+          {isDeliveryReview ? '暂不通过' : '拒绝'}
         </button>
         <button
           type="button"
@@ -867,7 +871,7 @@ function ConfirmationCard({
           disabled={sent || !onRespond}
           onClick={() => respond('approved')}
         >
-          {sent ? '已提交' : '允许执行'}
+          {sent ? '已提交' : isDeliveryReview ? '确认这版交付' : '允许执行'}
         </button>
       </div>
     </div>

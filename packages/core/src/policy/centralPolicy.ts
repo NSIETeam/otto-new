@@ -20,6 +20,7 @@ import { Config, ApprovalMode } from '../config/config.js';
 import { PolicyEngine, PolicyDecision } from './policy-engine.js';
 import { getAuditLogger, AuditLogger } from '../orchestration/auditLog.js';
 import { isHighRisk } from './highRiskTools.js';
+import { assertTurnExecutionAllowed } from './turnExecutionGuard.js';
 import {
   FEATURE_FLAGS,
   FeatureFlagManager,
@@ -142,6 +143,11 @@ export class CentralPolicy {
    *   3. Approve mode gating via PolicyEngine → Allow / AskUser / Deny
    */
   canExecute(toolName: string, context: ExecutionContext): PolicyDecisionResult {
+    try {
+      assertTurnExecutionAllowed(this.config, { callId: 'policy-review', name: toolName, args: context.toolArgs ?? {} });
+    } catch (error) {
+      return this.auditAndReturn(PolicyDecision.Deny, error instanceof Error ? error.message : 'Turn constraint denied', toolName, context);
+    }
     // --- Guard: deny-by-default if we have no policy config at all ---
     if (!toolName) {
       return this.auditAndReturn(

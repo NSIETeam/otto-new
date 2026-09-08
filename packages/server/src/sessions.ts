@@ -42,8 +42,13 @@ export type Unsubscribe = () => void;
  * 骨架阶段是可选的 stub，store 不依赖它即可工作。
  */
 export interface SessionRuntime {
+  steer?(input: import('./taskContinuity.js').TurnSteeringRequest): Promise<import('./taskContinuity.js').SteeringReceipt>;
   /** 跑一轮对话：消费用户消息，产出流式事件（实装时映射成 publish 广播）。 */
-  run(input: MessageContent, source: MessageSource): Promise<void>;
+  run(
+    input: MessageContent,
+    source: MessageSource,
+    context?: { userMessageId: string },
+  ): Promise<void>;
   /** 用独立的轻量模型请求根据首条用户消息生成会话标题。 */
   generateTitle?(firstUserMessage: string): Promise<string>;
   /** 中止当前轮。 */

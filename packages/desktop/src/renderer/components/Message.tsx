@@ -15,7 +15,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import type { OttoMessage } from 'otto-server';
-import { Prose, contentToText } from './Prose.js';
+import { Prose, contentToText, renderedLocalOutputPaths } from './Prose.js';
 import { attachmentToDataUrl } from '../lib/image.js';
 import {
   buildToolCompletionSummary,
@@ -51,6 +51,10 @@ interface MessageProps {
   /** AskUserQuestion 作答回传（透传到工具卡里的问答卡）。 */
   onRespondQuestion?: RespondQuestionFn;
 }
+
+const INTERNAL_BOOKKEEPING = new Set([
+  'update_task_plan', 'review_answer_evidence', 'plan_delivery_repair', 'prepare_repair_format',
+]);
 
 export function Message({
   message,
@@ -209,7 +213,7 @@ function BotMessage({
 }: MessageProps): React.JSX.Element {
   const text = contentToText(message.content);
   const tools = (message.associatedToolCalls ?? []).filter(
-    (tool) => tool.toolName !== 'update_task_plan',
+    (tool) => !INTERNAL_BOOKKEEPING.has(tool.toolName) || tool.status !== 'success',
   );
   const responding = Boolean(
     message.isStreaming ||
@@ -230,10 +234,12 @@ function BotMessage({
     message.turn?.status === 'interrupted' ||
     message.turn?.status === 'cancelled',
   );
+  const linkedPaths = message.turn?.artifacts?.length ? renderedLocalOutputPaths(displayText) : new Set<string>();
   const mentionedArtifactPaths = (message.turn?.artifacts ?? [])
+    .filter(artifact => artifact.verified)
     .map((artifact) => artifact.path)
     .filter((artifactPath): artifactPath is string =>
-      Boolean(artifactPath && displayText.includes(artifactPath)),
+      Boolean(artifactPath && linkedPaths.has(artifactPath)),
     );
   const mentionedCitationUris = (message.turn?.citations ?? [])
     .map((citation) => citation.uri)
@@ -263,20 +269,6 @@ function BotMessage({
           />
         ) : null}
 
-        {message.progressMessages?.length ? (
-          <details
-            className="otto-msg-progress"
-            open={responding ? true : undefined}
-          >
-            <summary>查看过程说明（{message.progressMessages.length}）</summary>
-            {message.progressMessages.map((progress) => (
-              <div key={progress.id}>
-                <Prose text={progress.text} />
-              </div>
-            ))}
-          </details>
-        ) : null}
-
         {displayText ? (
           <Prose text={displayText} streaming={message.isStreaming} />
         ) : message.isStreaming && tools.length === 0 ? (
@@ -289,6 +281,20 @@ function BotMessage({
             omittedArtifactPaths={mentionedArtifactPaths}
             omittedCitationUris={mentionedCitationUris}
           />
+        ) : null}
+
+        {message.progressMessages?.length ? (
+          <details
+            className="otto-msg-progress"
+            open={responding ? true : undefined}
+          >
+            <summary>先前的说明（{message.progressMessages.length}）</summary>
+            {message.progressMessages.map((progress) => (
+              <div key={progress.id}>
+                <Prose text={progress.text} />
+              </div>
+            ))}
+          </details>
         ) : null}
 
         {!responding && message.phase !== 'commentary' && text.trim() ? (

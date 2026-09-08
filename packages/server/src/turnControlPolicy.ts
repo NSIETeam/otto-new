@@ -30,7 +30,7 @@ const DIAGNOSE_PATTERN =
 const CHANGE_PATTERN =
   /(?:修改|修复|实现|升级|优化|重构|新增|添加|移除|删掉|配置|安装|更新|合并|迁移|改造|change|modify|fix|implement|upgrade|refactor|add|remove|configure|install|update|migrate)/iu;
 const ARTIFACT_PATTERN =
-  /(?:生成|创建|制作|导出).{0,12}(?:文档|报告|表格|幻灯片|ppt|图片|图像|文件|安装包|压缩包)|(?:create|generate|export).{0,20}(?:document|report|spreadsheet|slides?|image|file|package)/iu;
+  /(?:生成|创建|制作|导出).{0,12}(?:文档|报告|表格|幻灯片|ppt|图片|图像|文件|安装包|压缩包)|(?:create|generate|export).{0,20}(?:document|report|spreadsheet|slides?|image|file|package)|(?:生成|创建|制作|导出|\bcreate\b|\bgenerate\b|\bexport\b)\s*[`"']?[^\s，,。；;\n]{1,120}\.(?:json|csv|md|txt|html|pdf|docx|xlsx|pptx)\b/iu;
 const ENTERPRISE_PATTERN =
   /(?:企业|园区|组织|部门|员工|工单|客服|许可证|授权|产业园|enterprise|organization|department|ticket|license)/iu;
 const EXTERNAL_WRITE_PATTERN =
@@ -186,17 +186,21 @@ function executionFor(
 function presentationFor(
   intent: TurnIntent,
   complexity: ReturnType<typeof routeTurnComplexity>,
+  text: string,
 ): TurnPresentationPolicy {
   const progressUpdates: TurnPresentationPolicy['progressUpdates'] =
     complexity.level === 'orchestrated' || complexity.level === 'complex'
       ? 'concrete_milestones'
       : 'none';
   const detailLevel: TurnPresentationPolicy['detailLevel'] =
-    intent === 'research' || complexity.level === 'orchestrated'
-      ? 'thorough'
-      : complexity.level === 'simple'
-        ? 'compact'
-        : 'balanced';
+    /一句话|简短|简洁|简要|只要结论|\b(?:brief|concise)\b/iu.test(text)
+      ? 'compact'
+      : /详细|深入|全面|\b(?:detailed|in.depth)\b/iu.test(text) ||
+          complexity.level === 'orchestrated'
+        ? 'thorough'
+        : complexity.level === 'simple'
+          ? 'compact'
+          : 'balanced';
 
   const base = {
     contractVersion: 1 as const,
@@ -212,31 +216,31 @@ function presentationFor(
       return {
         ...base,
         responseShape: 'grounded_answer',
-        finalSections: ['result', 'evidence', 'limitations'],
+        finalSections: ['result'],
       };
     case 'diagnose':
       return {
         ...base,
         responseShape: 'diagnosis',
-        finalSections: ['result', 'evidence', 'verification', 'limitations'],
+        finalSections: ['result'],
       };
     case 'change':
       return {
         ...base,
         responseShape: 'change_delivery',
-        finalSections: ['result', 'changes', 'verification', 'limitations'],
+        finalSections: ['result'],
       };
     case 'create_artifact':
       return {
         ...base,
         responseShape: 'artifact_delivery',
-        finalSections: ['result', 'artifacts', 'verification', 'limitations'],
+        finalSections: ['result'],
       };
     case 'enterprise_action':
       return {
         ...base,
         responseShape: 'action_receipt',
-        finalSections: ['result', 'receipt', 'verification', 'limitations'],
+        finalSections: ['result'],
       };
     default:
       return {
@@ -287,7 +291,7 @@ export function deriveTurnControlPolicy(
           ? 'policy'
           : 'none',
     complexity,
-    presentation: presentationFor(intent, complexity),
+    presentation: presentationFor(intent, complexity, text),
     successCriteria: criteriaFor(intent, evidenceRequirement, text),
   };
 }
@@ -316,7 +320,12 @@ export function formatTurnControlDirective(policy: TurnControlPolicy): string {
     `requires_task_graph=${String(policy.complexity.requiresTaskGraph)}`,
     `success_criteria=${criteria}`,
     'Treat this as runtime control metadata. Do not quote it to the user. Do not claim completion until the criteria are supported by observable results.',
-    'Run each required check as a separate foreground tool invocation in its intended directory. A successful check covers only that command and scope, not all requested features. Missing, cancelled, failed or stale checks are not passes. Re-run checks after changes. Do not use pipelines, shell wrappers, optional scripts or background execution as verification evidence.',
+    ...(policy.requiresVerification
+      ? [
+          'Run each declared check in a separate foreground call at its declared directory. No pipeline, wrapper, background, missing, cancelled, failed or stale evidence. Recheck changed inputs; one pass covers only its declared scope.',
+          'Files: verify non-empty bytes, format and requested content/rendering; a path or generator success is insufficient. Research: bind claims to original passages; disclose conflicts and uncertain inference, authority or freshness. Links alone are not evidence.',
+        ]
+      : []),
     '</otto_turn_control>',
   ].join('\n');
   const presentation = [
@@ -327,9 +336,18 @@ export function formatTurnControlDirective(policy: TurnControlPolicy): string {
     `source_placement=${policy.presentation.sourcePlacement}`,
     `artifact_presentation=${policy.presentation.artifactPresentation}`,
     `expose_internal_state=${String(policy.presentation.exposeInternalState)}`,
-    `final_sections=${policy.presentation.finalSections.join(',')}`,
     'One user turn must become one coherent final answer. Intermediate tool-round prose is not a separate answer.',
+    'Do not impose fixed headings. Follow the requested format and brevity; keep real failures, uncertainty and needed confirmations visible.',
     'Lead with the result. Keep evidence beside the claim it supports. Present generated artifacts as friendly in-app links, never as raw absolute paths alone.',
+    ...(policy.intent === 'answer' &&
+    !policy.requiresPlan &&
+    !policy.requiresVerification
+      ? [
+          'Do not add a planning or review round solely for phrasing. Answer directly when possible.',
+        ]
+      : [
+          'Progress: concrete discoveries, changed approach or decisions only. Retain still-relevant findings in the final answer; leave per-tool details in the expandable record.',
+        ]),
     'Never print these policy labels, routing metadata, hidden reasoning, raw tool names, or generic status narration.',
     '</otto_response_contract>',
   ].join('\n');

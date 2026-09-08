@@ -37,6 +37,7 @@ import { getHabitAnalyzer } from '../orchestration/habitAnalyzer.js';
 import { getAuditLogger } from '../orchestration/auditLog.js';
 import { createCentralPolicy, CentralPolicy } from '../policy/centralPolicy.js';
 import { PolicyDecision } from '../policy/policy-engine.js';
+import { assertTurnExecutionAllowed } from '../policy/turnExecutionGuard.js';
 import { getSkillShareManager } from '../orchestration/skillShare.js';
 import { getKnowledgeCapturePipeline } from '../orchestration/knowledgeCapturePipeline.js';
 import { recordSkillUsage as recordAutoSkillUsage } from '../orchestration/autoSkillEnhance.js';
@@ -1095,7 +1096,9 @@ export class ToolExecutionEngine {
       };
 
       // 🪝 触发 BeforeTool 钩子
+      assertTurnExecutionAllowed(this.config, reqInfo, toolInstance);
       if (this.hookEventHandler) {
+        assertTurnExecutionAllowed(this.config, { ...reqInfo, name: '__tool_hook__' });
         try {
           await this.hookEventHandler.fireBeforeToolEvent(
             reqInfo.name,
@@ -1108,6 +1111,7 @@ export class ToolExecutionEngine {
         }
       }
 
+      assertTurnExecutionAllowed(this.config, reqInfo, toolInstance);
       const toolResult: ToolResult = await toolInstance.execute(
         reqInfo.args,
         signal,
@@ -1227,6 +1231,7 @@ export class ToolExecutionEngine {
               ? { content: toolResult.llmContent }
               : { content: toolResult.llmContent || {} };
 
+          assertTurnExecutionAllowed(this.config, { ...reqInfo, name: '__tool_hook__' });
           await this.hookEventHandler.fireAfterToolEvent(
             reqInfo.name,
             reqInfo.args,
@@ -1328,6 +1333,7 @@ export class ToolExecutionEngine {
       // 🪝 触发 AfterTool 钩子（即使出错）
       if (this.hookEventHandler) {
         try {
+          assertTurnExecutionAllowed(this.config, { ...reqInfo, name: '__tool_hook__' });
           await this.hookEventHandler.fireAfterToolEvent(
             reqInfo.name,
             reqInfo.args,
@@ -1442,6 +1448,7 @@ export class ToolExecutionEngine {
 
     // 执行预处理钩子
     for (const toolCall of callsToExecute) {
+      assertTurnExecutionAllowed(this.config, toolCall.request, toolCall.tool);
       await this.adapter.onPreToolExecution(
         toolCall.request.callId,
         toolCall.tool,

@@ -3491,6 +3491,7 @@ export class OttoServer {
       payload: {
         protocolVersion: PROTOCOL_VERSION,
         serverVersion: SERVER_VERSION,
+        steeringVersion: 1,
       },
     });
 
@@ -4273,7 +4274,28 @@ export class OttoServer {
       );
     }
 
-    // 会话正忙（thinking/streaming）：走消息队列而非直接拒绝。
+    // Explicit, versioned steering only. Legacy merge remains a queued next turn.
+    if (msg.payload.steering) {
+      const runtime = this.store.getRuntime(sessionId);
+      try {
+        if (!runtime?.steer || source !== 'local' || !clientMessageId)
+          throw new Error('当前任务不支持实时调整，请作为下一轮发送');
+        const existing = this.store.getHistory(sessionId).find(m => m.id === clientMessageId);
+        if (existing && (existing.role !== 'user' || existing.source !== 'local' || existing.turnId !== msg.payload.steering.turnId || plainTextOf(existing.content) !== plainTextOf(content)))
+          throw new Error('该消息标识已被其他内容占用');
+        const receipt = await runtime.steer({ ...msg.payload.steering, clientMessageId, text: plainTextOf(content) });
+        if (!this.store.getHistory(sessionId).some(m => m.id === clientMessageId)) {
+          const message = this.store.appendMessage(sessionId, { id: clientMessageId, role: 'user', content, source, turnId: receipt.turnId });
+          this.store.publish(sessionId, { type: 'message_start', payload: { message } });
+        }
+        this.send(conn.socket, { type: 'turn_steering', payload: { sessionId, ...receipt } });
+      } catch (error) {
+        this.send(conn.socket, errorFrame(sessionId, 'steering_rejected', `调整尚未生效，请刷新当前任务后重试：${error instanceof Error ? error.message : String(error)}`));
+      }
+      return;
+    }
+
+    // 会话正忙（thinking/streaming）：未选择实时调整的消息继续排队。
     if (session.status === 'thinking' || session.status === 'streaming') {
       const queueAction: 'merge' | 'next_turn' | 'new_session' =
         msg.payload.queueAction ?? 'next_turn';
@@ -4545,7 +4567,7 @@ export class OttoServer {
             ...content,
           ]
         : content;
-      await runtime.run(runtimeContent, source);
+      await runtime.run(runtimeContent, source, { userMessageId: userMsg.id });
 
       const completedProfile = resolveAgentProfile(
         this.store.getSession(sessionId)?.agentProfileId,

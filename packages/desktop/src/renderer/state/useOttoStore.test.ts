@@ -127,6 +127,21 @@ afterEach(() => {
 });
 
 describe('applyFrame 各帧分支', () => {
+  it('sends safe-point edits only with negotiated capability and the latest accepted revision', () => {
+    const { view, push } = setup();
+    push({ type: 'sessions_list', payload: { sessions: [makeSession({ status: 'thinking' })] } });
+    push({ type: 'history', payload: { sessionId: 's1', messages: [makeMsg({ turn: { turnId: 'turn-1', status: 'in_progress', request: { version: 1, revision: 1, text: '检查代码', source: 'local' } } as OttoMessage['turn'] })] } });
+    act(() => { view.result.current.actions.sendMessage('不要改后端', 'local', [], undefined, undefined, 'replace'); });
+    expect(sendSpy.mock.calls.some(([f]) => f.type === 'send_user_message')).toBe(false);
+    push({ type: 'welcome', payload: { protocolVersion: '1', serverVersion: 'test', steeringVersion: 1 } });
+    push({ type: 'turn_steering', payload: { sessionId: 's1', turnId: 'turn-1', clientMessageId: 'prior', revision: 2, status: 'applied' } });
+    push({ type: 'turn_steering', payload: { sessionId: 's1', turnId: 'turn-1', clientMessageId: 'prior', revision: 2, status: 'accepted' } });
+    expect(view.result.current.state.steeringReceipts?.s1.status).toBe('applied');
+    act(() => { view.result.current.actions.sendMessage('不要改后端', 'local', [], undefined, undefined, 'replace'); });
+    expect(sendSpy).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'send_user_message', payload: expect.objectContaining({ steering: { version: 1, turnId: 'turn-1', expectedRevision: 2, mode: 'replace' } }) }));
+    act(() => { _capturedConnHandler?.(false); });
+    expect(view.result.current.state.steeringVersion).toBeUndefined();
+  });
   it('sessions_list：批量 upsert + 无选中时默认选第一个', async () => {
     const { view, push } = setup();
     push({
@@ -502,6 +517,20 @@ describe('applyFrame 各帧分支', () => {
       significanceSignals: [],
       observedAt: '2026-07-15T00:00:00.000Z',
     });
+  });
+
+  it('切换企业后，不把仍在等待功能开关检查的旧企业观察上传给新企业', async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof organizationFeaturesSpy>>) => void;
+    organizationFeaturesSpy.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    const view = renderHook(({ organizationId }) => useOttoStore({ enterpriseOrganizationId: organizationId }), { initialProps: { organizationId: 'org-old' } });
+    act(() => capturedHandler?.({ type: 'knowledge_activity', payload: {
+      action: 'auto_capture', sessionId: 'old-session', written: 1,
+      captured: [{ id: 'old-knowledge', category: 'convention', content: '旧企业的内部验收约定不能交给新企业。', tags: [], createdAt: '2026-09-03T00:00:00Z' }], recent: [],
+    } } as ServerToClient));
+    await waitFor(() => expect(organizationFeaturesSpy).toHaveBeenCalled());
+    view.rerender({ organizationId: 'org-new' });
+    await act(async () => { resolve({ enterprise_tree: true, park_service: true, feishu_auto_reply: true, direct_messages: true, atoa: true, knowledge: true }); });
+    expect(knowledgeSpy).not.toHaveBeenCalled();
   });
 
   it('同步重复知识观察，让企业侧按跨会话证据晋级而不是保存整段对话', async () => {

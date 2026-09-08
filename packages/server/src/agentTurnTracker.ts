@@ -5,6 +5,8 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import type { SessionStore } from './sessions.js';
 import {
   ToolCallStatus,
@@ -34,10 +36,18 @@ import {
 import { TaskGraphCoordinator } from './taskGraph.js';
 import { TaskContractLedger, TASK_PLAN_TOOL_NAME } from './taskContract.js';
 import { refineComplexityFromObjectives } from './complexityRouter.js';
+import { classifyExecutionFailure } from './adaptiveExecution.js';
+import { REPAIR_PLAN_TOOL_NAME, REPAIR_FORMAT_TOOL_NAME } from './repairStrategyTools.js';
+import { ClaimEvidenceLedger } from './claimEvidence.js';
+import { CLAIM_REVIEW_TOOL_NAME } from './claimEvidenceTools.js';
+import { toolExecutionFingerprint } from './turnRecoveryStore.js';
+import { inspectArtifactFile, inspectPdfFile, observeFileBefore, readVersionedFile, sameFileVersion } from './artifactEvidence.js';
+import type { DeliveryReadiness } from './deliveryClosure.js';
 import {
   VerificationEvidenceLedger,
   verificationKind,
   hasSuccessfulProcessReceipt,
+  hasFailedVerificationReceipt,
 } from './verificationEvidence.js';
 
 type TurnEventName = AgentTurnEventMsg['payload']['event'];
@@ -184,13 +194,7 @@ function cloneControl(policy: TurnControlPolicy): TurnControlPolicy {
 }
 
 function cloneVerification(verification: TurnVerification): TurnVerification {
-  return {
-    ...verification,
-    checks: verification.checks.map((check) => ({
-      ...check,
-      ...(check.evidence ? { evidence: [...check.evidence] } : {}),
-    })),
-  };
+  return structuredClone(verification);
 }
 
 function intentLabel(policy: TurnControlPolicy): string {
@@ -213,17 +217,18 @@ function intentLabel(policy: TurnControlPolicy): string {
 function isSuccessfulTool(tool: ToolCall): boolean {
   return (
     tool.status === ToolCallStatus.Success &&
-    tool.result?.success !== false &&
+    tool.result?.success === true &&
     !tool.result?.error &&
     (!tool.result?.process || hasSuccessfulProcessReceipt(tool))
   );
 }
 
 function isFailedTool(tool: ToolCall): boolean {
-  return tool.status === ToolCallStatus.Error;
+  return tool.status === ToolCallStatus.Error || tool.result?.success === false || !!tool.result?.error;
 }
 
 function isMutationTool(tool: ToolCall): boolean {
+  if (tool.toolName === 'web_fetch' && tool.result?.sourceEvidence?.length) return false;
   if (verificationKind(tool)) return false;
   const name = tool.toolName.trim().toLowerCase();
   if (
@@ -232,6 +237,9 @@ function isMutationTool(tool: ToolCall): boolean {
       'update_plan',
       'ask_user_question',
       TASK_PLAN_TOOL_NAME,
+      CLAIM_REVIEW_TOOL_NAME,
+      REPAIR_PLAN_TOOL_NAME,
+      REPAIR_FORMAT_TOOL_NAME,
     ].includes(name) ||
     isParallelSafeToolName(name)
   ) {
@@ -284,16 +292,68 @@ function safeCitationUri(raw: string): string | undefined {
   }
 }
 
+function isDirectSourceRetrievalTool(tool: ToolCall): boolean {
+  return /(?:fetch|open|browse|read[_-]?(?:url|uri|page|web)|get[_-]?(?:url|uri|page)|http[_-]?get)/iu.test(
+    tool.toolName,
+  );
+}
+
 function citationUris(tool: ToolCall): string[] {
-  const candidates = stringValues([tool.parameters, tool.result?.data]);
+  // Search queries may themselves contain a URL. That is not evidence the URL
+  // was returned or retrieved, so parameters count only for direct fetch/open.
+  const candidates = stringValues([
+    tool.result?.data,
+    ...(isDirectSourceRetrievalTool(tool) ? [tool.parameters] : []),
+  ]);
   const uris = candidates.flatMap(
     (value) => value.match(/https?:\/\/[^\s<>"'`)\]}]+/giu) ?? [],
   );
   return [...new Set(uris.map(safeCitationUri).filter(Boolean))] as string[];
 }
 
+function outputStringValues(
+  value: unknown,
+  options: { allowGenericPath: boolean; selected?: boolean },
+  depth = 0,
+): string[] {
+  if (depth > 4) return [];
+  if (typeof value === 'string') return options.selected ? [value] : [];
+  if (Array.isArray(value))
+    return value.flatMap((entry) =>
+      outputStringValues(entry, options, depth + 1),
+    );
+  if (typeof value !== 'object' || value === null) return [];
+  return Object.entries(value as Record<string, unknown>).flatMap(
+    ([key, entry]) => {
+      const normalized = key.replace(/[-_]/gu, '').toLowerCase();
+      const selected =
+        options.selected ||
+        /^(?:output|outputs|destination|dest|target|save|artifact|artifacts)(?:path|paths|file|files|filename|filenames|uri|uris)?$/u.test(
+          normalized,
+        ) ||
+        (options.allowGenericPath &&
+          /^(?:path|paths|filepath|filepaths|file|files)$/u.test(normalized));
+      return outputStringValues(entry, { ...options, selected }, depth + 1);
+    },
+  );
+}
+
 function artifactPaths(tool: ToolCall): string[] {
-  const values = stringValues([tool.parameters, tool.result?.data]);
+  const parameterValues = outputStringValues(tool.parameters, {
+    allowGenericPath:
+      /(?:^|[_-])(?:write|save|export|render)(?:[_-]|$)|^(?:write|save|export|render)/iu.test(
+        tool.toolName,
+      ),
+  });
+  const structuredResultValues = outputStringValues(tool.result?.data, {
+    allowGenericPath: true,
+  });
+  const values =
+    parameterValues.length || structuredResultValues.length
+      ? [...parameterValues, ...structuredResultValues]
+      : typeof tool.result?.data === 'string'
+        ? [tool.result.data]
+        : [];
   const candidates = values.flatMap((value) => {
     const direct = value.trim().replace(/^['"]|['"]$/gu, '');
     const embedded =
@@ -341,29 +401,91 @@ function mimeTypeForPath(filePath: string): string | undefined {
   }[extension ?? ''];
 }
 
+type NativeArtifactVerification = NonNullable<
+  AgentArtifactReference['verification']
+>;
+export interface TurnNativeEvidenceCheckpoint {
+  version: 1;
+  requestRevision: number;
+  contract: import('./taskContract.js').TaskNativeEvidenceSnapshot;
+  artifacts: AgentArtifactReference[];
+}
+
+function resolveArtifactPath(
+  artifactPath: string,
+  tool: ToolCall,
+  workspacePath?: string,
+): string | undefined {
+  let candidate = artifactPath.trim();
+  if (!candidate) return undefined;
+  if (/^~[\\/]/u.test(candidate)) {
+    candidate = path.join(homedir(), candidate.slice(2));
+  }
+  if (path.isAbsolute(candidate) || path.win32.isAbsolute(candidate)) {
+    return path.normalize(candidate);
+  }
+  const directory =
+    tool.result?.process?.directory ??
+    (typeof tool.parameters.directory === 'string'
+      ? tool.parameters.directory
+      : undefined) ??
+    workspacePath ??
+    process.cwd();
+  if (!path.isAbsolute(directory) && !path.win32.isAbsolute(directory))
+    return undefined;
+  return path.resolve(directory, candidate);
+}
+
+function inspectArtifact(
+  artifactPath: string,
+  tool: ToolCall,
+  workspacePath?: string,
+): NativeArtifactVerification {
+  const resolved = resolveArtifactPath(artifactPath, tool, workspacePath);
+  return resolved
+    ? inspectArtifactFile(resolved, tool.id)
+    : { status: 'unresolved', check: 'native_format', toolCallId: tool.id };
+}
+
 /**
  * Owns one turn's semantic lifecycle while legacy chat/tool frames remain
  * intact. Mutations are persisted to the root assistant message before the
  * versioned snapshot event is broadcast.
  */
 export class AgentTurnTracker {
-  private readonly verificationEvidence = new VerificationEvidenceLedger();
+  private verificationEvidence = new VerificationEvidenceLedger();
   readonly turnId: string;
   private readonly startedAt = Date.now();
-  private readonly control: TurnControlPolicy;
-  private readonly taskGraph: TaskGraphCoordinator;
+  private control: TurnControlPolicy;
+  private taskGraph: TaskGraphCoordinator;
   private verification: TurnVerification;
   private readonly lineage: TurnRunLineage;
   private retries: AgentRetryRecord[] = [];
   private adaptations: AgentAdaptationRecord[] = [];
   private artifacts: AgentArtifactReference[] = [];
+  private readonly artifactReceipts = new Map<string, NativeArtifactVerification>();
+  private readonly collectedArtifactCalls = new Set<string>();
+  private readonly artifactBefore = new Map<string, Map<string, ReturnType<typeof observeFileBefore>>>();
   private citations: AgentCitationReference[] = [];
+  private claimEvidence = new ClaimEvidenceLedger();
+  private deliveryDraft = '';
+
+  reviewAnswerEvidence(value: unknown): import('./claimEvidence.js').ClaimReview {
+    return this.claimEvidence.review(value, this.request?.revision ?? 1, this.request?.text ?? '');
+  }
+  setDeliveryDraft(text: string): void { this.deliveryDraft = text; }
+  offersClaimReview(): boolean { return this.control.evidenceRequirement === 'primary_sources' || this.claimEvidence.hasEvidence(); }
+  private claimChecks(): TurnVerificationCheck[] {
+    return this.control.evidenceRequirement === 'primary_sources' || !!this.claimEvidence.snapshot()
+      ? this.claimEvidence.checks(this.deliveryDraft, this.request?.revision ?? 1) : [];
+  }
   private outcome: AgentTurnOutcome | undefined;
   private rootMessageId: string | null = null;
   private status: AgentTurnStatus = 'in_progress';
   private items: AgentTurnItem[] = [];
   private sequence = 0;
   private modelRound = 0;
+  private deliveryClosureAttempts = 0;
   private currentStageId: string | null = null;
   private currentToolGroupId: string | null = null;
   private completedAt: number | undefined;
@@ -371,8 +493,58 @@ export class AgentTurnTracker {
   private sawConfirmation = false;
   private reconciliationReason: string | undefined;
   private readonly observedTools = new Map<string, ToolCall>();
-  private readonly taskContract?: TaskContractLedger;
-  private readonly requiresTaskContract: boolean;
+  private taskContract?: TaskContractLedger;
+  private constraintState?: ReturnType<import('./turnConstraints.js').TurnConstraintGuard['snapshot']>;
+  private constraintChecks: TurnVerificationCheck[] = [];
+  private constraintsNeedDirection = false;
+  updateConstraints(guard: import('./turnConstraints.js').TurnConstraintGuard, text: string): void {
+    guard.setSemanticEvidence(this.taskContract?.semanticConstraintEvidence() ?? new Map());
+    this.constraintState = guard.active ? guard.snapshot() : undefined;
+    this.constraintChecks = guard.checks(text);
+    this.constraintsNeedDirection = guard.needsDirection(text);
+    this.taskContract?.setNativeConstraintChecks(this.constraintChecks);
+  }
+  private requiresTaskContract: boolean;
+  private request?: import('./protocol.js').AgentTaskRequest;
+
+  reviseRequest(request: import('./protocol.js').AgentTaskRequest, control: TurnControlPolicy): void {
+    this.request = structuredClone(request);
+    this.control = cloneControl(control);
+    this.taskContract = this.taskContract?.rebase(request.text) ?? new TaskContractLedger(request.text, undefined, request.workspacePath);
+    this.requiresTaskContract = control.requiresVerification && control.executionMode !== 'restricted';
+    this.taskGraph = new TaskGraphCoordinator(control);
+    this.sawAssistantContent = false;
+    this.sawConfirmation = false;
+    // Old cancelled/unstarted directions remain in message audit, not current acceptance.
+    for (const [id, tool] of this.observedTools) if (tool.status !== ToolCallStatus.Success) this.observedTools.delete(id);
+    this.verificationEvidence = new VerificationEvidenceLedger();
+    for (const tool of this.taskContract.boundNativeTools()) this.verificationEvidence.observe(tool, false);
+    this.taskGraph.observeTools(this.taskContract.boundNativeTools().filter(isSuccessfulTool).map(tool => ({ name: tool.toolName, status: 'success', evidenceId: tool.id, mutating: isMutationTool(tool), verification: Boolean(verificationKind(tool)) })));
+    this.emit('item_updated');
+  }
+
+  nativeCheckpoint(): TurnNativeEvidenceCheckpoint | undefined {
+    if (!this.taskContract) return;
+    this.refreshNativeArtifacts();
+    return { version: 1, requestRevision: this.request?.revision ?? 1, contract: this.taskContract.nativeCheckpoint(),
+      artifacts: structuredClone(this.artifacts.filter(a => a.verification && this.artifactReceipts.has(a.id)).slice(-128)) };
+  }
+  restoreNativeCheckpoint(checkpoint: TurnNativeEvidenceCheckpoint): void {
+    if (checkpoint.version !== 1 || checkpoint.requestRevision !== (this.request?.revision ?? 1) ||
+      !Array.isArray(checkpoint.artifacts) || checkpoint.artifacts.length > 128) throw new Error('Invalid turn evidence revision');
+    this.taskContract?.restoreNativeCheckpoint(checkpoint.contract);
+    for (const tool of this.taskContract?.boundNativeTools() ?? []) {
+      this.observedTools.set(tool.id, tool);
+      this.verificationEvidence.observe(tool, false);
+    }
+    for (const artifact of checkpoint.artifacts) {
+      const receipt = artifact.verification;
+      if (typeof artifact.id !== 'string' || !receipt || typeof receipt.toolCallId !== 'string') throw new Error('Invalid artifact checkpoint');
+      this.artifacts.push(structuredClone(artifact));
+      if (this.observedTools.has(receipt.toolCallId)) this.artifactReceipts.set(artifact.id, structuredClone(receipt));
+    }
+    this.refreshNativeArtifacts();
+  }
 
   constructor(
     private readonly store: SessionStore,
@@ -384,9 +556,12 @@ export class AgentTurnTracker {
       resumedFromSequence?: number;
       taskGraphSnapshot?: AgentTaskGraphSnapshot;
       taskText?: string;
+      request?: import('./protocol.js').AgentTaskRequest;
+      taskContractSnapshot?: import('./taskContract.js').TaskContractSnapshot;
     } = {},
   ) {
     this.turnId = options.turnId ?? randomUUID();
+    this.request = options.request ? { ...options.request } : undefined;
     this.lineage = {
       runId: this.turnId,
       attempt: Math.max(1, options.attempt ?? 1),
@@ -409,13 +584,25 @@ export class AgentTurnTracker {
       options.taskText !== undefined
         ? new TaskContractLedger(
             options.taskText,
-            options.taskGraphSnapshot?.taskContract,
+            options.taskGraphSnapshot?.taskContract ??
+              options.taskContractSnapshot,
+            this.request?.workspacePath,
           )
         : undefined;
     this.requiresTaskContract = Boolean(
       this.taskContract &&
       this.control.executionMode !== 'restricted' &&
-      ['complex', 'orchestrated'].includes(this.control.complexity.level),
+      (this.control.requiresVerification || ['complex', 'orchestrated'].includes(this.control.complexity.level) ||
+        (['change', 'create_artifact'].includes(this.control.intent) &&
+          this.taskContract
+            .requirements()
+            .filter(
+              (r) =>
+                r.behavioral &&
+                !/^(?:运行|执行)?(?:测试|验证|类型检查|构建)|^(?:run\s+)?(?:tests?|verify|build)\b/iu.test(
+                  r.quote,
+                ),
+            ).length > 0)),
     );
     this.verification = {
       status: this.control.requiresVerification ? 'pending' : 'not_required',
@@ -440,6 +627,7 @@ export class AgentTurnTracker {
   }
 
   attachAssistantMessage(messageId: string): void {
+    this.sawAssistantContent = false;
     this.modelRound += 1;
     this.currentToolGroupId = null;
     if (this.rootMessageId === null) {
@@ -461,20 +649,26 @@ export class AgentTurnTracker {
 
   markStreaming(): void {
     if (!this.currentStageId) return;
-    this.sawAssistantContent = true;
     const current = this.items.find((item) => item.id === this.currentStageId);
     if (!current || current.type !== 'stage' || current.detail) return;
     this.upsertItem({ ...current, detail: '正在生成可读结果' }, 'item_updated');
   }
 
   completeAssistantMessage(hasContent = true): void {
-    this.sawAssistantContent ||= hasContent;
+    this.sawAssistantContent = hasContent;
     this.finishCurrentStage('completed');
   }
 
   updateToolCalls(toolCalls: readonly ToolCall[]): void {
     if (toolCalls.length === 0) return;
     for (const tool of toolCalls) {
+      if (tool.status === ToolCallStatus.Executing && isMutationTool(tool) && !this.artifactBefore.has(tool.id)) {
+        const targets = [...artifactPaths(tool), ...(this.taskContract?.declaredArtifactPaths() ?? [])];
+        this.artifactBefore.set(tool.id, new Map(targets.flatMap(p => {
+          const resolved = resolveArtifactPath(p, tool, this.request?.workspacePath);
+          return resolved ? [[resolved, observeFileBefore(resolved)] as const] : [];
+        })));
+      }
       this.verificationEvidence.observe(tool, isMutationTool(tool));
       this.taskContract?.observe(tool, isMutationTool(tool));
     }
@@ -497,8 +691,7 @@ export class AgentTurnTracker {
     );
     for (const tool of toolCalls) {
       this.observedTools.set(tool.id, {
-        ...tool,
-        parameters: { ...tool.parameters },
+        ...structuredClone({ ...tool, confirmationDetails: undefined }),
       });
       if (tool.status === ToolCallStatus.WaitingForConfirmation) {
         this.sawConfirmation = true;
@@ -557,6 +750,7 @@ export class AgentTurnTracker {
   }
 
   complete(): void {
+    this.refreshNativeArtifacts();
     if (this.reconciliationReason) {
       this.interruptUnknown(this.reconciliationReason);
       return;
@@ -596,6 +790,82 @@ export class AgentTurnTracker {
       type: 'incomplete',
       reason: '成功条件或验证要求尚未全部满足',
     });
+  }
+
+  /** Inspect without emitting a terminal outcome or marking the turn delivered. */
+  deliveryReadiness(): DeliveryReadiness {
+    this.taskGraphSnapshot();
+    const satisfied = this.finalizeVerification([], false);
+    if (satisfied && this.control.requiresVerification)
+      this.taskGraph.markVerificationPassed();
+    const missing = this.verification.checks.filter(
+      (check) => check.status !== 'passed',
+    );
+    const graph = this.taskGraph.validate();
+    if (!missing.length && !graph.readyToDeliver)
+      missing.push({
+        id: 'criterion-task-graph',
+        label: '任务图仍有未完成的依赖',
+        status: 'not_run',
+        evidence: [...graph.incompleteNodeIds, ...graph.invalidDependencyIds],
+      });
+    const blocked = Boolean(
+      this.reconciliationReason ||
+      this.constraintsNeedDirection ||
+      this.taskContract?.hasManualChecks() ||
+      [...this.observedTools.values()].some(
+        (tool) =>
+          [
+            ToolCallStatus.Canceled,
+            ToolCallStatus.WaitingForConfirmation,
+            ToolCallStatus.BackgroundRunning,
+          ].includes(tool.status) ||
+          (tool.status === ToolCallStatus.Error &&
+            ['permission', 'unknown_side_effect'].includes(
+              classifyExecutionFailure(tool.result?.error ?? '', hasFailedVerificationReceipt(tool)),
+            )),
+      ),
+    );
+    const blockers: string[] = [];
+    if (this.constraintChecks.some(c => c.status !== 'passed'))
+      blockers.push('用户约束尚未通过原生核对或人工确认；不会把缺失观察视为通过。');
+    if (this.reconciliationReason)
+      blockers.push('先核对上次操作是否已经生效，避免重复执行。');
+    if (this.taskContract?.hasManualChecks())
+      blockers.push(
+        '存在需要人工判断的验收项，请按待核对列表确认；模型不能代替人工通过。',
+      );
+    for (const tool of this.observedTools.values()) {
+      if (tool.status === ToolCallStatus.Canceled)
+        blockers.push('有操作被取消；如仍需执行，请重新明确请求。');
+      if (tool.status === ToolCallStatus.WaitingForConfirmation)
+        blockers.push('有操作等待权限确认，请先处理确认请求。');
+      if (tool.status === ToolCallStatus.BackgroundRunning)
+        blockers.push('后台操作尚未结束，需要先核对其结果。');
+      if (tool.status === ToolCallStatus.Error) {
+        const failure = classifyExecutionFailure(tool.result?.error ?? '', hasFailedVerificationReceipt(tool));
+        if (failure === 'permission')
+          blockers.push('有工具被拒绝访问，请确认所需权限；不会自动绕过拒绝。');
+        if (failure === 'unknown_side_effect')
+          blockers.push('有操作结果不明确，需要先核对是否生效，不能直接重试。');
+      }
+    }
+    return {
+      missing: structuredClone(missing),
+      blocked,
+      blockers: [...new Set(blockers)],
+      progress: this.verification.checks
+        .filter(
+          (c) =>
+            c.status === 'passed' &&
+            (c.id.startsWith('coverage:') || c.id.startsWith('objective:')),
+        )
+        .map((c) => c.id),
+    };
+  }
+
+  recordDeliveryClosure(): void {
+    this.deliveryClosureAttempts++;
   }
 
   cancel(): void {
@@ -652,6 +922,14 @@ export class AgentTurnTracker {
       type: 'unknown_outcome',
       reason: detail,
       requiresReconciliation: true,
+    });
+  }
+
+  requestClarification(detail: string): void {
+    this.finishTurn('interrupted', {
+      type: 'interrupt',
+      reason: detail,
+      resumable: false,
     });
   }
 
@@ -721,12 +999,29 @@ export class AgentTurnTracker {
         : {}),
     };
   }
+  observedInputPaths(toolCallId: string): string[] {
+    return this.taskContract?.observedInputPaths(toolCallId) ?? [];
+  }
+
+  repairContext(): import('./deliveryRepair.js').RepairContext {
+    const definitions = this.taskContract?.snapshot().objectives.map(({ evidence: _evidence, ...definition }) => definition) ?? [];
+    return { workspacePath: this.request?.workspacePath, requestRevision: this.request?.revision ?? 1,
+      acceptanceKey: createHash('sha256').update(JSON.stringify(definitions)).digest('hex') };
+  }
+  hasObservedTool(toolCallId: string): boolean { return this.observedTools.has(toolCallId); }
+  resolveRecoveries(fingerprints: readonly string[], toolCallId: string): void {
+    const tool = this.observedTools.get(toolCallId);
+    if (tool && isSuccessfulTool(tool)) this.taskGraph.resolveRecoveries(fingerprints, toolCallId);
+  }
 
   updateTaskContract(input: unknown): {
     taskPlan: import('./taskContract.js').TaskContractSnapshot;
     checks: TurnVerificationCheck[];
+    coverage: TurnVerificationCheck[];
+    requirements: ReturnType<TaskContractLedger['requirements']>;
   } {
     if (!this.taskContract) throw new Error('Task contract unavailable');
+    this.refreshNativeArtifacts();
     const taskPlan = this.taskContract.update(input);
     const checks = this.taskContract.checks();
     this.control.complexity = refineComplexityFromObjectives(
@@ -735,18 +1030,35 @@ export class AgentTurnTracker {
       this.control.riskLevel,
     );
     this.taskGraph.syncObjectives(taskPlan, checks);
-    return { taskPlan, checks };
+    return {
+      taskPlan,
+      checks,
+      coverage: this.taskContract.coverageChecks(),
+      requirements: this.taskContract.requirements().slice(0, 48),
+    };
   }
 
-  taskContractDirective(): string {
-    if (!this.taskContract) return '';
-    return `Internal task acceptance: ${this.requiresTaskContract ? 'A request-specific plan is required before delivery.' : 'For nontrivial work, use update_task_plan to decompose actual requirements.'} Use exact quotes from the user request, explicit dependencies, and scoped process/observation/manual criteria. Never infer permission from this plan. Model assertions cannot verify work. Missing checks must be disclosed. Current contract: ${this.taskContract.directive()}`;
+  taskContractInstructions(): { rules: string; state: string } {
+    if (!this.taskContract) return { rules: '', state: '' };
+    // Omit planning prose only for an untouched, unconstrained ordinary answer.
+    // The native ledger and completion checks still exist; observing a tool or
+    // accepting a plan/steering restores these instructions on the next round.
+    if (this.control.intent === 'answer' && !this.control.requiresPlan &&
+      !this.requiresTaskContract && !this.control.requiresVerification &&
+      this.observedTools.size === 0 && this.taskContract.snapshot().revision === 0 &&
+      this.taskContract.requirements().every(r => r.kind === 'behavior' && !r.behavioral)) {
+      return { rules: '', state: '' };
+    }
+    return {
+      rules: `Internal task acceptance: ${this.requiresTaskContract ? 'A request-specific plan is required before delivery.' : 'For nontrivial work, use update_task_plan to decompose actual requirements.'} Use exact quotes from the user request, explicit dependencies, and scoped process/observation/manual criteria. Use constraint criteria with exact requirementQuote for native operational constraints; only native observations or an actual user review can pass them. Never infer permission from this plan. Model assertions cannot verify work. Missing checks must be disclosed.`,
+      state: `Current contract: ${this.taskContract.directive()}`,
+    };
   }
 
   recordArtifact(reference: AgentArtifactReference): void {
     this.artifacts = [
       ...this.artifacts.filter((artifact) => artifact.id !== reference.id),
-      { ...reference },
+      structuredClone(reference),
     ];
   }
 
@@ -759,19 +1071,20 @@ export class AgentTurnTracker {
 
   private collectAutomaticReferences(tool: ToolCall): void {
     if (!isSuccessfulTool(tool)) return;
+    if (tool.result?.sourceEvidence) this.claimEvidence.observe(tool.id, tool.result.sourceEvidence);
 
     if (isSourceTool(tool)) {
       const uris = citationUris(tool);
-      if (uris.length === 0) {
+      if (
+        uris.length === 0 &&
+        /(?:enterprise|knowledge|organization)/iu.test(tool.toolName)
+      ) {
         this.recordCitation({
           id: referenceId('citation', `${tool.id}:${tool.toolName}`),
           label: `来源工具：${tool.displayName || tool.toolName}`,
-          sourceType: /(?:enterprise|knowledge|organization)/iu.test(
-            tool.toolName,
-          )
-            ? 'enterprise'
-            : 'tool',
-          verified: true,
+          sourceType: 'enterprise',
+          verified: false,
+          toolCallId: tool.id,
         });
       }
       for (const uri of uris) {
@@ -787,26 +1100,80 @@ export class AgentTurnTracker {
           label,
           uri,
           sourceType: 'web',
-          verified: true,
+          verified: false,
+          toolCallId: tool.id,
         });
       }
     }
 
-    const paths = artifactPaths(tool);
-    if (isArtifactProducingTool(tool)) {
+    const paths = [...new Set([...artifactPaths(tool), ...(tool.toolName === 'run_shell_command' && !verificationKind(tool) ? this.taskContract?.declaredArtifactPaths() ?? [] : [])])];
+    if ((isArtifactProducingTool(tool) || (tool.toolName === 'run_shell_command' && !verificationKind(tool))) && !this.collectedArtifactCalls.has(tool.id)) {
+      this.collectedArtifactCalls.add(tool.id);
       for (const artifactPath of paths) {
+        const verification = inspectArtifact(
+          artifactPath,
+          tool,
+          this.request?.workspacePath,
+        );
+        const resolved = resolveArtifactPath(artifactPath, tool, this.request?.workspacePath);
+        const before = resolved && this.artifactBefore.get(tool.id)?.get(resolved);
+        verification.provenance = before && verification.version
+          ? before.absent || (before.version && !sameFileVersion(before.version, verification.version)) ? 'created_or_changed' : before.version ? 'unchanged' : 'unobserved'
+          : 'unobserved';
+        const id = referenceId('artifact', verification.version?.path ?? artifactPath);
+        this.artifactReceipts.set(id, verification);
         this.recordArtifact({
-          id: referenceId('artifact', artifactPath),
+          id,
           label: artifactPath.split(/[\\/]/u).at(-1) || artifactPath,
           path: artifactPath,
           mimeType: mimeTypeForPath(artifactPath),
-          verified: false,
+          verified: verification.status === 'verified',
+          verification,
         });
       }
     }
 
-    // A successful test/build is not an artifact inspection receipt. Only an
-    // explicit recordArtifact(... verified: true) from a verifier may attest it.
+    // A successful test/build is not an artifact inspection receipt. Local
+    // paths receive a native existence/signature check; external artifacts
+    // still require an explicit verified record from their owning adapter.
+  }
+
+  private refreshNativeArtifacts(): void {
+    this.artifacts = this.artifacts.map((artifact) => {
+      const receipt = this.artifactReceipts.get(artifact.id);
+      if (!receipt || !artifact.path) return { ...artifact, verified: false };
+      const tool = this.observedTools.get(receipt.toolCallId);
+      const resolved = tool && resolveArtifactPath(artifact.path, tool, this.request?.workspacePath);
+      const current = resolved && readVersionedFile(resolved);
+      const verification: NativeArtifactVerification = !current
+        ? { ...receipt, status: 'missing' }
+        : !sameFileVersion(receipt.version, current.version)
+          ? { ...receipt, status: 'stale' }
+          : receipt;
+      return {
+        ...artifact,
+        verified: verification.status === 'verified',
+        verification,
+      };
+    });
+    this.taskContract?.setNativeArtifacts(this.artifacts);
+  }
+
+  async prepareDeliveryEvidence(): Promise<void> {
+    await this.taskContract?.prepareSemanticReview();
+    for (const [id, receipt] of this.artifactReceipts) {
+      if (receipt.status !== 'pending' || !receipt.version || !receipt.version.path.endsWith('.pdf')) continue;
+      this.artifactReceipts.set(id, await inspectPdfFile(receipt.version.path, receipt));
+    }
+    this.refreshNativeArtifacts();
+    for (const replacement of this.taskContract?.resolvedExecutionReplacements() ?? []) {
+      const original = this.observedTools.get(replacement.originalToolCallId);
+      const current = this.observedTools.get(replacement.replacementToolCallId);
+      const denied = this.adaptations.some(a => a.failedToolCallId === replacement.originalToolCallId &&
+        (a.action === 'reconcile' || a.category === 'permission'));
+      if (original && current && !denied && hasSuccessfulProcessReceipt(current))
+        this.taskGraph.resolveRecoveries([toolExecutionFingerprint(original.toolName, original.parameters)], current.id);
+    }
   }
 
   snapshot(): AgentTurnSnapshot {
@@ -814,33 +1181,56 @@ export class AgentTurnTracker {
     return {
       contractVersion: 1,
       turnId: this.turnId,
+      ...(this.request ? { request: { ...this.request } } : {}),
+      ...(this.constraintState ? { constraints: structuredClone(this.constraintState) } : {}),
       sequence: this.sequence,
       status: this.status,
       items: this.items.map(cloneItem),
       startedAt: this.startedAt,
       updatedAt,
       control: cloneControl(this.control),
+      deliveryClosureAttempts: this.deliveryClosureAttempts,
       verification: cloneVerification(this.verification),
       lineage: { ...this.lineage },
       retries: this.retries.map((retry) => ({ ...retry })),
       adaptations: this.adaptations.map((adaptation) => ({ ...adaptation })),
-      artifacts: this.artifacts.map((artifact) => ({ ...artifact })),
+      artifacts: structuredClone(this.artifacts),
       citations: this.citations.map((citation) => ({ ...citation })),
+      ...(this.claimEvidence.snapshot() ? { claimEvidence: this.claimEvidence.snapshot() } : {}),
       taskGraph: this.taskGraphSnapshot(),
       ...(this.outcome ? { outcome: { ...this.outcome } } : {}),
       ...(this.completedAt ? { completedAt: this.completedAt } : {}),
     };
   }
 
+  private currentVerificationChecks(
+    kind?: import('./protocol.js').TurnVerificationKind,
+  ): TurnVerificationCheck[] {
+    const superseded =
+      this.taskContract?.supersededVerificationScopes() ?? new Set<string>();
+    return this.verificationEvidence
+      .checks(kind)
+      .filter((check) => !superseded.has(check.id));
+  }
+
   private finalizeVerification(
     extraChecks: TurnVerificationCheck[] = [],
+    publish = true,
   ): boolean {
+    this.refreshNativeArtifacts();
     const checks = [
       ...this.control.successCriteria.map((criterion) =>
         this.evaluateCriterion(criterion),
       ),
-      ...this.verificationEvidence.checks(),
+      ...this.currentVerificationChecks(),
+      ...this.constraintChecks,
+      ...this.claimChecks(),
+      ...[...this.observedTools.values()].filter(tool => ![ToolCallStatus.Success, ToolCallStatus.Error].includes(tool.status)).map(tool => ({
+        id: `unsettled:${tool.id}`, label: `操作尚未取得终态回执：${tool.displayName ?? tool.toolName}`, status: 'not_run' as const, evidence: [tool.id],
+      })),
       ...(this.taskContract?.checks() ?? []),
+      ...(this.taskContract?.coverageChecks() ?? []),
+      ...(this.taskContract?.semanticChecks() ?? []),
       ...(this.requiresTaskContract &&
       !this.taskContract?.snapshot().objectives.length
         ? [
@@ -867,7 +1257,7 @@ export class AgentTurnTracker {
           : 'not_run';
     this.verification = { status, checks };
 
-    if (this.control.requiresVerification || !allSatisfied) {
+    if (publish && (this.control.requiresVerification || !allSatisfied)) {
       this.upsertItem(
         {
           id: 'turn-verification',
@@ -899,14 +1289,20 @@ export class AgentTurnTracker {
     const successful = tools.filter(isSuccessfulTool);
     const failed = tools.filter(isFailedTool);
     const successfulMutations = successful.filter(isMutationTool);
-    const failedMutations = failed.filter(isMutationTool);
-    const verificationChecks = this.verificationEvidence.checks(
+    const latestMutations = new Map<string, ToolCall>();
+    for (const tool of tools.filter(isMutationTool)) latestMutations.set(toolExecutionFingerprint(tool.toolName, tool.parameters), tool);
+    const failedMutations = [...latestMutations.values()].filter(isFailedTool);
+    const verificationChecks = this.currentVerificationChecks(
       criterion.verificationKind,
     );
     const verified =
       verificationChecks.length > 0 &&
       verificationChecks.every((check) => check.status === 'passed');
-    const successfulSources = successful.filter(isSourceTool);
+    const traceableSources = this.citations.filter(
+      (citation) =>
+        citation.verified &&
+        (Boolean(citation.uri) || citation.sourceType === 'enterprise'),
+    );
 
     let satisfied = false;
     let explicitlyFailed = false;
@@ -924,34 +1320,36 @@ export class AgentTurnTracker {
           : undefined;
         break;
       case 'artifact':
-        satisfied =
-          this.artifacts.some((artifact) => artifact.verified) ||
-          successfulMutations.some((tool) =>
-            /(?:write|create|generate|export|ppt|image|document|file)/iu.test(
-              tool.toolName,
-            ),
+        satisfied = this.artifacts.length > 0 && this.artifacts.every((artifact) => artifact.verified);
+        explicitlyFailed =
+          failedMutations.length > 0 ||
+          this.artifacts.some(
+            (artifact) =>
+              !artifact.verified,
           );
-        explicitlyFailed = failedMutations.length > 0;
         evidence = this.artifacts
           .filter((artifact) => artifact.verified)
           .map((artifact) => artifact.label);
         break;
       case 'evidence':
         if (this.control.evidenceRequirement === 'primary_sources') {
-          satisfied = successfulSources.length > 0;
-          explicitlyFailed =
-            tools.some(isSourceTool) && successfulSources.length === 0;
+          satisfied = this.claimChecks().length > 0 && this.claimChecks().every(c => c.status === 'passed');
+          explicitlyFailed = tools.some(isSourceTool) && !satisfied;
         } else {
           satisfied =
             verified ||
             (this.control.intent === 'diagnose' && successful.length > 0);
           explicitlyFailed = failed.length > 0 && !satisfied;
         }
-        evidence = satisfied ? ['已获得可复核的工具结果'] : undefined;
+        evidence = satisfied
+          ? traceableSources.length > 0
+            ? traceableSources.map((source) => source.label)
+            : ['已获得可复核的工具结果']
+          : undefined;
         break;
       case 'verification':
         if (this.control.evidenceRequirement === 'primary_sources') {
-          satisfied = successfulSources.length > 0;
+          satisfied = this.claimChecks().length > 0 && this.claimChecks().every(c => c.status === 'passed');
         } else if (
           this.control.evidenceRequirement === 'deterministic_receipt'
         ) {
@@ -979,7 +1377,7 @@ export class AgentTurnTracker {
         if (this.control.confirmationMode === 'always') {
           satisfied &&= this.sawConfirmation;
         }
-        explicitlyFailed = failedMutations.length > 0 && !satisfied;
+        explicitlyFailed = failedMutations.length > 0;
         evidence = satisfied ? ['外部操作具有成功回执'] : undefined;
         break;
       default: {
@@ -992,8 +1390,10 @@ export class AgentTurnTracker {
 
     return {
       id: criterion.id,
-      label: criterion.label,
-      status: satisfied ? 'passed' : explicitlyFailed ? 'failed' : 'not_run',
+      label: this.control.evidenceRequirement === 'primary_sources' && ['evidence', 'verification'].includes(criterion.kind)
+        ? '当前结论已核对原文归属或明确证据不足；不代表一手来源身份和事实真伪已认证'
+        : criterion.label,
+      status: explicitlyFailed ? 'failed' : satisfied ? 'passed' : 'not_run',
       ...(evidence?.length ? { evidence } : {}),
     };
   }

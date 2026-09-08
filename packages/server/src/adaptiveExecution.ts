@@ -27,9 +27,26 @@ export interface ExecutionFailureObservation {
   callFingerprint: string;
   message: string;
   sideEffect: 'read_only' | 'local_write' | 'external_write';
+  verification?: boolean;
+  /** Host-derived from a matching terminal native process receipt only. */
+  nativeVerificationFailed?: boolean;
+  /** Native observed inputs/changed files, never model-declared permissions. */
+  targetPaths?: string[];
+}
+
+export type ExecutionAttemptObservation = Omit<
+  ExecutionFailureObservation,
+  'message'
+>;
+
+export interface AdaptiveAttemptReview {
+  allowed: boolean;
+  disposition: 'initial' | 'retry' | 'strategy_change' | 'blocked';
+  guidance?: string;
 }
 
 export interface AdaptiveStrategyDecision {
+  failureFingerprint: string;
   category: AdaptiveFailureCategory;
   action: AdaptiveStrategyAction;
   toolName: string;
@@ -37,6 +54,79 @@ export interface AdaptiveStrategyDecision {
   retryAllowed: boolean;
   replanRequired: boolean;
   guidance: string;
+  alternatives: AdaptiveStrategyAlternative[];
+}
+
+export interface AdaptiveStrategyAlternative {
+  action: AdaptiveStrategyAction;
+  eligible: boolean;
+  selected: boolean;
+  prerequisite: string;
+  risk: 'read_only' | 'local_write' | 'external_write';
+  maxAdditionalCalls: number;
+  acceptance: 'unchanged';
+}
+
+/** Native option comparison, not permission or a second executor. Concrete
+ * multi-file repair proposals are compared by DeliveryRepairGuard. Generic
+ * failures compare a bounded retry, inspection/repair, and human reconciliation. */
+function compareFailureStrategies(
+  category: AdaptiveFailureCategory,
+  observation: ExecutionFailureObservation,
+  attempt: number,
+): AdaptiveStrategyAlternative[] {
+  const ambiguous = category === 'unknown_side_effect';
+  const permission = category === 'permission';
+  const compact = category === 'context_overflow';
+  const retry =
+    category === 'transient' &&
+    observation.sideEffect === 'read_only' &&
+    attempt === 1;
+  const choices: AdaptiveStrategyAlternative[] = [
+    {
+      action: 'retry_once',
+      eligible: retry,
+      selected: false,
+      prerequisite: retry
+        ? 'One remaining read-only retry; same evidence requirements'
+        : 'Identical retry is unsafe, irrelevant or exhausted',
+      risk: observation.sideEffect,
+      maxAdditionalCalls: 1,
+      acceptance: 'unchanged',
+    },
+    {
+      action: compact ? 'compact_context' : 'switch_strategy',
+      eligible: !ambiguous && !permission,
+      selected: false,
+      prerequisite: compact
+        ? 'Safe context boundary; native authority must survive'
+        : observation.verification && observation.targetPaths?.length
+          ? 'Fresh related input reads; bounded repair proposal; original checks must pass again'
+          : 'Inspect schema, capability or source before corrected dispatch',
+      risk:
+        observation.verification && observation.targetPaths?.length
+          ? 'local_write'
+          : 'read_only',
+      maxAdditionalCalls: 2,
+      acceptance: 'unchanged',
+    },
+    {
+      action: ambiguous ? 'reconcile' : 'request_input',
+      eligible: true,
+      selected: false,
+      prerequisite: ambiguous
+        ? 'Reconcile previous result; no automatic external replay or rollback'
+        : 'Ask only for missing authority, capability or input',
+      risk: 'read_only',
+      maxAdditionalCalls: 0,
+      acceptance: 'unchanged',
+    },
+  ];
+  // Prefer a bounded, eligible automatic path; a permission/unknown-result gate
+  // makes both automatic choices ineligible regardless of estimated cost.
+  const chosen = choices.find((c) => c.eligible)!;
+  chosen.selected = true;
+  return choices;
 }
 
 const CATEGORY_PATTERNS: ReadonlyArray<
@@ -78,8 +168,15 @@ const CATEGORY_PATTERNS: ReadonlyArray<
 
 export function classifyExecutionFailure(
   message: string,
+  nativeVerificationFailed = false,
 ): AdaptiveFailureCategory {
+  // A test can return 403 or print "forbidden" as business data. Its native
+  // non-zero completion is not a denial by the tool authorization layer.
   for (const [category, pattern] of CATEGORY_PATTERNS) {
+    // A known process exit is not proof that its business side effects are
+    // known. Keep explicit reconciliation above the native-check exception.
+    if (nativeVerificationFailed && category !== 'unknown_side_effect')
+      continue;
     if (pattern.test(message)) return category;
   }
   return 'unknown';
@@ -127,9 +224,35 @@ function decisionGuidance(
  */
 export class AdaptiveExecutionCoordinator {
   private readonly attempts = new Map<string, number>();
+  private readonly constraints = new Map<
+    string,
+    {
+      decision: AdaptiveStrategyDecision;
+      retriesRemaining: number;
+      toolName: string;
+      verification: boolean;
+      targetPaths: string[];
+      repairRetry: boolean;
+    }
+  >();
+  private readonly latestConstraintByTool = new Map<
+    string,
+    { fingerprint: string; decision: AdaptiveStrategyDecision }
+  >();
+  private externalWriteReconciliationRequired = false;
+  private readonly strategyChanges = new Map<string, number>();
+  private readonly admittedReads = new Set<string>();
+  private readonly successfulReads = new Set<string>();
 
   observe(observation: ExecutionFailureObservation): AdaptiveStrategyDecision {
-    let category = classifyExecutionFailure(observation.message);
+    const readKey = `${observation.toolName}:${observation.callFingerprint}`;
+    this.admittedReads.delete(readKey);
+    this.successfulReads.delete(readKey);
+    let category = classifyExecutionFailure(
+      observation.message,
+      observation.verification === true &&
+        observation.nativeVerificationFailed === true,
+    );
     if (
       observation.sideEffect === 'external_write' &&
       /(?:timeout|timed?\s*out|connection|socket|closed|reset|unknown|中断|超时|断开)/iu.test(
@@ -142,19 +265,15 @@ export class AdaptiveExecutionCoordinator {
     const attempt = (this.attempts.get(key) ?? 0) + 1;
     this.attempts.set(key, attempt);
 
-    let action: AdaptiveStrategyAction;
-    if (category === 'unknown_side_effect') action = 'reconcile';
-    else if (category === 'permission') action = 'request_input';
-    else if (category === 'context_overflow') action = 'compact_context';
-    else if (
-      category === 'transient' &&
-      observation.sideEffect === 'read_only' &&
-      attempt === 1
-    ) {
-      action = 'retry_once';
-    } else action = 'switch_strategy';
+    const alternatives = compareFailureStrategies(
+      category,
+      observation,
+      attempt,
+    );
+    const action = alternatives.find((c) => c.selected)!.action;
 
-    return {
+    const decision: AdaptiveStrategyDecision = {
+      failureFingerprint: observation.callFingerprint,
       category,
       action,
       toolName: observation.toolName.slice(0, 120),
@@ -162,7 +281,154 @@ export class AdaptiveExecutionCoordinator {
       retryAllowed: action === 'retry_once',
       replanRequired: action !== 'retry_once',
       guidance: decisionGuidance(category, action),
+      alternatives,
     };
+    this.constraints.set(observation.callFingerprint, {
+      decision,
+      retriesRemaining: action === 'retry_once' ? 1 : 0,
+      toolName: observation.toolName,
+      verification: observation.verification === true,
+      targetPaths: observation.targetPaths ?? [],
+      repairRetry: false,
+    });
+    this.latestConstraintByTool.set(observation.toolName, {
+      fingerprint: observation.callFingerprint,
+      decision,
+    });
+    if (action === 'reconcile' && observation.sideEffect === 'external_write') {
+      this.externalWriteReconciliationRequired = true;
+    }
+    return decision;
+  }
+
+  /**
+   * Native pre-execution gate for a path that already failed in this turn.
+   * It does not grant permission: allowed calls still pass the normal policy
+   * and confirmation checks in the runtime.
+   */
+  reviewAttempt(
+    observation: ExecutionAttemptObservation,
+  ): AdaptiveAttemptReview {
+    if (
+      observation.sideEffect === 'external_write' &&
+      this.externalWriteReconciliationRequired
+    ) {
+      return {
+        allowed: false,
+        disposition: 'blocked',
+        guidance:
+          'An earlier external write has an unknown outcome. Reconcile it before any further external write.',
+      };
+    }
+
+    const exact = this.constraints.get(observation.callFingerprint);
+    if (exact) {
+      if (
+        (exact.decision.action === 'retry_once' || exact.repairRetry) &&
+        exact.retriesRemaining > 0
+      ) {
+        exact.retriesRemaining -= 1;
+        return { allowed: true, disposition: 'retry' };
+      }
+      return {
+        allowed: false,
+        disposition: 'blocked',
+        guidance:
+          'This exact failed tool call is blocked. Use a materially different, permitted path instead of repeating it.',
+      };
+    }
+
+    const latest = this.latestConstraintByTool.get(observation.toolName);
+    if (latest) {
+      if (
+        latest.decision.action === 'request_input' ||
+        latest.decision.action === 'reconcile' ||
+        latest.decision.category === 'unsupported'
+      ) {
+        return {
+          allowed: false,
+          disposition: 'blocked',
+          guidance:
+            latest.decision.action === 'request_input'
+              ? 'This tool remains blocked after an access or input failure. Use a permitted alternative or request the required user input.'
+              : latest.decision.action === 'reconcile'
+                ? 'This tool remains blocked until the earlier outcome is reconciled.'
+                : 'This unsupported tool remains blocked. Use a supported capability.',
+        };
+      }
+      const changes = this.strategyChanges.get(observation.toolName) ?? 0;
+      const readKey = `${observation.toolName}:${observation.callFingerprint}`;
+      if (
+        observation.sideEffect === 'read_only' &&
+        !observation.verification &&
+        this.successfulReads.has(readKey)
+      )
+        return { allowed: true, disposition: 'initial' };
+      if (changes >= 2)
+        return {
+          allowed: false,
+          disposition: 'blocked',
+          guidance:
+            'Two alternative attempts for this failed capability are exhausted. Preserve results and explain the missing evidence or input; do not rename a tool to bypass this budget.',
+        };
+      this.strategyChanges.set(observation.toolName, changes + 1);
+      if (observation.sideEffect === 'read_only' && !observation.verification)
+        this.admittedReads.add(readKey);
+      return { allowed: true, disposition: 'strategy_change' };
+    }
+
+    return { allowed: true, disposition: 'initial' };
+  }
+
+  recordSuccess(observation: ExecutionAttemptObservation): string[] {
+    const readKey = `${observation.toolName}:${observation.callFingerprint}`;
+    if (
+      observation.sideEffect === 'read_only' &&
+      !observation.verification &&
+      this.admittedReads.delete(readKey)
+    )
+      this.successfulReads.add(readKey);
+    const resolved: string[] = [];
+    for (const [fingerprint, constraint] of this.constraints) {
+      if (
+        fingerprint === observation.callFingerprint &&
+        constraint.toolName === observation.toolName &&
+        !['permission', 'unsupported', 'unknown_side_effect'].includes(
+          constraint.decision.category,
+        )
+      ) {
+        this.constraints.delete(fingerprint);
+        resolved.push(fingerprint);
+      } else if (
+        observation.sideEffect === 'local_write' &&
+        !observation.verification &&
+        constraint.verification &&
+        constraint.targetPaths.some((p) =>
+          observation.targetPaths?.includes(p),
+        ) &&
+        !['permission', 'unsupported', 'unknown_side_effect'].includes(
+          constraint.decision.category,
+        )
+      ) {
+        // Permit ONE recheck of the affected scope. A repair is not a passing test.
+        constraint.repairRetry = true;
+        constraint.retriesRemaining = 1;
+      }
+    }
+    for (const [toolName, latest] of this.latestConstraintByTool) {
+      if (resolved.includes(latest.fingerprint)) {
+        const remaining = [...this.constraints]
+          .reverse()
+          .find(([, c]) => c.toolName === toolName);
+        if (remaining)
+          this.latestConstraintByTool.set(toolName, {
+            fingerprint: remaining[0],
+            decision: remaining[1].decision,
+          });
+        else this.latestConstraintByTool.delete(toolName);
+      }
+    }
+    return resolved;
   }
 
   buildDirective(
@@ -193,5 +459,26 @@ export class AdaptiveExecutionCoordinator {
     ]
       .join('\n')
       .slice(0, 1_180);
+  }
+
+  buildAttemptDirective(reviews: readonly AdaptiveAttemptReview[]): string {
+    const guidance = [
+      ...new Set(
+        reviews
+          .filter((review) => !review.allowed && review.guidance)
+          .map((review) => review.guidance!),
+      ),
+    ].slice(0, 4);
+    if (guidance.length === 0) return '';
+    return [
+      '<otto_strategy_guard contract_version="1">',
+      'A previously failed execution path was blocked before it could run again.',
+      ...guidance.map((item, index) => `${index + 1}. ${item}`),
+      'Choose a permitted alternative that addresses the original goal. Do not rename or cosmetically alter a call to bypass this guard.',
+      'Do not expose this control block or internal execution modes to the user.',
+      '</otto_strategy_guard>',
+    ]
+      .join('\n')
+      .slice(0, 960);
   }
 }

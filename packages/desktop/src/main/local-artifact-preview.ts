@@ -83,6 +83,7 @@ export async function buildLocalArtifactPreview(
     return unsupported(filePath, 'PPT 文件不存在或不可读取。');
   }
   const outputRoot = path.dirname(presentationPath);
+  const presentationStat = await fs.promises.stat(presentationPath);
 
   const siblings = await fs.promises.readdir(outputRoot);
   const hasSingleDeck =
@@ -118,9 +119,8 @@ export async function buildLocalArtifactPreview(
           numeric: true,
           sensitivity: 'base',
         }),
-      )
-      .slice(0, MAX_SLIDES);
-    if (imageEntries.length === 0) continue;
+      );
+    if (imageEntries.length === 0 || imageEntries.length > MAX_SLIDES) continue;
 
     const slides: LocalArtifactPreviewSlide[] = [];
     let totalBytes = 0;
@@ -136,6 +136,7 @@ export async function buildLocalArtifactPreview(
       }
       if (
         !stat.isFile() ||
+        stat.mtimeMs < presentationStat.mtimeMs ||
         stat.size <= 0 ||
         stat.size > MAX_SLIDE_BYTES ||
         totalBytes + stat.size > MAX_TOTAL_BYTES
@@ -151,7 +152,13 @@ export async function buildLocalArtifactPreview(
         dataUrl: `data:${imageMime};base64,${data.toString('base64')}`,
       });
     }
-    if (slides.length > 0) {
+    // Never silently show a partial/mixed generation as if it were a full deck.
+    const currentStat = await fs.promises.stat(presentationPath);
+    if (
+      slides.length === imageEntries.length &&
+      currentStat.mtimeMs === presentationStat.mtimeMs &&
+      currentStat.size === presentationStat.size
+    ) {
       return {
         ok: true,
         kind: 'slides',
@@ -161,6 +168,8 @@ export async function buildLocalArtifactPreview(
             ? PRESENTATION_MIME
             : 'application/vnd.ms-powerpoint',
         slides,
+        notice:
+          '逐页图片预览：未校验图片与当前 PPT 的版式、图表和页数完全一致，不能据此认定文件质量验收通过。文件未上传，也未启动其他应用。',
       };
     }
   }

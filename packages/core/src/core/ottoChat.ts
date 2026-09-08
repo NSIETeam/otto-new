@@ -1126,6 +1126,15 @@ export class OttoChat {
     return structuredClone(history);
   }
 
+  /** Text-only history view for instruction retention checks. Strings are
+   * immutable; the new array cannot mutate history and no media payload is cloned.
+   */
+  getUserTextHistory(): string[] {
+    return extractCuratedHistory(this.history)
+      .filter((entry) => entry.role === MESSAGE_ROLES.USER)
+      .flatMap((entry) => entry.parts?.flatMap((part) => part.text ? [part.text] : []) ?? []);
+  }
+
   /**
    * Clears the chat history.
    */

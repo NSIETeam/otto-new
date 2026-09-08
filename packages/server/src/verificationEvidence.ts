@@ -13,6 +13,15 @@ export const VERIFICATION_LABELS: Record<TurnVerificationKind, string> = {
   lint: '静态检查',
   build: '构建',
 };
+export function verificationScopeId(
+  command: string,
+  directory: string,
+): string {
+  return `verification-scope-${createHash('sha256')
+    .update(JSON.stringify([command, directory]))
+    .digest('hex')
+    .slice(0, 16)}`;
+}
 
 function scriptKind(
   script: string | undefined,
@@ -108,6 +117,25 @@ export function hasSuccessfulProcessReceipt(tool: ToolCall): boolean {
   );
 }
 
+/** A terminal native check failure, not a keyword from model/tool prose.
+ * This permits considering a local repair; it never proves authorization or
+ * that a rerun passed. A mismatched command/directory cannot open repair scope. */
+export function hasFailedVerificationReceipt(tool: ToolCall): boolean {
+  const receipt = tool.result?.process;
+  return Boolean(
+    verificationKind(tool) &&
+    tool.status === ToolCallStatus.Error &&
+    tool.result?.success === false &&
+    receipt?.status === 'exited' &&
+    receipt.signal === null &&
+    Number.isSafeInteger(receipt.exitCode) &&
+    Number(receipt.exitCode) > 0 &&
+    receipt.command === String(tool.parameters.command ?? '').trim() &&
+    (tool.parameters.directory === undefined ||
+      tool.parameters.directory === receipt.directory),
+  );
+}
+
 interface Observation {
   tool: ToolCall;
   kind: TurnVerificationKind;
@@ -175,7 +203,7 @@ export class VerificationEvidenceLedger {
       ]);
       scopes.set(scope, observation);
     }
-    return [...scopes].map(([scope, { tool, kind: checkKind, revision }]) => {
+    return [...scopes.values()].map(({ tool, kind: checkKind, revision }) => {
       const receipt = tool.result?.process;
       const failed =
         tool.status === ToolCallStatus.Error ||
@@ -192,7 +220,12 @@ export class VerificationEvidenceLedger {
       const stale = revision !== this.revision;
       const passed = !stale && hasSuccessfulProcessReceipt(tool);
       return {
-        id: `verification-scope-${createHash('sha256').update(scope).digest('hex').slice(0, 16)}`,
+        id: verificationScopeId(
+          String(tool.parameters.command),
+          String(
+            tool.result?.process?.directory ?? tool.parameters.directory ?? '',
+          ),
+        ),
         label: `${VERIFICATION_LABELS[checkKind]}（独立执行范围）`,
         status: failed ? 'failed' : passed ? 'passed' : 'not_run',
         evidence: [

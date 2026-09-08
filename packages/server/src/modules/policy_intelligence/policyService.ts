@@ -1238,7 +1238,7 @@ export class EnterprisePolicyService {
           `source-status:${source.id}`,
           () => ({
             checkedAt,
-            status: failedUrls.length
+            status: failedUrls.length || documents.some(d => d.sourceStatus !== 'verified')
               ? 'partial'
               : documents.length
                 ? 'available'

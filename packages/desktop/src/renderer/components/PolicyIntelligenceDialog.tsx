@@ -886,7 +886,7 @@ export function PolicyIntelligenceDialog({
                           <p key={batch.policyId}>
                             <button
                               type="button"
-                              onClick={() => setSelected(batch.policyId)}
+                              onClick={() => { setQuery(''); setLevel('all'); setCategory('all'); setStatus('all'); setTab('all'); setSelected(batch.policyId); }}
                             >
                               {batch.title}
                             </button>

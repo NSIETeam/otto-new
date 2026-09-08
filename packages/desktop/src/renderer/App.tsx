@@ -64,6 +64,7 @@ import { CustomerModuleRunDialog } from './components/CustomerModuleRunDialog.js
 import { ModuleGroupCatalogDialog } from './components/ModuleGroupCatalogDialog.js';
 import { RecruitmentWorkbenchDialog } from './components/RecruitmentWorkbenchDialog.js';
 import { PolicyIntelligenceDialog } from './components/PolicyIntelligenceDialog.js';
+import { usePolicyInbox } from './usePolicyInbox.js';
 import { ParkCarpoolDialog } from './components/ParkCarpoolDialog.js';
 import { ConfirmDialog } from './components/ConfirmDialog.js';
 import {
@@ -196,6 +197,9 @@ import {
 import type { ModuleDefinition } from './moduleCatalog.js';
 import type { ModuleModalState } from './moduleModal.js';
 import { RecruitmentWorkspaceStore } from './recruitmentWorkspaceStore.js';
+import { getRecruitmentAutosave } from './recruitmentAutosave.js';
+import { RecruitmentAutosaveNotice } from './components/RecruitmentAutosaveNotice.js';
+import { buildRecruitmentSourceStates } from './recruitmentSources.js';
 
 /** 启动后静默检查更新的延迟：让 server 连接 / 首屏渲染先跑完，不抢启动窗口。 */
 const SILENT_UPDATE_CHECK_DELAY_MS = 15_000;
@@ -293,6 +297,24 @@ function OttoWorkspaceApp({
   const recruitmentWorkspace = useMemo(
     () => new RecruitmentWorkspaceStore(recruitmentWorkspaceScope),
     [recruitmentWorkspaceScope],
+  );
+  const recruitmentOperationRef = useRef(new AbortController());
+  useEffect(() => getRecruitmentAutosave(recruitmentWorkspace).start((action) =>
+    window.otto.enterpriseRecruitmentJobs({ scopeId: recruitmentWorkspaceScope, action })), [recruitmentWorkspace, recruitmentWorkspaceScope]);
+  useEffect(() => {
+    const controller = new AbortController();
+    recruitmentOperationRef.current = controller;
+    return () => controller.abort();
+  }, [recruitmentWorkspace, state.activeSessionId]);
+  const recruitmentSourceStates = useMemo(
+    () => buildRecruitmentSourceStates(settingsData.state.mcpServers, settingsData.state.tools),
+    [settingsData.state.mcpServers, settingsData.state.tools],
+  );
+  const automaticRecruitmentSourceLabels = useMemo(
+    () => recruitmentSourceStates
+      .filter((source) => source.capabilities.automaticSearch && source.readiness === 'connected')
+      .map((source) => source.source.label),
+    [recruitmentSourceStates],
   );
   const [enterpriseUnreadCounts, setEnterpriseUnreadCounts] = useState<EnterpriseUnreadCounts>({});
   const [parkTicketUnreadCounts, setParkTicketUnreadCounts] = useState<ParkTicketUnreadCounts>({
@@ -406,6 +428,13 @@ function OttoWorkspaceApp({
     [account],
   );
   const edition = centralIdentity.edition;
+  const refreshRecruitmentMcpServers = settingsData.actions.refreshMcpServers;
+  const refreshRecruitmentMcpTools = settingsData.actions.refreshTools;
+  useEffect(() => {
+    if (edition !== 'enterprise' || !state.activeSessionId) return;
+    refreshRecruitmentMcpServers();
+    refreshRecruitmentMcpTools(state.activeSessionId);
+  }, [edition, refreshRecruitmentMcpServers, refreshRecruitmentMcpTools, state.activeSessionId]);
   const customAgentsKey = useMemo(
     () => customAgentStorageKey(account.organizationId, account.id),
     [account.id, account.organizationId],
@@ -488,6 +517,9 @@ function OttoWorkspaceApp({
   const policyScopeId = edition === 'enterprise'
     ? `${account.organizationId}:${account.id}`
     : account.id;
+  const policyMessages = usePolicyInbox(policyScopeId, edition === 'enterprise' && account.accountType !== 'personal' && !internalAdminPreview, mainView);
+  const [openedPolicyId, setOpenedPolicyId] = useState<string>();
+  const allEnterpriseUnreadCounts = { ...enterpriseUnreadCounts, 'enterprise:policy:inbox': policyMessages.inbox.unreadCount };
   const policySeedProfile = useMemo<PolicyEnterpriseProfile>(() => ({
     organizationName: account.organizationName,
   }), [account.organizationName]);
@@ -1565,6 +1597,20 @@ function OttoWorkspaceApp({
               await window.otto.enterpriseKnowledgeList({ query, status: 'active' }),
             )
             : undefined,
+          automaticSourceLabels: automaticRecruitmentSourceLabels,
+          signal: recruitmentOperationRef.current.signal,
+          getSourceMaterial: (input) => window.otto.enterpriseRecruitmentSourceMaterialGet({ ...input, scopeId: policyScopeId }),
+          queryRelatedApplications: async (action) => {
+            const result = await window.otto.enterpriseRecruitmentJobs({ scopeId: policyScopeId, action });
+            if (result.kind !== 'related') throw new Error('岗位关联查询返回格式无效');
+            return result;
+          },
+          searchSources: async (input) => {
+            const sources = await window.otto.enterpriseRecruitmentSourcesList(policyScopeId);
+            const sourceIds = sources.filter((source) => source.searchable).map((source) => source.id);
+            if (!sourceIds.length) throw new Error('企业尚未接通可搜索的正式招聘来源，请在右侧配置授权，或先手动导入简历。');
+            return window.otto.enterpriseRecruitmentSourcesSearch({ ...input, sourceIds, limitPerSource: 50, scopeId: policyScopeId });
+          },
           postMessage: actions.postLocalChatMessage,
           expectedDraftId: targetDraft?.source === 'recruitment' ? targetDraft.id : undefined,
         });
@@ -2078,7 +2124,7 @@ function OttoWorkspaceApp({
         onRename={actions.renameSession}
         onDelete={actions.deleteSession}
         enterpriseAccount={account}
-        enterpriseUnreadCounts={enterpriseUnreadCounts}
+        enterpriseUnreadCounts={allEnterpriseUnreadCounts}
         parkTicketUnreadCount={parkTicketUnreadCounts.actionableCount}
         parkCreatorUpdateUnreadCount={parkTicketUnreadCounts.creatorUpdateCount}
         onJoinEnterprise={onJoinEnterprise}
@@ -2112,7 +2158,7 @@ function OttoWorkspaceApp({
           }
           schedules={product.state.schedules}
           organizationRefreshRevision={organizationRefreshRevision}
-          enterpriseUnreadCounts={enterpriseUnreadCounts}
+          enterpriseUnreadCounts={allEnterpriseUnreadCounts}
           enterpriseDirectChatOpenRequest={enterpriseDirectChatOpenRequest}
           onMessageRead={markEnterpriseDirectMessageRead}
           friends={product.state.workspace?.friends}
@@ -2121,6 +2167,10 @@ function OttoWorkspaceApp({
         />
       ) : mainView === 'inbox' ? (
         <InboxPage
+          policyInbox={policyMessages.inbox}
+          policyInboxError={policyMessages.error}
+          onPolicyRead={policyMessages.read}
+          onOpenPolicy={(id) => { setOpenedPolicyId(id); setModuleModal({ kind: 'policy-intelligence' }); }}
           enterpriseAccount={account}
           effectiveDirectMessages={
             effectiveDirectMessages
@@ -2131,7 +2181,7 @@ function OttoWorkspaceApp({
             effectiveAtoa
           }
           effectiveParkService={effectiveParkService}
-          enterpriseUnreadCounts={enterpriseUnreadCounts}
+          enterpriseUnreadCounts={allEnterpriseUnreadCounts}
           federationContactOpenRequest={enterpriseFederationChatOpenRequest}
           onFederationMessageRead={markEnterpriseFederationMessageRead}
           onParkTicketRead={markParkCreatorUpdateRead}
@@ -2232,6 +2282,7 @@ function OttoWorkspaceApp({
               currentModel={state.currentModel}
               busy={busy}
               onSend={handleSend}
+              onSteer={state.steeringVersion === 1 ? (text, mode) => actions.sendMessage(text, 'local', [], undefined, undefined, mode) : undefined}
               onCancel={actions.cancel}
               onSetModel={actions.setModel}
               onSetWorkspace={actions.setWorkspace}
@@ -2364,6 +2415,7 @@ function OttoWorkspaceApp({
         }}
       />
       <PolicyIntelligenceDialog
+        initialPolicyId={openedPolicyId}
         key={`${moduleWorkspaceScopeKey}:policy-intelligence`}
         open={moduleModal?.kind === 'policy-intelligence'}
         scopeId={policyScopeId}
@@ -2390,14 +2442,35 @@ function OttoWorkspaceApp({
         target={moduleModal?.kind === 'recruitment' ? moduleModal.target : 'resume-analysis'}
         reviewerId={account.id}
         organizationName={account.organizationName}
+        sourceScopeId={policyScopeId}
         enterpriseMemoryEnabled={moduleCapabilities.organizationFeatures?.knowledge === true}
+        mcpServers={settingsData.state.mcpServers}
+        mcpTools={settingsData.state.tools}
         workspaceStore={recruitmentWorkspace}
+        onManageMcpSources={() => openHub('mcp')}
+        onRefreshSources={() => {
+          settingsData.actions.refreshMcpServers();
+          if (state.activeSessionId) settingsData.actions.refreshTools(state.activeSessionId);
+        }}
+        onStartSourceSearch={(prompt) => {
+          setModuleModal(null);
+          setMainView('chat');
+          void handleSend(prompt, 'local');
+        }}
         onClose={() => setModuleModal(null)}
       />
+      <RecruitmentAutosaveNotice store={recruitmentWorkspace} hidden={moduleModal?.kind === 'recruitment'} onOpen={() => setModuleModal({ kind: 'recruitment', target: 'resume-analysis' })} />
       <AutoSkillDialog
         key={`${moduleWorkspaceScopeKey}:auto-skill`}
         open={moduleModal?.kind === 'auto-skill'}
         candidates={product.state.pendingAutoSkills}
+        releases={product.state.skillReleases}
+        releaseBusy={product.state.skillReleaseBusy}
+        releaseError={product.state.skillReleaseError}
+        releaseStatus={product.state.skillReleaseStatus}
+        onRefreshReleases={product.actions.refreshSkillReleases}
+        onRollback={product.actions.rollbackSkillRelease}
+        onRecord={product.actions.recordSkillAcceptance}
         lastAction={product.state.lastAutoSkillAction}
         onRefresh={product.actions.refreshPendingAutoSkills}
         onConfirm={product.actions.confirmPendingAutoSkill}
@@ -2429,7 +2502,7 @@ function OttoWorkspaceApp({
           sessions={selectSortedSessions(state)}
           activeSessionId={state.activeSessionId}
           unreadSessions={state.unreadSessions}
-          enterpriseUnreadCounts={enterpriseUnreadCounts}
+          enterpriseUnreadCounts={allEnterpriseUnreadCounts}
           onSelect={(id) => {
             setMainView('chat');
             actions.selectSession(id);

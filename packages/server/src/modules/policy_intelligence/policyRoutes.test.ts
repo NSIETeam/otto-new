@@ -9,6 +9,8 @@ describe('policy HTTP authorization boundary', () => {
     for (const path of [
       '/enterprise/policy-intelligence',
       '/enterprise/policy-intelligence/actions',
+      '/enterprise/policy-intelligence/inbox',
+      '/enterprise/policy-intelligence/inbox/read',
     ]) {
       expect(isMemberRoute(path)).toBe(true);
       expect(commercialFeatureForEnterpriseRoute(path)).toBeNull();

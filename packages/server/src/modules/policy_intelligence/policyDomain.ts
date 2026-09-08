@@ -68,6 +68,10 @@ export function normalizePolicyRegion(value: unknown): PolicyRegion {
   }
   if (typeof value !== 'string') return { country: 'CN' };
   const text = value.replace(/\s+/gu, '').replace(/^中国/u, '');
+  const provinceOnly = text.match(
+    /^([\p{Script=Han}]{1,15}(?:省|自治区|特别行政区))$/u,
+  );
+  if (provinceOnly) return { country: 'CN', province: provinceOnly[1] };
   const municipality = MUNICIPALITIES.find((item) => text.startsWith(item));
   if (municipality) {
     const district = text

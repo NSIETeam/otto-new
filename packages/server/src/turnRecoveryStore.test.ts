@@ -16,6 +16,8 @@ import {
 } from './turnRecoveryStore.js';
 import { deriveTurnControlPolicy } from './turnControlPolicy.js';
 import { TaskGraphCoordinator } from './taskGraph.js';
+import { TaskContinuityLedger } from './taskContinuity.js';
+import { TurnConstraintGuard } from './turnConstraints.js';
 
 let root: string;
 let store: FileTurnRecoveryStore;
@@ -30,6 +32,32 @@ afterEach(async () => {
 });
 
 describe('FileTurnRecoveryStore', () => {
+  it('persists repair spending across restart and rejects attempts to reset that budget', async () => {
+    const record = await store.begin({ sessionId: 'repair', turnId: 'turn', intentHash: 'intent' });
+    const ledger = new TaskContinuityLedger('turn', { version: 1, text: '修复登录', source: 'local' });
+    const budget = { version: 1 as const, batches: 1, comparisons: 2, formats: 1 };
+    await store.recordContinuity(record, ledger.snapshot(), undefined, undefined, undefined, budget);
+    const restored = await new FileTurnRecoveryStore(root).load('repair');
+    expect(restored?.repairBudget).toEqual(budget);
+    await expect(store.recordContinuity(record, ledger.snapshot(), undefined, undefined, undefined, { ...budget, batches: 0 })).rejects.toThrow('cannot decrease');
+  });
+  it('rejects stale checkpoints, rewritten authority and missing original constraint observations', async () => {
+    const record = await store.begin({ sessionId: 'continuity', turnId: 'turn', intentHash: 'intent' });
+    const initial = { version: 1 as const, text: '解释代码。不要打开 WPS。', source: 'local' as const };
+    const ledger = new TaskContinuityLedger('turn', initial);
+    const guard = new TurnConstraintGuard(initial.text, { turnId: 'turn' }); guard.coverageStarted();
+    const graph = new TaskGraphCoordinator(deriveTurnControlPolicy({ text: initial.text, source: 'local', toolFree: false }));
+    await store.recordContinuity(record, ledger.snapshot(), guard.snapshot(), graph.snapshot());
+    const original = ledger.snapshot();
+    ledger.accept({ version: 1, turnId: 'turn', expectedRevision: 1, clientMessageId: 'one', text: '补充示例', mode: 'append' });
+    await store.recordContinuity(record, ledger.snapshot(), guard.snapshot(), graph.snapshot());
+    await expect(store.recordContinuity(record, original)).rejects.toThrow('Stale');
+    const tampered = ledger.snapshot(); tampered.initial.text = '打开 WPS';
+    await expect(store.recordContinuity(record, tampered)).rejects.toThrow('Stale');
+    const saved = await store.load('continuity');
+    await writeFile(store.pathForSession('continuity'), JSON.stringify({ ...saved, constraints: { ...saved!.constraints, monitors: [] } }));
+    await expect(store.load('continuity')).rejects.toBeInstanceOf(TurnRecoveryCorruptError);
+  });
   it('persists only an argument hash and can reuse a completed irreversible result', async () => {
     const record = await store.begin({
       sessionId: 'session-a',

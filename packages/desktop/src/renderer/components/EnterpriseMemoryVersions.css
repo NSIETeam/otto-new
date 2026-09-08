@@ -1,0 +1,84 @@
+.otto-workspace-dialog .otto-memory-versions {
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px solid var(--otto-border-strong);
+  border-radius: 12px;
+  background: var(--otto-surface-raised);
+  color: var(--otto-text);
+}
+.otto-memory-versions label,
+.otto-memory-versions form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.otto-workspace-dialog .otto-memory-versions select,
+.otto-workspace-dialog .otto-memory-versions textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--otto-border-strong);
+  border-radius: 8px;
+  background: var(--otto-bg);
+  color: var(--otto-text);
+  font: inherit;
+}
+.otto-memory-comparison__columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+.otto-workspace-dialog .otto-memory-comparison__columns article {
+  min-width: 0;
+  border: 1px solid var(--otto-border-strong);
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--otto-bg);
+  color: var(--otto-text);
+}
+.otto-workspace-dialog .otto-memory-comparison__columns article:last-child {
+  border-color: var(--otto-accent);
+  background: color-mix(in srgb, var(--otto-accent) 9%, var(--otto-bg));
+}
+.otto-workspace-dialog .otto-memory-comparison h4 {
+  margin: 0 0 12px;
+  color: var(--otto-text);
+}
+.otto-workspace-dialog .otto-memory-comparison strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--otto-text);
+}
+.otto-workspace-dialog .otto-memory-versions p,
+.otto-workspace-dialog .otto-memory-versions small,
+.otto-workspace-dialog .otto-memory-comparison p,
+.otto-workspace-dialog .otto-memory-comparison small {
+  color: var(--otto-text);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.otto-memory-comparison__columns p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+  line-height: 1.7;
+}
+.otto-memory-versions .otto-memory-versions__confirmation {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.otto-memory-versions button {
+  justify-self: start;
+}
+.otto-memory-versions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+@media (max-width: 760px) {
+  .otto-memory-comparison__columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

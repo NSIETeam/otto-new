@@ -1,0 +1,124 @@
+.otto-skill-versions {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.otto-skill-versions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.otto-skill-versions > header,
+.otto-skill-release > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.otto-skill-versions h2,
+.otto-skill-release h3 {
+  margin: 0;
+}
+.otto-skill-release {
+  padding: 20px;
+  border: 1px solid var(--border-color, #8994a480);
+  border-radius: 14px;
+  min-width: 0;
+}
+.otto-skill-release p,
+.otto-skill-function p,
+.otto-skill-release li {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.otto-skill-function dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.otto-workspace-dialog__list article > .otto-skill-function {
+  display: block;
+  font-size: 14px;
+  color: var(--otto-text);
+}
+.otto-skill-function dl > div {
+  padding: 12px;
+  border: 1px solid #8994a450;
+  border-radius: 8px;
+}
+.otto-skill-function dt {
+  font-weight: 650;
+}
+.otto-skill-function dd {
+  margin: 8px 0 0;
+}
+.otto-skill-function dd p {
+  margin: 4px 0;
+}
+.otto-skill-evidence {
+  border-left: 4px solid #3183e7;
+  padding: 1px 16px;
+  margin: 16px 0;
+  background: #3183e710;
+}
+.otto-skill-warning {
+  border-left: 3px solid #c28112;
+  padding: 10px;
+  background: #c2811214;
+}
+.otto-skill-release details {
+  margin: 12px 0;
+}
+.otto-skill-release summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.otto-skill-review,
+.otto-skill-rollback {
+  padding: 16px;
+  margin-top: 16px;
+  border: 2px solid #3183e7;
+  border-radius: 10px;
+}
+.otto-skill-review > label {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+.otto-skill-review textarea,
+.otto-skill-review select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid #8994a4;
+  border-radius: 6px;
+  background: var(--input-background, transparent);
+  color: inherit;
+  font: inherit;
+}
+.otto-skill-review textarea {
+  resize: vertical;
+}
+.otto-skill-check {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 8px;
+}
+.otto-skill-check input {
+  width: auto !important;
+  flex: 0 0 auto;
+}
+.otto-skill-release footer {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+@media (max-width: 680px) {
+  .otto-skill-function dl {
+    grid-template-columns: 1fr;
+  }
+  .otto-skill-release {
+    padding: 12px;
+  }
+}

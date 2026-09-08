@@ -76,6 +76,8 @@ export interface AccountLifecycleRepositoryStore<
   TAccountView extends AccountLifecycleView,
 > {
   db(): Database;
+  /** Runs inside the account deletion transaction, before commit. */
+  deleteAccountIntegrationData?(database: Database, organizationId: string, accountId: string): void;
   defaultOrganizationId: string;
   organizationExists(organizationId: string): boolean;
   normalizeUsername(username: string): string;
@@ -470,6 +472,7 @@ export function deleteAccountInRepository<
         organizationId,
       );
     deleteAccountTagsInRepository(store, id, organizationId);
+    store.deleteAccountIntegrationData?.(database, organizationId, id);
     database
       .prepare(
         `UPDATE auth_sessions SET revoked_at = datetime('now')

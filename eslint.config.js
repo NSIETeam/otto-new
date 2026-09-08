@@ -131,7 +131,8 @@ export default tseslint.config(
       'import/no-internal-modules': [
         'error',
         {
-          allow: ['react-dom/test-utils', 'react-dom/client', 'memfs/lib/volume.js', 'yargs/**', '**/styles/**', '**/assets/**'],
+          // Explicit browser-safe public export; the server's internal modules remain disallowed.
+          allow: ['otto-server/recruitment', 'react-dom/test-utils', 'react-dom/client', 'memfs/lib/volume.js', 'yargs/**', '**/styles/**', '**/assets/**'],
         },
       ],
       'import/no-relative-packages': 'error',

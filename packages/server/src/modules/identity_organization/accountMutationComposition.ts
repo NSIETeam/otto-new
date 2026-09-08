@@ -39,6 +39,7 @@ export interface AccountMutationCompositionOptions<
   TInviteView,
 > {
   db(): Database;
+  deleteAccountIntegrationData?(database: Database, organizationId: string, accountId: string): void;
   defaultOrganizationId: string;
   now(): number;
   organizationExists(organizationId: string): boolean;
@@ -110,6 +111,7 @@ export function createAccountMutationComposition<
 ) {
   const accountLifecycle = createAccountLifecycleFacade<TAccountView>({
     db: options.db,
+    deleteAccountIntegrationData: options.deleteAccountIntegrationData,
     defaultOrganizationId: options.defaultOrganizationId,
     organizationExists: options.organizationExists,
     normalizeUsername: options.normalizeUsername,

@@ -41,13 +41,19 @@ const response = JSON.stringify({
 });
 
 describe('enterprise memory intelligence model', () => {
+  it('does not raise confidence from model self-report and rejects unsupported partial citations', () => {
+    const raw = JSON.stringify({ ...JSON.parse(response), confidence: 1, evidenceGraph: [{ claim: '未经核实的结论', status: 'partially_supported', evidenceIds: ['invented'] }] });
+    const result = parseEnterpriseMemoryIntelligence(raw, input, { modelProvider: 'test', inputTokens: 0, outputTokens: 0 });
+    expect(result.confidence).toBe(input.confidence);
+    expect(result.evidenceGraph[0]).toMatchObject({ status: 'unverified', evidenceIds: [] });
+  });
   it('returns a reviewable proposal and drops invented evidence ids', () => {
     expect(parseEnterpriseMemoryIntelligence(response, input, {
       modelProvider: 'test-model', inputTokens: 120, outputTokens: 60,
     })).toMatchObject({
       shouldUpdate: true,
       title: '客户验收前置检查',
-      confidence: 0.91,
+      confidence: input.confidence,
       usedEvidenceIds: ['e-1'],
       modelProvider: 'test-model',
       evidenceGraph: [{

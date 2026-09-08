@@ -300,8 +300,29 @@ export interface EnterpriseAccountUsage {
   lastUsedAt: string | null;
 }
 
-import type { PolicyIntelligenceState, PolicyAction } from 'otto-server';
-export type { PolicyEnterpriseProfile, PolicyIntelligenceState, PolicyAction, OfficialPolicyDocument, PolicyAssessment, PolicyDiagnosis } from 'otto-server';
+import type {
+  PolicyIntelligenceState,
+  PolicyInbox,
+  PolicyAction,
+  RecruitmentGatewaySearchResult,
+  RecruitmentSearchRunRecord,
+  RecruitmentSourceRuntimeView,
+  RecruitmentMaterialResult,
+} from 'otto-server';
+export type {
+  PolicyEnterpriseProfile,
+  PolicyInbox,
+  PolicyNotice,
+  PolicyIntelligenceState,
+  PolicyAction,
+  OfficialPolicyDocument,
+  PolicyAssessment,
+  PolicyDiagnosis,
+  RecruitmentGatewaySearchResult,
+  RecruitmentSearchRunRecord,
+  RecruitmentSourceRuntimeView,
+  RecruitmentMaterialResult,
+} from 'otto-server';
 
 export interface EnterpriseAccountCreateInput {
   username: string;
@@ -1572,7 +1593,16 @@ const IPC = {
   customerModuleCancel: 'otto:customer-module-cancel',
   generateCustomAgent: 'otto:generate-custom-agent',
   policyIntelligenceGet: 'otto:policy-intelligence-get',
+  policyIntelligenceInbox: 'otto:policy-intelligence-inbox',
   policyIntelligenceAction: 'policy-intelligence:action',
+  recruitmentSourcesList: 'otto:enterprise-recruitment-sources-list',
+  recruitmentJobs: 'otto:enterprise-recruitment-jobs',
+  recruitmentWorkable: 'otto:enterprise-recruitment-workable',
+  recruitmentWorkableLogin: 'otto:enterprise-recruitment-workable-login',
+  recruitmentWorkableCancel: 'otto:enterprise-recruitment-workable-cancel',
+  recruitmentSourcesSearch: 'otto:enterprise-recruitment-sources-search',
+  recruitmentSourceRunGet: 'otto:enterprise-recruitment-source-run-get',
+  recruitmentSourceMaterialGet: 'otto:enterprise-recruitment-source-material-get',
   parkNativeNotify: 'otto:park-native-notify',
   writeClipboard: 'otto:write-clipboard',
 } as const;
@@ -1905,7 +1935,27 @@ export interface OttoBridge {
     instructions: string;
   }>;
   policyIntelligenceGet(scopeId: string): Promise<PolicyIntelligenceState>;
+  policyIntelligenceInbox(input: { scopeId: string; ids?: string[] }): Promise<PolicyInbox>;
   policyIntelligenceAction(input: { scopeId: string; action: PolicyAction }): Promise<PolicyIntelligenceState>;
+  enterpriseRecruitmentSourcesList(scopeId: string, requisitionId?: string): Promise<RecruitmentSourceRuntimeView[]>;
+  enterpriseRecruitmentJobs(input: { scopeId: string; action: import('otto-server').RecruitmentJobAction }): Promise<import('otto-server').RecruitmentJobResponse>;
+  enterpriseRecruitmentWorkable(input: { scopeId: string; action: import('otto-server').WorkableConnectionAction }): Promise<import('otto-server').WorkableConnectionView>;
+  enterpriseRecruitmentWorkableLogin(input: { scopeId: string; expectedRevision: number }): Promise<import('otto-server').WorkableConnectionView>;
+  enterpriseRecruitmentWorkableCancel(scopeId: string): Promise<void>;
+  enterpriseRecruitmentSourcesSearch(input: {
+    scopeId: string;
+    requisitionId: string;
+    query: string;
+    sourceIds?: string[];
+    limitPerSource?: number;
+  }): Promise<RecruitmentGatewaySearchResult>;
+  enterpriseRecruitmentSourceRunGet(input: {
+    scopeId: string;
+    runId: string;
+  }): Promise<RecruitmentSearchRunRecord>;
+  enterpriseRecruitmentSourceMaterialGet(input: {
+    scopeId: string; runId: string; requisitionId: string; canonicalId: string; sourceId: string;
+  }): Promise<RecruitmentMaterialResult>;
   customerModuleInstalledList(): Promise<InstalledCustomerModuleRecord[]>;
   customerModuleInstall(input: {
     moduleId: string;
@@ -2083,6 +2133,7 @@ export interface OttoBridge {
     id: string,
     action: 'approve' | 'archive',
     note?: string,
+    expectedVersion?: number,
   ): Promise<EnterpriseKnowledgeItem>;
   enterpriseKnowledgeDelete(id: string): Promise<{ id: string; deleted: true }>;
   enterpriseKnowledgeAnalyze(
@@ -2091,6 +2142,8 @@ export interface OttoBridge {
   enterpriseKnowledgeRevise(
     id: string,
     input: {
+      expectedVersion?: number;
+      restoreVersion?: number;
       title: string;
       category: string;
       content: string;
@@ -3112,8 +3165,35 @@ const bridge: OttoBridge = {
   policyIntelligenceGet(scopeId) {
     return ipcRenderer.invoke(IPC.policyIntelligenceGet, scopeId) as ReturnType<OttoBridge['policyIntelligenceGet']>;
   },
+  policyIntelligenceInbox(input) {
+    return ipcRenderer.invoke(IPC.policyIntelligenceInbox, input) as Promise<PolicyInbox>;
+  },
   policyIntelligenceAction(input) {
     return ipcRenderer.invoke(IPC.policyIntelligenceAction, input) as ReturnType<OttoBridge['policyIntelligenceAction']>;
+  },
+  enterpriseRecruitmentSourcesList(scopeId, requisitionId) {
+    return ipcRenderer.invoke(IPC.recruitmentSourcesList, scopeId, requisitionId) as ReturnType<OttoBridge['enterpriseRecruitmentSourcesList']>;
+  },
+  enterpriseRecruitmentJobs(input) {
+    return ipcRenderer.invoke(IPC.recruitmentJobs, input) as ReturnType<OttoBridge['enterpriseRecruitmentJobs']>;
+  },
+  enterpriseRecruitmentWorkable(input) {
+    return ipcRenderer.invoke(IPC.recruitmentWorkable, input) as ReturnType<OttoBridge['enterpriseRecruitmentWorkable']>;
+  },
+  enterpriseRecruitmentWorkableLogin(input) {
+    return ipcRenderer.invoke(IPC.recruitmentWorkableLogin, input) as ReturnType<OttoBridge['enterpriseRecruitmentWorkableLogin']>;
+  },
+  enterpriseRecruitmentWorkableCancel(scopeId) {
+    return ipcRenderer.invoke(IPC.recruitmentWorkableCancel, scopeId) as Promise<void>;
+  },
+  enterpriseRecruitmentSourcesSearch(input) {
+    return ipcRenderer.invoke(IPC.recruitmentSourcesSearch, input) as ReturnType<OttoBridge['enterpriseRecruitmentSourcesSearch']>;
+  },
+  enterpriseRecruitmentSourceRunGet(input) {
+    return ipcRenderer.invoke(IPC.recruitmentSourceRunGet, input) as ReturnType<OttoBridge['enterpriseRecruitmentSourceRunGet']>;
+  },
+  enterpriseRecruitmentSourceMaterialGet(input) {
+    return ipcRenderer.invoke(IPC.recruitmentSourceMaterialGet, input) as ReturnType<OttoBridge['enterpriseRecruitmentSourceMaterialGet']>;
   },
   customerModuleInstalledList() {
     return ipcRenderer.invoke(IPC.customerModuleInstalledList) as Promise<InstalledCustomerModuleRecord[]>;
@@ -3486,11 +3566,13 @@ const bridge: OttoBridge = {
     id: string,
     action: 'approve' | 'archive',
     note?: string,
+    expectedVersion?: number,
   ): Promise<EnterpriseKnowledgeItem> {
     return ipcRenderer.invoke(IPC.enterpriseKnowledgeReview, {
       id,
       action,
       note,
+      expectedVersion,
     }) as Promise<EnterpriseKnowledgeItem>;
   },
   enterpriseKnowledgeDelete(id: string): Promise<{ id: string; deleted: true }> {

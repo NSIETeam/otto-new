@@ -31,6 +31,12 @@ describe('policy v1.3 server compatibility', () => {
       fetcher.mock.calls.every(([url]) => String(url).endsWith('/health')),
     ).toBe(true);
   });
+  it('does not send inbox read requests to a server without the notification capability', async () => {
+    const { client, fetcher } = harness(['policy_intelligence_v3']);
+    await expect(client.getPolicyInbox()).rejects.toThrow(/升级/);
+    await expect(client.readPolicyInbox(['a'.repeat(64)])).rejects.toThrow(/升级/);
+    expect(fetcher.mock.calls.every(([url]) => String(url).endsWith('/health'))).toBe(true);
+  });
   it('keeps the authenticated state and action endpoints on an upgraded server', async () => {
     const { client, fetcher } = harness([
       'policy_intelligence_v2',

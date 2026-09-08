@@ -221,7 +221,17 @@ export interface ProcessExecutionReceipt {
   signal: string | null;
 }
 
+export interface WebSourceReceipt {
+  uri: string;
+  text: string;
+  sha256: string;
+  retrievedAt: string;
+  truncated: boolean;
+}
+
 export interface ToolResult {
+  /** Native web bytes only. The executor strips this from non-native tools. */
+  sourceEvidence?: WebSourceReceipt[];
   process?: ProcessExecutionReceipt;
   /**
    * A short, one-line summary of the tool's action and result.

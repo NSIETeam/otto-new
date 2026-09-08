@@ -10,6 +10,7 @@ function harness() {
     ...emptyPolicyState(),
     canManage: true,
     enabled: true,
+    notificationCapability: true,
     region: { country: 'CN', city: '上海市' },
     policies: [
       {
@@ -54,6 +55,15 @@ function harness() {
   };
 }
 describe('政策对话与模块共用服务', () => {
+  it('关注明确选中的批次，并通过同一后端取消提醒，不触发诊断', async () => {
+    const h = harness();
+    await h.say('有哪些政策');
+    await h.say('关注第1项政策');
+    expect(h.input.act).toHaveBeenLastCalledWith({ action: 'watch', policyId: 'p', enabled: true });
+    await h.say('取消关注第1项政策');
+    expect(h.input.act).toHaveBeenLastCalledWith({ action: 'watch', policyId: 'p', enabled: false });
+    expect(h.input.act.mock.calls).toHaveLength(2);
+  });
   it('对话展示排除依据，并将否和不确定按服务端字段类型传递', async () => {
     const h = harness();
     h.state.diagnoses = [

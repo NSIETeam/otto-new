@@ -1,5 +1,15 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { randomUUID } from 'node:crypto';
+import { annotatePolicyBatches } from './policyLineage.js';
+import {
+  advancePolicyMailbox,
+  emptyPolicyMailbox,
+  policyInboxView,
+  policyMailboxKey,
+  watchPolicy,
+  type PolicyMailbox,
+} from './policyNotifications.js';
+import type { PolicyInbox } from './contracts.js';
 import type { PolicyStore } from './policyStore.js';
 import type {
   OfficialPolicyDocument,
@@ -53,6 +63,11 @@ interface Workspace {
 interface CollectionStatus {
   at: string;
   errors: Array<{ sourceId: string; message: string }>;
+}
+interface SourceCollectionStatus {
+  checkedAt: string;
+  status: 'unverified' | 'available' | 'partial' | 'unavailable';
+  documentCount: number;
 }
 const blank = (): Workspace => ({
   enabled: false,
@@ -242,7 +257,7 @@ export class EnterprisePolicyService {
       profile: actor.isAdmin
         ? workspace.profile
         : corePolicyProfile(workspace.profile),
-      policies: policies.slice(0, 500),
+      policies: annotatePolicyBatches(policies.slice(0, 500)),
       assessments: (actor.isAdmin ? workspace.assessments : [])
         .filter(
           (item) =>
@@ -329,6 +344,24 @@ export class EnterprisePolicyService {
       feedbackRevisions: Object.fromEntries(
         feedbackRows.map(({ value }) => [value.policyId, value.revision]),
       ),
+      watchedPolicyIds: (await this.inbox(accountId)).watchedPolicyIds,
+      notificationCapability: true,
+      sourceHealth: await Promise.all(
+        this.options.sources.map(async (source) => {
+          const health = await this.store.get<SourceCollectionStatus>(
+            `source-status:${source.id}`,
+          );
+          return {
+            sourceId: source.id,
+            name: source.name,
+            province: source.region.province,
+            url: source.listUrl,
+            status: health?.status ?? 'unverified',
+            checkedAt: health?.checkedAt,
+            documentCount: health?.documentCount ?? 0,
+          };
+        }),
+      ),
     };
   }
   async act(
@@ -336,12 +369,28 @@ export class EnterprisePolicyService {
     input: PolicyAction,
   ): Promise<PolicyIntelligenceState> {
     const actor = await this.actor(accountId);
-    if (!actor.isAdmin)
+    if (!actor.isAdmin && input.action !== 'watch')
       throw new PolicyOperationError(
         '仅企业管理员可管理政策服务和发起企业诊断',
       );
     let workspace = await this.workspace(actor);
-    if (input.action === 'configure') {
+    if (input.action === 'watch') {
+      if (typeof input.enabled !== 'boolean')
+        throw new PolicyOperationError('提醒开关参数错误');
+      const doc = await this.document(input.policyId);
+      if (
+        input.enabled &&
+        (!workspace.enabled ||
+          !sourceMatchesRegion(
+            doc,
+            normalizePolicyRegion(
+              workspace.profile.region ?? workspace.profile.registeredRegion,
+            ),
+          ))
+      )
+        throw new PolicyOperationError('请启用政策服务并选择企业所在地的政策');
+      await watchPolicy(this.store, actor, doc, input.enabled);
+    } else if (input.action === 'configure') {
       if (typeof input.enabled !== 'boolean')
         throw new PolicyOperationError('开关参数错误');
       if (input.enabled && input.consent !== true)
@@ -629,6 +678,80 @@ export class EnterprisePolicyService {
       await this.recommend(actor, workspace);
     } else throw new PolicyOperationError('不支持的政策操作');
     return this.state(accountId);
+  }
+  async inbox(accountId: string): Promise<PolicyInbox> {
+    const actor = await this.actor(accountId);
+    return policyInboxView(
+      (await this.store.get<PolicyMailbox>(policyMailboxKey(actor))) ??
+        emptyPolicyMailbox(actor),
+    );
+  }
+  async readNotifications(
+    accountId: string,
+    ids: unknown,
+  ): Promise<PolicyInbox> {
+    const actor = await this.actor(accountId);
+    if (
+      !Array.isArray(ids) ||
+      ids.length > 200 ||
+      ids.some((id) => typeof id !== 'string' || !/^[a-f0-9]{64}$/u.test(id))
+    )
+      throw new PolicyOperationError('政策消息标识无效');
+    const now = this.now().toISOString();
+    const mailbox = await this.store.update<PolicyMailbox>(
+      policyMailboxKey(actor),
+      (current) => {
+        const box = current ?? emptyPolicyMailbox(actor);
+        if (ids.some((id) => !box.notices.some((notice) => notice.id === id)))
+          throw new PolicyOperationError('消息不存在或无权访问');
+        for (const notice of box.notices)
+          if (ids.includes(notice.id)) notice.readAt ??= now;
+        return box;
+      },
+    );
+    return policyInboxView(mailbox);
+  }
+  async refreshNotifications(): Promise<void> {
+    const mailboxes = (
+      await this.store.list<PolicyMailbox>('policy-inbox:')
+    ).filter((row) => Object.keys(row.value.watches).length > 0);
+    if (!mailboxes.length) return;
+    const documents = (
+      await this.store.list<OfficialPolicyDocument>('document:')
+    ).map((row) => row.value);
+    for (const { key, value } of mailboxes) {
+      // A removed account, changed tenant or disabled organization must not
+      // continue receiving enterprise information through an old subscription.
+      const actor = await this.options.getActor(value.accountId);
+      if (
+        !actor?.active ||
+        actor.organizationId !== value.organizationId ||
+        key !== policyMailboxKey(actor)
+      )
+        continue;
+      const workspace = await this.workspace(actor);
+      if (!workspace.enabled) continue;
+      const region = normalizePolicyRegion(
+        workspace.profile.region ?? workspace.profile.registeredRegion,
+      );
+      const relevant = documents.filter(
+        (doc) => value.watches[doc.id] && sourceMatchesRegion(doc, region),
+      );
+      // Avoid rewriting an encrypted mailbox every minute when nothing changed.
+      if (
+        JSON.stringify(
+          advancePolicyMailbox(structuredClone(value), relevant, this.now()),
+        ) === JSON.stringify(value)
+      )
+        continue;
+      await this.store.update<PolicyMailbox>(key, (current) =>
+        advancePolicyMailbox(
+          current ?? emptyPolicyMailbox(actor),
+          relevant,
+          this.now(),
+        ),
+      );
+    }
   }
   private async assess(
     actor: PolicyActor,
@@ -1013,6 +1136,8 @@ export class EnterprisePolicyService {
           contentHash: doc.contentHash,
           version: doc.version,
           bodyText: doc.bodyText,
+          attachments: doc.attachments,
+          references: doc.references,
           sourceStatus: 'verified',
         };
         signal.throwIfAborted();
@@ -1080,18 +1205,46 @@ export class EnterprisePolicyService {
         ({ value }) => value.policyId,
       ),
     );
-    for (const source of this.options.sources) {
+    const health = new Map(
+      (await this.store.list<SourceCollectionStatus>('source-status:')).map(
+        (row) => [row.key.slice('source-status:'.length), row.value],
+      ),
+    );
+    const sources = [...this.options.sources].sort((a, b) =>
+      (health.get(a.id)?.checkedAt ?? '').localeCompare(
+        health.get(b.id)?.checkedAt ?? '',
+      ),
+    );
+    const pendingExtraction: OfficialPolicyDocument[] = [];
+    for (const source of sources) {
       if (signal.aborted) break;
+      const checkedAt = this.now().toISOString();
+      await this.store.update<SourceCollectionStatus>(
+        `source-status:${source.id}`,
+        () => ({ checkedAt, status: 'unverified', documentCount: 0 }),
+      );
       try {
         const failedUrls: string[] = [];
         const documents = await collectPolicySource(
           source,
           this.options.fetchImpl ?? fetch,
-          signal,
+          AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
           this.now(),
           (url) => failedUrls.push(url),
           knownDocuments,
           priorityIds,
+        );
+        await this.store.update<SourceCollectionStatus>(
+          `source-status:${source.id}`,
+          () => ({
+            checkedAt,
+            status: failedUrls.length
+              ? 'partial'
+              : documents.length
+                ? 'available'
+                : 'unavailable',
+            documentCount: documents.length,
+          }),
         );
         if (failedUrls.length) {
           errors.push({
@@ -1136,11 +1289,15 @@ export class EnterprisePolicyService {
           await this.snapshot(next);
           await this.store.update(`document:${doc.id}`, () => next);
           if (analyzeEnabled && !doc.attachments.some((item) => !item.parsed))
-            await this.interpret(next, signal);
+            pendingExtraction.push(next);
         }
       } catch {
         if (signal.aborted) break;
         errors.push({ sourceId: source.id, message: `${source.name}暂不可用` });
+        await this.store.update<SourceCollectionStatus>(
+          `source-status:${source.id}`,
+          () => ({ checkedAt, status: 'unavailable', documentCount: 0 }),
+        );
         for (const {
           key,
           value,
@@ -1152,11 +1309,22 @@ export class EnterprisePolicyService {
             }));
       }
     }
+    await this.refreshNotifications();
     if (signal.aborted) return;
     await this.store.update('collection:status', () => ({
       at: this.now().toISOString(),
       errors,
     }));
+    // Network coverage must not wait for paid interpretation of earlier regions.
+    for (const doc of pendingExtraction.slice(0, 8)) {
+      if (signal.aborted) break;
+      try {
+        await this.interpret(doc, signal);
+      } catch {
+        /* Per-document status retains the failure; continue other regions. */
+      }
+    }
+    await this.refreshNotifications();
     for (const { value } of workspaces) {
       if (signal.aborted) break;
       if (!value.enabled || !value.enabledBy) continue;

@@ -23,6 +23,10 @@ import {
 } from '../modules/data_platform/index.js';
 import { createAuthorizationComposition } from '../modules/authorization/index.js';
 import { createSqlitePolicyStore } from '../modules/policy_intelligence/policyStore.js';
+import { createSqliteRecruitmentJobStore, RecruitmentJobService, createSqliteWorkableConnectionStore, WorkableConnectionService, createWorkableOAuthClient, createWorkableSourceRuntime, createSqliteRecruitmentSourceStore, deleteSqliteRecruitmentSearchesForAccount } from '../modules/recruitment_intelligence/index.js';
+import { startRecruitmentCacheMaintenance } from '../modules/recruitment_intelligence/recruitmentCacheMaintenance.js';
+import { RecruitmentIntakeWorker, type RecruitmentSourceRuntime } from '../modules/recruitment_intelligence/index.js';
+import { RecruitmentBackgroundWorker, resolveRecruitmentBackgroundModel, RecruitmentUsageLedger, createSqliteRecruitmentUsageStore } from '../modules/recruitment_intelligence/index.js';
 import { EnterprisePolicyService } from '../modules/policy_intelligence/policyService.js';
 import { loadPolicySources } from '../modules/policy_intelligence/policySources.js';
 import { createPolicyModelFromEnv } from '../modules/policy_intelligence/policyModel.js';
@@ -962,6 +966,12 @@ export const {
   assertPassword: assertAccountPassword,
   hashPassword: passwordHash,
   createAccountEntityId: (prefix: 'acc' | 'emp') => `${prefix}_${randomUUID()}`,
+  deleteAccountIntegrationData(database, organizationId, accountId) {
+    deleteSqliteRecruitmentSearchesForAccount(database, fieldCipher, organizationId, accountId);
+    if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='enterprise_workable_connections_v1'").get()) {
+      database.prepare("UPDATE enterprise_workable_connections_v1 SET revision=revision+1,payload='' WHERE organization_id=? AND account_id=?").run(organizationId, accountId);
+    }
+  },
   createDeletionPasswordHash: () =>
     passwordHash(randomBytes(32).toString('base64url')),
   createOrganizationId: () => `org_${randomUUID()}`,
@@ -1199,6 +1209,70 @@ export const {
   inviteCodeRawLength: INVITE_CODE_RAW_LENGTH,
   audit: logAudit,
 });
+
+const recruitmentJobStore = createSqliteRecruitmentJobStore(getDB, fieldCipher);
+export function startRecruitmentCacheRuntime(registry: RecurringTaskRegistry): () => void {
+  return startRecruitmentCacheMaintenance(createSqliteRecruitmentSourceStore(getDB, fieldCipher), registry);
+}
+export function createDefaultRecruitmentSources(): ReturnType<typeof createWorkableSourceRuntime> {
+  return createWorkableSourceRuntime({
+    connectionService: getWorkableConnectionService,
+    store: createSqliteRecruitmentSourceStore(getDB, fieldCipher),
+    async audit(event) { logAudit('recruitment_source_search', null, JSON.stringify(event), event.organizationId); },
+    async auditMaterial(event) { logAudit('recruitment_source_material', null, JSON.stringify(event), event.organizationId); },
+  });
+}
+let workableConnectionService: WorkableConnectionService | undefined;
+export function getWorkableConnectionService(): WorkableConnectionService {
+  return workableConnectionService ??= new WorkableConnectionService({
+    store: createSqliteWorkableConnectionStore(getDB, fieldCipher),
+    ...(process.env.OTTO_WORKABLE_OAUTH_ENABLED === '1' ? { oauth: createWorkableOAuthClient() } : {}),
+    getJob: (org, id) => recruitmentJobStore.get(org, id),
+    async audit(event) { logAudit(`workable_${event.kind}_${event.phase}`, null, JSON.stringify(event), event.organizationId); },
+    async getActor(id) {
+      const account = getAccount(id);
+      if (!account) return null;
+      return { id: account.id, organizationId: account.organizationId, isAdmin: account.isAdmin, active: account.status === 'active' && account.accountType !== 'personal' && getOrganization(account.organizationId)?.status === 'active' };
+    },
+  });
+}
+const recruitmentJobServices = new WeakMap<RecruitmentSourceRuntime, RecruitmentJobService>();
+let defaultRecruitmentJobSources: RecruitmentSourceRuntime | undefined;
+async function recruitmentJobActor(id: string) {
+  const account = getAccount(id);
+  if (!account) return null;
+  return { id: account.id, organizationId: account.organizationId, isAdmin: account.isAdmin, active: account.status === 'active' && account.accountType !== 'personal' && getOrganization(account.organizationId)?.status === 'active' };
+}
+export function createRecruitmentIntakeWorker(runtime: RecruitmentSourceRuntime): RecruitmentIntakeWorker {
+  return new RecruitmentIntakeWorker({ store: recruitmentJobStore, runtime, getActor: recruitmentJobActor,
+    // Recruitment routes currently use the deployment license baseline, not a park entitlement.
+    async isEntitled() { return !isLicenseRestricted(); },
+    async audit(event) { logAudit(`recruitment_intake_${event.phase}`, null, JSON.stringify(event), event.organizationId); },
+  });
+}
+export function createRecruitmentBackgroundWorker(): RecruitmentBackgroundWorker {
+  return new RecruitmentBackgroundWorker({ store: recruitmentJobStore, usageLedger: new RecruitmentUsageLedger(createSqliteRecruitmentUsageStore(getDB, fieldCipher)), resolveModel: resolveRecruitmentBackgroundModel, getActor: recruitmentJobActor,
+    async isEntitled() { return !isLicenseRestricted(); },
+    async audit(event) { logAudit(`recruitment_${event.operation === 'archive' ? 'archive' : 'analysis'}_${event.phase}`, null, JSON.stringify(event), event.organizationId); },
+  });
+}
+export function getRecruitmentJobService(runtime: RecruitmentSourceRuntime = defaultRecruitmentJobSources ??= createDefaultRecruitmentSources()): RecruitmentJobService {
+  const existing = recruitmentJobServices.get(runtime); if (existing) return existing;
+  const service = new RecruitmentJobService({
+    store: recruitmentJobStore,
+    intakeSources: runtime,
+    backgroundModel: resolveRecruitmentBackgroundModel,
+    analyzeOnce: (accountId, action) => createRecruitmentBackgroundWorker().analyzeOnce(accountId, action),
+    async audit(event) { logAudit(`recruitment_job_${event.kind}_${event.phase}`, null, JSON.stringify(event), event.organizationId); },
+    async getActor(id) {
+      const account = getAccount(id);
+      if (!account) return null;
+      return { id: account.id, organizationId: account.organizationId, isAdmin: account.isAdmin, active: account.status === 'active' && account.accountType !== 'personal' && getOrganization(account.organizationId)?.status === 'active' };
+    },
+  });
+  recruitmentJobServices.set(runtime, service);
+  return service;
+}
 
 const policyIntelligenceStore = createSqlitePolicyStore(getDB, fieldCipher);
 let policyIntelligenceService: EnterprisePolicyService | undefined;

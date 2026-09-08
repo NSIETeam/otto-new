@@ -65,6 +65,7 @@ describe('enterprise runtime dependency closure', () => {
       '@google/genai': '1.35.0',
       pg: '8.22.0',
       redis: '4.7.1',
+      'pdf-parse': '1.1.4',
     });
     expect(result.directVersions).not.toHaveProperty('better-sqlite3');
     expect(result.directVersions).not.toHaveProperty('otto-core');
@@ -133,6 +134,11 @@ describe('enterprise runtime dependency closure', () => {
       expect(
         existsSync(path.join(releaseRoot, 'node_modules', 'typescript')),
       ).toBe(false);
+      // Recruitment extraction runs on the enterprise server, not in the
+      // pruned Electron dependency tree. Preserve both parser and fake worker.
+      for (const asset of ['pdf.js', 'pdf.worker.js']) {
+        expect(existsSync(path.join(releaseRoot, 'node_modules/pdf-parse/lib/pdf.js/v2.0.550/build', asset))).toBe(true);
+      }
     },
     30_000,
   );

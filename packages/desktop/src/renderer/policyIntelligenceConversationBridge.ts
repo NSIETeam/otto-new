@@ -131,7 +131,7 @@ export async function handlePolicyIntelligenceConversation(input: {
   if (
     pending?.phase === 'browse' &&
     !intent &&
-    !/诊断|评估|第?\s*\d+\s*[项条]/u.test(text)
+    !/诊断|评估|关注|取消提醒|第?\s*\d+\s*[项条]/u.test(text)
   )
     return false;
   try {
@@ -252,6 +252,32 @@ export async function handlePolicyIntelligenceConversation(input: {
       return true;
     }
     let state = await input.getState();
+    if (/^(?:关注|取消关注|取消提醒)/u.test(text)) {
+      if (state.notificationCapability !== true) {
+        say(
+          '当前企业服务器尚未支持政策提醒，请升级服务端后再关注。已有政策仍可浏览。',
+        );
+        return true;
+      }
+      const index = text.match(/第?\s*(\d+)\s*[项条]/u)?.[1];
+      const doc =
+        state.policies.find((doc) => text.includes(doc.title)) ??
+        state.policies.find(
+          (doc) => doc.id === pending?.policyIds?.[Number(index) - 1],
+        );
+      if (!doc) {
+        say('请先说“有哪些政策”，再回复“关注第1项政策”，以免关注错批次。');
+        return true;
+      }
+      const enabled = !/^取消/u.test(text);
+      await input.act({ action: 'watch', policyId: doc.id, enabled });
+      say(
+        enabled
+          ? `已关注“${doc.title}”。截止临近和原文变更会进入“我的消息”的政策助手会话；不会自动提交申请。`
+          : `已取消“${doc.title}”的后续提醒，过去消息仍可回看。`,
+      );
+      return true;
+    }
     if (/开启.*政策|政策.*开启/u.test(text)) {
       remember({ phase: 'enable' });
       say(
@@ -338,7 +364,7 @@ export async function handlePolicyIntelligenceConversation(input: {
               )
               .join('\n\n')
           : '暂未收录可展示政策。未收录不代表没有可申报项目，请检查来源覆盖。') +
-        '\n\n可回复“诊断第1项”逐项核验，或说“完善政策企业资料”。浏览不会发起模型分析。',
+        '\n\n可回复“诊断第1项”逐项核验，“关注第1项政策”接收提醒，或说“完善政策企业资料”。浏览不会发起模型分析。',
     );
     return true;
   } catch (error) {

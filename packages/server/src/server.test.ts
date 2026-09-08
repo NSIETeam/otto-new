@@ -27,6 +27,7 @@ import {
   type RuntimeFactory,
 } from './server.js';
 import { InMemorySessionStore } from './sessions.js';
+import { TaskContinuityLedger } from './taskContinuity.js';
 import { ProductWorkspaceStore } from './productWorkspaceStore.js';
 import type { AuthenticatedEnterpriseAccount } from './productWorkspaceStore.js';
 import type { SessionRuntime } from './sessions.js';
@@ -429,6 +430,35 @@ describe('OttoServer WS（v1.7 产品工作区）', () => {
     const refreshedSkills = await client.waitFor((frame) => frame.type === 'skills_list'
       && frame.payload.skills.some((skill) => skill.id.includes('project-only')));
     expect(refreshedSkills.type).toBe('skills_list');
+    client.close();
+  });
+
+  it('Skill 版本通过真实 WS 读取、人工复核和确认回滚，忙碌时拒绝切换', async () => {
+    const { stageSkillDraft, installConfirmedSkillDraft, listSkillReleases } = await import('otto-core');
+    const userDir = path.join(tmpHome, 'user');
+    const content = (version: number) => `---\nname: ws-report\ndescription: 整理销售数据并输出可复核的月报，供负责人检查与确认。\n---\n# 销售月报\n\n## 需要你提供\n销售明细与统计月份。\n\n## 交付结果\n第 ${version} 版月报及待确认事项。\n\n## 不适用与限制\n先核对原始数据的完整性，不编造金额、引用或缺失字段；不得上传客户资料或未经授权覆盖文件。输出应核对合计、来源及附件是否完整。\n`;
+    for (const version of [1, 2]) {
+      const draft = await stageSkillDraft({ userDir, candidateId: `ws_report_version_${version}`, name: 'ws-report', mode: version === 1 ? 'create' : 'enhance', files: [{ path: 'SKILL.md', content: content(version) }] });
+      await installConfirmedSkillDraft(userDir, draft);
+    }
+    const releases = (await listSkillReleases(userDir))[0];
+    const client = await connectWs(baseUrl);
+    client.send({ type: 'get_skill_releases', payload: {} });
+    const listed = await client.waitFor((frame) => frame.type === 'skill_releases');
+    expect(listed.type === 'skill_releases' && listed.payload.skills[0].history).toHaveLength(1);
+    client.send({ type: 'record_skill_acceptance', payload: { skillName: 'ws-report', expectedCurrentHash: releases.current.id, scenario: '缺少金额', input: '金额空白', expected: '询问金额', actual: '询问金额', environment: 'mock / Windows', verdict: 'passed', confirmed: true } });
+    const reviewed = await client.waitFor((frame) => frame.type === 'skill_releases' && frame.payload.lastAction?.kind === 'reviewed');
+    expect(reviewed.type === 'skill_releases' && reviewed.payload.skills[0].current.acceptance[0].source).toBe('user-review');
+    const store = (server as unknown as { store: InMemorySessionStore }).store;
+    const session = store.createSession();
+    store.setStatus(session.sessionId, 'thinking');
+    const rollback = { type: 'rollback_skill_release', payload: { skillName: 'ws-report', versionId: releases.history[0].id, expectedCurrentHash: releases.current.id, confirmed: true } };
+    client.send(rollback);
+    await client.waitFor((frame) => frame.type === 'error' && frame.payload.code === 'skill_release_failed' && frame.payload.message.includes('正在执行'));
+    store.setStatus(session.sessionId, 'idle');
+    client.send(rollback);
+    await client.waitFor((frame) => frame.type === 'skill_releases' && frame.payload.lastAction?.kind === 'rolled-back');
+    expect(fs.readFileSync(path.join(userDir, 'skills/ws-report/SKILL.md'), 'utf8')).toContain('第 1 版');
     client.close();
   });
 
@@ -1658,6 +1688,34 @@ describe('OttoServer WS（mock 模式）', () => {
 
 describe('OttoServer runtimeFactory（非 mock 路径）', () => {
   let server: OttoServer;
+  it('routes versioned steering to the running turn, deduplicates messages and keeps legacy merge queued', async () => {
+    const store = new InMemorySessionStore(); const session = store.createSession();
+    let release!: () => void; const pending = new Promise<void>(resolve => { release = resolve; });
+    const ledger = new TaskContinuityLedger('ws-turn', { version: 1, source: 'local', text: '检查代码' });
+    const steer = vi.fn(async (input: Parameters<TaskContinuityLedger['accept']>[0]) => ledger.accept(input));
+    const run = vi.fn(async () => { store.setStatus(session.sessionId, 'thinking'); await pending; store.setStatus(session.sessionId, 'idle'); });
+    server = new OttoServer({ port: 0, mock: false, store, runtimeFactory: async () => ({ run, steer, cancel() { release(); }, setModel() {}, getConfig() { return undefined; }, async dispose() { release(); } }) });
+    baseUrl = await startServer(server); const client = await connectWs(baseUrl);
+    try {
+      const welcome = await client.waitFor(f => f.type === 'welcome');
+      expect(welcome.type === 'welcome' && welcome.payload.steeringVersion).toBe(1);
+      client.send({ type: 'subscribe', payload: { sessionId: session.sessionId } });
+      await client.waitFor(f => f.type === 'history');
+      client.send({ type: 'send_user_message', payload: { sessionId: session.sessionId, source: 'local', content: [{ type: 'text', value: '检查代码' }] } });
+      await client.waitFor(f => f.type === 'session_status' && f.payload.status === 'thinking');
+      const edit = { type: 'send_user_message', payload: { sessionId: session.sessionId, source: 'local', clientMessageId: 'ws-edit', content: [{ type: 'text', value: '不要修改后端' }], steering: { version: 1, turnId: 'ws-turn', expectedRevision: 1, mode: 'append' } } };
+      client.send(edit); await client.waitFor(f => f.type === 'turn_steering' && !f.payload.duplicate);
+      client.send(edit); await client.waitFor(f => f.type === 'turn_steering' && f.payload.duplicate === true);
+      expect(store.getHistory(session.sessionId).filter(m => m.id === 'ws-edit')).toHaveLength(1);
+      expect(run).toHaveBeenCalledTimes(1);
+      client.send({ ...edit, payload: { ...edit.payload, clientMessageId: 'stale', content: [{ type: 'text', value: '新的错误版本' }] } });
+      await client.waitFor(f => f.type === 'error' && f.payload.code === 'steering_rejected');
+      expect(store.getHistory(session.sessionId).some(m => m.id === 'stale')).toBe(false);
+      client.send({ ...edit, payload: { ...edit.payload, clientMessageId: 'legacy', steering: undefined, queueAction: 'merge' } });
+      await client.waitFor(f => f.type === 'message_queued' && f.payload.clientMessageId === 'legacy');
+      expect(steer).toHaveBeenCalledTimes(3);
+    } finally { release(); client.close(); }
+  });
   let baseUrl: string;
 
   beforeEach(() => {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RecruitmentWorkbenchDialog } from './RecruitmentWorkbenchDialog.js';
 import { RecruitmentWorkspaceStore } from '../recruitmentWorkspaceStore.js';
+import { RECRUITMENT_SEMANTIC_ANALYSIS_VERSION } from '../../main/recruitmentSemantic.js';
 
 const resumeText = `李明
 电话：13900139000
@@ -66,14 +67,17 @@ beforeEach(() => {
         followUpQuestions: ['为什么优先处理这个瓶颈？'],
       },
       enterpriseContextUsed: true,
-      analysisVersion: 'otto-recruitment-semantic-v3.0', modelProvider: 'test-model',
+      analysisVersion: RECRUITMENT_SEMANTIC_ANALYSIS_VERSION, modelProvider: 'test-model',
       inputTokens: 100, outputTokens: 80, createdAt: '2026-09-02T02:00:00.000Z',
     })),
     saveTextFile: vi.fn(async () => 'D:\\reports\\report.md'),
   });
 });
 
-function renderDialog(target: React.ComponentProps<typeof RecruitmentWorkbenchDialog>['target'] = 'resume-analysis') {
+function renderDialog(
+  target: React.ComponentProps<typeof RecruitmentWorkbenchDialog>['target'] = 'resume-analysis',
+  sourceProps: Pick<React.ComponentProps<typeof RecruitmentWorkbenchDialog>, 'mcpServers' | 'mcpTools' | 'onStartSourceSearch' | 'sourceScopeId'> = {},
+) {
   return render(
     <RecruitmentWorkbenchDialog
       open
@@ -81,6 +85,7 @@ function renderDialog(target: React.ComponentProps<typeof RecruitmentWorkbenchDi
       reviewerId="hr-1"
       organizationName="星河科技"
       enterpriseMemoryEnabled
+      {...sourceProps}
       workspaceStore={new RecruitmentWorkspaceStore()}
       onClose={vi.fn()}
     />,
@@ -97,6 +102,161 @@ async function importResume(): Promise<void> {
 }
 
 describe('RecruitmentWorkbenchDialog', () => {
+  it('does not apply an old model result after a colleague changes the candidate material', async () => {
+    const store = new RecruitmentWorkspaceStore();
+    render(<RecruitmentWorkbenchDialog open target="resume-analysis" reviewerId="hr-1" organizationName="星河科技" workspaceStore={store} onClose={vi.fn()} />);
+    await importResume();
+    const before = store.activeCandidate()!.semanticEvaluation;
+    vi.mocked(window.otto.recruitmentAnalyzeResume).mockImplementationOnce(async () => {
+      store.setCandidates((items) => items.map((item) => ({ ...item, workSampleText: '同事刚补充的实战材料' })));
+      return { ...before!, summary: '不应写入的旧结果' };
+    });
+    fireEvent.click(screen.getByRole('button', { name: '按当前目标重新分析' }));
+    await screen.findByText(/本次旧分析未覆盖新材料/);
+    expect(store.activeCandidate()?.semanticEvaluation).toBe(before);
+    expect(store.activeCandidate()?.workSampleText).toBe('同事刚补充的实战材料');
+  });
+  it('imports an authorized source result into the same workspace and retains results across reopening', async () => {
+    const store = new RecruitmentWorkspaceStore();
+    store.setSharedJob({ id: 'shared-source-job', revision: 1, savedFingerprint: '' });
+    const source = { sourceId: 'official', sourceLabel: '企业人才库', sourceRecordId: 'person-1' };
+    Object.assign(window.otto, {
+      enterpriseRecruitmentSourcesList: vi.fn(async () => [{
+        id: 'official', label: '企业人才库', accessMode: 'official_api', capabilities: ['search_candidates', 'get_candidate'],
+        productionEnabled: true, authorized: true, searchable: true, materialReadable: true,
+        status: 'ready', authorizationEvidenceRecorded: true,
+      }]),
+      enterpriseRecruitmentSourcesSearch: vi.fn(async () => ({
+        runId: 'run-1', sources: [{ sourceId: 'official', label: '企业人才库', status: 'ok', count: 1, durationMs: 1 }],
+        candidates: [{ canonicalId: 'canonical-1', displayName: '候选人', identityKeys: [], sourceCount: 1, sources: [source], fieldEvidence: {} }],
+      })),
+      enterpriseRecruitmentSourceMaterialGet: vi.fn(async (request) => ({
+        ...request, source, contentHash: 'a'.repeat(64), retrievedAt: new Date().toISOString(), acquisitionMode: 'authorized_api',
+        material: { sourceRecordId: 'person-1', fileName: 'source-resume.txt', text: resumeText, completeness: 'full_text' },
+      })),
+    });
+    const props = { open: true, target: 'resume-analysis' as const, reviewerId: 'hr-1', organizationName: '星河科技', sourceScopeId: 'org-a:hr-1', workspaceStore: store, onClose: vi.fn() };
+    const view = render(<RecruitmentWorkbenchDialog {...props} />);
+    fireEvent.change(screen.getByRole('textbox', { name: '招聘目标' }), { target: { value: '我要招一名前端工程师，负责 React 企业应用' } });
+    fireEvent.click(screen.getByRole('button', { name: '候选人来源' }));
+    fireEvent.click(await screen.findByRole('button', { name: '按当前岗位自动寻才' }));
+    const importButton = await screen.findByRole('button', { name: '获取材料并分析' });
+    expect(window.otto.enterpriseRecruitmentSourcesSearch).toHaveBeenCalledWith(expect.objectContaining({ requisitionId: 'shared-source-job' }));
+    fireEvent.click(importButton);
+    await screen.findByText(/请先确认已取得本次候选人材料/u);
+    expect(window.otto.enterpriseRecruitmentSourceMaterialGet).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('checkbox', { name: /已取得本次所选候选人/u }));
+    fireEvent.click(importButton);
+    await screen.findByText(/来源材料已入档并完成全文分析/u);
+    expect(store.activeCandidate()?.semanticEvaluation).toBeTruthy();
+    expect(store.activeCandidate()?.sources[0]?.providerId).toBe('official');
+    expect(window.otto.recruitmentAnalyzeResume).toHaveBeenCalledOnce();
+    view.rerender(<RecruitmentWorkbenchDialog {...props} open={false} />);
+    view.rerender(<RecruitmentWorkbenchDialog {...props} />);
+    vi.mocked(window.otto.recruitmentAnalyzeResume).mockResolvedValueOnce({ ...store.activeCandidate()!.semanticEvaluation!, execution: {
+      runId: 'same-run', disposition: 'reused', requestedAt: new Date().toISOString(), inputFingerprint: 'a'.repeat(64), inputTokens: 10, outputTokens: 5,
+    } });
+    fireEvent.click(screen.getAllByRole('button', { name: '候选人来源' })[0]!);
+    fireEvent.click(await screen.findByRole('button', { name: '获取材料并分析' }));
+    await screen.findByText(/材料与岗位要求未变化/u);
+    expect(window.otto.recruitmentAnalyzeResume).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows many candidate sources but only marks a verified MCP contract as automatic', () => {
+    renderDialog('resume-analysis', {
+      mcpServers: [
+        { name: 'lagou-enterprise', status: 'connected', description: '拉勾企业招聘连接器', trust: true },
+        { name: 'boss-helper', status: 'connected', description: 'BOSS直聘导入助手', trust: true },
+      ],
+      mcpTools: [
+        { name: 'lagou-enterprise__search_candidates', serverName: 'lagou-enterprise' },
+        { name: 'lagou-enterprise__get_candidate', serverName: 'lagou-enterprise' },
+        { name: 'boss-helper__search_candidates', serverName: 'boss-helper' },
+      ],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '查看全部候选人来源' }));
+
+    expect(screen.getByRole('region', { name: '候选人来源中心' })).toBeTruthy();
+    for (const source of ['BOSS直聘', '智联招聘', '前程无忧', '猎聘', '拉勾', '脉脉招聘', '牛客招聘', '实习僧', '国聘']) {
+      expect(screen.getByText(source)).toBeTruthy();
+    }
+    expect(screen.getAllByText('可以自动寻才')).toHaveLength(1);
+    expect(screen.getByText(/还缺少 get_candidate/)).toBeTruthy();
+    expect(screen.getByText('1 个渠道可自动寻才')).toBeTruthy();
+  });
+
+  it('starts a multi-source search from the current job goal without authorizing outbound contact', () => {
+    const onStartSourceSearch = vi.fn();
+    renderDialog('resume-analysis', {
+      mcpServers: [
+        { name: 'lagou-enterprise', status: 'connected', description: '拉勾企业招聘连接器', trust: true },
+      ],
+      mcpTools: [
+        { name: 'lagou-enterprise__search_candidates', serverName: 'lagou-enterprise' },
+        { name: 'lagou-enterprise__get_candidate', serverName: 'lagou-enterprise' },
+      ],
+      onStartSourceSearch,
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: '招聘目标' }), {
+      target: { value: '我要招一名 Electron 前端工程师，重视完整交付' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '候选人来源' }));
+    fireEvent.click(screen.getByRole('button', { name: '按当前岗位自动寻才' }));
+
+    expect(onStartSourceSearch).toHaveBeenCalledOnce();
+    expect(onStartSourceSearch.mock.calls[0][0]).toContain('拉勾');
+    expect(onStartSourceSearch.mock.calls[0][0]).toContain('Electron 前端工程师');
+    expect(onStartSourceSearch.mock.calls[0][0]).toContain('不得发送消息、发布岗位或安排面试');
+  });
+
+  it('uses the enterprise audited gateway directly and renders source-attributed candidates', async () => {
+    const onStartSourceSearch = vi.fn();
+    Object.assign(window.otto, {
+      enterpriseRecruitmentSourcesList: vi.fn(async () => [{
+        id: 'boss', label: 'BOSS直聘', accessMode: 'official_api' as const,
+        capabilities: ['search_candidates', 'get_candidate'] as const,
+        productionEnabled: true, authorized: true, searchable: true,
+        status: 'ready' as const, authorizationEvidenceRecorded: true,
+      }]),
+      enterpriseRecruitmentSourcesSearch: vi.fn(async () => ({
+        runId: 'run-verified-1',
+        candidates: [{
+          canonicalId: 'candidate-1', displayName: '候选人甲', headline: 'Electron 前端工程师',
+          location: '北京', identityKeys: [], sourceCount: 1, fieldEvidence: {},
+          sources: [{
+            sourceId: 'boss', sourceLabel: 'BOSS直聘', sourceRecordId: 'record-1',
+            profileUrl: 'https://example.com/candidate/1',
+          }],
+        }],
+        sources: [{ sourceId: 'boss', label: 'BOSS直聘', status: 'ok' as const, count: 1, durationMs: 20 }],
+      })),
+      openExternal: vi.fn(async () => undefined),
+    });
+    renderDialog('resume-analysis', {
+      sourceScopeId: 'org-1:hr-1',
+      onStartSourceSearch,
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: '招聘目标' }), {
+      target: { value: '我要招一名 Electron 前端工程师，重视完整交付' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '候选人来源' }));
+    await screen.findByRole('button', { name: '按当前岗位自动寻才' });
+    fireEvent.click(screen.getByRole('button', { name: '按当前岗位自动寻才' }));
+
+    await screen.findByText('候选人甲');
+    expect(window.otto.enterpriseRecruitmentSourcesSearch).toHaveBeenCalledWith(expect.objectContaining({
+      scopeId: 'org-1:hr-1',
+      query: expect.stringContaining('Electron 前端工程师'),
+      sourceIds: ['boss'],
+    }));
+    expect(screen.getByText('Electron 前端工程师')).toBeTruthy();
+    expect(screen.getAllByText(/结果编号 run-verified-1/).length).toBeGreaterThanOrEqual(1);
+    expect(onStartSourceSearch).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看来源' }));
+    expect(window.otto.openExternal).toHaveBeenCalledWith('https://example.com/candidate/1');
+  });
+
   it('requires candidate consent, isolates PII and shows full-text semantic evidence', async () => {
     renderDialog();
     expect(screen.getByText('一句话加一份材料就够了')).toBeTruthy();
@@ -118,7 +278,7 @@ describe('RecruitmentWorkbenchDialog', () => {
     expect(screen.getAllByText('84').length).toBeGreaterThanOrEqual(1);
     fireEvent.click(screen.getByRole('button', { name: '查看原文证据' }));
     expect(screen.getAllByText(/第 5 行：使用 React 和 TypeScript/).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('全文尚未证明')).toBeTruthy();
+    expect(screen.getByText('材料未提及，不代表不具备')).toBeTruthy();
   });
 
   it('requires explicit recruiter confirmation for a final decision', async () => {
@@ -163,7 +323,8 @@ describe('RecruitmentWorkbenchDialog', () => {
     }
     fireEvent.click(screen.getByRole('button', { name: '比较 2 位候选人' }));
     expect(screen.getByText('候选人横向比较')).toBeTruthy();
-    expect(screen.getByText('统一岗位口径，保持导入顺序，不自动排名')).toBeTruthy();
+    expect(screen.getByText('选择同岗位、同材料范围的人选；保持导入顺序，不自动排名')).toBeTruthy();
+    await screen.findByText('暂不比较分数'); // Legacy mock lacks input/model provenance.
   });
 
   it('keeps a failed resume available for retry and never substitutes keyword scoring', async () => {
@@ -213,6 +374,8 @@ describe('RecruitmentWorkbenchDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '资料与隐私' }));
     expect(screen.getByText('敏感属性不参与评价')).toBeTruthy();
+    expect(screen.getByText('来源证据')).toBeTruthy();
+    expect(screen.getByText('手动导入')).toBeTruthy();
     expect(screen.getByText(/WhisperX 完成/)).toBeTruthy();
     expect(screen.getByText(/模型已阅读脱敏简历全文/)).toBeTruthy();
   });
@@ -224,7 +387,7 @@ describe('RecruitmentWorkbenchDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: '岗位证据图谱' }));
     expect(screen.getByText('岗位—候选人证据图谱')).toBeTruthy();
     expect(screen.getByText(/已结合企业记忆/)).toBeTruthy();
-    expect(screen.getByText('性能优化方法')).toBeTruthy();
+    expect(screen.getAllByText('性能优化方法').length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: '动态面试追问' }));
     expect(screen.getByText('现在最值得问')).toBeTruthy();
@@ -270,6 +433,6 @@ describe('RecruitmentWorkbenchDialog', () => {
       interviewTranscript: expect.stringContaining('[00:05] 候选人'),
     }));
     expect(screen.getByText('面试材料结论')).toBeTruthy();
-    expect(screen.getByText('面试材料已分析')).toBeTruthy();
+    expect(screen.getByText(/面试材料已分析/)).toBeTruthy();
   });
 });

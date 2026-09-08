@@ -170,6 +170,11 @@ import {
   listLocalSchedules,
   subscribeLocalSchedules,
   listPendingSkillCandidates,
+  describeSkillFunction,
+  listSkillReleases,
+  resolveAutoSkillUserDir,
+  rollbackSkillRelease,
+  recordSkillAcceptance,
   scanAndStageSkillCandidates,
   confirmPendingSkill,
   rejectPendingSkill,
@@ -293,6 +298,7 @@ function publicAutoSkillCandidate(
   candidate: SkillCandidate,
 ): AutoSkillCandidateInfo {
   return {
+    function: candidate.draft?.function ?? describeSkillFunction(candidate.skillContent, candidate.name),
     id: candidate.id,
     name: candidate.name,
     description: candidate.description,
@@ -541,6 +547,7 @@ export class OttoServer {
   private readonly workspaceUpdates = new Map<string, Promise<void>>();
   /** 从接收消息到 runtime 接管前的窗口也禁止切目录。 */
   private readonly messageDispatches = new Map<string, number>();
+  private skillReleaseMutation = false;
   /** 同一会话只允许一个后台标题生成请求。 */
   private readonly pendingSessionTitles = new Map<
     string,
@@ -3482,6 +3489,15 @@ export class OttoServer {
   // WS 连接 + 帧分发
   // ──────────────────────────────────────────────────────────────────────
 
+  private async withIdleSkillMutation<T>(action: () => Promise<T>): Promise<T> {
+    if (this.skillReleaseMutation || this.runtimeInit.size || this.messageDispatches.size || this.store.listSessions().some((session) => session.status !== 'idle' && session.status !== 'error')) {
+      throw new Error('当前有任务正在执行，请完成或停止任务后再安装、更新或回滚 Skill');
+    }
+    this.skillReleaseMutation = true;
+    try { return await action(); }
+    finally { this.skillReleaseMutation = false; }
+  }
+
   private handleConnection(socket: WebSocket): void {
     const conn: ClientConn = { id: randomUUID(), socket, subscriptions: new Map() };
     this.conns.add(conn);
@@ -3491,6 +3507,7 @@ export class OttoServer {
       payload: {
         protocolVersion: PROTOCOL_VERSION,
         serverVersion: SERVER_VERSION,
+        steeringVersion: 1,
       },
     });
 
@@ -3840,6 +3857,30 @@ export class OttoServer {
         }
         return;
       }
+      case 'get_skill_releases':
+      case 'rollback_skill_release':
+      case 'record_skill_acceptance': {
+        try {
+          const userDir = resolveAutoSkillUserDir();
+          if (msg.type === 'get_skill_releases' && this.skillReleaseMutation) throw new Error('Skill 正在切换版本，请稍后刷新');
+          if (msg.type === 'rollback_skill_release') await this.withIdleSkillMutation(() => rollbackSkillRelease(userDir, msg.payload));
+          if (msg.type === 'record_skill_acceptance') await recordSkillAcceptance(userDir, msg.payload);
+          this.send(conn.socket, {
+            type: 'skill_releases',
+            payload: {
+              skills: await listSkillReleases(userDir),
+              ...(msg.type === 'get_skill_releases' ? {} : { lastAction: {
+                kind: msg.type === 'rollback_skill_release' ? 'rolled-back' as const : 'reviewed' as const,
+                skillName: msg.payload.skillName,
+              } }),
+            },
+          });
+          if (msg.type === 'rollback_skill_release') await this.sendSkillsList(conn, this.defaultWorkspacePath);
+        } catch (error) {
+          this.send(conn.socket, { type: 'error', payload: { code: 'skill_release_failed', message: error instanceof Error ? error.message : String(error) } });
+        }
+        return;
+      }
       case 'get_pending_auto_skills': {
         try {
           const candidates = (await listPendingSkillCandidates()).map(
@@ -3883,7 +3924,7 @@ export class OttoServer {
       }
       case 'confirm_pending_auto_skill': {
         try {
-          const savedPath = await confirmPendingSkill(msg.payload.candidateId);
+          const savedPath = await this.withIdleSkillMutation(() => confirmPendingSkill(msg.payload.candidateId));
           const candidates = (await listPendingSkillCandidates()).map(
             publicAutoSkillCandidate,
           );
@@ -4227,6 +4268,9 @@ export class OttoServer {
     const { sessionId } = msg.payload;
     const workspaceUpdate = this.workspaceUpdates.get(sessionId);
     if (workspaceUpdate) await workspaceUpdate;
+    if (this.skillReleaseMutation) {
+      this.send(conn.socket, errorFrame(sessionId, 'session_busy', 'Skill 版本正在切换，请稍后重新发送')); return;
+    }
     this.beginMessageDispatch(sessionId);
     try {
       await this.handleSendUserMessageAfterWorkspace(conn, msg);
@@ -4273,7 +4317,28 @@ export class OttoServer {
       );
     }
 
-    // 会话正忙（thinking/streaming）：走消息队列而非直接拒绝。
+    // Explicit, versioned steering only. Legacy merge remains a queued next turn.
+    if (msg.payload.steering) {
+      const runtime = this.store.getRuntime(sessionId);
+      try {
+        if (!runtime?.steer || source !== 'local' || !clientMessageId)
+          throw new Error('当前任务不支持实时调整，请作为下一轮发送');
+        const existing = this.store.getHistory(sessionId).find(m => m.id === clientMessageId);
+        if (existing && (existing.role !== 'user' || existing.source !== 'local' || existing.turnId !== msg.payload.steering.turnId || plainTextOf(existing.content) !== plainTextOf(content)))
+          throw new Error('该消息标识已被其他内容占用');
+        const receipt = await runtime.steer({ ...msg.payload.steering, clientMessageId, text: plainTextOf(content) });
+        if (!this.store.getHistory(sessionId).some(m => m.id === clientMessageId)) {
+          const message = this.store.appendMessage(sessionId, { id: clientMessageId, role: 'user', content, source, turnId: receipt.turnId });
+          this.store.publish(sessionId, { type: 'message_start', payload: { message } });
+        }
+        this.send(conn.socket, { type: 'turn_steering', payload: { sessionId, ...receipt } });
+      } catch (error) {
+        this.send(conn.socket, errorFrame(sessionId, 'steering_rejected', `调整尚未生效，请刷新当前任务后重试：${error instanceof Error ? error.message : String(error)}`));
+      }
+      return;
+    }
+
+    // 会话正忙（thinking/streaming）：未选择实时调整的消息继续排队。
     if (session.status === 'thinking' || session.status === 'streaming') {
       const queueAction: 'merge' | 'next_turn' | 'new_session' =
         msg.payload.queueAction ?? 'next_turn';
@@ -4545,7 +4610,7 @@ export class OttoServer {
             ...content,
           ]
         : content;
-      await runtime.run(runtimeContent, source);
+      await runtime.run(runtimeContent, source, { userMessageId: userMsg.id });
 
       const completedProfile = resolveAgentProfile(
         this.store.getSession(sessionId)?.agentProfileId,

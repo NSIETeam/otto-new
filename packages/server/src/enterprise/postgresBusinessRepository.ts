@@ -209,6 +209,7 @@ async function transaction<T>(
 }
 
 import { createPostgresPolicyStore } from '../modules/policy_intelligence/policyStore.js';
+import { createPostgresRecruitmentJobStore, createPostgresWorkableConnectionStore, createPostgresRecruitmentSourceStore, deletePostgresRecruitmentSearchesForAccount, createPostgresRecruitmentUsageStore } from '../modules/recruitment_intelligence/index.js';
 
 export function createPostgresEnterpriseBusinessRepository(input: {
   pool: PostgresPoolLike;
@@ -456,19 +457,27 @@ export function createPostgresEnterpriseBusinessRepository(input: {
     expectedVersion: number;
     status: string;
     payload: T;
+    auditEvent?: { eventType: string; actorAccountId: string; payload: Record<string, unknown> };
   }): Promise<PostgresBusinessRecord<T> | null> {
     if (!Number.isInteger(raw.expectedVersion) || raw.expectedVersion < 1) {
       throw new Error('business record version is invalid');
     }
-    const result = await input.pool.query<BusinessRecordRow>(
-      `UPDATE enterprise_business_records
+    const updateSql = `UPDATE enterprise_business_records
        SET status = $5, payload = $6::jsonb, version = version + 1,
            updated_at = CURRENT_TIMESTAMP
        WHERE organization_id = $1 AND domain = $2
          AND resource_type = $3 AND resource_id = $4 AND version = $7
        RETURNING organization_id, domain, resource_type, resource_id,
-                 owner_account_id, status, version, payload, created_at, updated_at`,
-      [
+                 owner_account_id, status, version, payload, created_at, updated_at`;
+    const audit = raw.auditEvent;
+    // Both writes succeed together. No event is inserted when the version guard loses a race.
+    const sql = audit ? `WITH updated AS (${updateSql}), audit AS (
+      INSERT INTO enterprise_business_events
+        (organization_id, domain, event_id, resource_type, resource_id, actor_account_id, event_type, payload)
+      SELECT organization_id, domain, $8, resource_type, resource_id, $9, $10, $11::jsonb FROM updated
+      RETURNING event_id
+    ) SELECT updated.* FROM updated CROSS JOIN audit` : updateSql;
+    const values: unknown[] = [
         identifier(raw.organizationId, 'organization id'),
         businessDomain(raw.domain),
         identifier(raw.resourceType, 'resource type'),
@@ -476,8 +485,9 @@ export function createPostgresEnterpriseBusinessRepository(input: {
         identifier(raw.status, 'status'),
         JSON.stringify(raw.payload),
         raw.expectedVersion,
-      ],
-    );
+      ];
+    if (audit) values.push(createId(), identifier(audit.actorAccountId, 'actor account id'), identifier(audit.eventType, 'event type'), JSON.stringify(audit.payload));
+    const result = await input.pool.query<BusinessRecordRow>(sql, values);
     return result.rows[0] ? recordView<T>(result.rows[0]) : null;
   }
 
@@ -523,6 +533,7 @@ export function createPostgresEnterpriseBusinessRepository(input: {
     resourceType: string;
     resourceId: string;
     limit?: number;
+    newestFirst?: boolean;
   }): Promise<Array<PostgresBusinessEvent<T>>> {
     const limit = Math.min(500, Math.max(1, Math.floor(raw.limit ?? 100)));
     const result = await input.pool.query<BusinessEventRow>(
@@ -531,7 +542,7 @@ export function createPostgresEnterpriseBusinessRepository(input: {
        FROM enterprise_business_events
        WHERE organization_id = $1 AND domain = $2
          AND resource_type = $3 AND resource_id = $4
-       ORDER BY created_at, event_id
+       ORDER BY created_at ${raw.newestFirst ? 'DESC' : 'ASC'}, event_id ${raw.newestFirst ? 'DESC' : 'ASC'}
        LIMIT $5`,
       [
         identifier(raw.organizationId, 'organization id'),
@@ -677,6 +688,11 @@ export function createPostgresEnterpriseBusinessRepository(input: {
   return {
     listAccountSyncSnapshots,
     getPolicyIntelligenceStore: () => createPostgresPolicyStore(input.pool, { encryptText: encryptBusinessSensitiveText, decryptText: decryptBusinessSensitiveText }),
+    getRecruitmentJobStore: () => createPostgresRecruitmentJobStore(input.pool, { encryptText: encryptBusinessSensitiveText, decryptText: decryptBusinessSensitiveText }),
+    getRecruitmentUsageStore: () => createPostgresRecruitmentUsageStore(input.pool, { encryptText: encryptBusinessSensitiveText, decryptText: decryptBusinessSensitiveText }),
+    getWorkableConnectionStore: () => createPostgresWorkableConnectionStore(input.pool, { encryptText: encryptBusinessSensitiveText, decryptText: decryptBusinessSensitiveText }),
+    getRecruitmentSourceStore: () => createPostgresRecruitmentSourceStore(input.pool, { encryptText: encryptBusinessSensitiveText, decryptText: decryptBusinessSensitiveText }),
+    deleteRecruitmentSearchesForAccount: (client: Pick<PostgresPoolLike, 'query'>, organizationId: string, accountId: string) => deletePostgresRecruitmentSearchesForAccount(client, { encryptText: encryptBusinessSensitiveText, decryptText: decryptBusinessSensitiveText }, organizationId, accountId),
     putAccountSyncSnapshot,
     listBusinessRecords,
     getBusinessRecord,

@@ -20,6 +20,7 @@ export interface EnterpriseMemoryHealthItem {
   distinctSessionCount?: number;
   distinctContributorCount?: number;
   verifiedEvidenceCount?: number;
+  reviewedAt?: string | null;
   reviewDueAt?: string | null;
   expiresAt?: string | null;
   createdAt: string;
@@ -41,7 +42,6 @@ export interface EnterpriseMemoryHealthNode {
 }
 
 export interface EnterpriseMemoryHealthResult {
-  governanceScore: number;
   counts: Record<EnterpriseMemoryHealthStatus, number>;
   nodes: EnterpriseMemoryHealthNode[];
   nextAction: EnterpriseMemoryHealthNode | null;
@@ -80,10 +80,9 @@ export function enterpriseMemoryUsageScenarios(
 
 function learningReasons(item: EnterpriseMemoryHealthItem): string[] {
   const reasons: string[] = [];
-  if ((item.distinctSessionCount ?? 0) < 2) reasons.push('缺少第二个独立会话验证');
-  if ((item.distinctContributorCount ?? 0) < 2) reasons.push('缺少另一名贡献者确认');
-  if ((item.verifiedEvidenceCount ?? 0) < 1) reasons.push('还没有明确验证证据');
-  if (item.confidence < 0.75) reasons.push('当前可信度仍偏低');
+  if ((item.distinctSessionCount ?? 0) < 2) reasons.push('目前不足两个会话的观察记录');
+  if ((item.distinctContributorCount ?? 0) < 2) reasons.push('目前不足两名贡献者的记录');
+  if ((item.verifiedEvidenceCount ?? 0) < 1) reasons.push('尚无标记为已验证的记录；重复出现不等于事实已核实');
   return reasons.length ? reasons : ['仍需在后续真实工作中继续验证'];
 }
 
@@ -96,11 +95,10 @@ function classify(
   const expired = dateReached(item.expiresAt, now);
   const reviewDue = !expired && dateReached(item.reviewDueAt, now);
   const pending = item.status === 'pending_review';
-  const trustedByEvidence = (item.verifiedEvidenceCount ?? 0) > 0
-    || ((item.distinctSessionCount ?? 0) >= 2 && (item.distinctContributorCount ?? 0) >= 2);
-  const trustedByAdmin = item.sourceType === 'manual' && item.confidence >= 0.8;
-  const trusted = item.status !== 'archived' && item.confidence >= 0.8
-    && (trustedByEvidence || trustedByAdmin);
+  // Counts and review records are observable; model scores and repetition are not factual validation.
+  const trustedByEvidence = (item.verifiedEvidenceCount ?? 0) > 0;
+  const trustedByAdmin = Boolean(item.reviewedAt);
+  const trusted = item.status === 'active' && (trustedByEvidence || trustedByAdmin);
 
   let status: EnterpriseMemoryHealthStatus;
   let reasons: string[];
@@ -122,7 +120,7 @@ function classify(
   } else if (pending || reviewDue) {
     status = 'needs_review';
     reasons = pending
-      ? ['自动学习已经形成候选', '管理员确认前不会影响其他成员']
+      ? ['内容已保存为待确认版本', '管理员确认前不会进入成员知识检索']
       : ['已到计划复核日期', '需要确认制度、负责人或适用范围是否变化'];
     question = pending
       ? `“${title}”的表述准确吗？它适用于哪些部门、场景和时间范围？`
@@ -132,9 +130,9 @@ function classify(
   } else if (trusted) {
     status = 'trusted';
     reasons = trustedByAdmin
-      ? ['由企业管理员直接确认', '当前可信度达到可用标准']
-      : ['已经获得独立工作证据支持', '当前可信度达到可用标准'];
-    question = `“${title}”当前证据充分；后续出现新口径时，Otto 会保留证据并提示重新确认。`;
+      ? ['有人工审核记录', '审核记录不代表所有场景均已验证']
+      : ['有标记为已验证的观察记录', '仍需核对原文和适用条件，不等于结论必然正确'];
+    question = `“${title}”已有确认记录；条件变化时仍需核对来源并重新确认。`;
     actionLabel = '查看依据';
     priority = 0;
   } else {
@@ -142,7 +140,7 @@ function classify(
     reasons = learningReasons(item);
     question = `谁能确认“${title}”在真实工作中仍然成立？最好补充正式文件、负责人确认或另一次独立执行结果。`;
     actionLabel = '补充验证';
-    priority = 60 + Math.round((1 - Math.min(1, Math.max(0, item.confidence))) * 20);
+    priority = 60;
   }
 
   return {
@@ -155,9 +153,7 @@ function classify(
     question,
     actionLabel,
     usageScenarios: enterpriseMemoryUsageScenarios(item),
-    useStatus: item.status === 'active' && !expired && !conflicted
-      ? '已启用：遇到相关问题和任务时自动参考'
-      : '未启用：完成确认或复核前不会自动调用',
+    useStatus: enterpriseMemoryUseStatus(item, now),
     priority,
   };
 }
@@ -179,20 +175,17 @@ export function buildEnterpriseMemoryHealth(
     expired: 0,
   };
   for (const node of nodes) counts[node.status] += 1;
-  const scoreByStatus: Record<EnterpriseMemoryHealthStatus, number> = {
-    trusted: 100,
-    learning: 55,
-    needs_review: 35,
-    conflicted: 10,
-    expired: 0,
-  };
-  const governanceScore = nodes.length
-    ? Math.round(nodes.reduce((sum, node) => sum + scoreByStatus[node.status], 0) / nodes.length)
-    : 0;
   return {
-    governanceScore,
     counts,
     nodes,
     nextAction: nodes.find((node) => node.priority > 0) ?? null,
   };
+}
+
+export function enterpriseMemoryUseStatus(item: Pick<EnterpriseMemoryHealthItem, 'status' | 'sourceLabel' | 'expiresAt'>, now = Date.now()): string {
+  if (item.status === 'archived') return '已停止使用：不会进入知识检索';
+  if (item.sourceLabel?.includes('证据存在冲突')) return '存在冲突：裁决并确认前不启用';
+  if (dateReached(item.expiresAt, now)) return '已过期：复核前不启用';
+  if (item.status !== 'active') return '待确认：尚未进入成员知识检索';
+  return '可被检索：相关时作为参考，不代表本次已调用';
 }

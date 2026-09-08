@@ -414,12 +414,12 @@ export function synthesizeEnterpriseKnowledgeDocument(
     .slice(0, 2);
   const summary = input.summary;
   const formation = [
-    `${summary.evidenceCount} 条独立证据`,
+    `${summary.evidenceCount} 条观察记录`,
     `${summary.distinctSessionCount} 个会话`,
     `${summary.distinctContributorCount} 名贡献者`,
     `观察跨度 ${Math.max(0, Math.round(summary.spanDays))} 天`,
-    summary.hasVerifiedEvidence ? '包含已验证结果' : '尚无独立验证结果',
-    `组织可靠度 ${Math.round(scoreEnterpriseKnowledgeReliability(summary) * 100)}%`,
+    summary.hasVerifiedEvidence ? '部分来源记录标记为已验证，仍需核对原文' : '尚无已验证来源记录',
+    '重复出现不等于独立验证，不作为准确率证明',
   ].join('；');
   const sections = [
     `## 长期结论\n${headline}。`,
@@ -435,10 +435,10 @@ export function synthesizeEnterpriseKnowledgeDocument(
 export function enterpriseKnowledgeRetentionReasonLabel(
   reason: EnterpriseKnowledgeRetentionReason,
 ): string {
-  if (reason === 'high_impact_verified') return '高影响且已跨会话独立验证';
-  if (reason === 'governed_decision') return '组织制度经跨成员确认';
+  if (reason === 'high_impact_verified') return '较高影响的跨会话记录，含验证标记，需复核';
+  if (reason === 'governed_decision') return '组织制度在多名成员记录中出现，需确认';
   if (reason === 'long_term_recurrence') return '跨时间反复出现';
-  if (reason === 'cross_member_corroboration') return '多名员工独立印证';
+  if (reason === 'cross_member_corroboration') return '多名员工的观察记录相互支持，需复核';
   if (reason === 'contested') return '证据存在冲突，需人工裁决';
   if (reason === 'transient') return '短期或对话依赖内容';
   return '证据积累中';

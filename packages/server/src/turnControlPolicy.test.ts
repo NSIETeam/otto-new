@@ -12,6 +12,22 @@ import {
 } from './turnControlPolicy.js';
 
 describe('deriveTurnControlPolicy', () => {
+  it('recognizes explicit output filenames instead of requiring internet evidence for local data', () => {
+    const policy = deriveTurnControlPolicy({
+      text: '读取 input.json，核对当前 revision 的记录，生成 result.json 并运行测试验证。',
+      source: 'local',
+      toolFree: false,
+    });
+    expect(policy.intent).toBe('create_artifact');
+    expect(policy.evidenceRequirement).toBe('local_verification');
+    expect(
+      deriveTurnControlPolicy({
+        text: '生成 result.json 并部署服务器',
+        source: 'local',
+        toolFree: false,
+      }).riskLevel,
+    ).toBe('external_write');
+  });
   it('does not require a check that the user explicitly prohibits', () => {
     const policy = deriveTurnControlPolicy({
       text: '修改代码，不要运行测试和构建，只运行类型检查',
@@ -71,9 +87,9 @@ describe('deriveTurnControlPolicy', () => {
     );
     expect(policy.presentation).toMatchObject({
       responseShape: 'grounded_answer',
-      detailLevel: 'thorough',
+      detailLevel: 'compact',
       progressUpdates: 'none',
-      finalSections: ['result', 'evidence', 'limitations'],
+      finalSections: ['result'],
     });
   });
 
@@ -97,7 +113,7 @@ describe('deriveTurnControlPolicy', () => {
     );
     expect(policy.presentation).toMatchObject({
       responseShape: 'change_delivery',
-      finalSections: ['result', 'changes', 'verification', 'limitations'],
+      finalSections: ['result'],
     });
   });
 

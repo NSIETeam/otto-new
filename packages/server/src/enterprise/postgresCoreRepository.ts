@@ -1183,6 +1183,12 @@ export function createPostgresEnterpriseCoreRepository(input: {
           throw new Error('organization must retain one active administrator');
         }
       }
+      await business.deleteRecruitmentSearchesForAccount(client, organizationId, accountId);
+      const workableTable = await client.query<{ present: boolean } & Record<string, unknown>>("SELECT to_regclass('enterprise_workable_connections_v1') IS NOT NULL AS present");
+      if (workableTable.rows[0]?.present) await client.query(
+        "UPDATE enterprise_workable_connections_v1 SET revision=revision+1,payload='' WHERE organization_id=$1 AND account_id=$2",
+        [organizationId, accountId],
+      );
       const deleted = await client.query(
         `UPDATE accounts
          SET deleted_at = CURRENT_TIMESTAMP, status = 'disabled',
@@ -4142,6 +4148,14 @@ export function createPostgresEnterpriseCoreRepository(input: {
         `DELETE FROM account_sync_snapshots
          WHERE organization_id = $2 AND account_id = $1`,
         [account.id, account.organizationId],
+      );
+      // This optional integration table is installed lazily. Clear credentials
+      // in the same deletion transaction, retaining only a stale-write barrier.
+      await business.deleteRecruitmentSearchesForAccount(client, account.organizationId, account.id);
+      const workableTable = await client.query<{ present: boolean } & Record<string, unknown>>("SELECT to_regclass('enterprise_workable_connections_v1') IS NOT NULL AS present");
+      if (workableTable.rows[0]?.present) await client.query(
+        "UPDATE enterprise_workable_connections_v1 SET revision=revision+1,payload='' WHERE organization_id=$1 AND account_id=$2",
+        [account.organizationId, account.id],
       );
       await client.query(
         `DELETE FROM enterprise_business_records

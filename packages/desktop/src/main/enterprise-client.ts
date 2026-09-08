@@ -2980,6 +2980,7 @@ export class EnterpriseClient {
     id: string,
     action: 'approve' | 'archive',
     note?: string,
+    expectedVersion?: number,
   ): Promise<EnterpriseKnowledgeItem> {
     if (!this.token) throw new Error('登录已失效，请重新登录');
     const response = await this.request<{ knowledge: EnterpriseKnowledgeRow }>(
@@ -2988,6 +2989,7 @@ export class EnterpriseClient {
         method: 'POST',
         body: JSON.stringify({
           action,
+          expectedVersion,
           ...(note?.trim() ? { note: note.trim() } : {}),
         }),
       },
@@ -3006,6 +3008,8 @@ export class EnterpriseClient {
   async reviseKnowledge(
     id: string,
     input: {
+      expectedVersion?: number;
+      restoreVersion?: number;
       title: string;
       category: string;
       content: string;
@@ -3606,10 +3610,126 @@ export class EnterpriseClient {
     await this.assertCompatibleServer(this.serverUrl, ['policy_intelligence_v3']);
     return (await this.request<{ state: import('otto-server').PolicyIntelligenceState }>('/enterprise/policy-intelligence')).state;
   }
+  async getPolicyInbox(): Promise<import('otto-server').PolicyInbox> {
+    const generation = this.authOperationGeneration;
+    const session = this.snapshot();
+    await this.assertCompatibleServer(session.serverUrl, ['policy_intelligence_inbox_v1']);
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    const result = await this.request<{ inbox: import('otto-server').PolicyInbox }>('/enterprise/policy-intelligence/inbox', {}, { serverUrl: session.serverUrl, authorizationToken: session.token });
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    return result.inbox;
+  }
+  async readPolicyInbox(ids: string[]): Promise<import('otto-server').PolicyInbox> {
+    const generation = this.authOperationGeneration;
+    const session = this.snapshot();
+    await this.assertCompatibleServer(session.serverUrl, ['policy_intelligence_inbox_v1']);
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    const result = await this.request<{ inbox: import('otto-server').PolicyInbox }>('/enterprise/policy-intelligence/inbox/read', { method: 'POST', body: JSON.stringify({ ids }) }, { serverUrl: session.serverUrl, authorizationToken: session.token });
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    return result.inbox;
+  }
 
   async actPolicyIntelligence(action: import('otto-server').PolicyAction): Promise<import('otto-server').PolicyIntelligenceState> {
     await this.assertCompatibleServer(this.serverUrl, ['policy_intelligence_v3']);
     return (await this.request<{ state: import('otto-server').PolicyIntelligenceState }>('/enterprise/policy-intelligence/actions', { method: 'POST', body: JSON.stringify(action) })).state;
+  }
+
+  async listRecruitmentSources(requisitionId?: string): Promise<Array<import('otto-server').RecruitmentSourceRuntimeView>> {
+    if (requisitionId !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u.test(requisitionId)) throw new Error('招聘岗位标识无效');
+    const generation = this.authOperationGeneration;
+    const session = this.snapshot();
+    await this.assertCompatibleServer(session.serverUrl, ['recruitment_source_gateway_v1']);
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    const response = await this.request<{
+      sources: Array<import('otto-server').RecruitmentSourceRuntimeView>;
+    }>(`/enterprise/recruitment/sources${requisitionId ? `?requisitionId=${encodeURIComponent(requisitionId)}` : ''}`, {}, { serverUrl: session.serverUrl, authorizationToken: session.token });
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    return response.sources;
+  }
+
+  async workableConnection(action: import('otto-server').WorkableConnectionAction): Promise<import('otto-server').WorkableConnectionView> {
+    const generation = this.authOperationGeneration;
+    const session = this.snapshot();
+    if (action.kind === 'material_probe') {
+      await this.assertCompatibleServer(session.serverUrl, ['recruitment_workable_acceptance_v1']);
+      this.assertAuthOperationCurrent(generation, session.serverUrl);
+    }
+    if (action.kind === 'oauth_start' || action.kind === 'oauth_complete') {
+      const url = new URL(session.serverUrl);
+      if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname))) throw new Error('Workable 授权需要 HTTPS 企业服务器，本机开发回环地址除外');
+    }
+    await this.assertCompatibleServer(session.serverUrl, ['recruitment_workable_connections_v1']);
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    const response = await this.request<{ contract: string; result: import('otto-server').WorkableConnectionView }>(
+      '/enterprise/recruitment/workable', { method: 'POST', body: JSON.stringify(action) },
+      { timeoutMs: action.kind === 'oauth_start' || action.kind === 'oauth_complete' ? 100_000 : 30_000, serverUrl: session.serverUrl, authorizationToken: session.token },
+    );
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    if (response.contract !== 'otto-workable-connection-v1' || !response.result) throw new Error('Workable 授权响应格式不正确');
+    return response.result;
+  }
+
+  async recruitmentJobs(action: import('otto-server').RecruitmentJobAction): Promise<import('otto-server').RecruitmentJobResponse> {
+    const generation = this.authOperationGeneration;
+    const session = this.snapshot();
+    if (action.kind === 'analyze_intake_once') {
+      await this.assertCompatibleServer(session.serverUrl, ['recruitment_intake_once_v1', 'recruitment_organization_budget_v1']);
+      this.assertAuthOperationCurrent(generation, session.serverUrl);
+    }
+    if (action.kind === 'configure_background_analysis' && action.enabled) {
+      await this.assertCompatibleServer(session.serverUrl, ['recruitment_organization_budget_v1']);
+      this.assertAuthOperationCurrent(generation, session.serverUrl);
+    }
+    if (action.kind === 'configure_auto_archive') {
+      await this.assertCompatibleServer(session.serverUrl, ['recruitment_auto_archive_v1']);
+      this.assertAuthOperationCurrent(generation, session.serverUrl);
+    }
+    if (['claim_intake_analysis', 'start_intake_analysis', 'finish_intake_analysis', 'reset_intake_analysis'].includes(action.kind)) {
+      await this.assertCompatibleServer(session.serverUrl, ['recruitment_intake_claims_v1']);
+      this.assertAuthOperationCurrent(generation, session.serverUrl);
+    }
+    await this.assertCompatibleServer(session.serverUrl, ['recruitment_jobs_v1', ...(['configure_intake', 'dismiss_intake'].includes(action.kind) ? ['recruitment_intake_v1'] : []), ...(['related', 'copy_candidate', 'link_candidate', 'unlink_candidate'].includes(action.kind) ? ['recruitment_people_v1'] : [])]);
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    const result = await this.request<{ result: import('otto-server').RecruitmentJobResponse }>(
+      '/enterprise/recruitment/jobs', { method: 'POST', body: JSON.stringify(action) },
+      { timeoutMs: action.kind === 'analyze_intake_once' ? 120_000 : 30_000, serverUrl: session.serverUrl, authorizationToken: session.token },
+    );
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    return result.result;
+  }
+
+  async searchRecruitmentSources(input: {
+    requisitionId: string;
+    query: string;
+    sourceIds?: string[];
+    limitPerSource?: number;
+  }): Promise<import('otto-server').RecruitmentGatewaySearchResult> {
+    await this.assertCompatibleServer(this.serverUrl, ['recruitment_source_gateway_v1']);
+    return (await this.request<{
+      result: import('otto-server').RecruitmentGatewaySearchResult;
+    }>('/enterprise/recruitment/sources/search', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }, { timeoutMs: 60_000 })).result;
+  }
+
+  async getRecruitmentSourceRun(
+    runId: string,
+  ): Promise<import('otto-server').RecruitmentSearchRunRecord> {
+    await this.assertCompatibleServer(this.serverUrl, ['recruitment_source_gateway_v1']);
+    return (await this.request<{
+      result: import('otto-server').RecruitmentSearchRunRecord;
+    }>(`/enterprise/recruitment/source-runs/${encodeURIComponent(runId)}`)).result;
+  }
+
+  async getRecruitmentSourceMaterial(input: {
+    runId: string; requisitionId: string; canonicalId: string; sourceId: string;
+  }): Promise<import('otto-server').RecruitmentMaterialResult> {
+    await this.assertCompatibleServer(this.serverUrl, ['recruitment_source_material_v1']);
+    return (await this.request<{ result: import('otto-server').RecruitmentMaterialResult }>(
+      '/enterprise/recruitment/sources/material', { method: 'POST', body: JSON.stringify(input) },
+      { timeoutMs: 65_000 },
+    )).result;
   }
 
   async updateEnterprisePublicProfile(

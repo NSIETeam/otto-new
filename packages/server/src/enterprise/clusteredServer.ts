@@ -13,7 +13,12 @@ import {
   type Server,
   type ServerResponse,
 } from 'node:http';
-import { createAliyunLoginSmsFromEnv } from 'otto-core';
+import { createAliyunLoginSmsFromEnv, RecurringTaskRegistry } from 'otto-core';
+import { startRecruitmentCacheMaintenance } from '../modules/recruitment_intelligence/recruitmentCacheMaintenance.js';
+import { RecruitmentIntakeWorker, startRecruitmentIntake } from '../modules/recruitment_intelligence/recruitmentIntake.js';
+import { RecruitmentBackgroundWorker, startRecruitmentBackgroundAnalysis } from '../modules/recruitment_intelligence/recruitmentBackgroundAnalysis.js';
+import { resolveRecruitmentBackgroundModel } from '../modules/recruitment_intelligence/recruitmentBackgroundModel.js';
+import { RecruitmentUsageLedger } from '../modules/recruitment_intelligence/recruitmentUsageLedger.js';
 
 import {
   ORGANIZATION_FEATURE_KEYS,
@@ -72,6 +77,16 @@ import { loadPolicySources } from '../modules/policy_intelligence/policySources.
 import { createPolicyModelFromEnv } from '../modules/policy_intelligence/policyModel.js';
 import { handlePolicyRoute } from '../modules/policy_intelligence/policyRoutes.js';
 import { startPolicyRuntime } from '../modules/policy_intelligence/policyRuntime.js';
+import {
+  handleRecruitmentSourceRoute,
+  handleRecruitmentJobRoute,
+  handleWorkableConnectionRoute,
+  WorkableConnectionService,
+  createWorkableOAuthClient,
+  createWorkableSourceRuntime,
+  RecruitmentJobService,
+  type RecruitmentSourceRuntime,
+} from '../modules/recruitment_intelligence/index.js';
 import { createClusteredMlsMaintenance } from './clusteredMlsMaintenance.js';
 import { e2eeProductionCapabilities } from './e2eeProductionReleasePolicy.js';
 import {
@@ -126,6 +141,8 @@ export interface ClusteredEnterpriseServerOptions {
   edgeGatewayLeaseToken?: string;
   edgeGatewayUrl?: string;
   edgeGatewayFetch?: typeof fetch;
+  /** Authorized recruitment connectors composed by the deployment host. */
+  recruitmentSources?: RecruitmentSourceRuntime;
 }
 
 export interface ClusteredEnterpriseSmsSender {
@@ -749,12 +766,15 @@ export function createClusteredEnterpriseServer(
     edgeGatewayLeaseToken?: string;
     edgeGatewayUrl?: string;
     edgeGatewayFetch?: typeof fetch;
+    recruitmentSources?: RecruitmentSourceRuntime;
   } = {},
 ): {
   server: Server;
   host: string;
   port: number;
   adminToken: string;
+  createRecruitmentIntakeWorker(): RecruitmentIntakeWorker;
+  createRecruitmentBackgroundWorker(): RecruitmentBackgroundWorker;
 } {
   const host = options.host?.trim() || '127.0.0.1';
   const port = options.port ?? DEFAULT_PORT;
@@ -813,6 +833,39 @@ export function createClusteredEnterpriseServer(
   };
 
   let policyService: EnterprisePolicyService | undefined;
+  let recruitmentJobService: RecruitmentJobService | undefined;
+  let workableConnectionService: WorkableConnectionService | undefined;
+  const recruitmentSources = options.recruitmentSources ?? createWorkableSourceRuntime({
+    connectionService: () => getWorkableConnectionService(),
+    store: repository.getRecruitmentSourceStore(),
+    async audit(event) { await repository.logAudit('recruitment_source_search', event.organizationId, null, { ...event }); },
+    async auditMaterial(event) { await repository.logAudit('recruitment_source_material', event.organizationId, null, { ...event }); },
+  });
+  const getWorkableConnectionService = (): WorkableConnectionService => workableConnectionService ??= new WorkableConnectionService({
+    store: repository.getWorkableConnectionStore(),
+    ...(process.env.OTTO_WORKABLE_OAUTH_ENABLED === '1' ? { oauth: createWorkableOAuthClient() } : {}),
+    getJob: (org, id) => repository.getRecruitmentJobStore().get(org, id),
+    async audit(event) { await repository.logAudit(`workable_${event.kind}_${event.phase}`, event.organizationId, null, event); },
+    async getActor(id) {
+      const account = await repository.getAccount(id);
+      if (!account) return null;
+      const organization = await repository.getOrganization(account.organizationId);
+      return { id: account.id, organizationId: account.organizationId, isAdmin: account.isAdmin, active: account.status === 'active' && organization?.status === 'active' && organization.type !== 'personal' };
+    },
+  });
+  const getRecruitmentJobService = (): RecruitmentJobService => recruitmentJobService ??= new RecruitmentJobService({
+    store: repository.getRecruitmentJobStore(),
+    intakeSources: recruitmentSources,
+    backgroundModel: resolveRecruitmentBackgroundModel,
+    analyzeOnce: (accountId, action) => createRecruitmentBackgroundWorker().analyzeOnce(accountId, action),
+    async audit(event) { await repository.logAudit(`recruitment_job_${event.kind}_${event.phase}`, event.organizationId, null, event); },
+    async getActor(id) {
+      const account = await repository.getAccount(id);
+      if (!account) return null;
+      const organization = await repository.getOrganization(account.organizationId);
+      return { id: account.id, organizationId: account.organizationId, isAdmin: account.isAdmin, active: account.status === 'active' && organization?.status === 'active' && organization.type !== 'personal' };
+    },
+  });
   const getPolicyService = (): EnterprisePolicyService => policyService ??= new EnterprisePolicyService({
     store: repository.getPolicyIntelligenceStore(), sources: loadPolicySources(), model: createPolicyModelFromEnv(),
     async getBaseProfile(organizationId) {
@@ -860,6 +913,7 @@ export function createClusteredEnterpriseServer(
           capabilities: [
             'policy_intelligence_v2',
             'policy_intelligence_v3',
+            'policy_intelligence_inbox_v1',
             'password_auth',
             'sms_registration',
             'personal_registration',
@@ -887,12 +941,20 @@ export function createClusteredEnterpriseServer(
             'enterprise_skill_market_v1',
             'enterprise_park_services_v1',
             'park_carpool_v1',
+            'recruitment_jobs_v1',
+            'recruitment_workable_connections_v1',
+            'recruitment_people_v1',
             'enterprise_ticketing_v1',
             'commercial_control_v1',
             'managed_model_gateway_v1',
             'modular_update_push_v1',
             'signed_update_policy_v1',
             'privacy_export_delete_v1',
+            'recruitment_intake_claims_v1', 'recruitment_intake_v1', 'recruitment_source_gateway_v1', ...(recruitmentSources.getCandidateMaterial ? ['recruitment_source_material_v1'] : []),
+            'recruitment_auto_archive_v1',
+            'recruitment_workable_acceptance_v1',
+            'recruitment_organization_budget_v1',
+            'recruitment_intake_once_v1',
             ...(options.attachmentStorage
               ? [
                   'direct_message_attachments_v1',
@@ -1865,6 +1927,25 @@ export function createClusteredEnterpriseServer(
       }
 
       if (await handlePolicyRoute({ path, method, req, res, accountId: member.id, service: getPolicyService, readBody: readJsonBody, sendJSON: sendJson })) return;
+      if (await handleRecruitmentJobRoute({ path, method, req, res, accountId: member.id, service: getRecruitmentJobService, readBody: readJsonBody, sendJson })) return;
+      if (await handleWorkableConnectionRoute({ path, method, req, res, accountId: member.id, service: getWorkableConnectionService, readBody: readJsonBody, sendJson })) return;
+      if (
+        await handleRecruitmentSourceRoute({
+          path,
+          method,
+          req,
+          res,
+          principal: {
+            organizationId: member.organizationId,
+            accountId: member.id,
+            isAdmin: member.isAdmin,
+          },
+          runtime: recruitmentSources,
+          authorizeJob: (accountId, jobId) => getRecruitmentJobService().canAccess(accountId, jobId),
+          readBody: readJsonBody,
+          sendJson,
+        })
+      ) return;
       if (
         await handleClusteredBusinessRoute({
           path,
@@ -2892,7 +2973,27 @@ export function createClusteredEnterpriseServer(
     if (initializedPolicyService) stopPolicy = startPolicyRuntime(initializedPolicyService, repository.getPolicyIntelligenceStore());
   });
   server.once('close', () => stopPolicy?.());
-  return { server, host, port, adminToken };
+  const recruitmentWorkerOptions = () => ({
+    store: repository.getRecruitmentJobStore(),
+    async getActor(id: string) {
+      const account = await repository.getAccount(id); if (!account) return null;
+      const organization = await repository.getOrganization(account.organizationId);
+      return { id: account.id, organizationId: account.organizationId, isAdmin: account.isAdmin, active: account.status === 'active' && organization?.status === 'active' && organization.type !== 'personal' };
+    },
+    async isEntitled(organizationId: string) {
+      const [stored, accounts] = await Promise.all([
+        repository.getBusinessRecord<Record<string, unknown>>({ organizationId, domain: 'commercial_control', resourceType: 'license', resourceId: 'current' }), repository.listAccounts(organizationId),
+      ]);
+      return evaluateClusteredLicense({ stored, organizationId, deploymentId, publicKeys: licensePublicKeys,
+        activeSeatCount: accounts.filter((account) => account.accountType === 'enterprise' && account.status === 'active').length,
+      }).allowed;
+    },
+  });
+  const createRecruitmentIntakeWorker = (): RecruitmentIntakeWorker => new RecruitmentIntakeWorker({ ...recruitmentWorkerOptions(), runtime: recruitmentSources,
+    async audit(event) { await repository.logAudit(`recruitment_intake_${event.phase}`, event.organizationId, null, event); } });
+  const createRecruitmentBackgroundWorker = (): RecruitmentBackgroundWorker => new RecruitmentBackgroundWorker({ ...recruitmentWorkerOptions(), usageLedger: new RecruitmentUsageLedger(repository.getRecruitmentUsageStore()), resolveModel: resolveRecruitmentBackgroundModel,
+    async audit(event) { await repository.logAudit(`recruitment_${event.operation === 'archive' ? 'archive' : 'analysis'}_${event.phase}`, event.organizationId, null, event); } });
+  return { server, host, port, adminToken, createRecruitmentIntakeWorker, createRecruitmentBackgroundWorker };
 }
 
 export async function startClusteredEnterpriseServer(
@@ -2951,6 +3052,7 @@ export async function startClusteredEnterpriseServer(
       edgeGatewayLeaseToken: options.edgeGatewayLeaseToken,
       edgeGatewayUrl: options.edgeGatewayUrl,
       edgeGatewayFetch: options.edgeGatewayFetch,
+      recruitmentSources: options.recruitmentSources,
       smsSender:
         options.smsSender !== undefined
           ? options.smsSender
@@ -2977,10 +3079,21 @@ export async function startClusteredEnterpriseServer(
         );
       },
     });
+    const recruitmentMaintenanceRegistry = new RecurringTaskRegistry({
+      allowPaidBackground: process.env['OTTO_RECRUITMENT_BACKGROUND_ANALYSIS_ENABLED'] === '1',
+      onError() { console.error('[Otto Enterprise] 招聘后台任务未完成，将检查持久状态后重试'); },
+    });
+    let stopRecruitmentIntake: () => void = () => undefined;
+    let stopRecruitmentAnalysis: () => void = () => undefined;
     created.server.once('close', () => {
+      stopRecruitmentIntake();
+      stopRecruitmentAnalysis();
       maintenance.close();
       mlsMaintenance.close();
-      void infrastructure.close();
+      // Keep the database alive until an in-flight cache batch has finished.
+      void recruitmentMaintenanceRegistry.shutdown({ timeoutMs: 30_000 })
+        .then(() => infrastructure.close())
+        .catch(() => console.error('[Otto Enterprise] 后台清理尚未安全退出，保留数据库连接等待进程处理'));
     });
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => reject(error);
@@ -2992,6 +3105,9 @@ export async function startClusteredEnterpriseServer(
     });
     maintenance.start();
     mlsMaintenance.start();
+    startRecruitmentCacheMaintenance(infrastructure.repository.getRecruitmentSourceStore(), recruitmentMaintenanceRegistry);
+    stopRecruitmentIntake = startRecruitmentIntake(created.createRecruitmentIntakeWorker(), recruitmentMaintenanceRegistry);
+    stopRecruitmentAnalysis = startRecruitmentBackgroundAnalysis(created.createRecruitmentBackgroundWorker(), recruitmentMaintenanceRegistry);
     console.log(
       `[Otto Enterprise] PostgreSQL authority ready at http://${created.host}:${created.port}`,
     );

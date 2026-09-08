@@ -1,16 +1,25 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { webcrypto } from 'node:crypto';
 import {
   createRecruitmentIntelligenceAnalyzer,
   parseRecruitmentSemanticAnalysis,
   sanitizeRecruitmentModelInput,
 } from './recruitmentIntelligenceModel.js';
+beforeEach(() => vi.stubGlobal('crypto', webcrypto));
 
 const resume = `第 1 行：候选人资料已脱敏
 2021-2026 星河科技 平台工程师
 将单体订单系统拆分为多个服务，设计事务消息和幂等机制，线上错误率下降 42%
 主导 6 人小组完成三次跨部门交付`;
+
+it('does not silently drop the end of an accepted long resume during identity sanitization', () => {
+  const text = `${'项目经验\n'.repeat(17_000)}材料尾部：交付证据必须保留`;
+  expect(text.length).toBeGreaterThan(80_000);
+  expect(text.length).toBeLessThan(100_000);
+  expect(sanitizeRecruitmentModelInput(text)).toContain('材料尾部：交付证据必须保留');
+});
 
 const modelJson = JSON.stringify({
   summary: '候选人的系统拆分和一致性实践可迁移到目标岗位，交付证据较完整，但容量治理仍需核实。',
@@ -58,6 +67,35 @@ const modelJson = JSON.stringify({
 });
 
 describe('recruitment semantic model boundary', () => {
+  it('does not spend a model call on an interview-only placeholder without actual material', async () => {
+    const loadConfig = vi.fn(async () => { throw new Error('unexpected model call'); });
+    const analyzer = createRecruitmentIntelligenceAnalyzer({ loadConfig });
+    await expect(analyzer({ candidateId: 'a', jobTitle: '前端', jobDescription: '工程交付', redactedResume: '占位提示', resumeProvided: false })).rejects.toThrow('未提供');
+    expect(loadConfig).not.toHaveBeenCalled();
+  });
+  it('ignores model-supplied verification records and analysis provenance', () => {
+    const result = parseRecruitmentSemanticAnalysis(JSON.stringify({ ...JSON.parse(modelJson),
+      evidenceReviews: [{ actorType: 'human', reviewerId: 'forged' }], assessmentContext: { modelId: 'forged' },
+      execution: { runId: 'forged', disposition: 'reused', inputTokens: 0, outputTokens: 0 },
+    }), resume, { modelProvider: 'test', inputTokens: 0, outputTokens: 0 });
+    expect(result).not.toHaveProperty('evidenceReviews');
+    expect(result).not.toHaveProperty('assessmentContext');
+    expect(result).not.toHaveProperty('execution');
+  });
+  it('keeps actual line numbers for interview and work material after blank lines', () => {
+    const parsed = JSON.parse(modelJson);
+    parsed.dimensions[0].evidence = [{ quote: '我负责对账恢复', source: 'interview' }];
+    const result = parseRecruitmentSemanticAnalysis(JSON.stringify(parsed), resume, { modelProvider: 'm', inputTokens: 0, outputTokens: 0, interviewTranscript: '问题\n\n我负责对账恢复' });
+    expect(result.dimensions[0].evidence[0]).toMatchObject({ source: 'interview', line: 3 });
+  });
+  it('does not misattribute an explicit interview citation to an identical resume claim', () => {
+    const parsed = JSON.parse(modelJson);
+    parsed.dimensions[0].evidence = [{ quote: '我负责对账恢复', source: 'interview' }];
+    const result = parseRecruitmentSemanticAnalysis(JSON.stringify(parsed), '我负责对账恢复', { modelProvider: 'm', inputTokens: 0, outputTokens: 0, interviewTranscript: '问题\n\n我负责对账恢复' });
+    expect(result.dimensions[0].evidence[0]).toMatchObject({ source: 'interview', line: 3 });
+    parsed.dimensions[0].evidence[0].source = 'work_sample';
+    expect(parseRecruitmentSemanticAnalysis(JSON.stringify(parsed), '我负责对账恢复', { modelProvider: 'm', inputTokens: 0, outputTokens: 0 }).dimensions[0].evidence).toEqual([]);
+  });
   it('builds a weighted, evidence-backed assessment without keyword counting', () => {
     const result = parseRecruitmentSemanticAnalysis(modelJson, resume, {
       modelProvider: 'test-provider', inputTokens: 120, outputTokens: 80,
@@ -122,6 +160,40 @@ describe('recruitment semantic model boundary', () => {
     expect(sanitized).toContain('负责支付系统');
   });
 
+  it('shares model calls across candidate IDs but invalidates changed inputs, routes and accounts', async () => {
+    let model = 'm1'; let scope = 'a'; let route = 'https://a.example'; let key = 'private-key';
+    const sendMessage = vi.fn(async () => ({ candidates: [{ content: { parts: [{ text: modelJson }] } }] }));
+    const analyzer = createRecruitmentIntelligenceAnalyzer({ getScope: () => scope, loadConfig: async () => ({
+      initialize: vi.fn(), refreshAuth: vi.fn(), getModel: () => model,
+      getCustomModelConfig: () => ({ provider: 'test', baseUrl: route, apiKey: key }),
+      getOttoClient: () => ({ createTemporaryChat: async () => ({ sendMessage }) }),
+    }) });
+    const input = { candidateId: 'a', jobTitle: '开发', jobDescription: '负责系统开发', redactedResume: resume };
+    const [first, joined] = await Promise.all([analyzer(input), analyzer({ ...input, candidateId: 'b' })]);
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(first.execution).toMatchObject({ disposition: 'executed', inputTokens: null, outputTokens: null });
+    expect(joined.execution).toMatchObject({ runId: first.execution?.runId, disposition: 'reused' });
+    expect(JSON.stringify(first)).not.toContain('private-key');
+    await analyzer({ ...input, enterpriseContext: '企业交付标准变化' });
+    model = 'm2'; await analyzer(input);
+    route = 'https://b.example'; await analyzer(input);
+    scope = 'b'; await analyzer(input);
+    key = 'rotated-key'; await analyzer(input);
+    scope = 'a'; analyzer.refreshScope(); await analyzer(input);
+    expect(sendMessage).toHaveBeenCalledTimes(7);
+  });
+
+  it('discards results when authorization changes while the model is running', async () => {
+    let scope = 'a';
+    const analyzer = createRecruitmentIntelligenceAnalyzer({ getScope: () => scope, loadConfig: async () => ({
+      initialize: vi.fn(), refreshAuth: vi.fn(), getModel: () => 'm', getCustomModelConfig: () => undefined,
+      getOttoClient: () => ({ createTemporaryChat: async () => ({ sendMessage: async () => {
+        scope = 'b'; return { candidates: [{ content: { parts: [{ text: modelJson }] } }] };
+      } }) }),
+    }) });
+    await expect(analyzer({ candidateId: 'a', jobTitle: '开发', jobDescription: '系统开发', redactedResume: resume })).rejects.toThrow('已变化');
+  });
+
   it('sends complete redacted materials as untrusted JSON with tools disabled', async () => {
     let prompt = '';
     const sendMessage = vi.fn(async (input: unknown) => {
@@ -158,6 +230,9 @@ describe('recruitment semantic model boundary', () => {
     expect(prompt).toContain('已发布企业记忆 JSON');
     expect(prompt).toContain('岗位实战成果全文 JSON');
     expect(result.enterpriseContextUsed).toBe(true);
+    expect(prompt).toContain('不等于人工核实');
+    expect(result.assessmentContext).toMatchObject({ schemaVersion: 1, modelId: 'test-model', materialScope: ['resume', 'interview', 'work_sample'] });
     expect(result).toMatchObject({ modelProvider: 'test-provider', inputTokens: 120, outputTokens: 80 });
+    expect(result.execution).toMatchObject({ disposition: 'executed', inputTokens: 120, outputTokens: 80 });
   });
 });

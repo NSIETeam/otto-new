@@ -115,7 +115,8 @@ describe('剩余工作区能力对话桥', () => {
       ...health.input, text: '查看企业记忆健康图谱',
     })).toBe(true);
     expect(listKnowledge).toHaveBeenCalledWith({ includeReview: true });
-    expect(health.messages.at(-1)?.text).toContain('治理完成度');
+    expect(health.messages.at(-1)?.text).toContain('企业记忆依据概览');
+    expect(health.messages.at(-1)?.text).not.toContain('/100');
     expect(health.messages.at(-1)?.text).toContain('存在冲突：1');
 
     const next = harness({ listKnowledge });

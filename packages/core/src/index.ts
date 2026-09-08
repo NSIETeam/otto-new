@@ -370,3 +370,4 @@ export * from './customer-modules/index.js';
 
 // Export ACP-facing command helpers
 export * as AcpCommands from './commands/index.js';
+export { installTurnExecutionGuard, assertTurnExecutionAllowed } from './policy/turnExecutionGuard.js';

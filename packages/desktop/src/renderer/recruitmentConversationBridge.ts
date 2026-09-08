@@ -12,6 +12,13 @@ import {
   type CandidateWorkspace,
   type RecruitmentWorkspaceStore,
 } from './recruitmentWorkspaceStore.js';
+import { createManualCandidateSource } from './recruitmentSources.js';
+import { assertRecruitmentHistoryCapacity } from './recruitmentAnalysisHistory.js';
+import { importRecruitmentSourceCandidate, type RecruitmentSourceImportInput } from './recruitmentSourceImport.js';
+import { withRecruitmentIntakeContext } from './recruitmentIntakeContext.js';
+import type { RecruitmentGatewaySearchResult, RecruitmentJobAction, RecruitmentJobResponse } from 'otto-server';
+import { recruitmentArchiveFingerprint } from './recruitmentArchive.js';
+import { evidenceSupportLabel, evidenceSourceLabel, RECRUITMENT_SUPPORT_NOTICE, RECRUITMENT_COVERAGE_NOTICE } from '../main/recruitmentAssessment.js';
 import type { ConversationActionDraftSummary } from './conversationActionDraft.js';
 import type {
   RecruitmentEvidenceGraphNode,
@@ -29,6 +36,7 @@ const AUDIO_EXTENSIONS = new Set(['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'op
 type RecruitmentActionKind = 'resume-import' | 'audio-import' | 'purge-candidate';
 
 export interface RecruitmentConversationDraft {
+  workspaceEpoch?: number;
   id: string;
   kind: RecruitmentActionKind;
   sessionId: string;
@@ -64,6 +72,12 @@ export interface RecruitmentConversationInput {
   analyzeResume(input: RecruitmentSemanticAnalysisInput): Promise<RecruitmentSemanticEvaluation>;
   transcribe(path: string): Promise<RecruitmentTranscription>;
   loadEnterpriseContext?(query: string): Promise<string>;
+  /** 已通过连接状态和工具合同验证、可交给通用 Agent 调用的招聘来源。 */
+  automaticSourceLabels?: readonly string[];
+  getSourceMaterial?: RecruitmentSourceImportInput['getMaterial'];
+  searchSources?(input: { requisitionId: string; query: string }): Promise<RecruitmentGatewaySearchResult>;
+  queryRelatedApplications?(action: Extract<RecruitmentJobAction, { kind: 'related' }>): Promise<Extract<RecruitmentJobResponse, { kind: 'related' }>>;
+  signal?: AbortSignal;
   postMessage(role: 'user' | 'assistant', text: string): void;
   /** UI 草稿中心确认时必须绑定当前展示的草稿，拒绝串单或过期确认。 */
   expectedDraftId?: string;
@@ -71,6 +85,9 @@ export interface RecruitmentConversationInput {
 }
 
 type RecruitmentIntent = RecruitmentActionKind
+  | 'related-applications'
+  | 'source-import'
+  | 'source-search'
   | 'screening'
   | 'evidence-graph'
   | 'interview-kit'
@@ -94,8 +111,15 @@ function labeledValue(text: string, labels: readonly string[]): string {
   return clean(match?.[1]);
 }
 
+function looksLikeCandidateSourcingRequest(text: string): boolean {
+  return /(?:找|寻找|搜索|搜寻|寻访|推荐|匹配).{0,24}(?:候选人|人才|简历|工程师|设计师|产品经理|运营|销售|会计|专员|负责人|助理|主管|经理)/u.test(text);
+}
+
 function detectIntent(text: string): RecruitmentIntent | null {
   if (/(?:介绍|解释|是什么|怎么用|如何使用|功能)/u.test(text)) return null;
+  if (/^(?:请|帮我)?(?:查看|查询).{0,8}候选人.{0,8}(?:其他|其它)岗位.{0,8}(?:记录|进展)[。！!]?$/u.test(text.trim())) return 'related-applications';
+  if (sourceCandidateIndex(text) !== null) return 'source-import';
+  if (looksLikeCandidateSourcingRequest(text)) return 'source-search';
   if (/(?:删除|清除).{0,8}(?:当前)?候选人(?:材料|数据|简历)/u.test(text)) return 'purge-candidate';
   if (/(?:招聘)?隐私与审计|招聘审计|候选人材料保存期限/u.test(text)) return 'privacy-audit';
   if (/(?:岗位|候选人)?证据图谱|证据链|哪些能力.{0,8}(?:已验证|未验证)/u.test(text)) return 'evidence-graph';
@@ -109,6 +133,13 @@ function detectIntent(text: string): RecruitmentIntent | null {
   return null;
 }
 
+function sourceCandidateIndex(text: string): number | null {
+  const match = /^(?:我确认已取得候选人材料分析授权[，,。]\s*)?(?:请|帮我)?(?:分析|导入)(?:找到的|检索到的)?第\s*(\d{1,3}|[一二三四五六七八九十])\s*(?:位|个)候选人[。！!]?$/u.exec(text.trim());
+  if (!match) return null;
+  const number = Number(match[1]) || '一二三四五六七八九十'.indexOf(match[1]!) + 1;
+  return number - 1;
+}
+
 function extension(path: string): string {
   return path.split(/[\\/]/u).at(-1)?.split('.').at(-1)?.toLowerCase() ?? '';
 }
@@ -119,7 +150,8 @@ function timestamp(seconds: number): string {
 }
 
 function applyResumeContext(input: RecruitmentConversationInput): void {
-  const naturalGoal = looksLikeNaturalRecruitmentGoal(input.text);
+  const naturalGoal = looksLikeNaturalRecruitmentGoal(input.text)
+    || looksLikeCandidateSourcingRequest(input.text);
   const title = labeledValue(input.text, ['岗位名称', '职位名称', '招聘岗位'])
     || (naturalGoal ? inferRecruitmentJobTitle(input.text) : '');
   const description = labeledValue(input.text, ['岗位要求', '任职要求', '职位要求'])
@@ -153,7 +185,7 @@ function screeningMessage(candidate: CandidateWorkspace): string {
       : '无可回查原文，本维度分数已受限';
     return `${index + 1}. **${dimension.label} ${dimension.score}**：${clean(dimension.assessment, 500)}\n   原文证据：${evidence}`;
   });
-  return `候选人全文综合分析：**${evaluation.overallScore}/100**（证据覆盖 ${evaluation.evidenceCoverage}%）\n\n${clean(evaluation.summary, 800)}\n\n${dimensions.join('\n\n')}\n\n该分数是当前材料与当前岗位的贴合度，不是录用概率；最终招聘决定必须由招聘人员作出并复核原文。`;
+  return `候选人全文综合分析：**${evaluation.overallScore}/100**（引用维度覆盖 ${evaluation.evidenceCoverage}%）\n\n${clean(evaluation.summary, 800)}\n\n${dimensions.join('\n\n')}\n\n该分数是当前材料与当前岗位的贴合度，不是录用概率；最终招聘决定必须由招聘人员作出并复核原文。\n\n${RECRUITMENT_COVERAGE_NOTICE}`;
 }
 
 function interviewKitMessage(candidate: CandidateWorkspace): string {
@@ -184,17 +216,13 @@ function evidenceGraphMessage(candidate: CandidateWorkspace): string {
       gaps: item.status === 'met' ? [] : [item.explanation],
       nextQuestion: '',
     }));
-  const labels = {
-    verified: '已验证', partially_verified: '部分验证', contradicted: '存在矛盾',
-    untested: '尚未验证', unclear: '材料不清楚',
-  } as const;
   const lines = graph.map((item, index) => {
     const evidence = item.evidence.length
-      ? item.evidence.map((entry) => `${entry.source === 'interview' ? '面试' : entry.source === 'work_sample' ? '实战' : '简历'}第 ${entry.line} 行：${clean(entry.quote, 240)}`).join('；')
+      ? item.evidence.map((entry) => `${evidenceSourceLabel(entry.source)} · ${entry.source === 'interview' ? '面试' : entry.source === 'work_sample' ? '实战' : '简历'}第 ${entry.line} 行：${clean(entry.quote, 240)}`).join('；')
       : '暂无可回查证据';
-    return `${index + 1}. **${clean(item.criterion, 300)}｜${labels[item.status]}**\n   ${clean(item.assessment, 400)}\n   证据：${evidence}${item.nextQuestion ? `\n   下一步核验：${clean(item.nextQuestion, 400)}` : ''}`;
+    return `${index + 1}. **${clean(item.criterion, 300)}｜${evidenceSupportLabel(item.status)}**\n   ${clean(item.assessment, 400)}\n   证据：${evidence}${item.nextQuestion ? `\n   下一步核验：${clean(item.nextQuestion, 400)}` : ''}`;
   });
-  return `岗位—候选人证据图谱${evaluation.enterpriseContextUsed ? '（已结合已发布企业记忆）' : ''}：\n\n${lines.join('\n\n')}\n\nOtto 只整理证据状态，不自动作出录用或淘汰决定。`;
+  return `岗位—候选人证据图谱${evaluation.enterpriseContextUsed ? '（已结合已发布企业记忆）' : ''}：\n\n${lines.join('\n\n')}\n\n${RECRUITMENT_SUPPORT_NOTICE}\n\n人工逐项核实记录可在右侧“岗位证据图谱”单独查看和填写，模型不替人核实，也不自动作出录用或淘汰决定。`;
 }
 
 function interviewCopilotMessage(candidate: CandidateWorkspace): string {
@@ -254,6 +282,7 @@ function createDraft(
 ): RecruitmentConversationDraft {
   return {
     id: `recruitment:${kind}:${crypto.randomUUID()}`,
+    workspaceEpoch: input.store.getWorkspaceEpoch(),
     kind,
     sessionId: input.sessionId,
     accountId: input.accountId,
@@ -285,7 +314,14 @@ async function importResume(
   draft: RecruitmentConversationDraft,
   now: number,
 ): Promise<void> {
+  const state = input.store.getSnapshot();
+  const epoch = input.store.getWorkspaceEpoch();
+  const assertCurrent = (): void => {
+    const current = input.store.getSnapshot();
+    if (input.signal?.aborted || input.store.getWorkspaceEpoch() !== epoch || current.jobTitle !== state.jobTitle || current.jobDescription !== state.jobDescription || current.retentionDays !== state.retentionDays || !current.consentConfirmed) throw new Error('招聘岗位或授权已变化，本次结果不会写入其他工作台');
+  };
   const filePaths = (await input.selectFiles()).slice(0, 3);
+  assertCurrent();
   if (!filePaths.length) {
     input.postMessage('assistant', '你取消了文件选择，候选人材料尚未导入；草稿仍保留。');
     return;
@@ -298,7 +334,6 @@ async function importResume(
   if (resumePaths.length > 1 || mediaPaths.length > 1) {
     throw new Error('对话入口一次处理一位候选人的一份简历和一份面试材料；批量分析请使用右侧智能招聘工作台');
   }
-  const state = input.store.getSnapshot();
   const candidateId = `candidate:${crypto.randomUUID()}`;
   let extracted: ExtractedDocument | null = null;
   if (resumePaths[0]) {
@@ -339,21 +374,27 @@ async function importResume(
       jobDescription: state.jobDescription,
     });
   }
-  const semanticEvaluation = await input.analyzeResume({
+  const enterpriseContext = await input.loadEnterpriseContext?.(`${state.jobTitle} ${state.jobDescription}`);
+  assertCurrent();
+  const semanticEvaluation = await input.analyzeResume(withRecruitmentIntakeContext(input.store, {
     candidateId,
     jobTitle: state.jobTitle,
     jobDescription: state.jobDescription,
+    resumeProvided: Boolean(extracted),
     redactedResume: extracted
       ? analysis.redactedResume
       : '当前候选人未提供简历，请只根据面试转写判断，并将缺少的履历信息列为待核实事项。',
     ...(transcriptText ? { interviewTranscript: transcriptText } : {}),
-    ...(input.loadEnterpriseContext
-      ? { enterpriseContext: await input.loadEnterpriseContext(`${state.jobTitle} ${state.jobDescription}`) }
-      : {}),
-  });
+    ...(enterpriseContext ? { enterpriseContext } : {}),
+  }));
+  assertCurrent();
   const candidate: CandidateWorkspace = {
     id: candidateId,
     fileName: clean(extracted?.fileName ?? mediaPaths[0]?.split(/[\\/]/u).at(-1) ?? '候选人材料', 300),
+    sources: [createManualCandidateSource(
+      clean(extracted?.fileName ?? mediaPaths[0]?.split(/[\\/]/u).at(-1) ?? '候选人材料', 300),
+      new Date(now).toISOString(),
+    )],
     consentAt: new Date(now).toISOString(),
     retentionDays: state.retentionDays,
     expiresAt: new Date(now + state.retentionDays * 86_400_000).toISOString(),
@@ -385,16 +426,24 @@ async function importResume(
     `${semanticEvaluation.analysisVersion}/${semanticEvaluation.modelProvider}`,
   ), ...current]);
   input.registry.clear(draft.sessionId, draft.accountId);
-  input.postMessage('assistant', `候选人档案已生成：${extracted && transcriptText ? '简历与面试材料已联合分析' : extracted ? '简历全文已分析' : '已根据面试材料分析，未提供的履历信息已标为待核实'}。当前材料贴合度 ${semanticEvaluation.overallScore}/100，证据覆盖 ${semanticEvaluation.evidenceCoverage}%。结果已同步到右侧智能招聘；每条能力判断可回查原文，手机号、邮箱等身份字段没有进入评价输入。`);
+  input.postMessage('assistant', `候选人档案已生成：${extracted && transcriptText ? '简历与面试材料已联合分析' : extracted ? '简历全文已分析' : '已根据面试材料分析，未提供的履历信息已标为待核实'}。当前材料贴合度 ${semanticEvaluation.overallScore}/100，引用维度覆盖 ${semanticEvaluation.evidenceCoverage}%。结果已同步到右侧智能招聘；每条能力判断可回查原文，手机号、邮箱等身份字段没有进入评价输入。\n\n${RECRUITMENT_COVERAGE_NOTICE}`);
 }
 
 async function importAudio(
   input: RecruitmentConversationInput,
   draft: RecruitmentConversationDraft,
 ): Promise<void> {
-  const candidate = input.store.getSnapshot().candidates.find((item) => item.id === draft.candidateId);
+  const state = input.store.getSnapshot();
+  const epoch = input.store.getWorkspaceEpoch();
+  const candidate = state.candidates.find((item) => item.id === draft.candidateId);
   if (!candidate) throw new Error('候选人已切换或材料已被清除，请重新发起音频分析');
+  assertRecruitmentHistoryCapacity(candidate);
+  const assertCurrent = (): void => {
+    const current = input.store.getSnapshot();
+    if (input.signal?.aborted || input.store.getWorkspaceEpoch() !== epoch || current.jobTitle !== state.jobTitle || current.jobDescription !== state.jobDescription || current.candidates.find((item) => item.id === candidate.id) !== candidate) throw new Error('招聘岗位或候选人已变化，本次结果不会覆盖新档案');
+  };
   const [filePath] = await input.selectFiles();
+  assertCurrent();
   if (!filePath) {
     input.postMessage('assistant', '你取消了文件选择，面试录音尚未处理；草稿仍保留。');
     return;
@@ -404,14 +453,17 @@ async function importAudio(
   const transcriptText = result.segments.map((segment) => (
     `[${timestamp(segment.startSeconds)}] ${clean(segment.speaker, 80)}：${clean(segment.text)}`
   )).join('\n');
-  const state = input.store.getSnapshot();
+  assertCurrent();
   const transcriptReport = analyzeInterviewTranscript({
     transcript: transcriptText,
     redactedResume: candidate.analysis.redactedResume,
     jobDescription: state.jobDescription,
   });
-  const semanticEvaluation = await input.analyzeResume({
+  const enterpriseContext = await input.loadEnterpriseContext?.(`${state.jobTitle} ${state.jobDescription}`);
+  assertCurrent();
+  const semanticEvaluation = await input.analyzeResume(withRecruitmentIntakeContext(input.store, {
     candidateId: candidate.id,
+    resumeProvided: candidate.semanticMaterials !== 'interview',
     jobTitle: state.jobTitle,
     jobDescription: state.jobDescription,
     redactedResume: candidate.analysis.redactedResume,
@@ -419,10 +471,9 @@ async function importAudio(
     ...(candidate.workSampleText?.trim()
       ? { workSampleArtifact: candidate.workSampleText }
       : {}),
-    ...(input.loadEnterpriseContext
-      ? { enterpriseContext: await input.loadEnterpriseContext(`${state.jobTitle} ${state.jobDescription}`) }
-      : {}),
-  });
+    ...(enterpriseContext ? { enterpriseContext } : {}),
+  }));
+  assertCurrent();
   input.store.setCandidates((current) => current.map((item) => item.id === candidate.id ? {
     ...item,
     transcriptText,
@@ -430,7 +481,7 @@ async function importAudio(
     transcriptWarning: clean(result.warning),
     semanticEvaluation,
     semanticError: '',
-    semanticMaterials: 'resume_interview',
+    semanticMaterials: candidate.semanticMaterials === 'interview' ? 'interview' : 'resume_interview',
   } : item));
   input.store.setAudits((current) => [makeRecruitmentAudit(
     candidate.id,
@@ -440,7 +491,7 @@ async function importAudio(
     `${semanticEvaluation.analysisVersion}/${semanticEvaluation.modelProvider}`,
   ), ...current]);
   input.registry.clear(draft.sessionId, draft.accountId);
-  input.postMessage('assistant', `面试材料已与简历联合分析：当前材料贴合度 ${semanticEvaluation.overallScore}/100，证据覆盖 ${semanticEvaluation.evidenceCoverage}%。候选人档案和针对性面试问题已经同步更新；只分析回答文字，不分析口音、音高、表情或情绪。`);
+  input.postMessage('assistant', `面试材料已与简历联合分析：当前材料贴合度 ${semanticEvaluation.overallScore}/100，引用维度覆盖 ${semanticEvaluation.evidenceCoverage}%。候选人档案和针对性面试问题已经同步更新；只分析回答文字，不分析口音、音高、表情或情绪。\n\n${RECRUITMENT_COVERAGE_NOTICE}`);
 }
 
 export class RecruitmentConversationDraftRegistry {
@@ -570,13 +621,111 @@ export async function handleRecruitmentConversation(
   if (!input.enabled || !input.text.trim()) return false;
   const now = input.now?.() ?? Date.now();
   let draft = input.registry.get(input.sessionId, input.accountId, now);
+  if (draft && (draft.workspaceEpoch ?? 0) !== input.store.getWorkspaceEpoch()) {
+    input.registry.clear(input.sessionId, input.accountId);
+    input.postMessage('assistant', '招聘工作台已切换，旧操作草稿已取消，请针对当前岗位重新发起。');
+    return true;
+  }
   if (input.expectedDraftId && draft?.id !== input.expectedDraftId) {
     input.postMessage('assistant', '该招聘操作草稿已变化或过期，本次没有执行。请检查当前草稿后重新确认。');
     return true;
   }
   const intent = draft ? null : detectIntent(input.text);
   if (!draft && !intent) return false;
+  if (!draft && intent === 'source-search' && !input.searchSources && input.automaticSourceLabels?.length) {
+    // 不在本地桥消费这条消息，让正常 Agent 回合调用已经验证的 MCP 工具。
+    // 岗位目标仍写入共享工作区，后续导入/面试沿用同一目标。
+    applyResumeContext(input);
+    return false;
+  }
   input.postMessage('user', input.text.trim());
+
+  if (!draft && intent === 'related-applications') {
+    const state = input.store.getSnapshot();
+    const candidate = input.store.activeCandidate();
+    if (!candidate || !state.sharedJob?.revision || state.sharedJob.savedFingerprint !== recruitmentArchiveFingerprint(state)) {
+      input.postMessage('assistant', '请先在右侧选中候选人并保存当前企业岗位，再查询其他岗位记录。');
+      return true;
+    }
+    if (!input.queryRelatedApplications) { input.postMessage('assistant', '请登录企业并升级到支持跨岗位档案的客户端与服务器。'); return true; }
+    try {
+      if (input.signal?.aborted) return true;
+      const result = await input.queryRelatedApplications({ kind: 'related', jobId: state.sharedJob.id, candidateId: candidate.id });
+      if (input.signal?.aborted) return true;
+      if (input.store.getSnapshot() !== state) { input.postMessage('assistant', '工作台已变化，未展示旧候选人的查询结果，请重新查询。'); return true; }
+      const stages = { new: '待分析', reviewing: '了解中', interview: '面试中', follow_up: '待跟进', closed: '已结束' };
+      input.postMessage('assistant', [
+        '只查询你有权访问的企业岗位，未修改档案或调用模型。',
+        ...result.matches.slice(0, 20).map((item) => `• ${clean(item.jobTitle, 100)}：${stages[item.stage]}；${item.reason === 'linked' ? '已人工关联' : '仅身份匹配线索，尚未人工确认'}。`),
+        ...(!result.matches.length ? ['本页未找到相关记录；同名或单个联系方式一致不会自动合并。'] : []),
+        ...(result.nextCursor || result.matches.length > 20 ? ['还有后续页或更多记录，请在右侧“关联其他岗位与复用资料”中继续查看。'] : []),
+        '复用或关联材料请在右侧核对目标岗位并确认；各岗位的分析、进展与决定独立保存。',
+      ].join('\n\n'));
+    } catch (error) { if (!input.signal?.aborted) input.postMessage('assistant', error instanceof Error ? error.message : '岗位记录查询失败，请重试。'); }
+    return true;
+  }
+
+  if (!draft && intent === 'source-import') {
+    const index = sourceCandidateIndex(input.text)!;
+    const search = input.store.getSnapshot().sourceSearch;
+    const candidate = search?.result.candidates[index];
+    if (!candidate || !input.getSourceMaterial) {
+      input.postMessage('assistant', '没有找到对应的企业检索结果，请先在候选人来源中按当前岗位检索。');
+      return true;
+    }
+    if (/^我确认已取得候选人材料分析授权[，,。]/u.test(input.text.trim())) input.store.setConsentConfirmed(true);
+    if (!input.store.getSnapshot().consentConfirmed) {
+      input.postMessage('assistant', `分析前需要确认材料授权。请在右侧勾选授权，或回复“我确认已取得候选人材料分析授权，分析找到的第 ${index + 1} 位候选人”。`);
+      return true;
+    }
+    if (candidate.sources.length !== 1) {
+      input.postMessage('assistant', '这位候选人有多个来源，请在右侧检索结果中选择要读取的来源，避免误用不同版本的材料。');
+      return true;
+    }
+    try {
+      const state = input.store.getSnapshot();
+      const enterpriseContext = await input.loadEnterpriseContext?.(`${state.jobTitle} ${state.jobDescription}`) ?? '';
+      if (input.signal?.aborted) return true;
+      if (input.store.getSnapshot().sourceSearch !== search) throw new Error('检索结果已变化，请重新选择候选人');
+      const result = await importRecruitmentSourceCandidate({
+        store: input.store, canonicalId: candidate.canonicalId, sourceId: candidate.sources[0]!.sourceId,
+        getMaterial: input.getSourceMaterial, analyzeResume: input.analyzeResume, enterpriseContext,
+        signal: input.signal,
+      });
+      if (input.signal?.aborted) return true;
+      input.postMessage('assistant', result.status === 'incomplete' ? '来源资料已进入候选人档案，但尚未取得完整正文。本次没有调用模型，请补充完整简历。'
+        : result.status === 'analysis_failed' ? result.candidate.semanticError!
+          : `${result.status === 'unchanged' ? '材料与岗位要求未变化，已复用已有结果，没有重复消耗分析 Token。' : '来源材料已入档并完成全文分析。'}\n\n${screeningMessage(result.candidate)}\n\n右侧档案已同步，你可以继续说“生成面试问题”。`);
+    } catch (error) {
+      if (!input.signal?.aborted) input.postMessage('assistant', error instanceof Error ? error.message : '候选人材料分析失败，请重试。');
+    }
+    return true;
+  }
+
+  if (!draft && intent === 'source-search' && input.searchSources) {
+    applyResumeContext(input);
+    const state = input.store.getSnapshot();
+    const requisitionId = input.store.getSourceRequisitionId();
+    const sourceWorkspaceEpoch = input.store.getWorkspaceEpoch();
+    try {
+      if (input.signal?.aborted) return true;
+      const result = await input.searchSources({ requisitionId, query: `岗位：${state.jobTitle}\n招聘目标：${state.jobDescription}` });
+      if (input.signal?.aborted) return true;
+      input.store.setSourceSearch({ result, requisitionId, jobTitle: state.jobTitle, jobDescription: state.jobDescription }, sourceWorkspaceEpoch);
+      const lines = result.candidates.slice(0, 10).map((candidate, index) => `${index + 1}. ${clean(candidate.displayName, 100)}：${clean(candidate.headline, 200) || '详情待获取'}（来源：${candidate.sources.map((source) => clean(source.sourceLabel, 100)).join('、')}）`);
+      input.postMessage('assistant', [
+        `本次找到 ${result.candidates.length} 位候选人，结果已同步到右侧工作台。以下仅为来源摘要，尚未完成全文分析。`,
+        ...result.sources.filter((source) => source.message).map((source) => `${clean(source.label, 100)}：${clean(source.message, 500)}`),
+        ...lines,
+        ...(result.sources.some((source) => source.status !== 'ok') ? ['部分来源未完成检索，当前列表不代表所有来源。'] : []),
+        ...(result.sources.some((source) => source.nextCursor) ? ['来源还有后续结果，本次仅展示已获取的一批。'] : []),
+        result.candidates.length ? '可以说“分析找到的第 1 位候选人”，或在右侧选择“获取材料并分析”。' : '可以调整要求后再次检索，或手动导入简历。',
+      ].join('\n\n'));
+    } catch (error) {
+      if (!input.signal?.aborted) input.postMessage('assistant', error instanceof Error ? error.message : '企业招聘来源检索失败，请检查授权或先手动导入材料。');
+    }
+    return true;
+  }
 
   if (draft && isCancel(input.text)) {
     input.registry.clear(input.sessionId, input.accountId);
@@ -611,6 +760,13 @@ export async function handleRecruitmentConversation(
   }
   if (!draft && intent === 'privacy-audit') {
     input.postMessage('assistant', privacyMessage(input.store));
+    return true;
+  }
+  if (!draft && intent === 'source-search') {
+    applyResumeContext(input);
+    const state = input.store.getSnapshot();
+    const goal = state.jobTitle ? `“${state.jobTitle}”` : '该岗位';
+    input.postMessage('assistant', `Otto 已记下${goal}的招聘目标，但目前没有通过工具合同验证的自动寻才渠道。你可以在右侧“智能招聘 → 候选人来源”中配置招聘 MCP，或先手动导入简历；Otto 不会使用未授权爬虫代替正式接入。`);
     return true;
   }
 
@@ -704,7 +860,7 @@ export async function handleRecruitmentConversation(
         null,
       ), ...current]);
       input.registry.clear(draft.sessionId, draft.accountId);
-      input.postMessage('assistant', '当前候选人材料已清除；仅保留不含简历和录音原文的审计事件。');
+      input.postMessage('assistant', `当前工作台的候选人材料已清除；仅保留不含简历和录音原文的审计事件。${input.store.getSnapshot().sharedJob ? '该岗位已有企业共享档案，请在“企业共享岗位”再次保存，才能移除服务器当前副本。' : ''}`);
     } finally {
       input.registry.finish(input.sessionId, input.accountId);
     }

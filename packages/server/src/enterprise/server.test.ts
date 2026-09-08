@@ -16,6 +16,7 @@ import path from 'node:path';
 import { RecurringTaskRegistry } from 'otto-core';
 import { canonicalJson } from '../modules/commercial_control/signedEnvelope.js';
 import { currentLegalDocumentReferences } from '../modules/data_governance/index.js';
+import { RECRUITMENT_SEMANTIC_DIMENSIONS } from '../modules/recruitment_intelligence/recruitmentSemantic.js';
 import {
   e2eeDeviceApprovalSignaturePayload,
   e2eeMessageSignaturePayload,
@@ -231,6 +232,391 @@ beforeEach(() => {
 });
 
 describe('面向所有企业的政策服务', () => {
+  it('persists explicit intake through HTTP and feeds the shared inbox with the same authorized runtime', async () => {
+    const runtime = {
+      listSources: vi.fn(async () => [{ id: 'workable', label: 'Workable', accessMode: 'authorized_mcp', productionEnabled: true, authorized: true, searchable: true, materialReadable: true, capabilities: [], status: 'ready', authorizationEvidenceRecorded: true }]),
+      search: vi.fn(async () => ({ runId: 'background-run', candidates: [{ canonicalId: 'person', displayName: '候选人', identityKeys: [], sourceCount: 1, fieldEvidence: {}, sources: [{ sourceId: 'workable', sourceLabel: 'Workable', sourceRecordId: 'record' }] }], sources: [{ sourceId: 'workable', label: 'Workable', status: 'ok', count: 1, durationMs: 1 }] })),
+      getSearchRun: vi.fn(async () => null), getCandidateMaterial: vi.fn(async () => ({ runId: 'background-run', requisitionId: 'background-job', canonicalId: 'person', source: { sourceId: 'workable', sourceLabel: 'Workable', sourceRecordId: 'record' }, acquisitionMode: 'authorized_mcp', retrievedAt: new Date().toISOString(), contentHash: 'a'.repeat(64), material: { sourceRecordId: 'record', text: '企业应用 React 开发，负责交付及自动化测试。', completeness: 'full_text' } })),
+    };
+    const { base } = await startIsolated(ADMIN_TOKEN, null, { recruitmentSources: runtime });
+    const db = await import('./db.js');
+    const organization = db.createOrganization({ name: '后台接收企业', slug: 'intake-enterprise' });
+    const owner = db.createAccount({ organizationId: organization.id, username: 'intake-hr', password: 'intake-test-password', name: 'HR' });
+    const headers = { authorization: `Bearer ${db.createAuthSession(owner.id).token}`, 'content-type': 'application/json' };
+    const post = (action: unknown) => fetch(`${base}/enterprise/recruitment/jobs`, { method: 'POST', headers, body: JSON.stringify(action) });
+    expect((await post({ kind: 'save', jobId: 'background-job', expectedRevision: 0, title: '前端', description: 'React', candidates: [], sharingConfirmed: true })).status).toBe(200);
+    expect((await post({ kind: 'configure_intake', jobId: 'background-job', expectedRevision: 1, enabled: true, confirmed: true })).status).toBe(200);
+    await db.createRecruitmentIntakeWorker(runtime as import('../modules/recruitment_intelligence/index.js').RecruitmentSourceRuntime).tick();
+    expect(runtime.search).toHaveBeenCalledWith(expect.objectContaining({ organizationId: organization.id, actorAccountId: owner.id, requisitionId: 'background-job', sourceIds: ['workable'] }));
+    const received = await (await post({ kind: 'get', jobId: 'background-job' })).json();
+    expect(received.result.job.intake.runs[0]).toMatchObject({ status: 'completed', received: 1, modelInvoked: false });
+    expect(received.result.job.incomingMaterials[0].material.material.text).toContain('自动化测试');
+    expect((await post({ kind: 'configure_intake', jobId: 'background-job', expectedRevision: received.result.job.revision, enabled: false, confirmed: true })).status).toBe(200);
+    const claimTarget = { jobId: 'background-job', itemId: received.result.job.incomingMaterials[0].id, requestId: 'manual-client' };
+    const claimResponse = await post({ ...claimTarget, kind: 'claim_intake_analysis', candidateId: 'candidate', ...received.result.sync, confirmed: true });
+    expect(claimResponse.status).toBe(200);
+    const claimed = await claimResponse.json(); const claimId = claimed.result.job.incomingMaterials[0].manualAnalysis.id;
+    const start = { ...claimTarget, kind: 'start_intake_analysis', claimId };
+    expect((await post(start)).status).toBe(200);
+    expect((await post(start)).status).toBe(409);
+    const finished = await post({ ...start, kind: 'finish_intake_analysis', outcome: 'completed' });
+    expect(finished.status).toBe(200);
+    expect((await finished.json()).result.job.incomingMaterials[0].manualAnalysis).toMatchObject({ status: 'completed', actorAccountId: owner.id, candidateId: 'candidate' });
+    const health = await (await fetch(`${base}/enterprise/health`)).json();
+    expect(health.capabilities).toContain('recruitment_intake_claims_v1');
+    expect(health.capabilities).toContain('recruitment_auto_archive_v1');
+    expect(health.capabilities).toContain('recruitment_workable_acceptance_v1');
+    expect(health.capabilities).toContain('recruitment_organization_budget_v1');
+    expect(health.capabilities).toContain('recruitment_intake_once_v1');
+    const unconfiguredOnce = await post({ kind: 'analyze_intake_once', jobId: 'background-job', itemId: received.result.job.incomingMaterials[0].id, expectedRevision: claimed.result.job.revision + 2, scopeToken: received.result.sync.scopeToken, headerToken: received.result.sync.headerToken, modelVersion: 'unconfigured', confirmed: true });
+    expect(unconfiguredOnce.status).toBe(409);
+    expect(JSON.stringify(await unconfiguredOnce.json())).toContain('先保存企业模型与岗位额度');
+    const unapprovedSample = await fetch(`${base}/enterprise/recruitment/workable`, { method: 'POST', headers, body: JSON.stringify({ kind: 'material_probe', jobId: 'background-job', expectedRevision: 0, confirmed: true }) });
+    expect(unapprovedSample.status).toBe(403); expect(unapprovedSample.headers.get('cache-control')).toBe('no-store');
+    const fresh = await (await post({ kind: 'get', jobId: 'background-job' })).json();
+    expect((await post({ kind: 'configure_auto_archive', jobId: 'background-job', expectedRevision: fresh.result.job.revision, enabled: true, confirmed: false })).status).toBe(400);
+    const archive = await post({ kind: 'configure_auto_archive', jobId: 'background-job', expectedRevision: fresh.result.job.revision, enabled: true, confirmed: true, retentionDays: 7 });
+    expect(archive.status).toBe(200); expect((await archive.json()).result.job.autoArchive).toMatchObject({ enabled: true, retentionDays: 7, actorAccountId: owner.id, bindings: [] });
+  });
+  it('runs server-inbox one-off analysis through authenticated HTTP and separately authorized automatic filing using only synthetic provider responses', async () => {
+    const runtime = {
+      listSources: vi.fn(async () => [{ id: 'workable', label: 'Workable', accessMode: 'authorized_mcp', productionEnabled: true, authorized: true, searchable: true, materialReadable: true, capabilities: [], status: 'ready', authorizationEvidenceRecorded: true }]),
+      search: vi.fn(async () => ({ runId: 'once-source', candidates: [{ canonicalId: 'synthetic', displayName: '合成候选人', identityKeys: [], sourceCount: 1, fieldEvidence: {}, sources: [{ sourceId: 'workable', sourceLabel: 'Workable', sourceRecordId: 'synthetic' }] }], sources: [{ sourceId: 'workable', label: 'Workable', status: 'ok', count: 1, durationMs: 1 }] })),
+      getSearchRun: vi.fn(async () => null), getCandidateMaterial: vi.fn(async () => ({ runId: 'once-source', requisitionId: 'once-job', canonicalId: 'synthetic', source: { sourceId: 'workable', sourceLabel: 'Workable', sourceRecordId: 'synthetic' }, acquisitionMode: 'authorized_mcp', retrievedAt: new Date().toISOString(), contentHash: 'a'.repeat(64), material: { sourceRecordId: 'synthetic', text: '合成材料：具有 React 企业应用开发经验，负责自动化测试、故障定位和项目交付。', completeness: 'full_text' } })),
+    };
+    const network = globalThis.fetch; let paid = 0;
+    const provider = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (String(url).startsWith('http://127.0.0.1:')) return network(url, init);
+      if (String(url) !== 'https://synthetic-model.invalid/chat/completions') throw new Error('Unexpected external endpoint in isolated test');
+      paid++;
+      return Response.json({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ summary: '合成简历自述支持 React 开发，仍需面试核实', dimensions: RECRUITMENT_SEMANTIC_DIMENSIONS.map((d) => ({ ...d, score: 50, evidence: [] })), strengths: [], risks: [], missingInformation: [] }) } }], usage: { prompt_tokens: 300, completion_tokens: 100 } });
+    });
+    try {
+      const { base } = await startIsolated(ADMIN_TOKEN, null, { recruitmentSources: runtime });
+      const db = await import('./db.js');
+      const org = db.createOrganization({ name: '单次分析测试企业', slug: 'once-enterprise' });
+      const owner = db.createAccount({ organizationId: org.id, username: 'once-hr', password: 'isolated-test-password', name: 'HR' });
+      vi.stubEnv('OTTO_ENTERPRISE_CANARY_MODE', '');
+      vi.stubEnv('OTTO_RECRUITMENT_BACKGROUND_ANALYSIS_ENABLED', '1');
+      vi.stubEnv('OTTO_RECRUITMENT_MODEL_ORGANIZATION_IDS', org.id);
+      vi.stubEnv('OTTO_RECRUITMENT_MODEL_API_KEY', 'synthetic-not-a-real-key');
+      vi.stubEnv('OTTO_RECRUITMENT_MODEL', 'synthetic-model');
+      vi.stubEnv('OTTO_RECRUITMENT_MODEL_APPROVAL', 'isolated-test-only');
+      vi.stubEnv('OTTO_RECRUITMENT_MODEL_API_URL', 'https://synthetic-model.invalid/chat/completions');
+      vi.stubEnv('OTTO_RECRUITMENT_ORGANIZATION_BUDGETS', JSON.stringify([{ organizationId: org.id, dailyRequests: 1, dailyReservedTokens: 200_000 }]));
+      const headers = { authorization: `Bearer ${db.createAuthSession(owner.id).token}`, 'content-type': 'application/json' };
+      const post = async (action: unknown) => {
+        const response = await fetch(`${base}/enterprise/recruitment/jobs`, { method: 'POST', headers, body: JSON.stringify(action) });
+        expect(response.status).toBe(200); return (await response.json()).result;
+      };
+      await post({ kind: 'save', jobId: 'once-job', expectedRevision: 0, title: '前端', description: 'React 企业应用开发', candidates: [], sharingConfirmed: true });
+      await post({ kind: 'configure_intake', jobId: 'once-job', expectedRevision: 1, enabled: true, confirmed: true });
+      await db.createRecruitmentIntakeWorker(runtime as import('../modules/recruitment_intelligence/index.js').RecruitmentSourceRuntime).tick();
+      const received = await post({ kind: 'get', jobId: 'once-job' });
+      const configured = await post({ kind: 'configure_background_analysis', jobId: 'once-job', expectedRevision: received.job.revision, enabled: false, confirmed: true });
+      const ready = await post({ kind: 'configure_auto_archive', jobId: 'once-job', expectedRevision: configured.job.revision, enabled: true, confirmed: true, retentionDays: 7 });
+      expect(paid).toBe(0);
+      const action = { kind: 'analyze_intake_once', jobId: 'once-job', itemId: ready.job.incomingMaterials[0].id, expectedRevision: ready.job.revision, scopeToken: ready.sync.scopeToken, headerToken: ready.sync.headerToken, modelVersion: ready.job.backgroundAnalysis.modelVersion, confirmed: true };
+      const analyzed = await post(action);
+      expect(analyzed.job.backgroundAnalysis).toMatchObject({ enabled: false, organizationUsage: { requests: 1 } });
+      expect(analyzed.job.incomingMaterials[0].analysis).toMatchObject({ status: 'completed', trigger: 'manual', requestedBy: owner.id });
+      await post({ ...action, expectedRevision: analyzed.job.revision }); expect(paid).toBe(1);
+      await db.createRecruitmentBackgroundWorker().autoArchive.tick();
+      const filed = await post({ kind: 'get', jobId: 'once-job' });
+      expect(filed.job.incomingMaterials[0].archive.status).toBe('created');
+      expect(filed.job.candidates).toHaveLength(1); expect(paid).toBe(1);
+    } finally { provider.mockRestore(); vi.unstubAllEnvs(); }
+  });
+  it('installs Workable in the default host but does not advertise an unaccepted connector as searchable', async () => {
+    vi.stubEnv('OTTO_WORKABLE_REAL_ACCOUNT_VERIFIED', ''); vi.stubEnv('OTTO_WORKABLE_AUTHORIZATION_REFERENCE', '');
+    try {
+      const { base } = await startIsolated(ADMIN_TOKEN);
+      const db = await import('./db.js');
+      const org = db.createOrganization({ name: '默认招聘企业', slug: 'recruitment-default' });
+      const admin = db.createAccount({ organizationId: org.id, username: 'default-hr', password: 'fixture-password', name: 'HR', isAdmin: true });
+      const headers = { authorization: `Bearer ${db.createAuthSession(admin.id).token}` };
+      const response = await fetch(`${base}/enterprise/recruitment/sources`, { headers });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ searchableSourceCount: 0, sources: [{ id: 'workable', status: 'production_approval_required', searchable: false }] });
+    } finally { vi.unstubAllEnvs(); }
+  });
+  it('runs the default Workable HTTP chain with simulated provider data: bind, probe, search, persisted detail, then revoke', async () => {
+    vi.stubEnv('OTTO_WORKABLE_REAL_ACCOUNT_VERIFIED', '1'); vi.stubEnv('OTTO_WORKABLE_AUTHORIZATION_REFERENCE', 'fixture-only-not-live-acceptance');
+    const network = globalThis.fetch;
+    const tools = [
+      { name: 'get_accounts', inputSchema: { type: 'object', properties: {}, required: [] } },
+      { name: 'get_candidates', inputSchema: { type: 'object', properties: { account: { type: 'string' }, shortcode: { type: 'string' }, limit: { type: 'integer' } }, required: ['account', 'shortcode'] } },
+      { name: 'get_candidate', inputSchema: { type: 'object', properties: { account: { type: 'string' }, id: { type: 'integer' } }, required: ['account', 'id'] } },
+    ];
+    const calls: string[] = [];
+    const provider = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (String(url).startsWith('http://127.0.0.1:')) return network(url, init);
+      if (String(url) !== 'https://mcp.workable.com/mcp') throw new Error('Unapproved fixture endpoint');
+      const rpc = JSON.parse(String(init?.body));
+      if (rpc.method === 'notifications/initialized') return new Response(null, { status: 202 });
+      if (rpc.method === 'tools/call') calls.push(rpc.params.name);
+      const result = rpc.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: { tools: {} } }
+        : rpc.method === 'tools/list' ? { tools }
+          : rpc.params.name === 'get_accounts' ? { structuredContent: { accounts: [{ subdomain: 'acme' }] } }
+            : rpc.params.name === 'get_candidates' ? { structuredContent: { candidates: [{ id: 42, name: '模拟候选人', headline: 'React' }] } }
+              : { structuredContent: { candidate: { id: 42, name: '模拟候选人', summary: '具有 React 项目开发经验', job: { shortcode: 'FRONT' } } } };
+      return Response.json({ jsonrpc: '2.0', id: rpc.id, result });
+    });
+    try {
+      const { base } = await startIsolated(ADMIN_TOKEN);
+      const db = await import('./db.js');
+      const org = db.createOrganization({ name: '招聘链路测试企业', slug: 'recruitment-chain' });
+      const hr = db.createAccount({ organizationId: org.id, username: 'chain-hr', password: 'fixture-password', name: 'HR', isAdmin: true });
+      const headers = { authorization: `Bearer ${db.createAuthSession(hr.id).token}`, 'content-type': 'application/json' };
+      await db.getRecruitmentJobService().act(hr.id, { kind: 'save', jobId: 'frontend', expectedRevision: 0, title: '前端', description: 'React', candidates: [], sharingConfirmed: true });
+      await db.getWorkableConnectionService().acceptVerifiedGrant({ organizationId: org.id, actorAccountId: hr.id, expectedRevision: 0, accessToken: 'private-fixture-token', expiresAt: '2099-01-01T00:00:00Z', targets: [{ account: 'acme', shortcode: 'FRONT', label: '前端' }] });
+      const post = (path: string, body: unknown) => fetch(`${base}/enterprise/recruitment/${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+      expect((await post('workable', { kind: 'bind', jobId: 'frontend', expectedRevision: 1, account: 'acme', shortcode: 'FRONT', confirmed: true })).status).toBe(200);
+      const probe = await post('workable', { kind: 'probe', jobId: 'frontend', expectedRevision: 2, confirmed: true });
+      expect(await probe.json()).toMatchObject({ result: { connectionCheck: { scope: 'protocol_and_account_only', candidateReadVerified: false, resumeReadVerified: false } } });
+      expect(calls).toEqual(['get_accounts']);
+      expect(await (await fetch(`${base}/enterprise/recruitment/sources?requisitionId=frontend`, { headers })).json()).toMatchObject({ searchableSourceCount: 1 });
+      const search = await post('sources/search', { requisitionId: 'frontend', query: 'React', sourceIds: ['workable'] });
+      const result = (await search.json()).result;
+      expect(result.sources).toMatchObject([{ status: 'ok', count: 1 }]);
+      const materialInput = { runId: result.runId, requisitionId: 'frontend', canonicalId: result.candidates[0].canonicalId, sourceId: 'workable' };
+      const material = await post('sources/material', materialInput);
+      expect(await material.json()).toMatchObject({ result: { material: { completeness: 'partial', text: expect.stringContaining('React') } } });
+      expect(await db.createDefaultRecruitmentSources().getSearchRun(org.id, result.runId)).toMatchObject({ actorAccountId: hr.id, requisitionId: 'frontend' });
+      const stored = JSON.stringify(db.getDB().prepare('SELECT payload FROM enterprise_recruitment_records_v1').all());
+      expect(stored).not.toContain('模拟候选人'); expect(stored).not.toContain('private-fixture-token');
+      await post('workable', { kind: 'revoke', expectedRevision: 2, confirmed: true });
+      const count = calls.length;
+      expect((await post('sources/material', materialInput)).status).toBe(403);
+      expect(await (await fetch(`${base}/enterprise/recruitment/sources?requisitionId=frontend`, { headers })).json()).toMatchObject({ searchableSourceCount: 0 });
+      expect(calls).toHaveLength(count);
+    } finally { provider.mockRestore(); vi.unstubAllEnvs(); }
+  });
+  it('completes Workable PKCE authorization and published job catalog through authenticated HTTP with simulated official responses', async () => {
+    const previous = process.env.OTTO_WORKABLE_OAUTH_ENABLED;
+    process.env.OTTO_WORKABLE_OAUTH_ENABLED = '1';
+    const network = globalThis.fetch; const redirectUri = 'http://127.0.0.1:45678/otto-workable-callback';
+    const scopes = ['r_account', 'r_jobs', 'r_candidates'];
+    let tokenRequests = 0;
+    const mock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const endpoint = String(url);
+      if (endpoint.startsWith('http://127.0.0.1:')) return network(url, init);
+      if (endpoint.endsWith('oauth-protected-resource')) return Response.json({ resource: 'https://mcp.workable.com/mcp', authorization_servers: ['https://mcp.workable.com'] });
+      if (endpoint.endsWith('oauth-authorization-server')) return Response.json({ issuer: 'https://mcp.workable.com', authorization_endpoint: 'https://workable.com/oauth/authorize', token_endpoint: 'https://workable.com/oauth/token', registration_endpoint: 'https://mcp.workable.com/oauth/register', response_types_supported: ['code'], code_challenge_methods_supported: ['S256'], scopes_supported: scopes });
+      if (endpoint === 'https://mcp.workable.com/oauth/register') return Response.json({ client_id: 'fixture-client', token_endpoint_auth_method: 'none', redirect_uris: [redirectUri] });
+      if (endpoint === 'https://workable.com/oauth/token') {
+        tokenRequests += 1; expect(new URLSearchParams(String(init?.body)).get('code_verifier')).toHaveLength(43);
+        return Response.json({ access_token: 'fixture-oauth-secret', token_type: 'Bearer', expires_in: 3600, scope: scopes.join(' ') });
+      }
+      if (endpoint !== 'https://mcp.workable.com/mcp') throw new Error('Unapproved test network endpoint');
+      const body = JSON.parse(String(init?.body));
+      if (body.method === 'notifications/initialized') return new Response(null, { status: 202 });
+      const result = body.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: { tools: {} } }
+        : body.method === 'tools/list' ? { tools: [{ name: 'get_accounts', inputSchema: { type: 'object', properties: {} } }, { name: 'get_jobs', inputSchema: { type: 'object', properties: { account: { type: 'string' } }, required: ['account'] } }] }
+          : { structuredContent: body.params.name === 'get_accounts' ? { accounts: [{ subdomain: 'fixture' }] } : { jobs: [{ shortcode: 'FRONT', title: '前端' }] } };
+      return Response.json({ jsonrpc: '2.0', id: body.id, result });
+    });
+    try {
+      const { base } = await startIsolated(ADMIN_TOKEN);
+      const db = await import('./db.js');
+      const org = db.createOrganization({ name: 'OAuth 测试企业', slug: 'workable-oauth' });
+      const hr = db.createAccount({ organizationId: org.id, username: 'oauth-hr', password: 'fixture-password', name: 'HR', isAdmin: false });
+      const other = db.createAccount({ organizationId: org.id, username: 'oauth-other', password: 'fixture-password', name: '另一 HR', isAdmin: false });
+      const token = db.createAuthSession(hr.id).token; const otherToken = db.createAuthSession(other.id).token;
+      const post = (auth: string, action: unknown) => fetch(`${base}/enterprise/recruitment/workable`, { method: 'POST', headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json' }, body: JSON.stringify(action) });
+      const start = await post(token, { kind: 'oauth_start', redirectUri, expectedRevision: 0, confirmed: true });
+      expect(start.status).toBe(200); expect(start.headers.get('cache-control')).toBe('no-store');
+      const begin = await start.json() as { result: { authorization: { state: string; url: string } } };
+      expect(begin.result.authorization.url).toContain('code_challenge_method=S256');
+      const action = { kind: 'oauth_complete', state: begin.result.authorization.state, code: 'fixture-code' };
+      expect((await post(otherToken, action)).status).toBe(409);
+      expect((await post(token, { ...action, state: 'wrong' })).status).toBe(409);
+      expect(tokenRequests).toBe(0);
+      const completed = await post(token, action);
+      expect(completed.status).toBe(200);
+      const resultText = await completed.text();
+      expect(JSON.parse(resultText)).toMatchObject({ result: { status: 'binding_required', targets: [{ account: 'fixture', shortcode: 'FRONT', label: '前端' }] } });
+      expect(resultText).not.toContain('fixture-oauth-secret');
+      expect((await post(token, action)).status).toBe(409); expect(tokenRequests).toBe(1);
+      const row = db.getDB().prepare('SELECT payload FROM enterprise_workable_connections_v1 WHERE organization_id=? AND account_id=?').get(org.id, hr.id);
+      expect(JSON.stringify(row)).not.toContain('fixture-oauth-secret');
+    } finally { mock.mockRestore(); if (previous === undefined) delete process.env.OTTO_WORKABLE_OAUTH_ENABLED; else process.env.OTTO_WORKABLE_OAUTH_ENABLED = previous; }
+  });
+  it('allows revoking own Workable authorization even when the enterprise License has expired', async () => {
+    process.env.OTTO_LICENSE_ENFORCE = 'true';
+    const { base } = await startIsolated(ADMIN_TOKEN);
+    const db = await import('./db.js');
+    const org = db.createOrganization({ name: '授权自助企业', slug: 'workable-revoke' });
+    const hr = db.createAccount({ organizationId: org.id, username: 'revoke-hr', password: 'fixture-password', name: 'HR', isAdmin: false });
+    await db.getWorkableConnectionService().acceptVerifiedGrant({ organizationId: org.id, actorAccountId: hr.id, expectedRevision: 0, accessToken: 'fixture-token', expiresAt: '2099-01-01T00:00:00Z', targets: [{ account: 'fixture', shortcode: 'FRONT', label: '测试岗位' }] });
+    const response = await fetch(`${base}/enterprise/recruitment/workable`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${db.createAuthSession(hr.id).token}` }, body: JSON.stringify({ kind: 'revoke', expectedRevision: 1, confirmed: true }) });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ result: { status: 'authorization_required' } });
+  });
+  it('persists recruitment jobs over real HTTP and authorizes assigned HR without source connectors', async () => {
+    const { base } = await startIsolated(ADMIN_TOKEN);
+    const db = await import('./db.js');
+    const org = db.createOrganization({ name: '共享招聘企业', slug: 'recruitment-shared-jobs' });
+    const admin = db.createAccount({ organizationId: org.id, username: 'archive-admin', password: 'archive-test-password', name: '管理员', isAdmin: true });
+    const hr = db.createAccount({ organizationId: org.id, username: 'archive-hr', password: 'archive-test-password', name: 'HR', isAdmin: false });
+    const outsider = db.createAccount({ username: 'archive-other', password: 'archive-test-password', name: '其他企业管理员', isAdmin: true });
+    const token = (id: string): string => db.createAuthSession(id).token;
+    const adminToken = token(admin.id);
+    const hrToken = token(hr.id);
+    const otherToken = token(outsider.id);
+    const post = (auth: string, action: unknown) => fetch(`${base}/enterprise/recruitment/jobs`, { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: `Bearer ${auth}` } : {}) }, body: JSON.stringify(action) });
+    const health = await (await fetch(`${base}/enterprise/health`)).json() as { capabilities: string[] };
+    expect(health.capabilities).toContain('recruitment_jobs_v1');
+    expect(health.capabilities).toContain('recruitment_people_v1');
+    expect(health.capabilities).toContain('recruitment_workable_connections_v1');
+    expect((await post('', { kind: 'list' })).status).toBe(401);
+    // Non-admin creation and candidate-scoped metadata writes use the same authenticated route.
+    const own = await post(hrToken, { kind: 'save', jobId: 'hr-owned', expectedRevision: 0, title: 'HR 新岗位', description: '', candidates: [], sharingConfirmed: true });
+    expect(own.status).toBe(200);
+    const ownBody = await own.json() as { result: { job: { revision: number; ownerAccountId: string }; sync: { scopeToken: string; headerToken: string }; canManage: boolean } };
+    expect(ownBody.result).toMatchObject({ canManage: true, job: { ownerAccountId: hr.id } });
+    const patch = { kind: 'patch', jobId: 'hr-owned', sharingConfirmed: true, ...ownBody.result.sync, metadata: { title: 'HR 新岗位', description: '已更新需求' }, changes: [] };
+    expect((await post(hrToken, patch)).status).toBe(200);
+    expect((await post(otherToken, patch)).status).toBe(404);
+    const unchanged = await post(hrToken, { kind: 'get', jobId: 'hr-owned', knownRevision: 2 });
+    await expect(unchanged.json()).resolves.toMatchObject({ result: { kind: 'unchanged', jobId: 'hr-owned', revision: 2 } });
+    const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    const candidate = { id: 'resume-1', expiresAt, document: JSON.stringify({ id: 'resume-1', expiresAt, consentAt: new Date().toISOString(), retentionDays: 7, fileName: 'private-candidate.pdf' }) };
+    const save = { kind: 'save', jobId: 'job-front', expectedRevision: 0, title: 'React工程师', description: '企业应用', candidates: [candidate], sharingConfirmed: true, organizationId: 'forged-org', isAdmin: true };
+    expect((await post(adminToken, save)).status).toBe(200);
+    expect((await post(hrToken, { kind: 'get', jobId: 'job-front' })).status).toBe(404);
+    expect((await post(otherToken, { kind: 'get', jobId: 'job-front' })).status).toBe(404);
+    expect((await post(adminToken, { kind: 'share', jobId: 'job-front', expectedRevision: 1, collaboratorAccountIds: [hr.id] })).status).toBe(200);
+    const loaded = await post(hrToken, { kind: 'get', jobId: 'job-front' });
+    expect(loaded.status).toBe(200);
+    await expect(loaded.json()).resolves.toMatchObject({ result: { job: { candidates: [candidate], revision: 2 }, canManage: false } });
+    const connection = (auth: string, action: unknown) => fetch(`${base}/enterprise/recruitment/workable`, { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: `Bearer ${auth}` } : {}) }, body: JSON.stringify(action) });
+    expect((await connection('', { kind: 'status', jobId: 'job-front' })).status).toBe(401);
+    expect((await connection(otherToken, { kind: 'status', jobId: 'job-front' })).status).toBe(404);
+    const beforeGrant = await connection(hrToken, { kind: 'status', jobId: 'job-front', actorAccountId: admin.id });
+    await expect(beforeGrant.json()).resolves.toMatchObject({ contract: 'otto-workable-connection-v1', result: { status: 'authorization_required' } });
+    expect((await connection(hrToken, { kind: 'authorize', accessToken: 'forged-token', jobId: 'job-front' })).status).toBe(400);
+    await db.getWorkableConnectionService().acceptVerifiedGrant({ organizationId: org.id, actorAccountId: hr.id, expectedRevision: 0, accessToken: 'fixture-only-token', expiresAt: '2099-01-01T00:00:00Z', targets: [{ account: 'fixture', shortcode: 'FRONT', label: '测试岗位' }] });
+    const bound = await connection(hrToken, { kind: 'bind', jobId: 'job-front', expectedRevision: 1, account: 'fixture', shortcode: 'FRONT', confirmed: true });
+    expect(bound.status).toBe(200);
+    expect(await bound.text()).not.toContain('fixture-only-token');
+    const adminView = await connection(adminToken, { kind: 'status', jobId: 'job-front' });
+    await expect(adminView.json()).resolves.toMatchObject({ result: { status: 'authorization_required' } });
+    expect((await connection(hrToken, { kind: 'revoke', expectedRevision: 2, confirmed: true })).status).toBe(200);
+    expect((await post(hrToken, { ...save, expectedRevision: 2, description: 'HR继续处理' })).status).toBe(200);
+    expect((await post(adminToken, { ...save, jobId: 'job-second' })).status).toBe(200);
+    expect((await post(hrToken, { kind: 'related', jobId: 'job-front', candidateId: 'resume-1' })).status).toBe(200);
+    const link = { kind: 'link_candidate', jobId: 'job-front', candidateId: 'resume-1', expectedRevision: 3, targetJobId: 'job-second', targetCandidateId: 'resume-1', targetRevision: 1, sharingConfirmed: true };
+    expect((await post(hrToken, link)).status).toBe(404);
+    expect((await post(adminToken, link)).status).toBe(200);
+    const related = await post(adminToken, { kind: 'related', jobId: 'job-front', candidateId: 'resume-1' });
+    await expect(related.json()).resolves.toMatchObject({ result: { kind: 'related', matches: [{ jobId: 'job-second', reason: 'linked' }] } });
+    const hidden = await post(hrToken, { kind: 'related', jobId: 'job-front', candidateId: 'resume-1' });
+    await expect(hidden.json()).resolves.toMatchObject({ result: { matches: [] } });
+    expect((await post(adminToken, { ...save, expectedRevision: 2 })).status).toBe(409);
+    expect((await post(hrToken, { kind: 'share', jobId: 'job-front', expectedRevision: 3, collaboratorAccountIds: [] })).status).toBe(403);
+    expect((await post(adminToken, { kind: 'share', jobId: 'job-front', expectedRevision: 3, collaboratorAccountIds: [] })).status).toBe(200);
+    expect((await post(hrToken, { kind: 'get', jobId: 'job-front' })).status).toBe(404);
+    expect((await post(adminToken, { kind: 'delete', jobId: 'job-front', expectedRevision: 4 })).status).toBe(200);
+    expect((await post(adminToken, save)).status).toBe(409);
+    await db.getWorkableConnectionService().acceptVerifiedGrant({ organizationId: org.id, actorAccountId: hr.id, expectedRevision: 3, accessToken: 'delete-fixture-token', expiresAt: '2099-01-01T00:00:00Z', targets: [{ account: 'fixture', shortcode: 'FRONT', label: '测试岗位' }] });
+    const sourceRuntime = db.createDefaultRecruitmentSources();
+    const search = await sourceRuntime.search({ organizationId: org.id, actorAccountId: hr.id, requisitionId: 'job-front', query: 'React' });
+    db.deleteOwnAccountData(hr);
+    expect(db.getDB().prepare("SELECT COUNT(*) AS count FROM enterprise_recruitment_records_v1 WHERE organization_id=? AND record_kind='search' AND record_id=?").get(org.id, search.runId)).toEqual({ count: 0 });
+    expect(db.getDB().prepare('SELECT revision,payload FROM enterprise_workable_connections_v1 WHERE organization_id=? AND account_id=?').get(org.id, hr.id)).toEqual({ revision: 5, payload: '' });
+    const removed = db.createAccount({ organizationId: org.id, username: 'cache-delete', password: 'Test-password-123!', name: 'Cache cleanup fixture' });
+    const removedSearch = await sourceRuntime.search({ organizationId: org.id, actorAccountId: removed.id, requisitionId: 'job-second', query: 'React' });
+    const keptSearch = await sourceRuntime.search({ organizationId: org.id, actorAccountId: admin.id, requisitionId: 'job-second', query: 'React' });
+    db.deleteAccount(removed.id, org.id, admin.id);
+    expect(await sourceRuntime.getSearchRun(org.id, removedSearch.runId)).toBeNull();
+    expect(await sourceRuntime.getSearchRun(org.id, keptSearch.runId)).not.toBeNull();
+    expect((await post(adminToken, { kind: 'get', jobId: 'job-second' })).status).toBe(200);
+    await expect(db.getWorkableConnectionService().acceptVerifiedGrant({ organizationId: org.id, actorAccountId: hr.id, expectedRevision: 5, accessToken: 'delayed-fixture-token', expiresAt: '2099-01-01T00:00:00Z', targets: [{ account: 'fixture', shortcode: 'FRONT', label: '测试岗位' }] })).rejects.toThrow();
+  });
+
+  it('routes recruitment source access through the authenticated tenant and shared-job boundary', async () => {
+    const runtime = {
+      listSources: vi.fn(async () => [{
+        id: 'official', label: '正式人才接口', accessMode: 'official_api' as const,
+        capabilities: ['search_candidates', 'get_candidate'] as const,
+        productionEnabled: true, authorized: true, searchable: true,
+        status: 'ready' as const, authorizationEvidenceRecorded: true,
+      }]),
+      search: vi.fn(async () => ({ runId: 'run-1', candidates: [], sources: [] })),
+      getSearchRun: vi.fn(async () => null),
+      getCandidateMaterial: vi.fn(async () => ({
+        runId: 'run-1', requisitionId: 'frontend-1', canonicalId: 'candidate-1',
+        source: { sourceId: 'official', sourceLabel: '正式人才接口', sourceRecordId: 'person-1' },
+        acquisitionMode: 'authorized_api' as const, retrievedAt: new Date().toISOString(), contentHash: 'a'.repeat(64),
+        material: { sourceRecordId: 'person-1', text: '', completeness: 'unavailable' as const },
+      })),
+    };
+    const { base } = await startIsolated(ADMIN_TOKEN, null, {
+      recruitmentSources: runtime,
+    });
+    const db = await import('./db.js');
+    const organization = db.createOrganization({ name: '招聘测试企业', slug: 'recruitment-route' });
+    const admin = db.createAccount({
+      organizationId: organization.id, username: 'recruitment-admin',
+      password: 'recruitment-test-password', name: '招聘管理员', isAdmin: true,
+    });
+    const member = db.createAccount({
+      organizationId: organization.id, username: 'recruitment-member',
+      password: 'recruitment-test-password', name: '招聘成员', isAdmin: false,
+    });
+    const adminHeaders = {
+      authorization: `Bearer ${db.createAuthSession(admin.id).token}`,
+      'content-type': 'application/json',
+    };
+    const memberHeaders = {
+      authorization: `Bearer ${db.createAuthSession(member.id).token}`,
+      'content-type': 'application/json',
+    };
+
+    const health = (await (
+      await fetch(`${base}/enterprise/health`)
+    ).json()) as { capabilities: string[] };
+    expect(health.capabilities).toContain('recruitment_source_gateway_v1');
+    expect(health.capabilities).toContain('recruitment_source_material_v1');
+    expect((await fetch(`${base}/enterprise/recruitment/sources`)).status).toBe(401);
+    expect((await fetch(`${base}/enterprise/recruitment/sources`, { headers: memberHeaders })).status).toBe(200);
+    const list = await fetch(`${base}/enterprise/recruitment/sources`, { headers: adminHeaders });
+    expect(list.status).toBe(200);
+    await expect(list.json()).resolves.toMatchObject({
+      contract: 'otto-recruitment-sources-v1', searchableSourceCount: 1,
+    });
+    expect(runtime.listSources).toHaveBeenCalledWith({
+      organizationId: organization.id, actorAccountId: admin.id,
+    });
+
+    await db.getRecruitmentJobService().act(admin.id, { kind: 'save', jobId: 'frontend-1', expectedRevision: 0, title: '前端', description: 'React', candidates: [], sharingConfirmed: true });
+    const search = await fetch(`${base}/enterprise/recruitment/sources/search`, {
+      method: 'POST', headers: adminHeaders,
+      body: JSON.stringify({
+        organizationId: 'spoofed-org', actorAccountId: 'spoofed-user',
+        requisitionId: 'frontend-1', query: 'Electron 前端', sourceIds: ['official'],
+      }),
+    });
+    expect(search.status).toBe(200);
+    expect(runtime.search).toHaveBeenCalledWith(expect.objectContaining({
+      organizationId: organization.id, actorAccountId: admin.id,
+      requisitionId: 'frontend-1', query: 'Electron 前端', sourceIds: ['official'],
+    }));
+    const materialBody = JSON.stringify({ runId: 'run-1', requisitionId: 'frontend-1', canonicalId: 'candidate-1', sourceId: 'official', organizationId: 'spoofed' });
+    const deniedMaterial = await fetch(`${base}/enterprise/recruitment/sources/material`, { method: 'POST', headers: memberHeaders, body: materialBody });
+    expect(deniedMaterial.status).toBe(403);
+    expect(runtime.getCandidateMaterial).not.toHaveBeenCalled();
+    const material = await fetch(`${base}/enterprise/recruitment/sources/material`, { method: 'POST', headers: adminHeaders, body: materialBody });
+    expect(material.status).toBe(200);
+    expect(runtime.getCandidateMaterial).toHaveBeenCalledWith(expect.objectContaining({ organizationId: organization.id, actorAccountId: admin.id, canonicalId: 'candidate-1' }));
+    await db.getRecruitmentJobService().act(admin.id, { kind: 'share', jobId: 'frontend-1', expectedRevision: 1, collaboratorAccountIds: [member.id] });
+    expect((await fetch(`${base}/enterprise/recruitment/sources/material`, { method: 'POST', headers: memberHeaders, body: materialBody })).status).toBe(200);
+    expect(runtime.getCandidateMaterial).toHaveBeenLastCalledWith(expect.objectContaining({ actorAccountId: member.id }));
+    await db.getRecruitmentJobService().act(admin.id, { kind: 'share', jobId: 'frontend-1', expectedRevision: 2, collaboratorAccountIds: [] });
+    expect((await fetch(`${base}/enterprise/recruitment/sources/material`, { method: 'POST', headers: memberHeaders, body: materialBody })).status).toBe(403);
+  });
+
   it('shares the real HTTP state without requiring park membership and isolates company profiles', async () => {
     const { base } = await startIsolated(ADMIN_TOKEN);
     const db = await import('./db.js');
@@ -452,6 +838,10 @@ describe('企业常驻任务注册', () => {
       'enterprise.local-mls-resource-maintenance',
       'enterprise.ticket-notification-delivery',
       'enterprise.policy-intelligence.collection',
+      'enterprise.recruitment-cache-maintenance',
+      'enterprise.recruitment-material-intake',
+      'enterprise.recruitment-auto-archive',
+      'enterprise.recruitment-background-analysis',
     ]);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     servers = servers.filter((item) => item !== server);
@@ -7049,6 +7439,20 @@ describe('B2B 企业隔离、邀请码与 Token 用量 API', () => {
     await expect(memberDeleteAttempt.json()).resolves.toEqual({
       error: '只有企业管理员可以永久删除知识',
     });
+
+    const restoreBody = { expectedVersion: 4, restoreVersion: 1, changeNote: '经核对需要恢复旧版合同清单并重新复核' };
+    const patchKnowledge = (token: string, body: object) => fetch(`${base}/enterprise/knowledge/${pendingPayload.knowledgeId}`, {
+      method: 'PATCH', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    expect((await patchKnowledge(legalToken, restoreBody)).status).toBe(403);
+    expect((await patchKnowledge(adminToken, { ...restoreBody, expectedVersion: 3 })).status).toBe(409);
+    expect((await patchKnowledge(adminToken, { ...restoreBody, restoreVersion: '1' })).status).toBe(400);
+    const restored = await patchKnowledge(adminToken, restoreBody);
+    expect(restored.status).toBe(200);
+    await expect(restored.json()).resolves.toMatchObject({ knowledge: { status: 'pending_review', version: 5, department: '法务部', content: '签署前必须核对主体、金额和违约责任。' } });
+    const afterRestore = await fetch(`${base}/enterprise/knowledge?q=${encodeURIComponent('合同复核')}`, { headers: { authorization: `Bearer ${legalToken}` } });
+    const afterRestorePayload = await afterRestore.json() as { knowledge: Array<{ id: number }> };
+    expect(afterRestorePayload.knowledge.some((item) => item.id === pendingPayload.knowledgeId)).toBe(false);
 
     const deletion = await fetch(
       `${base}/enterprise/knowledge/${pendingPayload.knowledgeId}`,

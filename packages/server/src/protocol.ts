@@ -31,6 +31,20 @@
  */
 
 import type { ProductWorkspaceSnapshot } from './productWorkspaceStore.js';
+import type {
+  InstalledSkillReleases,
+  SkillRollbackInput,
+  SkillAcceptanceInput,
+  SkillFunctionDescription,
+} from 'otto-core';
+export type {
+  InstalledSkillReleases,
+  SkillRelease,
+  SkillReleaseComparison,
+  SkillRollbackInput,
+  SkillAcceptanceInput,
+  SkillFunctionDescription,
+} from 'otto-core';
 
 // ============================================================================
 // 0. 版本 / 信封
@@ -116,6 +130,7 @@ export enum ToolCallStatus {
 
 /** 工具执行结果（与 webview ToolExecutionResult 同构）。 */
 export interface ToolExecutionResult {
+  sourceEvidence?: Array<import('otto-core').WebSourceReceipt>;
   /** Populated by the native executor, not extracted from tool output text. */
   process?: import('otto-core').ProcessExecutionReceipt;
   success: boolean;
@@ -325,6 +340,7 @@ export interface TurnPresentationPolicy {
   sourcePlacement: 'inline';
   artifactPresentation: 'app_link';
   exposeInternalState: false;
+  /** Legacy content hint, not mandatory headings; new runtimes only keep result. */
   finalSections: TurnFinalSection[];
 }
 
@@ -348,6 +364,13 @@ export interface TurnVerificationCheck {
   label: string;
   status: 'pending' | 'passed' | 'failed' | 'not_run';
   evidence?: string[];
+  receiptBinding?: {
+    requirementId?: string;
+    contractRevision: number;
+    mutationRevision: number;
+    toolCallIds: string[];
+    inputVersions: Array<{ path: string; sha256: string; size: number; fileId: string }>;
+  };
 }
 
 export interface TurnVerification {
@@ -372,6 +395,18 @@ export interface AgentRetryRecord {
 
 /** Internal audit record for a runtime strategy change; never rendered as UI status. */
 export interface AgentAdaptationRecord {
+  /** Native comparison metadata, audit only; never a user-facing mode label. */
+  alternatives?: Array<{
+    action: 'retry_once' | 'switch_strategy' | 'request_input' | 'compact_context' | 'reconcile';
+    eligible: boolean;
+    selected: boolean;
+    prerequisite: string;
+    risk: 'read_only' | 'local_write' | 'external_write';
+    maxAdditionalCalls: number;
+    acceptance: 'unchanged';
+  }>;
+  failureFingerprint?: string;
+  failedToolCallId?: string;
   revision: number;
   timestamp: number;
   category:
@@ -400,6 +435,13 @@ export interface AgentArtifactReference {
   path?: string;
   mimeType?: string;
   verified: boolean;
+  verification?: {
+    status: 'verified' | 'missing' | 'empty' | 'format_mismatch' | 'unresolved' | 'pending' | 'unsupported' | 'stale';
+    check: 'native_format';
+    toolCallId: string;
+    version?: { path: string; sha256: string; size: number; fileId: string };
+    provenance?: 'created_or_changed' | 'unchanged' | 'unobserved';
+  };
 }
 
 export interface AgentCitationReference {
@@ -408,6 +450,7 @@ export interface AgentCitationReference {
   uri?: string;
   sourceType: 'local' | 'web' | 'enterprise' | 'tool';
   verified: boolean;
+  toolCallId?: string;
 }
 
 export type AgentTaskGraphNodeKind =
@@ -423,6 +466,8 @@ export type AgentTaskGraphNodeStatus =
   'pending' | 'in_progress' | 'completed' | 'blocked' | 'failed' | 'cancelled';
 
 export interface AgentTaskGraphNode {
+  failureFingerprint?: string;
+  failedToolCallId?: string;
   id: string;
   label: string;
   kind: AgentTaskGraphNodeKind;
@@ -528,8 +573,25 @@ export type AgentTurnItem =
       verification: TurnVerification;
     };
 
+/** Native task context, never reconstructed from model/tool prose or approvals. */
+export interface AgentTaskRequest {
+  version: 1;
+  revision?: number;
+  text: string;
+  source: MessageSource;
+  workspacePath?: string;
+  continuedFromTurnId?: string;
+  continuationBlocked?: boolean;
+}
+
 /** Authoritative snapshot persisted with the root assistant message. */
 export interface AgentTurnSnapshot {
+  claimEvidence?: import('./claimEvidence.js').ClaimReview;
+  /** Host-owned observations; never trusted as authority when loading a new turn. */
+  constraints?: ReturnType<import('./turnConstraints.js').TurnConstraintGuard['snapshot']>;
+  request?: AgentTaskRequest;
+  /** Native pre-delivery continuations; not model claims or UI mode labels. */
+  deliveryClosureAttempts?: number;
   contractVersion: 1;
   turnId: string;
   sequence: number;
@@ -666,11 +728,13 @@ export type SendUserMessageMsg = Envelope<
     authorizedContext?: string;
     /**
      * 会话 busy 时消息的排队策略：
-     * - 'merge'：注入到当前轮（安全边界如工具结果返回后合并）
+     * - 'merge'：旧客户端兼容排队；只有显式 steering 字段才调整当前轮
      * - 'next_turn'：等当前轮完成后下一轮处理（默认）
      * - 'new_session'：另开话题，创建新会话路由消息
      */
     queueAction?: 'merge' | 'next_turn' | 'new_session';
+    /** Opt-in v1 steering. Legacy merge keeps its queue semantics. */
+    steering?: Omit<import('./taskContinuity.js').TurnSteeringRequest, 'text' | 'clientMessageId'>;
   }
 >;
 
@@ -1029,6 +1093,7 @@ export type AcceptCompanyLinkMsg = Envelope<
 >;
 
 export interface AutoSkillCandidateInfo {
+  function?: SkillFunctionDescription;
   id: string;
   name: string;
   description: string;
@@ -1078,6 +1143,25 @@ export type ConfirmPendingAutoSkillMsg = Envelope<
 export type RejectPendingAutoSkillMsg = Envelope<
   'reject_pending_auto_skill',
   { candidateId: string }
+>;
+export type GetSkillReleasesMsg = Envelope<
+  'get_skill_releases',
+  Record<string, never>
+>;
+export type RollbackSkillReleaseMsg = Envelope<
+  'rollback_skill_release',
+  SkillRollbackInput
+>;
+export type RecordSkillAcceptanceMsg = Envelope<
+  'record_skill_acceptance',
+  SkillAcceptanceInput
+>;
+export type SkillReleasesMsg = Envelope<
+  'skill_releases',
+  {
+    skills: InstalledSkillReleases[];
+    lastAction?: { kind: 'rolled-back' | 'reviewed'; skillName: string };
+  }
 >;
 
 export interface ScheduleItemInfo {
@@ -1176,6 +1260,9 @@ export type ClientToServer =
   | AddFriendMsg
   | AcceptCompanyLinkMsg
   | GetPendingAutoSkillsMsg
+  | GetSkillReleasesMsg
+  | RollbackSkillReleaseMsg
+  | RecordSkillAcceptanceMsg
   | ScanPendingAutoSkillsMsg
   | ConfirmPendingAutoSkillMsg
   | RejectPendingAutoSkillMsg
@@ -1293,8 +1380,10 @@ export type SlashCommandResultMsg = Envelope<
 /** 握手确认。 */
 export type WelcomeMsg = Envelope<
   'welcome',
-  { protocolVersion: string; serverVersion: string; sessionId?: string }
+  { protocolVersion: string; serverVersion: string; sessionId?: string; steeringVersion?: 1 }
 >;
+
+export type TurnSteeringMsg = Envelope<'turn_steering', import('./taskContinuity.js').SteeringReceipt & { sessionId: string }>;
 
 /** 会话列表回包。 */
 export type SessionsListMsg = Envelope<
@@ -1981,7 +2070,9 @@ export type ServerToClient =
   | RealtimePatternMsg
   | HabitInsightMsg
   | PendingAutoSkillsMsg
+  | SkillReleasesMsg
   | MessageQueuedMsg
+  | TurnSteeringMsg
   | QueueDrainedMsg;
 
 export type ServerToClientType = ServerToClient['type'];
@@ -2336,6 +2427,22 @@ export function validateClientPayload(msg: {
       // 禁止客户端伪造 source=feishu，否则会借飞书免确认策略绕过桌面操作确认。
       if (p['source'] === 'feishu')
         return '客户端不得声明 source=feishu；飞书消息仅由服务端适配器注入';
+      if (p['steering'] !== undefined) {
+        const s = p['steering'];
+        if (p['source'] !== 'local' || !isNonEmptyString(p['clientMessageId']) || p['clientMessageId'].length > 200 ||
+          p['authorizedContext'] !== undefined || (p['queueAction'] !== undefined && p['queueAction'] !== 'merge'))
+          return '实时调整仅接受本机用户的明确文本，不接受外部上下文或排队指令';
+        if (!isPlainObject(s) || s['version'] !== 1 || !isNonEmptyString(s['turnId']) || s['turnId'].length > 200 ||
+          !Number.isSafeInteger(s['expectedRevision']) || Number(s['expectedRevision']) < 1 ||
+          !['append', 'replace', 'pause'].includes(String(s['mode'])) ||
+          (s['releaseConstraintIds'] !== undefined && (!Array.isArray(s['releaseConstraintIds']) || s['releaseConstraintIds'].length > 128 ||
+            s['releaseConstraintIds'].some(id => typeof id !== 'string' || id.length > 200))))
+          return '无效的任务调整版本或操作';
+        const parts = p['content'] as MessageContent;
+        const text = parts.map(part => part.type === 'text' ? part.value : '').join('\n');
+        if (parts.some(part => part.type !== 'text') || !text.trim() || text.length > 16000)
+          return '实时调整必须是 16000 字符以内的纯文本，附件请作为下一轮任务发送';
+      }
       if (
         p['clientMessageId'] !== undefined &&
         typeof p['clientMessageId'] !== 'string'
@@ -2518,6 +2625,45 @@ export function validateClientPayload(msg: {
     case 'accept_company_link': {
       if (!isPlainObject(p)) return 'accept_company_link payload 必须是对象';
       return isNonEmptyString(p['link']) ? null : 'link 必须是非空字符串';
+    }
+    case 'get_skill_releases':
+      return isPlainObject(p) ? null : 'get_skill_releases payload 必须是对象';
+    case 'rollback_skill_release':
+    case 'record_skill_acceptance': {
+      if (!isPlainObject(p)) return 'Skill 版本操作 payload 必须是对象';
+      if (
+        typeof p['skillName'] !== 'string' ||
+        !/^[a-z0-9][a-z0-9-]{0,62}$/u.test(p['skillName'])
+      )
+        return 'Skill 名称不合法';
+      if (p['confirmed'] !== true) return '需要用户明确确认';
+      if (
+        typeof p['expectedCurrentHash'] !== 'string' ||
+        !/^[a-f0-9]{64}$/u.test(p['expectedCurrentHash'])
+      )
+        return '当前版本校验值不合法';
+      if (msg.type === 'rollback_skill_release')
+        return typeof p['versionId'] === 'string' &&
+          /^[a-f0-9]{64}$/u.test(p['versionId'])
+          ? null
+          : '历史版本不合法';
+      for (const key of [
+        'scenario',
+        'input',
+        'expected',
+        'actual',
+        'environment',
+      ]) {
+        if (
+          typeof p[key] !== 'string' ||
+          !p[key].trim() ||
+          p[key].length > (key === 'scenario' ? 200 : 4000)
+        )
+          return `${key} 缺少内容或过长`;
+      }
+      return p['verdict'] === 'passed' || p['verdict'] === 'failed'
+        ? null
+        : '试用结果不合法';
     }
     case 'confirm_pending_auto_skill':
     case 'reject_pending_auto_skill': {

@@ -58,6 +58,8 @@ export type Attachment = ImageAttachment | FileAttachment | FolderAttachment;
 
 export interface OttoState {
   connection: ConnectionState;
+  steeringVersion?: 1;
+  steeringReceipts?: Record<string, Extract<ServerToClient, { type: 'turn_steering' }>['payload']>;
   sessions: Record<string, SessionSummary>;
   /** 列表顺序（按 updatedAt 倒序由 selector 计算）。 */
   sessionIds: string[];
@@ -376,7 +378,7 @@ function rollbackPendingModelSwitch(
 function reducer(state: OttoState, action: Action): OttoState {
   switch (action.kind) {
     case 'connection':
-      return { ...state, connection: action.value };
+      return { ...state, connection: action.value, ...(action.value === 'disconnected' ? { steeringVersion: undefined } : {}) };
 
     case 'select': {
       const pending = state.pendingModelSwitch;
@@ -479,7 +481,15 @@ function reducer(state: OttoState, action: Action): OttoState {
 function applyFrame(state: OttoState, frame: ServerToClient): OttoState {
   switch (frame.type) {
     case 'welcome':
-      return state;
+      return state.steeringVersion === frame.payload.steeringVersion ? state : { ...state, steeringVersion: frame.payload.steeringVersion };
+
+    case 'turn_steering': {
+      const receipt = frame.payload;
+      const previous = state.steeringReceipts?.[receipt.sessionId];
+      if (previous?.turnId === receipt.turnId && (previous.revision > receipt.revision ||
+        (previous.revision === receipt.revision && previous.status === 'applied'))) return state;
+      return { ...state, steeringReceipts: { ...state.steeringReceipts, [receipt.sessionId]: receipt } };
+    }
 
     case 'sessions_list':
       // sessions_list 是**权威快照**：不再只累加 upsert，而是以这份列表为准——
@@ -797,7 +807,8 @@ export interface OttoActions {
     attachments?: Attachment[],
     queueAction?: 'merge' | 'next_turn' | 'new_session',
     authorizedContext?: string,
-  ): void;
+    steeringMode?: 'append' | 'replace' | 'pause',
+  ): boolean | void;
   setModel(model: string): void;
   /** 切换当前会话的真实工作目录。 */
   setWorkspace(workspacePath: string): void;
@@ -859,6 +870,8 @@ export function useOttoStore(
   // reducer 在闭包里读不到最新 activeSessionId，用 ref 兜底动作里取值。
   const activeRef = useRef<string | null>(null);
   activeRef.current = state.activeSessionId;
+  const steeringStateRef = useRef(state);
+  steeringStateRef.current = state;
   // 同理用 ref 兜底 connection：sendMessage 是稳定回调（deps 空），需读最新连接态做断连校验。
   const connectionRef = useRef<ConnectionState>(state.connection);
   connectionRef.current = state.connection;
@@ -1004,7 +1017,7 @@ export function useOttoStore(
           // 获取失败也 fail closed，但 reducer 已保留 core 的个人本地捕获结果。
           void getEnterpriseOrganizationFeatures(organizationId, { force: true })
             .then((features) => {
-              if (!features.knowledge) return;
+              if (cancelled || organizationId !== enterpriseOrganizationIdRef.current || !features.knowledge) return;
               for (const entry of observations) {
                 void window.otto.enterpriseKnowledgeRecord({
                   sourceId: `auto:${sourceSessionId}:${entry.fingerprint}`.slice(0, 180),
@@ -1309,6 +1322,7 @@ export function useOttoStore(
       attachments: Attachment[] = [],
       queueAction?: 'merge' | 'next_turn' | 'new_session',
       authorizedContext?: string,
+      steeringMode?: 'append' | 'replace' | 'pause',
     ) => {
       const sessionId = activeRef.current;
       const trimmed = text.trim();
@@ -1319,6 +1333,14 @@ export function useOttoStore(
       }
       const clientMessageId = `c-${Date.now()}-${clientMsgSeq++}`;
       const content = buildUserMessageContent(trimmed, attachments);
+      const current = steeringStateRef.current;
+      const turn = [...(current.messages[sessionId] ?? [])].reverse().find(m => m.turn?.status === 'in_progress')?.turn;
+      const receipt = current.steeringReceipts?.[sessionId];
+      const steering = steeringMode && current.steeringVersion === 1 && source === 'local' && !attachments.length && !authorizedContext &&
+        turn && ['thinking', 'streaming'].includes(current.sessions[sessionId]?.status) ? {
+          version: 1 as const, turnId: turn.turnId, expectedRevision: Math.max(turn.request?.revision ?? 1, receipt?.turnId === turn.turnId ? receipt.revision : 1), mode: steeringMode,
+        } : undefined;
+      if (steeringMode && !steering) { dispatch({ kind: 'local_error', message: '当前任务不能实时调整，请刷新后重试或在任务结束后发送' }); return false; }
       dispatch({
         kind: 'optimistic_user',
         message: {
@@ -1337,12 +1359,14 @@ export function useOttoStore(
           content,
           source,
           clientMessageId,
+          ...(steering ? { steering } : {}),
           ...(queueAction ? { queueAction } : {}),
           ...(authorizedContext?.trim()
             ? { authorizedContext: authorizedContext.trim().slice(0, 12_000) }
             : {}),
         },
       });
+      return true;
     },
     [],
   );

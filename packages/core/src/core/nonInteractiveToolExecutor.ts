@@ -13,6 +13,8 @@ import {
 } from '../index.js';
 import { Config } from '../config/config.js';
 import { convertToFunctionResponse } from './coreToolScheduler.js';
+import { assertTurnExecutionAllowed } from '../policy/turnExecutionGuard.js';
+import { WebFetchTool } from '../tools/web-fetch.js';
 
 /**
  * Executes a single tool call non-interactively.
@@ -71,6 +73,7 @@ export async function executeToolCall(
   }
 
   try {
+    assertTurnExecutionAllowed(config, toolCallRequest, tool);
     // 🚨 CRITICAL: Even in YOLO mode, check for dangerous commands
     // Dangerous commands MUST be confirmed, regardless of approval mode
     const effectiveAbortSignal = abortSignal ?? new AbortController().signal;
@@ -130,6 +133,9 @@ export async function executeToolCall(
       }
     }
 
+    // Approval is not authority to override a user's turn constraint. Recheck
+    // after the asynchronous confirmation hook, immediately before dispatch.
+    assertTurnExecutionAllowed(config, toolCallRequest, tool);
     // Directly execute without confirmation; preserve the legacy two-argument
     // call when no live-output subscriber was supplied.
     const toolResult: ToolResult = options?.onOutput
@@ -143,6 +149,9 @@ export async function executeToolCall(
     const tool_output = toolResult.llmContent;
 
     const tool_display = toolResult.returnDisplay;
+    const sourceEvidence = toolCallRequest.name === WebFetchTool.Name &&
+      Object.getPrototypeOf(tool) === WebFetchTool.prototype && tool.execute === WebFetchTool.prototype.execute
+      ? toolResult.sourceEvidence : undefined;
     const process = toolCallRequest.name === 'run_shell_command'
       ? toolResult.process : undefined;
     const processError = process && process.status !== 'background' && (
@@ -191,6 +200,7 @@ export async function executeToolCall(
       resultDisplay: tool_display,
       error: processError,
       ...(process ? { process } : {}),
+      ...(sourceEvidence ? { sourceEvidence } : {}),
     };
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));

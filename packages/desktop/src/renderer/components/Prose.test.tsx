@@ -11,6 +11,14 @@ import { render, fireEvent, waitFor } from '@testing-library/react';
 import { Prose, contentToText, normalizeLocalOutputPath } from './Prose.js';
 
 describe('Prose 轻量 Markdown', () => {
+  it('本地 Markdown 链接只显示友好名称，不暴露绝对路径也不自动打开应用', () => {
+    const open = vi.fn();
+    window.otto = { inspectLocalPath: vi.fn(() => new Promise(() => {})), activateLocalPath: open } as unknown as typeof window.otto;
+    const { container, getByRole } = render(<Prose text={'[查看报告](<C:/private/report.pptx>)'} />);
+    expect(getByRole('link').textContent).toContain('查看报告');
+    expect(container.textContent).not.toContain('C:/private');
+    expect(open).not.toHaveBeenCalled();
+  });
   it('围栏代码块 → <pre> + 语言标签 + 复制按钮，前后正文分离', () => {
     const { container } = render(
       <Prose text={'前言\n```python\nprint("hi")\n```\n后语'} />,

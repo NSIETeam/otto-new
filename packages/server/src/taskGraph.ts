@@ -151,10 +151,6 @@ export class TaskGraphCoordinator {
       } else if (statuses.includes('running')) {
         this.setNodeStatus(kind, 'in_progress');
       } else if (statuses.every((status) => status === 'success')) {
-        const pendingRecovery = [...this.nodes]
-          .reverse()
-          .find((node) => node.kind === 'recover' && node.status === 'pending');
-        if (pendingRecovery) pendingRecovery.status = 'completed';
         for (const observation of observations) {
           this.setNodeStatus(kind, 'completed', observation.evidenceId);
         }
@@ -186,6 +182,8 @@ export class TaskGraphCoordinator {
       status: 'pending',
       attempt: record.attempt,
       strategy: strategyFor(record),
+      failureFingerprint: record.failureFingerprint,
+      failedToolCallId: record.failedToolCallId,
       ...(preservedNodeIds.length > 0
         ? { dependsOn: [preservedNodeIds[preservedNodeIds.length - 1]] }
         : {}),
@@ -221,6 +219,15 @@ export class TaskGraphCoordinator {
     }
     this.setNodeStatus('deliver', 'completed');
     return true;
+  }
+
+  /** Called only after a native success resolves the exact failed operation. */
+  resolveRecoveries(fingerprints: readonly string[], evidenceId: string): void {
+    for (const node of this.nodes) if (node.kind === 'recover' && node.failureFingerprint && fingerprints.includes(node.failureFingerprint)) {
+      node.status = 'completed';
+      node.evidenceIds = [...new Set([...(node.evidenceIds ?? []), evidenceId])];
+    }
+    this.refreshDependencyStatuses();
   }
 
   syncObjectives(

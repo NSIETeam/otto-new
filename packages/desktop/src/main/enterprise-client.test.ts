@@ -207,6 +207,65 @@ const API_V2_HEALTH = {
   ],
 };
 
+describe('recruitment archive session binding', () => {
+  it('does not send Workable authorization codes to a plaintext remote enterprise server', async () => {
+    const fetchMock = vi.fn(); const client = new EnterpriseClient(fetchMock as typeof fetch);
+    expect(() => client.restore({ serverUrl: 'http://enterprise.otto.test', token: 'member-session' })).toThrow(/HTTPS/);
+    await expect(client.workableConnection({ kind: 'oauth_complete', state: 's'.repeat(43), code: 'private-code' })).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it('uses the captured member session for Workable binding and discards stale-session responses', async () => {
+    const health = { ...API_V2_HEALTH, capabilities: [...API_V2_HEALTH.capabilities, 'recruitment_workable_connections_v1'] };
+    const result = { revision: 0, status: 'authorization_required', targets: [], authorizationAvailable: false };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, health)).mockResolvedValueOnce(jsonResponse(200, { contract: 'otto-workable-connection-v1', result }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    client.restore({ serverUrl: 'https://enterprise.otto.test', token: 'member-session' });
+    await expect(client.workableConnection({ kind: 'status', jobId: 'job' })).resolves.toEqual(result);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://enterprise.otto.test/enterprise/recruitment/workable');
+    expect(fetchMock.mock.calls[1]?.[1].headers.authorization).toBe('Bearer member-session');
+    fetchMock.mockImplementation(async () => {
+      client.restore({ serverUrl: 'https://other.otto.test', token: 'other' });
+      return jsonResponse(200, { contract: 'otto-workable-connection-v1', result });
+    });
+    await expect(client.workableConnection({ kind: 'status', jobId: 'job' })).rejects.toThrow();
+  });
+  it('does not send cross-job commands to a server that supports only the older archive contract', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { ...API_V2_HEALTH, capabilities: [...API_V2_HEALTH.capabilities, 'recruitment_jobs_v1'] }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    client.restore({ serverUrl: 'https://enterprise.otto.test', token: 'archive-session' });
+    await expect(client.recruitmentJobs({ kind: 'related', jobId: 'job-1', candidateId: 'c1' })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it('does not enable background intake on an older archive-only server', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { ...API_V2_HEALTH, capabilities: [...API_V2_HEALTH.capabilities, 'recruitment_jobs_v1'] }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    client.restore({ serverUrl: 'https://enterprise.otto.test', token: 'archive-session' });
+    await expect(client.recruitmentJobs({ kind: 'configure_intake', jobId: 'job', expectedRevision: 1, enabled: true, confirmed: true })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it('does not upload materials after the account changes during the compatibility check', async () => {
+    const fetchMock = vi.fn(async () => {
+      client.restore({ serverUrl: 'https://other.otto.test', token: 'other-session' });
+      return jsonResponse(200, { ...API_V2_HEALTH, capabilities: [...API_V2_HEALTH.capabilities, 'recruitment_jobs_v1'] });
+    });
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    client.restore({ serverUrl: 'https://original.otto.test', token: 'original-session' });
+    await expect(client.recruitmentJobs({ kind: 'list' })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it('sends archive requests only to the captured enterprise session', async () => {
+    const result = { kind: 'list', jobs: [], nextCursor: null, canManage: false };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { ...API_V2_HEALTH, capabilities: [...API_V2_HEALTH.capabilities, 'recruitment_jobs_v1'] }))
+      .mockResolvedValueOnce(jsonResponse(200, { result }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    client.restore({ serverUrl: 'https://enterprise.otto.test', token: 'archive-session' });
+    await expect(client.recruitmentJobs({ kind: 'list' })).resolves.toEqual(result);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://enterprise.otto.test/enterprise/recruitment/jobs');
+    expect(fetchMock.mock.calls[1]?.[1].headers.authorization).toBe('Bearer archive-session');
+  });
+});
+
 function mockFederationCrypto(): EnterpriseE2eeCrypto {
   const trusts = new Map<string, {
     card: Record<string, unknown>;
@@ -1643,6 +1702,20 @@ describe('EnterpriseClient', () => {
       rationale: '已核对现行制度和审批记录，确认继续有效。',
       validForDays: 180,
     });
+  });
+
+  it('透传历史恢复和审核的版本条件，支持集群编号并保留待确认状态', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(200, API_V2_HEALTH))
+      .mockResolvedValueOnce(jsonResponse(200, { account: ACCOUNT, token: 'session-token', expiresAt: '2099-01-01' }))
+      .mockResolvedValueOnce(jsonResponse(200, { knowledge: { id: 'k-12', category: '流程', content: '历史正文', status: 'pending_review', version: 3 } }))
+      .mockResolvedValueOnce(jsonResponse(200, { knowledge: { id: 'k-12', category: '流程', content: '历史正文', status: 'active', version: 4 } }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    await client.loginWithPassword('https://enterprise.otto.test', 'staff01', 'password');
+    await expect(client.reviseKnowledge('k-12', { expectedVersion: 2, restoreVersion: 1, title: '流程', category: '流程', content: '历史正文', changeNote: '对比新旧内容后申请恢复并重新复核' })).resolves.toMatchObject({ status: 'pending_review', version: 3 });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({ expectedVersion: 2, restoreVersion: 1 });
+    await client.reviewKnowledge('k-12', 'approve', '已核对原文', 3);
+    expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body))).toMatchObject({ expectedVersion: 3, action: 'approve' });
   });
 
   it('登录成员通过 main 内的会话令牌读取完整组织架构', async () => {

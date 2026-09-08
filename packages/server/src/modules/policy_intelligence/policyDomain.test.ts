@@ -10,6 +10,16 @@ import {
 } from './policyDomain.js';
 
 describe('nationwide policy domain', () => {
+  it('keeps a province-only address without inventing a city', () => {
+    expect(normalizePolicyRegion('广东省')).toEqual({
+      country: 'CN',
+      province: '广东省',
+    });
+    expect(normalizePolicyRegion('广西壮族自治区')).toEqual({
+      country: 'CN',
+      province: '广西壮族自治区',
+    });
+  });
   it('normalizes municipalities and fully qualified non-Beijing addresses', () => {
     expect(normalizePolicyRegion('上海市浦东新区')).toEqual({
       country: 'CN',

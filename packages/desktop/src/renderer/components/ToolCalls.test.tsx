@@ -336,6 +336,18 @@ describe('ToolCalls · AskUserQuestion 问答卡', () => {
 });
 
 describe('ToolCalls · 敏感操作确认卡', () => {
+  it('人工验收显示实际交付内容而不是一个允许执行按钮', () => {
+    const onRespond = vi.fn();
+    const tool = questionCard({ id: 'constraint-review-a', toolName: 'otto_delivery_review',
+      confirmationDetails: { type: 'info', title: '请核对当前交付', message: '交付版本 A，请核对这份内容。' } });
+    render(<ToolCallsCard toolCalls={[tool]} onRespondQuestion={onRespond} />);
+    expect(screen.getByText('交付版本 A，请核对这份内容。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '允许执行' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '确认这版交付' }));
+    expect(onRespond).toHaveBeenCalledWith(tool.id, 'approved', undefined, tool);
+    fireEvent.click(screen.getByRole('button', { name: '已提交' }));
+    expect(onRespond).toHaveBeenCalledTimes(1);
+  });
   it('展示风险与操作内容，并可允许或拒绝', () => {
     const onRespond = vi.fn();
     const tool: ToolCall = {

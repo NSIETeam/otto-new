@@ -65,6 +65,7 @@ bundle
 
 # Test report files
 junit.xml
+/vite-cache/
 packages/*/coverage/
 packages/evals/artifacts/
 artifacts/security/

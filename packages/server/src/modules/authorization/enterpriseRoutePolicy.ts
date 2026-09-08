@@ -80,6 +80,11 @@ const MEMBER_ROUTES = new Set([
   '/enterprise/privacy/export',
   '/enterprise/privacy/account',
   '/enterprise/usage/profile',
+  '/enterprise/recruitment/sources',
+  '/enterprise/recruitment/jobs',
+  '/enterprise/recruitment/workable',
+  '/enterprise/recruitment/sources/search',
+  '/enterprise/recruitment/sources/material',
 ]);
 
 export const FEATURE_ADMIN_PREFIX = '/admin/features';
@@ -101,6 +106,7 @@ export function isMemberRoute(path: string): boolean {
   return (
     MEMBER_ROUTES.has(path) ||
     path.startsWith('/enterprise/policy-intelligence/') ||
+    path.startsWith('/enterprise/recruitment/source-runs/') ||
     path.startsWith('/enterprise/skills/') ||
     path.startsWith('/enterprise/customer-modules/') ||
     path.startsWith('/enterprise/knowledge/') ||
@@ -147,6 +153,9 @@ export function isLicenseMaintenanceRoute(path: string, method?: string): boolea
     path === '/enterprise/privacy/accept' ||
     path === '/enterprise/privacy/export' ||
     path === '/enterprise/privacy/account' ||
+    // Self-owned credential management contains no candidate reads or provider
+    // calls. Expired subscriptions must not prevent withdrawing authorization.
+    path === '/enterprise/recruitment/workable' ||
     path.startsWith('/enterprise/auth/')
   );
 }

@@ -103,6 +103,111 @@ async function enabled(h: ReturnType<typeof harness>) {
     consent: true,
   });
 }
+describe('policy reminders use the persistent account-scoped inbox', () => {
+  it('does not scan public document bodies when nobody has an active subscription', async () => {
+    const h = harness();
+    const list = vi.spyOn(h.store, 'list');
+    await h.service.refreshNotifications();
+    expect(list).not.toHaveBeenCalledWith('document:');
+  });
+  it('lets members subscribe to public policies without exposing administrator diagnoses, and cancels future notices on unwatch', async () => {
+    const h = harness();
+    await enabled(h);
+    await h.service.act('member', {
+      action: 'watch',
+      policyId: 'p1',
+      enabled: true,
+    });
+    h.clock.date = new Date('2026-09-30T00:00:00Z');
+    await h.service.refreshNotifications();
+    const box = await h.service.inbox('member');
+    expect(box.unreadCount).toBe(1);
+    expect((await h.service.state('member')).diagnoses).toEqual([]);
+    await h.service.act('member', {
+      action: 'watch',
+      policyId: 'p1',
+      enabled: false,
+    });
+    h.clock.date = new Date('2026-10-02T00:00:00Z');
+    await h.service.refreshNotifications();
+    expect((await h.service.inbox('member')).notices).toHaveLength(1);
+  });
+  it('keeps read notices after re-entry, deduplicates deadlines and records document changes', async () => {
+    const h = harness();
+    await enabled(h);
+    h.clock.date = new Date('2026-09-30T00:00:00Z');
+    await h.service.act('a', {
+      action: 'watch',
+      policyId: 'p1',
+      enabled: true,
+    });
+    await h.service.refreshNotifications();
+    const first = await h.service.inbox('a');
+    expect(first.notices).toHaveLength(1);
+    expect(first.notices[0].kind).toBe('deadline');
+    await h.service.readNotifications('a', [first.notices[0].id]);
+    await h.service.refreshNotifications();
+    expect((await h.service.inbox('a')).notices[0].readAt).toBeTruthy();
+    expect((await h.service.inbox('a')).unreadCount).toBe(0);
+    expect((await h.service.inbox('b')).notices).toEqual([]);
+    expect((await h.service.inbox('other')).notices).toEqual([]);
+    await h.store.update('document:p1', () => ({
+      ...document,
+      version: 2,
+      contentHash: 'v2',
+      deadline: '2026-10-15',
+    }));
+    await h.service.refreshNotifications();
+    await h.service.refreshNotifications();
+    const next = await h.service.inbox('a');
+    expect(next.notices).toHaveLength(2);
+    expect(next.unreadCount).toBe(1);
+    expect(next.notices[0].kind).toBe('changed');
+    expect(next.notices[0].body).toContain('2026-10-15');
+    await expect(
+      h.service.readNotifications('other', [next.notices[0].id]),
+    ).rejects.toThrow();
+  });
+  it('never notifies unwatched, unavailable, disabled or foreign-region policies', async () => {
+    const h = harness();
+    await enabled(h);
+    h.clock.date = new Date('2026-09-30T00:00:00Z');
+    await h.service.refreshNotifications();
+    expect((await h.service.inbox('a')).notices).toEqual([]);
+    await h.service.act('a', {
+      action: 'watch',
+      policyId: 'p1',
+      enabled: true,
+    });
+    await h.service.act('a', { action: 'configure', enabled: false });
+    await h.service.refreshNotifications();
+    expect((await h.service.inbox('a')).notices).toEqual([]);
+    await h.service.act('a', {
+      action: 'configure',
+      enabled: true,
+      consent: true,
+    });
+    await h.store.update('document:p1', () => ({
+      ...document,
+      sourceStatus: 'unavailable',
+    }));
+    await h.service.refreshNotifications();
+    expect((await h.service.inbox('a')).notices).toEqual([]);
+    await h.store.update('document:foreign', () => ({
+      ...document,
+      id: 'foreign',
+      level: 'province',
+      region: { country: 'CN', province: '四川省' },
+    }));
+    await expect(
+      h.service.act('a', {
+        action: 'watch',
+        policyId: 'foreign',
+        enabled: true,
+      }),
+    ).rejects.toThrow();
+  });
+});
 describe('enterprise policy workspace isolation and diagnostics', () => {
   it('does not let already interpreted closed policies starve later actionable recommendations', async () => {
     const h = harness();

@@ -4,6 +4,27 @@ import { describe, expect, it, vi } from 'vitest';
 import { RecruitmentWorkspaceStore } from './recruitmentWorkspaceStore.js';
 
 describe('招聘共享工作区', () => {
+  it('切换到描述相同的其他岗位后，不接收上一个岗位的异步检索结果', () => {
+    const store = new RecruitmentWorkspaceStore();
+    store.restoreSharedJob('job-a', 1, '前端', 'React', [], []);
+    const epoch = store.getWorkspaceEpoch();
+    store.restoreSharedJob('job-b', 1, '前端', 'React', [], []);
+    expect(() => store.setSourceSearch({ requisitionId: 'job-a', jobTitle: '前端', jobDescription: 'React', result: { runId: 'old-run', candidates: [], sources: [] } }, epoch)).toThrow(/岗位已切换/);
+    expect(store.getSnapshot().sourceSearch).toBeNull();
+  });
+  it('两个入口使用共享岗位 ID 检索，未共享岗位在当前目标下复用 ID', () => {
+    const store = new RecruitmentWorkspaceStore();
+    const first = store.getSourceRequisitionId();
+    expect(store.getSourceRequisitionId()).toBe(first);
+    store.setJobDescription('招聘前端');
+    expect(store.getSourceRequisitionId()).not.toBe(first);
+    store.setSharedJob({ id: 'shared-job-1', revision: 1, savedFingerprint: '' });
+    expect(store.getSourceRequisitionId()).toBe('shared-job-1');
+    store.setJobDescription('岗位要求更新');
+    expect(store.getSourceRequisitionId()).toBe('shared-job-1');
+    store.setSharedJob({ id: 'shared-job-2', revision: 1, savedFingerprint: '' });
+    expect(store.getSourceRequisitionId()).toBe('shared-job-2');
+  });
   it('让右侧工作台与对话读取同一份岗位和候选人状态', () => {
     const store = new RecruitmentWorkspaceStore();
     const listener = vi.fn();
@@ -25,6 +46,12 @@ describe('招聘共享工作区', () => {
     const store = new RecruitmentWorkspaceStore();
     store.setCandidates([{
       id: 'candidate-1', fileName: 'resume.pdf', consentAt: '2026-08-01T00:00:00Z',
+      sources: [{
+        id: 'source-1', providerId: 'manual_upload', providerLabel: '手动导入',
+        acquisitionMode: 'manual_upload', authorizationStatus: 'confirmed',
+        importedAt: '2026-08-01T00:00:00Z', observedAt: '2026-08-01T00:00:00Z',
+        originalFileName: 'resume.pdf',
+      }],
       retentionDays: 7, expiresAt: '2026-08-08T00:00:00Z',
       analysis: {
         candidateId: 'candidate-1', identity: {}, redactedResume: '经验', findings: [],

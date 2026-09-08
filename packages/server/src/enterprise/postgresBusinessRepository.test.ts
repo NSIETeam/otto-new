@@ -19,6 +19,26 @@ function result<Row extends Record<string, unknown>>(
 }
 
 describe('PostgreSQL enterprise business repository', () => {
+  it('binds revision audit insertion to the same atomic statement and successful compare-and-swap', async () => {
+    const query = vi.fn(async () => result());
+    const repository = createPostgresEnterpriseBusinessRepository({
+      pool: { query, connect: vi.fn(), end: vi.fn() } as unknown as PostgresPoolLike,
+      accountSyncKeyProvider: { getKey: () => Buffer.alloc(32, 7), clear: vi.fn() },
+    });
+    expect(await repository.updateBusinessRecord({
+      organizationId: 'org-a', domain: 'knowledge', resourceType: 'entry', resourceId: '12',
+      expectedVersion: 2, status: 'pending_review', payload: { content: '恢复的正文' },
+      auditEvent: { eventType: 'restored', actorAccountId: 'admin-a', payload: { fromVersion: 2, toVersion: 3 } },
+    })).toBeNull();
+    const [sql, values] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain('WITH updated AS');
+    expect(sql).toContain('INSERT INTO enterprise_business_events');
+    expect(sql).toContain('FROM updated');
+    expect(sql).toContain('version = $7');
+    expect(values.slice(0, 4)).toEqual(['org-a', 'knowledge', 'entry', '12']);
+    expect(values).toContain('admin-a');
+    expect(query).toHaveBeenCalledOnce();
+  });
   it('encrypts account sync payloads and commits them under the account tenant', async () => {
     const key = Buffer.alloc(32, 7);
     let insertValues: readonly unknown[] = [];

@@ -10,6 +10,21 @@ import {
 } from './useProductWorkspace.js';
 
 describe('productWorkspaceReducer', () => {
+  it('版本读写失败会结束等待，错误不会被其他工作区消息掩盖', () => {
+    const busy = productWorkspaceReducer(initialProductWorkspaceState, { kind: 'skill_release_busy' });
+    expect(busy.skillReleaseBusy).toBe(true);
+    const failed = productWorkspaceReducer(busy, { kind: 'frame', frame: { type: 'error', payload: { code: 'skill_release_failed', message: '版本已变化' } } });
+    expect(failed.skillReleaseBusy).toBe(false);
+    expect(failed.skillReleaseError).toBe('版本已变化');
+    const success = productWorkspaceReducer(failed, { kind: 'frame', frame: { type: 'skill_releases', payload: { skills: [], lastAction: { kind: 'rolled-back', skillName: 'report' } } } });
+    expect(success.skillReleaseError).toBeNull();
+    expect(success.skillReleaseStatus).toContain('已恢复');
+    const offline = productWorkspaceReducer(busy, { kind: 'frame', frame: { type: 'error', payload: { code: 'offline_write_rejected', message: '连接中断，未发送回滚' } } });
+    expect(offline.skillReleaseBusy).toBe(false);
+    const timeout = productWorkspaceReducer(busy, { kind: 'skill_release_timeout' });
+    expect(timeout.skillReleaseBusy).toBe(false);
+    expect(timeout.skillReleaseError).toContain('不会自动重试');
+  });
   it('接收服务端脱敏工作区快照并切换模式', () => {
     const frame: ServerToClient = {
       type: 'product_workspace',

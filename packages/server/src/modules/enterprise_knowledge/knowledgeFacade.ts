@@ -100,6 +100,7 @@ export function createEnterpriseKnowledgeFacade(
     },
     reviewKnowledge(input: {
       id: number;
+      expectedVersion?: number;
       organizationId?: string;
       action: 'approve' | 'archive';
       reviewer: string;

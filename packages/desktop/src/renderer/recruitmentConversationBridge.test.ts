@@ -6,6 +6,7 @@ import {
   handleRecruitmentConversation,
 } from './recruitmentConversationBridge.js';
 import { RecruitmentWorkspaceStore } from './recruitmentWorkspaceStore.js';
+import { recruitmentArchiveFingerprint } from './recruitmentArchive.js';
 
 const resume = `李明
 电话：13900139000
@@ -13,6 +14,72 @@ const resume = `李明
 2022-2026 星河科技 前端工程师
 使用 React 和 TypeScript 开发企业系统
 负责性能优化，最终首屏时间降低 30%`;
+
+describe('conversation source material bridge', () => {
+  it('does not disclose delayed search results after switching shared jobs with the same description', async () => {
+    const h = harness();
+    h.store.restoreSharedJob('job-a', 1, '前端工程师', 'React', [], []);
+    const searchSources = vi.fn(async () => {
+      const state = h.store.getSnapshot();
+      h.store.restoreSharedJob('job-b', 1, state.jobTitle, state.jobDescription, [], []);
+      return { runId: 'stale', candidates: [], sources: [{ sourceId: 'workable', label: '旧岗位来源', status: 'ok' as const, count: 0, durationMs: 1, message: '不应披露的旧岗位信息' }] };
+    });
+    await handleRecruitmentConversation({ ...h.common, text: '帮我寻找 React 前端工程师候选人', searchSources });
+    expect(h.store.getSnapshot().sourceSearch).toBeNull();
+    expect(h.messages.at(-1)?.text).not.toContain('不应披露');
+  });
+  it('queries other job records without invoking a model or mutating recruitment state', async () => {
+    const h = harness();
+    await importResume(h);
+    h.store.setSharedJob({ id: 'job-1', revision: 3, savedFingerprint: recruitmentArchiveFingerprint(h.store.getSnapshot()) });
+    h.analyzeResume.mockClear();
+    const before = h.store.getSnapshot();
+    const queryRelatedApplications = vi.fn(async () => ({ kind: 'related' as const, matches: [{ jobId: 'job-2', jobTitle: '全栈工程师', jobRevision: 4, candidateId: 'other', fileName: 'resume.txt', reason: 'linked' as const, stage: 'interview' as const }], nextCursor: 'cursor' }));
+    expect(await handleRecruitmentConversation({ ...h.common, text: '查看当前候选人在其他岗位的记录', queryRelatedApplications })).toBe(true);
+    expect(queryRelatedApplications).toHaveBeenCalledWith({ kind: 'related', jobId: 'job-1', candidateId: before.activeCandidateId });
+    expect(h.messages.at(-1)?.text).toContain('全栈工程师');
+    expect(h.messages.at(-1)?.text).toContain('后续页');
+    expect(h.analyzeResume).not.toHaveBeenCalled(); expect(h.store.getSnapshot()).toBe(before);
+  });
+  it('does not disclose stale cross-job results after switching workspace', async () => {
+    const h = harness(); await importResume(h);
+    h.store.setSharedJob({ id: 'job-1', revision: 3, savedFingerprint: recruitmentArchiveFingerprint(h.store.getSnapshot()) });
+    const queryRelatedApplications = vi.fn(async () => { h.store.resetWorkspace(); return { kind: 'related' as const, matches: [{ jobId: 'private', jobTitle: '过期工作台的岗位', jobRevision: 1, candidateId: 'other', fileName: 'resume.txt', reason: 'linked' as const, stage: 'new' as const }], nextCursor: null }; });
+    expect(await handleRecruitmentConversation({ ...h.common, text: '查看当前候选人在其他岗位的记录', queryRelatedApplications })).toBe(true);
+    expect(queryRelatedApplications).toHaveBeenCalledOnce();
+    expect(h.messages.at(-1)?.text).not.toContain('过期工作台的岗位');
+  });
+  it('analyzes a numbered result in the shared workbench without choosing local files', async () => {
+    const h = harness();
+    h.store.setJobTitle('前端工程师'); h.store.setJobDescription('负责 React 交付'); h.store.setConsentConfirmed(true);
+    const source = { sourceId: 'official', sourceLabel: '企业人才库', sourceRecordId: 'person-1' };
+    h.store.setSourceSearch({ requisitionId: 'job-1', jobTitle: '前端工程师', jobDescription: '负责 React 交付', result: {
+      runId: 'run-1', sources: [], candidates: [{ canonicalId: 'canonical-1', displayName: '李明', sourceCount: 1, identityKeys: [], sources: [source], fieldEvidence: {} }],
+    } });
+    const getSourceMaterial = vi.fn(async () => ({
+      runId: 'run-1', requisitionId: 'job-1', canonicalId: 'canonical-1', source, acquisitionMode: 'authorized_api' as const,
+      material: { sourceRecordId: 'person-1', fileName: 'resume.txt', completeness: 'full_text' as const, text: resume },
+      contentHash: 'a'.repeat(64), retrievedAt: new Date().toISOString(),
+    }));
+    await expect(handleRecruitmentConversation({ ...h.common, text: '分析找到的第 1 位候选人', getSourceMaterial })).resolves.toBe(true);
+    expect(h.selectFiles).not.toHaveBeenCalled(); expect(h.analyzeResume).toHaveBeenCalledOnce();
+    expect(h.store.activeCandidate()?.sources[0]?.providerId).toBe('official');
+    await handleRecruitmentConversation({ ...h.common, text: '生成面试问题' });
+    expect(h.messages.at(-1)?.text).toContain('指标基线');
+  });
+
+  it('routes authorized enterprise searches into the shared source result list', async () => {
+    const h = harness();
+    h.store.setSharedJob({ id: 'shared-job-1', revision: 1, savedFingerprint: '' });
+    const searchSources = vi.fn(async () => ({ runId: 'run-1', candidates: [], sources: [{ sourceId: 'workable', label: 'Workable', status: 'ok' as const, count: 0, durationMs: 1, message: '仅读取绑定岗位，未按自由文本筛选。' }] }));
+    await expect(handleRecruitmentConversation({ ...h.common, text: '帮我寻找 React 前端工程师候选人', searchSources })).resolves.toBe(true);
+    expect(searchSources).toHaveBeenCalledOnce();
+    expect(searchSources).toHaveBeenCalledWith(expect.objectContaining({ requisitionId: 'shared-job-1' }));
+    expect(h.messages.at(-1)?.text).toContain('未按自由文本筛选');
+    expect(h.store.getSnapshot().sourceSearch?.result.runId).toBe('run-1');
+    expect(h.messages.at(-1)?.text).toContain('0 位');
+  });
+});
 
 function harness() {
   const store = new RecruitmentWorkspaceStore();
@@ -81,6 +148,46 @@ async function importResume(h: ReturnType<typeof harness>): Promise<void> {
 }
 
 describe('招聘对话共享桥', () => {
+  it('does not insert an old chat analysis into a newly opened shared workspace', async () => {
+    const h = harness();
+    const original = h.analyzeResume.getMockImplementation()!;
+    h.analyzeResume.mockImplementationOnce(async () => {
+      const result = await original();
+      h.store.resetWorkspace();
+      return result;
+    });
+    await handleRecruitmentConversation({ ...h.common, text: '我要招一名前端工程师，帮我分析简历' });
+    await handleRecruitmentConversation({ ...h.common, text: '确认候选人已授权并选择材料' });
+    expect(h.store.getSnapshot().candidates).toHaveLength(0);
+    expect(h.messages.at(-1)?.text).toContain('已变化');
+  });
+
+  it('没有已验证来源时解释接入方式，不假装已经去平台搜索', async () => {
+    const h = harness();
+    const handled = await handleRecruitmentConversation({
+      ...h.common,
+      text: '我要招一名前端工程师，帮我从多个招聘平台寻找候选人',
+    });
+    expect(handled).toBe(true);
+    expect(h.store.getSnapshot().jobTitle).toBe('前端工程师');
+    expect(h.messages.at(-1)?.text).toContain('没有通过工具合同验证的自动寻才渠道');
+    expect(h.messages.at(-1)?.text).toContain('不会使用未授权爬虫');
+    expect(h.selectFiles).not.toHaveBeenCalled();
+  });
+
+  it('有已验证来源时把寻才请求交给正常 Agent 回合调用 MCP', async () => {
+    const h = harness();
+    const handled = await handleRecruitmentConversation({
+      ...h.common,
+      text: '我要招一名前端工程师，帮我从多个招聘平台寻找候选人',
+      automaticSourceLabels: ['拉勾'],
+    });
+    expect(handled).toBe(false);
+    expect(h.store.getSnapshot().jobTitle).toBe('前端工程师');
+    expect(h.messages).toHaveLength(0);
+    expect(h.selectFiles).not.toHaveBeenCalled();
+  });
+
   it('在统一草稿中心展示招聘确认并拒绝过期卡片', async () => {
     const h = harness();
     await handleRecruitmentConversation({ ...h.common, text: '帮我分析一份简历' });
@@ -172,7 +279,7 @@ describe('招聘对话共享桥', () => {
     }));
 
     await handleRecruitmentConversation({ ...h.common, text: '查看候选人的岗位证据图谱' });
-    expect(h.messages.at(-1)?.text).toContain('性能优化方法｜部分验证');
+    expect(h.messages.at(-1)?.text).toContain('性能优化方法｜部分材料支持');
     expect(h.messages.at(-1)?.text).toContain('简历第 6 行');
 
     await handleRecruitmentConversation({ ...h.common, text: '下一步最值得问什么' });

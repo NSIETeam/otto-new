@@ -118,9 +118,10 @@ describe('TaskGraphCoordinator', () => {
         verification: false,
       },
     ]);
+    // A same-name tool without a bound resolution receipt cannot close recovery.
     expect(
       graph.snapshot().nodes.find((node) => node.kind === 'recover')?.status,
-    ).toBe('completed');
+    ).toBe('pending');
   });
 
   it('emits a bounded internal directive without user text or hidden payloads', () => {
@@ -222,6 +223,7 @@ describe('TaskGraphCoordinator', () => {
     graph.applyAdaptation({
       revision: 1,
       timestamp: 10,
+      failureFingerprint: 'replace-target',
       category: 'stale_state',
       action: 'switch_strategy',
       toolName: 'replace',
@@ -243,6 +245,10 @@ describe('TaskGraphCoordinator', () => {
         evidenceId: 'test-1',
       },
     ]);
+    expect(graph.markDelivered()).toBe(false);
+    graph.resolveRecoveries(['unrelated-target'], 'test-1');
+    expect(graph.markDelivered()).toBe(false);
+    graph.resolveRecoveries(['replace-target'], 'replace-2');
     expect(graph.markDelivered()).toBe(true);
 
     const snapshot = graph.snapshot();

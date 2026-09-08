@@ -2,18 +2,21 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { AutoSkillCandidateInfo } from 'otto-server';
+import type { AutoSkillCandidateInfo, InstalledSkillReleases, SkillRollbackInput, SkillAcceptanceInput } from 'otto-server';
 import type { CentralEnterpriseRole } from '../state/centralEnterpriseIdentity.js';
 import { customAgentIconToModuleIcon, type CustomAgentIcon } from '../customAgentIcons.js';
 import type { CustomAgentDefinition, CustomAgentDraft } from '../customAgents.js';
 import {
   buildEnterpriseMemoryHealth,
   enterpriseMemoryUsageScenarios,
+  enterpriseMemoryUseStatus,
   type EnterpriseMemoryHealthNode,
   type EnterpriseMemoryHealthStatus,
 } from '../enterpriseMemoryHealth.js';
 import { CustomAgentIconPicker } from './CustomAgentIconPicker.js';
 import { ModuleIcon } from './ModuleIcon.js';
+import { SkillFunctionCard, SkillVersionPanel } from './SkillVersionPanel.js';
+import { EnterpriseMemoryVersions, MemoryContentComparison } from './EnterpriseMemoryVersions.js';
 
 export function DialogFrame({ title, onClose, children }: {
   title: string; onClose(): void; children: React.ReactNode;
@@ -111,15 +114,8 @@ function knowledgeSourceLabel(sourceType?: string): string {
   return '企业工作中形成';
 }
 
-function knowledgeReliabilityLabel(confidence: number): string {
-  if (confidence >= 0.9) return '可信度很高';
-  if (confidence >= 0.75) return '可信度较高';
-  if (confidence >= 0.6) return '仍在学习';
-  return '需要更多验证';
-}
-
 function knowledgeHealthLabel(status: EnterpriseMemoryHealthStatus): string {
-  if (status === 'trusted') return '证据充分';
+  if (status === 'trusted') return '有确认记录';
   if (status === 'learning') return '继续学习';
   if (status === 'needs_review') return '等待确认';
   if (status === 'conflicted') return '存在冲突';
@@ -144,7 +140,7 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
   const [view, setView] = useState<'overview' | 'questions' | 'knowledge' | 'timeline'>('overview');
   const [busyId, setBusyId] = useState('');
   const [editor, setEditor] = useState<{
-    id?: string; title: string; category: string; content: string; confidence?: number;
+    id?: string; baseVersion?: number; original?: KnowledgeItem; title: string; category: string; content: string; confidence?: number;
     resolveConflict?: boolean; adjudication?: Omit<KnowledgeAdjudication, 'id' | 'adjudicatedBy'>;
     aiProposal?: KnowledgeAiProposal;
   } | null>(null);
@@ -167,7 +163,7 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
         includeReview: true,
       });
       if (epoch === epochRef.current) {
-        setItems(next);
+        setItems(next); setRevisions({}); setEvidence({}); setAiInsights({});
       }
     } catch (cause) {
       if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause));
@@ -198,9 +194,10 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
     const operationId = editor.id || 'new-knowledge';
     setBusyId(operationId);
     try {
-      if (editor.id) await window.otto.enterpriseKnowledgeRevise(editor.id, {
+      const saved = editor.id ? await window.otto.enterpriseKnowledgeRevise(editor.id, {
+        expectedVersion: editor.baseVersion,
         title: editor.title.trim(), category: editor.category.trim(), content: editor.content.trim(),
-        confidence: editor.confidence ?? 0.95,
+        confidence: editor.original?.confidence,
         changeNote: editor.resolveConflict
           ? '管理员核对证据并裁决冲突'
           : editor.aiProposal
@@ -208,8 +205,7 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
             : '管理员在企业记忆弹窗中修订',
         resolveConflict: editor.resolveConflict,
         adjudication: editor.resolveConflict ? editor.adjudication : undefined,
-      });
-      else await window.otto.enterpriseKnowledgeRecord({ sourceId: `manual:${crypto.randomUUID()}`, title: editor.title.trim(), category: editor.category.trim(), content: editor.content.trim(), confidence: 0.95, sourceType: 'manual', sourceLabel: '企业管理员手动录入' });
+      }) : await window.otto.enterpriseKnowledgeRecord({ sourceId: `manual:${crypto.randomUUID()}`, title: editor.title.trim(), category: editor.category.trim(), content: editor.content.trim(), confidence: 0.95, sourceType: 'manual', sourceLabel: '企业管理员手动录入' });
       if (epoch !== epochRef.current) return;
       if (editor.id) {
         setRevisions((current) => { const next = { ...current }; delete next[editor.id!]; return next; });
@@ -218,11 +214,9 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
         setAiInsights((current) => { const next = { ...current }; delete next[editor.id!]; return next; });
       }
       setEditor(null);
-      setNotice(editor.resolveConflict
-        ? '冲突已裁决并形成新版本，请再次确认后发布。'
-        : editor.aiProposal
-          ? '深化后的新版本已形成，Otto 会在后续相关工作中使用。'
-          : editor.id ? '知识已修订，新版本立即用于后续检索。' : '企业知识已发布。');
+      setNotice(editor.id
+        ? `内容已保存。${enterpriseMemoryUseStatus(saved as KnowledgeItem)}`
+        : '补充内容已保存，请查看下方审核状态。');
       setBusyId(''); await refresh();
     } catch (cause) { if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (epoch === epochRef.current) setBusyId(''); }
@@ -230,7 +224,7 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
   const review = async (id: string, action: 'approve' | 'archive'): Promise<void> => {
     const epoch = epochRef.current;
     setBusyId(id);
-    try { await window.otto.enterpriseKnowledgeReview(id, action); if (epoch !== epochRef.current) return; setNotice(action === 'approve' ? '知识已发布，可供 Otto 检索引用。' : '知识已归档。'); setRevisions((current) => { const next = { ...current }; delete next[id]; return next; }); setEvidence((current) => { const next = { ...current }; delete next[id]; return next; }); setBusyId(''); await refresh(); }
+    try { await window.otto.enterpriseKnowledgeReview(id, action, undefined, items.find((item) => item.id === id)?.version); if (epoch !== epochRef.current) return; setNotice(action === 'approve' ? '知识已发布，可供 Otto 检索引用。' : '知识已归档。'); setRevisions((current) => { const next = { ...current }; delete next[id]; return next; }); setEvidence((current) => { const next = { ...current }; delete next[id]; return next; }); setBusyId(''); await refresh(); }
     catch (cause) { if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (epoch === epochRef.current) setBusyId(''); }
   };
@@ -313,12 +307,15 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
       setRevalidation(null);
       setEditor({
         id: item.id,
+        baseVersion: item.version,
+        original: item,
         title: proposal.title,
         category: proposal.category,
         content: proposal.content,
         confidence: proposal.confidence,
         aiProposal: insight,
       });
+      setView('knowledge');
       setNotice('AI 已结合最新证据生成深化建议。请管理员检查后再应用。');
     } catch (cause) {
       if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause));
@@ -341,6 +338,25 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
       if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause));
     } finally { if (epoch === epochRef.current) setBusyId(''); }
   };
+  const restoreKnowledge = async (item: KnowledgeItem, revision: KnowledgeRevision, reason: string): Promise<void> => {
+    if (role !== 'company_admin' || busyId || !item.version) return;
+    const epoch = epochRef.current;
+    setBusyId(item.id); setError(''); setNotice('');
+    try {
+      const saved = await window.otto.enterpriseKnowledgeRevise(item.id, {
+        expectedVersion: item.version, restoreVersion: revision.version,
+        title: revision.title || item.title || item.category, category: revision.category || item.category,
+        content: revision.content, changeNote: reason,
+      });
+      if (epoch !== epochRef.current) return;
+      setEditor(null); setRevalidation(null); setRevisions({}); setAiInsights({});
+      setNotice(saved.status === 'pending_review'
+        ? `已恢复为 v${saved.version}，待管理员重新确认；历史版本仍保留，暂不进入成员检索。`
+        : `服务端返回的状态与预期不同，请刷新核对：${enterpriseMemoryUseStatus(saved)}`);
+      setBusyId(''); await refresh();
+    } catch (cause) { if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (epoch === epochRef.current) setBusyId(''); }
+  };
   const setEvidenceDisposition = (knowledgeId: string, evidenceId: string, disposition: 'accepted' | 'rejected'): void => {
     setAdjudications((current) => {
       const draft = current[knowledgeId] ?? { acceptedEvidenceIds: [], rejectedEvidenceIds: [], rationale: '' };
@@ -362,7 +378,7 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
   };
   useEffect(() => {
     if (!open || view !== 'timeline' || role !== 'company_admin') return;
-    const missing = items.filter((item) => item.status !== 'archived' && revisions[item.id] === undefined);
+    const missing = items.filter((item) => revisions[item.id] === undefined);
     if (!missing.length) return;
     const epoch = epochRef.current;
     void Promise.all(missing.map(async (item) => ({
@@ -378,15 +394,14 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
       if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause));
     });
   }, [items, open, revisions, role, view]);
-  const timeline = items.filter((item) => !item.status || item.status === 'active')
-    .flatMap((item) => (revisions[item.id]?.length ? revisions[item.id] : [{
+  const timeline = items.flatMap((item) => (revisions[item.id]?.length ? revisions[item.id] : [{
       id: `current-${item.id}`, version: item.version ?? 1, title: item.title,
       category: item.category, content: item.content, changedBy: item.contributor,
       changeNote: '当前版本', createdAt: item.updatedAt || item.createdAt,
     }]).map((revision) => ({ item, revision })))
     .sort((left, right) => (right.revision.createdAt || '').localeCompare(left.revision.createdAt || ''));
   const visibleItems = items.filter((item) => item.status !== 'archived');
-  const activeCount = visibleItems.filter((item) => !item.status || item.status === 'active').length;
+  const activeCount = visibleItems.filter((item) => item.status === 'active' && !item.sourceLabel?.includes('证据存在冲突') && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now())).length;
   const pendingCount = visibleItems.filter((item) => item.status === 'pending_review').length;
   const automaticallyLearnedCount = visibleItems.filter((item) => item.sourceType === 'auto_capture').length;
   const memoryHealth = useMemo(() => buildEnterpriseMemoryHealth(visibleItems), [visibleItems]);
@@ -400,23 +415,23 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
   return <DialogFrame title="企业记忆" onClose={requestClose}>
     <section className="otto-enterprise-memory-hero" aria-label="企业记忆工作方式">
       <div className="otto-enterprise-memory-hero__copy">
-        <span className="otto-enterprise-memory-hero__eyebrow">自动学习已开启</span>
+        <span className="otto-enterprise-memory-hero__eyebrow">从工作中积累，按依据使用</span>
         <h3>Otto 正在学习这家企业怎样工作</h3>
-        <p>完成对话和工作后，Otto 会自动识别稳定的制度、偏好、决定与解决方法。普通闲聊、敏感凭据和低可信内容不会进入企业记忆。</p>
-        <p>已经确认的记忆会在相关问题中自动调用；记忆地图会持续找出冲突、过期和证据缺口，并告诉管理员下一条最值得确认的问题。</p>
+        <p>企业知识功能开启时，完成对话和工作后，Otto 会自动识别制度、偏好、决定与解决方法，过滤常见闲聊和敏感凭据，先积累观察记录。自动提炼不等于事实已验证。</p>
+        <p>已经确认且未过期的记忆，可按部门权限供相关对话和任务参考。新证据继续积累，冲突或过期时提示复核。管理者可以修改、停止使用、删除，并比较或恢复历史内容。</p>
       </div>
       <div className="otto-enterprise-memory-hero__stats" aria-label="企业记忆概况">
-        <div><strong>{activeCount}</strong><span>Otto 已掌握</span></div>
+        <div><strong>{activeCount}</strong><span>当前可供检索</span></div>
         <div><strong>{pendingCount}</strong><span>待管理员确认</span></div>
         <div><strong>{automaticallyLearnedCount}</strong><span>自动学习形成</span></div>
-        <div><strong>{memoryHealth.governanceScore}</strong><span>治理完成度</span></div>
+        <div><strong>{memoryHealth.counts.conflicted + memoryHealth.counts.expired}</strong><span>冲突或已过期</span></div>
       </div>
     </section>
     <div role="tablist" aria-label="企业知识与记忆" className="otto-enterprise-memory-switch">
       <button type="button" role="tab" aria-selected={view === 'overview'} onClick={() => setView('overview')}>记忆地图</button>
       <button type="button" role="tab" aria-selected={view === 'questions'} onClick={() => setView('questions')}>下一步确认</button>
       <button type="button" role="tab" aria-selected={view === 'knowledge'} onClick={() => setView('knowledge')}>已掌握与待确认</button>
-      <button type="button" role="tab" aria-selected={view === 'timeline'} onClick={() => setView('timeline')}>如何变得更准确</button>
+      <button type="button" role="tab" aria-selected={view === 'timeline'} onClick={() => setView('timeline')}>版本与变更记录</button>
     </div>
     <div className="otto-workspace-dialog__toolbar">
       <form onSubmit={(event) => { event.preventDefault(); void refresh(); }}><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="搜索企业知识" placeholder="搜索制度、流程、项目结论"/><button type="submit">搜索</button></form>
@@ -425,16 +440,17 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
     </div>
     {view === 'knowledge' && editor ? <form className="otto-workspace-dialog__editor" onSubmit={(event) => { event.preventDefault(); void save(); }}>
       {editor.aiProposal ? <section className="otto-enterprise-memory-ai-proposal" aria-label="AI 深化建议">
-        <span>AI 深化建议 · 尚未保存</span>
+        <span>AI 深化建议 · 基于 v{editor.baseVersion ?? '未知'} · 尚未保存</span><p>以下理由是模型建议，不是验证报告。保存前请比较实际内容，核对引用与适用范围。</p>
         <strong>{editor.aiProposal.rationale}</strong>
         {editor.aiProposal.changes.length ? <ul>{editor.aiProposal.changes.map((change) => <li key={change}>{change}</li>)}</ul> : null}
         {editor.aiProposal.uncertainties.length ? <div><b>仍需人工判断</b><ul>{editor.aiProposal.uncertainties.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
-        {editor.aiProposal.evidenceGraph?.length ? <div className="otto-enterprise-memory-ai-graph"><b>主张—证据图谱</b>{editor.aiProposal.evidenceGraph.map((node) => <article key={`${node.claim}-${node.status}`} className={`is-${node.status}`}><header><strong>{node.claim}</strong><span>{evidenceClaimStatusLabel(node.status)}</span></header>{node.explanation ? <p>{node.explanation}</p> : null}{node.gaps.length ? <small>缺口：{node.gaps.join('；')}</small> : null}{node.nextQuestion ? <small>建议确认：{node.nextQuestion}</small> : null}</article>)}</div> : null}
-        {editor.aiProposal.applicableScenarios?.length ? <div><b>Otto 会在这些工作中调用</b><ul>{editor.aiProposal.applicableScenarios.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
+        {editor.aiProposal.evidenceGraph?.length ? <div className="otto-enterprise-memory-ai-graph"><b>主张—证据图谱</b>{editor.aiProposal.evidenceGraph.map((node) => <article key={`${node.claim}-${node.status}`} className={`is-${node.status}`}><header><strong>{node.claim}</strong><span>{evidenceClaimStatusLabel(node.status)}</span></header><small>模型判断 · 引用证据 #{node.evidenceIds.join('、#') || '无'}；请在下方学习依据中核对原文</small>{node.explanation ? <p>{node.explanation}</p> : null}{node.gaps.length ? <small>缺口：{node.gaps.join('；')}</small> : null}{node.nextQuestion ? <small>建议确认：{node.nextQuestion}</small> : null}</article>)}</div> : null}
+        {editor.aiProposal.applicableScenarios?.length ? <div><b>模型建议适用场景（未经逐项验证）</b><ul>{editor.aiProposal.applicableScenarios.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
         {editor.aiProposal.riskIfWrong ? <small><b>如果记错：</b>{editor.aiProposal.riskIfWrong}</small> : null}
         {editor.aiProposal.nextQuestion ? <div className="otto-enterprise-memory-ai-next"><span>下一条最值得确认的问题</span><strong>{editor.aiProposal.nextQuestion}</strong></div> : null}
         <small>依据 {editor.aiProposal.usedEvidenceIds.length} 条企业证据 · {editor.aiProposal.modelProvider}。请检查下方内容，管理员保存后才会形成新版本。</small>
       </section> : null}
+      {editor.original ? <MemoryContentComparison before={editor.original} after={editor} beforeLabel={`编辑前 v${editor.baseVersion ?? '未知'}`} afterLabel="待保存内容" /> : null}
       <input aria-label="知识标题" value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })}/>
       <input aria-label="知识分类" value={editor.category} onChange={(event) => setEditor({ ...editor, category: event.target.value })}/>
       <textarea aria-label="知识内容" rows={6} value={editor.content} onChange={(event) => setEditor({ ...editor, content: event.target.value })}/>
@@ -450,11 +466,11 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
     </form> : null}
     {error ? <p role="alert" className="otto-workspace-dialog__error">{error}</p> : null}{notice ? <p role="status">{notice}</p> : null}
     {view === 'overview' ? <section className="otto-enterprise-memory-map" aria-label="企业记忆地图">
-      <header className="otto-enterprise-memory-map__summary"><div><span>企业记忆治理完成度</span><strong>{memoryHealth.governanceScore}<small>/100</small></strong><p>这是证据、有效期和人工确认的治理指标，不是模型猜测的准确率。</p></div><div className="otto-enterprise-memory-map__counts"><article className="is-trusted"><strong>{memoryHealth.counts.trusted}</strong><span>证据充分</span></article><article className="is-learning"><strong>{memoryHealth.counts.learning}</strong><span>继续学习</span></article><article className="is-needs_review"><strong>{memoryHealth.counts.needs_review}</strong><span>等待确认</span></article><article className="is-conflicted"><strong>{memoryHealth.counts.conflicted}</strong><span>存在冲突</span></article><article className="is-expired"><strong>{memoryHealth.counts.expired}</strong><span>已经过期</span></article></div></header>
-      {memoryHealth.nextAction ? <article className={`otto-enterprise-memory-next is-${memoryHealth.nextAction.status}`}><span>NEXT BEST CLARIFICATION</span><h3>{memoryHealth.nextAction.question}</h3><p>{memoryHealth.nextAction.reasons.join(' · ')}</p>{role === 'company_admin' ? <button type="button" onClick={() => openHealthNode(memoryHealth.nextAction!)}>{memoryHealth.nextAction.actionLabel}</button> : null}</article> : <article className="otto-enterprise-memory-next is-trusted"><span>当前状态</span><h3>现有企业记忆均已完成必要治理</h3><p>Otto 仍会在后续工作中收集新证据，出现新口径时重新提示。</p></article>}
+      <header className="otto-enterprise-memory-map__summary"><div><span>企业记忆依据概览</span><h3>记住什么，凭什么使用</h3><p>展示实际记录与待确认事项，不用分数保证准确率。适用场景是建议，不代表已验证或实际调用。</p></div><div className="otto-enterprise-memory-map__counts"><article className="is-trusted"><strong>{memoryHealth.counts.trusted}</strong><span>有确认记录</span></article><article className="is-learning"><strong>{memoryHealth.counts.learning}</strong><span>继续学习</span></article><article className="is-needs_review"><strong>{memoryHealth.counts.needs_review}</strong><span>等待确认</span></article><article className="is-conflicted"><strong>{memoryHealth.counts.conflicted}</strong><span>存在冲突</span></article><article className="is-expired"><strong>{memoryHealth.counts.expired}</strong><span>已经过期</span></article></div></header>
+      {memoryHealth.nextAction ? <article className={`otto-enterprise-memory-next is-${memoryHealth.nextAction.status}`}><span>优先核对</span><h3>{memoryHealth.nextAction.question}</h3><p>{memoryHealth.nextAction.reasons.join(' · ')}</p>{role === 'company_admin' ? <button type="button" onClick={() => openHealthNode(memoryHealth.nextAction!)}>{memoryHealth.nextAction.actionLabel}</button> : null}</article> : <article className="otto-enterprise-memory-next is-trusted"><span>当前状态</span><h3>当前没有排队的复核事项</h3><p>这不代表所有结论均已验证。请在真实工作中核对来源，条件变化时及时修订。</p></article>}
       <div className="otto-enterprise-memory-map__nodes">{memoryHealth.nodes.map((node) => <article key={node.id} className={`is-${node.status}`}><header><div><span>{node.category}</span><h3>{node.title}</h3></div><strong>{knowledgeHealthLabel(node.status)}</strong></header><p>{node.reasons.join(' · ')}</p><div className="otto-enterprise-memory-map__usage"><b>{node.useStatus}</b>{node.usageScenarios.map((scenario) => <span key={scenario}>{scenario}</span>)}</div>{role === 'company_admin' ? <button type="button" onClick={() => openHealthNode(node)}>{node.actionLabel}</button> : null}</article>)}{!loading && !memoryHealth.nodes.length ? <p>暂无企业知识。完成真实工作后，Otto 会自动形成待确认候选。</p> : null}</div>
     </section> : null}
-    {view === 'questions' ? <section className="otto-enterprise-memory-questions" aria-label="企业记忆待确认问题"><header><span>动态确认队列</span><h3>只处理最影响后续工作的记忆缺口</h3><p>冲突、过期和待发布优先；证据充分的内容不会反复打扰管理员。</p></header>{memoryHealth.nodes.filter((node) => node.priority > 0).map((node, index) => <article key={node.id} className={`is-${node.status}`}><span>{String(index + 1).padStart(2, '0')}</span><div><header><strong>{node.title}</strong><b>{knowledgeHealthLabel(node.status)}</b></header><h4>{node.question}</h4><p>{node.reasons.join(' · ')}</p><small>可能调用：{node.usageScenarios.join('、')}</small>{role === 'company_admin' ? <button type="button" onClick={() => openHealthNode(node)}>{node.actionLabel}</button> : null}</div></article>)}{!memoryHealth.nodes.some((node) => node.priority > 0) ? <p>当前没有需要人工处理的记忆问题。</p> : null}</section> : null}
+    {view === 'questions' ? <section className="otto-enterprise-memory-questions" aria-label="企业记忆待确认问题"><header><span>动态确认队列</span><h3>只处理最影响后续工作的记忆缺口</h3><p>冲突、过期和待发布优先；有确认记录的内容仍可随时复核。</p></header>{memoryHealth.nodes.filter((node) => node.priority > 0).map((node, index) => <article key={node.id} className={`is-${node.status}`}><span>{String(index + 1).padStart(2, '0')}</span><div><header><strong>{node.title}</strong><b>{knowledgeHealthLabel(node.status)}</b></header><h4>{node.question}</h4><p>{node.reasons.join(' · ')}</p><small>可能调用：{node.usageScenarios.join('、')}</small>{role === 'company_admin' ? <button type="button" onClick={() => openHealthNode(node)}>{node.actionLabel}</button> : null}</div></article>)}{!memoryHealth.nodes.some((node) => node.priority > 0) ? <p>当前没有需要人工处理的记忆问题。</p> : null}</section> : null}
     {view === 'timeline' ? <div className="otto-enterprise-memory-timeline" aria-label="企业记忆沿革">{timeline.map(({ item, revision }) => <article key={`${item.id}-${revision.id}`}>
       <time>{formatKnowledgeDate(revision.createdAt)}</time><div><span>{item.department || '全组织'} · {revision.category || item.category} · v{revision.version}</span><strong>{revision.title || item.title || item.category}</strong><p>{revision.content}</p><small>{revision.changedBy || item.contributor || '系统沉淀'} · {revision.changeNote || revision.status || '形成知识'}</small>{revision.adjudication ? <small>裁决依据：{revision.adjudication.rationale} · 采纳 {revision.adjudication.acceptedEvidenceIds.length} 条 · 排除 {revision.adjudication.rejectedEvidenceIds.length} 条</small> : null}</div>
     </article>)}</div> : null}
@@ -465,53 +481,59 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
       const expired = Number.isFinite(expiresAt) && expiresAt <= Date.now();
       const reviewDue = !expired && Number.isFinite(reviewDueAt) && reviewDueAt <= Date.now();
       return <article key={item.id} className="otto-enterprise-memory-card">
-        <div className="otto-enterprise-memory-card__meta"><span>{item.department || '全组织'}</span><span>{item.category}</span><strong>{item.status === 'pending_review' ? '待你确认' : '对话中已启用'}</strong><span>{knowledgeSourceLabel(item.sourceType)}</span>{expired ? <strong className="is-expired">已过期</strong> : reviewDue ? <strong className="is-review-due">待复核</strong> : null}</div>
-        {item.evidenceCount ? <div className="otto-enterprise-memory-card__evidence"><strong>已被 {item.evidenceCount} 次工作验证</strong><span>{item.distinctSessionCount || 0} 个独立会话</span><span>{item.distinctContributorCount || 0} 名贡献者</span>{item.verifiedEvidenceCount ? <span>{item.verifiedEvidenceCount} 次明确确认</span> : null}{item.lastObservedAt ? <span>最近学习 {formatKnowledgeDate(item.lastObservedAt)}</span> : null}</div> : item.sourceType === 'manual' ? <div className="otto-enterprise-memory-card__evidence"><strong>由管理员直接确认</strong></div> : null}
-        <h3>{item.title || item.category}</h3><p>{item.content}</p><div className="otto-enterprise-memory-card__usage"><b>{item.status === 'pending_review' ? '确认后才会自动调用' : 'Otto 会自动用于'}</b>{enterpriseMemoryUsageScenarios(item).map((scenario) => <span key={scenario}>{scenario}</span>)}</div><small>{knowledgeReliabilityLabel(item.confidence)} · 已深化 {Math.max(0, (item.version ?? 1) - 1)} 次 · {item.contributor || 'Otto 自动学习'} · {formatKnowledgeDate(item.updatedAt || item.createdAt)}</small>
+        <div className="otto-enterprise-memory-card__meta"><span>{item.department || '全组织'}</span><span>{item.category}</span><strong>{enterpriseMemoryUseStatus(item)}</strong><span>{knowledgeSourceLabel(item.sourceType)}</span>{expired ? <strong className="is-expired">已过期</strong> : reviewDue ? <strong className="is-review-due">待复核</strong> : null}</div>
+        {item.evidenceCount ? <div className="otto-enterprise-memory-card__evidence"><strong>累计 {item.evidenceCount} 条观察记录</strong><span>{item.distinctSessionCount || 0} 个来源会话</span><span>{item.distinctContributorCount || 0} 名贡献者</span>{item.verifiedEvidenceCount ? <span>{item.verifiedEvidenceCount} 条标记为已验证</span> : null}{item.lastObservedAt ? <span>最近学习 {formatKnowledgeDate(item.lastObservedAt)}</span> : null}</div> : item.sourceType === 'manual' ? <div className="otto-enterprise-memory-card__evidence"><strong>手工补充内容，请结合审核记录核对</strong></div> : null}
+        <h3>{item.title || item.category}</h3><p>{item.content}</p><div className="otto-enterprise-memory-card__usage"><b>建议适用场景（不代表已验证）</b>{enterpriseMemoryUsageScenarios(item).map((scenario) => <span key={scenario}>{scenario}</span>)}</div><small>当前 v{item.version ?? '未知'} · 版本增加不代表准确率提高 · {item.contributor || 'Otto 自动学习'} · {formatKnowledgeDate(item.updatedAt || item.createdAt)}</small>
         {item.reviewDueAt || item.expiresAt ? <div className="otto-enterprise-memory-card__lifecycle">{item.reviewDueAt ? <span>复核日期 {formatKnowledgeDate(item.reviewDueAt)}</span> : null}{item.expiresAt ? <span>有效期至 {formatKnowledgeDate(item.expiresAt)}</span> : null}</div> : null}
         {role === 'company_admin' ? <footer>
-          {item.sourceType === 'auto_capture' || (item.evidenceCount ?? 0) > 0 ? <button type="button" disabled={busyId === item.id} onClick={() => void toggleEvidence(item.id)}>{evidence[item.id] !== undefined ? '收起学习依据' : '查看学习依据'}</button> : null}
-          {item.status === 'pending_review' ? <button type="button" disabled={busyId === item.id || contested} title={contested ? '请先修订内容并完成冲突裁决' : undefined} onClick={() => void review(item.id, 'approve')}>{contested ? '先裁决冲突' : '确认并让 Otto 使用'}</button> : null}
-          <button type="button" disabled={busyId === item.id || contested} title={contested ? '请先完成人工冲突裁决' : '让大模型结合全部学习依据重新归纳，保存前仍需管理员确认'} onClick={() => void deepenKnowledge(item)}>{busyId === item.id ? '分析中…' : 'AI 深化'}</button>
-          <button type="button" disabled={busyId === item.id || (contested && !isAdjudicationReady(item.id))} title={contested && !isAdjudicationReady(item.id) ? '请先处理全部冲突证据，并填写至少 12 个字的裁决依据' : undefined} onClick={() => setEditor({ id: item.id, title: item.title || item.category, category: item.category, content: item.content, resolveConflict: contested, adjudication: contested ? adjudications[item.id] : undefined })}>{contested ? '审查并裁决' : '人工修改'}</button>
-          {item.status === 'active' && !contested ? <button type="button" disabled={busyId === item.id} onClick={() => { setEditor(null); setRevalidation({ id: item.id, title: item.title || item.category, rationale: '', validForDays: item.sourceType === 'auto_capture' ? 180 : 365 }); }}>仍然有效</button> : null}
-          <button type="button" disabled={busyId === item.id} onClick={() => void toggleRevisions(item.id)}>{revisions[item.id] !== undefined ? '收起变化' : '查看变化'}</button><button type="button" disabled={busyId === item.id} onClick={() => void review(item.id, 'archive')}>停止使用</button><button className="otto-enterprise-memory-delete" type="button" disabled={busyId === item.id} onClick={() => void deleteKnowledge(item)}>永久删除</button>
+          {item.sourceType === 'auto_capture' || (item.evidenceCount ?? 0) > 0 ? <button type="button" disabled={Boolean(busyId)} onClick={() => void toggleEvidence(item.id)}>{evidence[item.id] !== undefined ? '收起学习依据' : '查看学习依据'}</button> : null}
+          {item.status === 'pending_review' ? <button type="button" disabled={Boolean(busyId) || contested} title={contested ? '请先修订内容并完成冲突裁决' : undefined} onClick={() => void review(item.id, 'approve')}>{contested ? '先裁决冲突' : '确认并让 Otto 使用'}</button> : null}
+          <button type="button" disabled={Boolean(busyId) || contested} title={contested ? '请先完成人工冲突裁决' : '让大模型结合学习依据提出建议，保存前仍需管理员确认；分析有条数和长度限制'} onClick={() => void deepenKnowledge(item)}>{busyId === item.id ? '处理中…' : 'AI 深化'}</button>
+          <button type="button" disabled={Boolean(busyId) || (contested && !isAdjudicationReady(item.id))} title={contested && !isAdjudicationReady(item.id) ? '请先处理全部冲突证据，并填写至少 12 个字的裁决依据' : undefined} onClick={() => setEditor({ id: item.id, baseVersion: item.version, original: item, title: item.title || item.category, category: item.category, content: item.content, resolveConflict: contested, adjudication: contested ? adjudications[item.id] : undefined })}>{contested ? '审查并裁决' : '人工修改'}</button>
+          {item.status === 'active' && !contested ? <button type="button" disabled={Boolean(busyId)} onClick={() => { setEditor(null); setRevalidation({ id: item.id, title: item.title || item.category, rationale: '', validForDays: item.sourceType === 'auto_capture' ? 180 : 365 }); }}>仍然有效</button> : null}
+          <button type="button" disabled={Boolean(busyId)} onClick={() => void toggleRevisions(item.id)}>{revisions[item.id] !== undefined ? '收起变化' : '查看变化'}</button><button type="button" disabled={Boolean(busyId)} onClick={() => void review(item.id, 'archive')}>停止使用</button><button className="otto-enterprise-memory-delete" type="button" disabled={Boolean(busyId)} onClick={() => void deleteKnowledge(item)}>永久删除</button>
         </footer> : null}
-        {aiInsights[item.id] && editor?.id !== item.id ? <section className="otto-enterprise-memory-insight" aria-label={`${item.title || item.category} 智能体检`}><header><div><span>AI 智能体检</span><strong>{aiInsights[item.id].rationale}</strong></div><small>{aiInsights[item.id].modelProvider}</small></header>{aiInsights[item.id].evidenceGraph?.length ? <div className="otto-enterprise-memory-ai-graph">{aiInsights[item.id].evidenceGraph!.map((node) => <article key={`${node.claim}-${node.status}`} className={`is-${node.status}`}><header><strong>{node.claim}</strong><span>{evidenceClaimStatusLabel(node.status)}</span></header>{node.explanation ? <p>{node.explanation}</p> : null}{node.gaps.length ? <small>缺口：{node.gaps.join('；')}</small> : null}</article>)}</div> : null}{aiInsights[item.id].applicableScenarios?.length ? <p><b>适用工作：</b>{aiInsights[item.id].applicableScenarios!.join('、')}</p> : null}{aiInsights[item.id].riskIfWrong ? <p><b>如果记错：</b>{aiInsights[item.id].riskIfWrong}</p> : null}{aiInsights[item.id].nextQuestion ? <div className="otto-enterprise-memory-ai-next"><span>下一条最值得确认的问题</span><strong>{aiInsights[item.id].nextQuestion}</strong></div> : null}<small>本次仅分析，没有自动修改企业记忆；形成新版本仍需管理员保存。</small></section> : null}
+        {aiInsights[item.id] && editor?.id !== item.id ? <section className="otto-enterprise-memory-insight" aria-label={`${item.title || item.category} 智能体检`}><header><div><span>AI 智能体检</span><strong>{aiInsights[item.id].rationale}</strong></div><small>{aiInsights[item.id].modelProvider}</small></header>{aiInsights[item.id].evidenceGraph?.length ? <div className="otto-enterprise-memory-ai-graph">{aiInsights[item.id].evidenceGraph!.map((node) => <article key={`${node.claim}-${node.status}`} className={`is-${node.status}`}><header><strong>{node.claim}</strong><span>{evidenceClaimStatusLabel(node.status)}</span></header><small>模型判断 · 引用证据 #{node.evidenceIds.join('、#') || '无'}；请在下方学习依据中核对原文</small>{node.explanation ? <p>{node.explanation}</p> : null}{node.gaps.length ? <small>缺口：{node.gaps.join('；')}</small> : null}</article>)}</div> : null}{aiInsights[item.id].applicableScenarios?.length ? <p><b>模型建议适用工作：</b>{aiInsights[item.id].applicableScenarios!.join('、')}</p> : null}{aiInsights[item.id].riskIfWrong ? <p><b>如果记错：</b>{aiInsights[item.id].riskIfWrong}</p> : null}{aiInsights[item.id].nextQuestion ? <div className="otto-enterprise-memory-ai-next"><span>下一条最值得确认的问题</span><strong>{aiInsights[item.id].nextQuestion}</strong></div> : null}<small>本次仅分析，没有自动修改企业记忆；形成新版本仍需管理员保存。</small></section> : null}
         {evidence[item.id] !== undefined ? <div className="otto-enterprise-memory-evidence" aria-label="知识证据明细">
           {evidence[item.id].length === 0 ? <div className="otto-enterprise-memory-evidence__empty">此条知识没有可展示的自动提炼证据。</div> : <>{evidence[item.id].map((entry) => <article key={entry.id}>
-            <div className="otto-enterprise-memory-evidence__badges"><span>{entry.stance === 'affirmative' ? '肯定 / 要求' : entry.stance === 'negative' ? '否定 / 禁止' : '中性描述'}</span>{entry.contested ? <strong>涉及冲突</strong> : null}<span>{entry.verified ? '已验证' : '未验证'}</span></div>
-            <p>{entry.content}</p><small>{entry.contributor || '系统观察'} · {formatKnowledgeDate(entry.observedAt)} · 置信度 {Math.round(entry.confidence * 100)}% · 影响 {Math.round(entry.impactScore * 100)}%</small><small>来源：{entry.sourceId || '来源编号不可用'}</small>{entry.tags.length || entry.impactReasons.length ? <small>{[...entry.tags, ...entry.impactReasons].join(' · ')}</small> : null}
+            <div className="otto-enterprise-memory-evidence__badges"><span>{entry.stance === 'affirmative' ? '肯定 / 要求' : entry.stance === 'negative' ? '否定 / 禁止' : '中性描述'}</span>{entry.contested ? <strong>涉及冲突</strong> : null}<span>{entry.verified ? '来源记录标记为已验证，仍需核对原文' : '未验证观察'}</span></div>
+            <p>{entry.content}</p><small>{entry.contributor || '系统观察'} · {formatKnowledgeDate(entry.observedAt)}</small><small>证据 #{entry.id} · 来源：{entry.sourceId || '来源编号不可用'}</small>{entry.tags.length || entry.impactReasons.length ? <small>{[...entry.tags, ...entry.impactReasons].join(' · ')}</small> : null}
             {contested && entry.contested ? <div className="otto-enterprise-memory-evidence__decision"><button type="button" aria-pressed={adjudications[item.id]?.acceptedEvidenceIds.includes(entry.id) ?? false} onClick={() => setEvidenceDisposition(item.id, entry.id, 'accepted')}>采纳</button><button type="button" aria-pressed={adjudications[item.id]?.rejectedEvidenceIds.includes(entry.id) ?? false} onClick={() => setEvidenceDisposition(item.id, entry.id, 'rejected')}>排除</button></div> : null}
           </article>)}{contested ? <label className="otto-enterprise-memory-evidence__rationale"><span>裁决依据</span><textarea aria-label="裁决依据" rows={3} value={adjudications[item.id]?.rationale ?? ''} onChange={(event) => setAdjudications((current) => ({ ...current, [item.id]: { acceptedEvidenceIds: current[item.id]?.acceptedEvidenceIds ?? [], rejectedEvidenceIds: current[item.id]?.rejectedEvidenceIds ?? [], rationale: event.target.value } }))} placeholder="说明采用哪些正式制度、验证结果或责任人确认作为裁决依据"/><small>已处理 {new Set([...(adjudications[item.id]?.acceptedEvidenceIds ?? []), ...(adjudications[item.id]?.rejectedEvidenceIds ?? [])]).size} / {evidence[item.id].filter((entry) => entry.contested).length} · 必须同时包含采纳和排除结论</small></label> : null}</>}
         </div> : null}
-        {revisions[item.id]?.map((revision) => <blockquote key={revision.id}>v{revision.version} · {revision.changedBy || '系统'} · {revision.changeNote || revision.status}<p>{revision.content}</p>{revision.adjudication ? <div className="otto-enterprise-memory-revisions__adjudication"><strong>冲突裁决</strong><p>{revision.adjudication.rationale}</p><small>采纳证据 #{revision.adjudication.acceptedEvidenceIds.join('、#')} · 排除证据 #{revision.adjudication.rejectedEvidenceIds.join('、#')} · {revision.adjudication.adjudicatedBy || '管理员'}</small></div> : null}</blockquote>)}
+        {revisions[item.id] !== undefined ? <EnterpriseMemoryVersions key={`${item.id}-${item.version}`} current={item} revisions={revisions[item.id]} canRestore={role === 'company_admin' && !contested} busy={Boolean(busyId)} onRestore={(revision, reason) => void restoreKnowledge(item, revision, reason)} /> : null}
       </article>;
     })}{!loading && !items.length ? <p>暂无企业知识。</p> : null}</div> : null}
   </DialogFrame>;
 }
 
-export function AutoSkillDialog({ open, candidates, lastAction, onRefresh, onConfirm, onReject, onClose }: {
+export function AutoSkillDialog({ open, candidates, lastAction, onRefresh, onConfirm, onReject, onClose, releases = [], releaseBusy = false, releaseError = null, releaseStatus, onRefreshReleases, onRollback, onRecord }: {
   open: boolean; candidates: AutoSkillCandidateInfo[];
   lastAction: { kind: 'confirmed' | 'rejected'; candidateId: string; savedPath?: string } | null;
   onRefresh(): void; onConfirm(id: string): void; onReject(id: string): void; onClose(): void;
+  releases?: InstalledSkillReleases[]; releaseBusy?: boolean; releaseError?: string | null; releaseStatus?: string;
+  onRefreshReleases?(): void; onRollback?(input: SkillRollbackInput): void; onRecord?(input: SkillAcceptanceInput): void;
 }): React.JSX.Element | null {
+  useEffect(() => { if (open) onRefreshReleases?.(); }, [open, onRefreshReleases, lastAction]);
   if (!open) return null;
-  return <DialogFrame title="Skill 草稿与候选" onClose={onClose}><div className="otto-workspace-dialog__toolbar"><p>主动需求和重复工作都会先进入隔离草稿区，检查通过并由你确认后才安装。</p><button type="button" onClick={onRefresh}>立即分析</button></div>{lastAction?.kind === 'confirmed' ? <p role="status">Skill 已确认安装{lastAction.savedPath ? `：${lastAction.savedPath}` : ''}</p> : null}<div className="otto-workspace-dialog__list">{candidates.length ? candidates.map((candidate) => {
+  return <DialogFrame title="Skill 功能、草稿与版本" onClose={onClose}>
+    {onRefreshReleases && onRollback && onRecord ? <SkillVersionPanel skills={releases} busy={releaseBusy} error={releaseError} status={releaseStatus} onRefresh={onRefreshReleases} onRollback={onRollback} onRecord={onRecord} /> : null}
+    <h2>待确认的新功能与更新</h2><div className="otto-workspace-dialog__toolbar"><p>先说明能做什么，再披露检查与风险。你确认后才安装；安装不代表业务效果已获验证。</p><button type="button" onClick={onRefresh}>立即分析</button></div>{lastAction?.kind === 'confirmed' ? <p role="status">Skill 已确认安装{lastAction.savedPath ? `：${lastAction.savedPath}` : ''}</p> : null}<div className="otto-workspace-dialog__list">{candidates.length ? candidates.map((candidate) => {
     const ready = candidate.draft?.validationPassed === true && candidate.draft.packageReady === true;
     return <article key={candidate.id} aria-label={`${candidate.name} Skill 草稿`}>
-      <h3>{candidate.name}</h3>
-      <p>{candidate.description}</p>
-      <small>{candidate.source === 'proactive' ? '主动需求' : '自动发现'} · {candidate.detectedPattern}{candidate.source === 'automatic' ? ` · ${candidate.occurrenceCount} 次重复` : ''}</small>
+      <h3>{candidate.function?.title ?? candidate.name}</h3>
+      {candidate.function ? <SkillFunctionCard value={candidate.function} /> : <p>{candidate.description}</p>}
+      <small>{candidate.name} · {candidate.source === 'proactive' ? '来自你的需求' : '来自重复工作观察'}{candidate.source === 'automatic' ? ` · ${candidate.occurrenceCount} 次历史观察（不是新功能的测试结果）` : ''}</small>
+      <p className="otto-skill-warning">尚未验证业务效果。功能说明是设计目标，不是生产级保证；本次没有自动运行行为测试。</p>
       {candidate.draft ? <div className="otto-auto-skill-draft-audit">
-        <p><strong>{ready ? '检查通过，等待确认' : '检查未通过，禁止安装'}</strong>{candidate.draft.packageRelativePath ? ` · 已打包 ${candidate.draft.packageRelativePath}` : ''}</p>
+        <p><strong>{ready ? '静态检查通过，等待确认试用' : '检查未通过，禁止安装'}</strong>{candidate.draft.packageRelativePath ? ` · 已打包 ${candidate.draft.packageRelativePath}` : ''}</p>
         <details><summary>文件变更（{candidate.draft.risk.fileChanges.length}）</summary><ul>{candidate.draft.risk.fileChanges.map((change) => <li key={change}>{change}</li>)}</ul></details>
         <details><summary>权限（{candidate.draft.risk.permissions.length}）</summary>{candidate.draft.risk.permissions.length ? <ul>{candidate.draft.risk.permissions.map((permission) => <li key={permission}>{permission}</li>)}</ul> : <p>未发现额外权限。</p>}</details>
-        <details><summary>安全风险（{candidate.draft.risk.securityRisks.length}）</summary>{candidate.draft.risk.securityRisks.length ? <ul>{candidate.draft.risk.securityRisks.map((risk) => <li key={risk}>{risk}</li>)}</ul> : <p>未发现脚本或高风险行为。</p>}</details>
+        <details><summary>安全风险（{candidate.draft.risk.securityRisks.length}）</summary>{candidate.draft.risk.securityRisks.length ? <ul>{candidate.draft.risk.securityRisks.map((risk) => <li key={risk}>{risk}</li>)}</ul> : <p>本次静态检查未发现已识别的风险，不等于不存在风险。</p>}</details>
         <details><summary>测试与校验（{candidate.draft.tests.length}）</summary><ul>{candidate.draft.tests.map((test) => <li key={test.name}>{test.status === 'passed' ? '通过' : test.status === 'failed' ? '失败' : '需人工确认'} · {test.name}：{test.detail}</li>)}</ul>{candidate.draft.validationErrors.map((error) => <p role="alert" key={error}>{error}</p>)}</details>
         {candidate.draft.risk.executionBlocked ? <p role="note">此草稿包含脚本：生成、打包和安装均不会执行；以后首次执行仍需单独授权。</p> : null}
       </div> : <p role="alert">旧候选尚未生成受控草稿；确认时会先完成校验和打包。</p>}
-      <footer><button type="button" disabled={candidate.draft ? !ready : false} onClick={() => onConfirm(candidate.id)}>{candidate.recommendation === 'enhance' ? '确认增强并安装' : '确认安装'}</button><button type="button" onClick={() => onReject(candidate.id)}>拒绝草稿</button></footer>
+      <footer><button type="button" disabled={candidate.draft ? !ready : false} onClick={() => onConfirm(candidate.id)}>{candidate.recommendation === 'enhance' ? '确认更新并试用' : '确认安装'}</button><button type="button" onClick={() => onReject(candidate.id)}>拒绝草稿</button></footer>
     </article>;
   }) : <p>暂无草稿或候选。点击“立即分析”扫描最近成果；也可以直接让 Otto 创建一个 Skill。</p>}</div></DialogFrame>;
 }

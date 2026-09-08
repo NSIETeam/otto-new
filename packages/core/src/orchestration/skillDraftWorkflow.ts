@@ -12,6 +12,10 @@ import matter from 'gray-matter';
 import JSZip from 'jszip';
 import { isBuiltinSkillName } from '../skills/seed-skills.js';
 import { validateSkillDraft } from '../skills/skill-draft-validator.js';
+import {
+  assertSkillDirectory, currentSkillHash, describeSkillFunction,
+  snapshotInstalledSkill, withSkillReleaseLock, type SkillFunctionDescription,
+} from './skillReleaseEvidence.js';
 
 const SKILL_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 const DRAFT_ID = /^[a-zA-Z0-9_-]{8,120}$/u;
@@ -47,6 +51,8 @@ export interface SkillDraftRiskSummary {
 }
 
 export interface SkillDraftSummary {
+  function?: SkillFunctionDescription;
+  baseContentHash?: string;
   draftRelativePath: string;
   packageRelativePath?: string;
   targetName: string;
@@ -348,7 +354,8 @@ export async function stageSkillDraft(
   }
 
   const userDir = path.resolve(options.userDir);
-  const draftsRoot = path.join(userDir, 'skill-drafts', 'pending');
+  const draftsRoot = await assertSkillDirectory(userDir, 'skill-drafts', 'pending');
+  const baseContentHash = mode === 'enhance' ? await currentSkillHash(userDir, targetName) : undefined;
   await fs.mkdir(draftsRoot, { recursive: true, mode: 0o700 });
   const finalRoot = path.join(draftsRoot, options.candidateId);
   const stagingRoot = path.join(
@@ -377,6 +384,8 @@ export async function stageSkillDraft(
       ? portable(path.join(draftRelativePath, `${targetName}.otto-skill`))
       : undefined;
     const summary: SkillDraftSummary = {
+      function: describeSkillFunction(normalizedFiles.find((file) => file.path === 'SKILL.md')!.content, targetName),
+      baseContentHash,
       draftRelativePath,
       packageRelativePath,
       targetName,
@@ -441,6 +450,18 @@ async function copyTree(source: string, target: string): Promise<void> {
 export async function installConfirmedSkillDraft(
   userDirInput: string,
   summary: SkillDraftSummary,
+  afterInstall?: (savedPath: string) => Promise<void>,
+): Promise<string> {
+  return withSkillReleaseLock(userDirInput, summary.targetName, async () => {
+    const savedPath = await installSkillDraftLocked(userDirInput, summary);
+    if (afterInstall) await afterInstall(savedPath);
+    return savedPath;
+  });
+}
+
+async function installSkillDraftLocked(
+  userDirInput: string,
+  summary: SkillDraftSummary,
 ): Promise<string> {
   const userDir = path.resolve(userDirInput);
   if (isBuiltinSkillName(summary.targetName)) {
@@ -449,6 +470,7 @@ export async function installConfirmedSkillDraft(
     );
   }
   const draftRoot = resolvePendingDraftRoot(userDir, summary.draftRelativePath);
+  await assertSkillDirectory(userDir, ...portable(summary.draftRelativePath).split('/'), summary.targetName);
   const draftSkillDir = path.join(draftRoot, summary.targetName);
   if (!(await pathExists(draftSkillDir)))
     throw new Error('Skill 草稿不存在或已被清理');
@@ -460,7 +482,7 @@ export async function installConfirmedSkillDraft(
     throw new Error('Skill 草稿未通过结构校验、静态测试或打包，不能安装');
   }
 
-  const skillsRoot = path.join(userDir, 'skills');
+  const skillsRoot = await assertSkillDirectory(userDir, 'skills', summary.targetName).then(() => path.join(userDir, 'skills'));
   await fs.mkdir(skillsRoot, { recursive: true, mode: 0o700 });
   const targetDir = path.join(skillsRoot, summary.targetName);
   const targetMarker = path.join(targetDir, '.otto-builtin-skill.json');
@@ -472,6 +494,9 @@ export async function installConfirmedSkillDraft(
     throw new Error(
       `用户 Skill 已存在，必须作为明确的增强候选重新确认：${summary.targetName}`,
     );
+  }
+  if (summary.mode === 'enhance' && (!targetExists || !summary.baseContentHash || await currentSkillHash(userDir, summary.targetName) !== summary.baseContentHash)) {
+    throw new Error('当前 Skill 已发生变化或缺少版本基线，请重新生成草稿并确认');
   }
 
   const installRoot = path.join(
@@ -486,6 +511,7 @@ export async function installConfirmedSkillDraft(
   await fs.mkdir(installRoot, { recursive: true, mode: 0o700 });
   try {
     if (targetExists) {
+      await snapshotInstalledSkill(userDir, summary.targetName);
       await copyTree(targetDir, preparedDir);
       const oldSkill = path.join(targetDir, 'SKILL.md');
       if (await pathExists(oldSkill)) {
@@ -501,7 +527,10 @@ export async function installConfirmedSkillDraft(
     const preparedValidation = validateSkillDraft(preparedDir);
     if (!preparedValidation.valid) throw new Error('安装前最终校验失败');
 
-    if (targetExists) await fs.rename(targetDir, backupDir);
+    if (targetExists) {
+      if (await currentSkillHash(userDir, summary.targetName) !== summary.baseContentHash) throw new Error('Skill 在安装期间发生变化，请重新确认');
+      await fs.rename(targetDir, backupDir);
+    }
     try {
       await fs.rename(preparedDir, targetDir);
       if (targetExists)

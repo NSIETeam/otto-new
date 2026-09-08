@@ -24,6 +24,7 @@ const RECONNECT_SAFE_READ_FRAME_TYPES = new Set<ClientToServer['type']>([
   'get_history',
   'get_product_workspace',
   'get_pending_auto_skills',
+  'get_skill_releases',
   'get_schedules',
   'get_models',
   'get_settings',

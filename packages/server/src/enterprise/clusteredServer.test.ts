@@ -18,6 +18,7 @@ import {
   signEd25519Envelope,
 } from '../modules/commercial_control/index.js';
 import { createClusteredEnterpriseServer } from './clusteredServer.js';
+import { MemoryRecruitmentSourceStore } from '../modules/recruitment_intelligence/recruitmentSourceStore.js';
 import type { ClusteredEnterpriseSharedState } from './clusteredSharedState.js';
 import type {
   PostgresEnterpriseAccountView,
@@ -130,6 +131,7 @@ function repository(
   }));
   return {
     defaultOrganizationId: 'org_default',
+    getRecruitmentSourceStore: () => new MemoryRecruitmentSourceStore(),
     readiness: vi.fn(async () => ({
       ready: true,
       backend: 'postgresql',
@@ -317,6 +319,13 @@ describe('clustered PostgreSQL enterprise server', () => {
         'sms_registration',
         'personal_registration',
         'data_governance_v1',
+        'recruitment_source_gateway_v1',
+        'recruitment_source_material_v1',
+        'recruitment_intake_claims_v1',
+        'recruitment_auto_archive_v1',
+        'recruitment_workable_acceptance_v1',
+        'recruitment_organization_budget_v1',
+        'recruitment_intake_once_v1',
       ]),
     });
     expect(Object.keys(body).sort()).toEqual([

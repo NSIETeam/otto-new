@@ -521,39 +521,3 @@ export function createHumanHiringDecision(input: {
     createdAt: input.now ?? new Date().toISOString(),
   };
 }
-
-export function buildCandidateComparisonReport(
-  entries: ReadonlyArray<
-    | CandidateResumeAnalysis
-    | { analysis: CandidateResumeAnalysis; semanticEvaluation?: RecruitmentSemanticEvaluation | null }
-  >,
-): string {
-  const rows = entries.map((entry) => {
-    const analysis = 'analysis' in entry ? entry.analysis : entry;
-    const semantic = 'analysis' in entry ? entry.semanticEvaluation : null;
-    if (!semantic) {
-      return `| ${analysis.identity.name || analysis.candidateId} | 待模型分析 | — | — | — | — |`;
-    }
-    const dimensions = new Map(semantic.dimensions.map((dimension) => [dimension.id, dimension.score]));
-    const pendingHardRequirements = semantic.hardRequirements.filter((requirement) => (
-      requirement.status !== 'met'
-    )).length;
-    return [
-      `| ${analysis.identity.name || analysis.candidateId}`,
-      `${semantic.overallScore}`,
-      `${semantic.evidenceCoverage}%`,
-      `${dimensions.get('core_capability') ?? '—'}`,
-      `${dimensions.get('delivery_impact') ?? '—'}`,
-      `${pendingHardRequirements} |`,
-    ].join(' | ');
-  });
-  return [
-    '# 候选人全文语义对比报告',
-    '',
-    '> 匹配度反映当前材料与当前岗位的语义贴合程度，不是录用概率，也不会自动排名或淘汰候选人。所有判断必须由招聘人员回查原文证据。',
-    '',
-    '| 候选人 | 综合匹配度 | 证据覆盖 | 核心能力 | 交付结果 | 待核实硬性条件 |',
-    '|---|---:|---:|---:|---:|---:|',
-    ...rows,
-  ].join('\n');
-}

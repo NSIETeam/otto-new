@@ -39,6 +39,7 @@ export interface PolicyEnterpriseProfile {
   [field: string]: unknown;
 }
 export interface PolicySource {
+  discovery?: 'portal';
   id: string;
   name: string;
   listUrl: string;
@@ -120,6 +121,15 @@ export interface PolicyFeedback {
   updatedAt: string;
 }
 export interface OfficialPolicyDocument {
+  references?: Array<{ label: string; url: string }>;
+  batch?: { year?: string; label?: string };
+  relatedBatches?: Array<{
+    policyId: string;
+    title: string;
+    url: string;
+    evidenceUrl: string;
+    reason: string;
+  }>;
   id: string;
   title: string;
   url: string;
@@ -151,10 +161,19 @@ export interface OfficialPolicyDocument {
   conditionTree: PolicyConditionTree;
   materials: Array<{ id: string; label: string; quote: string }>;
   resources: PolicyReference[];
-  attachments: Array<{ label: string; url: string; parsed: boolean }>;
+  attachments: PolicyAttachment[];
   sourceStatus: 'verified' | 'unavailable';
   interpretationStatus: 'ready' | 'pending' | 'failed';
   error?: string;
+}
+export interface PolicyAttachment {
+  label: string;
+  url: string;
+  parsed: boolean;
+  sha256?: string;
+  status?: 'complete' | 'partial' | 'unsupported' | 'failed';
+  reason?: string;
+  sections?: Array<{ locator: string; text: string }>;
 }
 export interface PolicyAssessment {
   policyId: string;
@@ -200,6 +219,17 @@ export interface PolicyMaterialState {
   updatedBy: string;
 }
 export interface PolicyIntelligenceState {
+  notificationCapability?: boolean;
+  sourceHealth?: Array<{
+    sourceId: string;
+    name: string;
+    province?: string;
+    url: string;
+    status: 'unverified' | 'available' | 'partial' | 'unavailable';
+    checkedAt?: string;
+    documentCount: number;
+  }>;
+  watchedPolicyIds?: string[];
   enabled: boolean;
   profile: PolicyEnterpriseProfile;
   policies: OfficialPolicyDocument[];
@@ -236,6 +266,7 @@ export type PolicyFactValue = string | number | boolean | string[] | null;
 export interface PolicyAction {
   action:
     | 'configure'
+    | 'watch'
     | 'profile'
     | 'sync'
     | 'diagnose'
@@ -256,6 +287,22 @@ export interface PolicyAction {
   materialId?: string;
   materialStatus?: PolicyMaterialState['status'];
   feedback?: Pick<PolicyFeedback, 'outcome' | 'reason' | 'note'>;
+}
+export interface PolicyNotice {
+  id: string;
+  policyId: string;
+  policyTitle: string;
+  url: string;
+  kind: 'deadline' | 'changed' | 'closed';
+  body: string;
+  createdAt: string;
+  readAt?: string;
+  policyVersion: number;
+}
+export interface PolicyInbox {
+  notices: PolicyNotice[];
+  unreadCount: number;
+  watchedPolicyIds: string[];
 }
 export interface PolicyModel {
   name: string;

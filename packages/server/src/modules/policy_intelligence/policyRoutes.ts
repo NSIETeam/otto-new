@@ -34,6 +34,23 @@ export async function handlePolicyRoute(input: {
         state: await input.service().state(input.accountId),
       });
     else if (
+      input.path === '/enterprise/policy-intelligence/inbox' &&
+      input.method === 'GET'
+    ) {
+      input.sendJSON(input.res, 200, {
+        inbox: await input.service().inbox(input.accountId),
+      });
+    } else if (
+      input.path === '/enterprise/policy-intelligence/inbox/read' &&
+      input.method === 'POST'
+    ) {
+      const body = await input.readBody(input.req, 16000);
+      input.sendJSON(input.res, 200, {
+        inbox: await input
+          .service()
+          .readNotifications(input.accountId, body.ids),
+      });
+    } else if (
       input.path === '/enterprise/policy-intelligence/actions' &&
       input.method === 'POST'
     ) {

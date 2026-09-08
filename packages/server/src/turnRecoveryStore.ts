@@ -5,11 +5,15 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentTaskGraphSnapshot } from './protocol.js';
+import { TaskContinuityLedger, type TaskContinuitySnapshot } from './taskContinuity.js';
+import { TurnConstraintGuard } from './turnConstraints.js';
+import type { TurnNativeEvidenceCheckpoint } from './agentTurnTracker.js';
 import { isParallelSafeToolName } from './turnControlPolicy.js';
+import { validateRepairBudget, type RepairBudget } from './deliveryRepair.js';
 
 export type TurnRecoveryReplayClass =
   'replayable' | 'idempotent' | 'never_replay';
@@ -37,6 +41,12 @@ export interface TurnRecoveryRecord {
   updatedAt: number;
   reconciliationReason?: string;
   taskGraph?: AgentTaskGraphSnapshot;
+  taskGraphRequestRevision?: number;
+  continuity?: TaskContinuitySnapshot;
+  constraints?: ReturnType<TurnConstraintGuard['snapshot']>;
+  nativeEvidence?: TurnNativeEvidenceCheckpoint;
+  repairBudget?: RepairBudget;
+  supersededGraphs?: Array<{ requestRevision: number; graph: AgentTaskGraphSnapshot }>;
   tools: TurnRecoveryToolRecord[];
 }
 
@@ -54,7 +64,7 @@ export interface TurnRecoveryToolInput {
 
 export type TurnRecoveryDecision =
   | { action: 'execute' }
-  | { action: 'reuse'; resultSummary: string }
+  | { action: 'reuse'; resultSummary: string; originalCallId?: string }
   | { action: 'reconcile'; reason: string };
 
 export class TurnRecoveryCorruptError extends Error {
@@ -117,6 +127,7 @@ function redactedSummary(value: string | undefined): string | undefined {
 function isRecoveryRecord(value: unknown): value is TurnRecoveryRecord {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Partial<TurnRecoveryRecord>;
+  try { if (record.repairBudget !== undefined) validateRepairBudget(record.repairBudget); } catch { return false; }
   return (
     record.version === 1 &&
     typeof record.sessionId === 'string' &&
@@ -205,12 +216,15 @@ export class FileTurnRecoveryStore {
   }
 
   private async write(record: TurnRecoveryRecord): Promise<void> {
-    await mkdir(this.root, { recursive: true });
+    const body = `${JSON.stringify(record, null, 2)}\n`;
+    if (Buffer.byteLength(body) > 16 * 1024 * 1024) throw new Error('Recovery capacity exceeded; execution stopped without dropping constraints');
+    await mkdir(this.root, { recursive: true, mode: 0o700 });
     const target = this.pathForSession(record.sessionId);
     const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`, {
+    await writeFile(temporary, body, {
       encoding: 'utf8',
       mode: 0o600,
+      flush: true,
     });
     await rename(temporary, target);
   }
@@ -218,9 +232,20 @@ export class FileTurnRecoveryStore {
   async load(sessionId: string): Promise<TurnRecoveryRecord | null> {
     const target = this.pathForSession(sessionId);
     try {
+      if ((await stat(target)).size > 16 * 1024 * 1024) throw new TurnRecoveryCorruptError(target);
       const parsed = JSON.parse(await readFile(target, 'utf8')) as unknown;
       if (!isRecoveryRecord(parsed) || parsed.sessionId !== sessionId) {
         throw new TurnRecoveryCorruptError(target);
+      }
+      if (parsed.continuity) {
+        const ledger = TaskContinuityLedger.restore(parsed.continuity);
+        if (parsed.continuity.turnId !== parsed.turnId) throw new TurnRecoveryCorruptError(target);
+        if (parsed.constraints) {
+          const guard = new TurnConstraintGuard(ledger.request.text, { turnId: parsed.turnId, workspacePath: ledger.request.workspacePath });
+          if (guard.snapshot().requestDigest !== parsed.constraints.requestDigest) throw new TurnRecoveryCorruptError(target);
+          guard.inherit(parsed.constraints, true);
+        }
+        if (parsed.taskGraph && parsed.taskGraphRequestRevision !== ledger.request.revision) throw new TurnRecoveryCorruptError(target);
       }
       return parsed;
     } catch (error) {
@@ -263,7 +288,7 @@ export class FileTurnRecoveryStore {
       if (!current) return null;
       const interrupted = current.tools.some(
         (tool) =>
-          tool.state === 'started' && tool.replayClass === 'never_replay',
+          tool.state === 'started' && tool.replayClass !== 'replayable',
       );
       const recovered: TurnRecoveryRecord = {
         ...current,
@@ -274,7 +299,7 @@ export class FileTurnRecoveryStore {
               status: 'reconciliation_required' as const,
               reconciliationReason: '上次运行在不可安全重放的工具返回前中断',
               tools: current.tools.map((tool) =>
-                tool.state === 'started' && tool.replayClass === 'never_replay'
+                tool.state === 'started' && tool.replayClass !== 'replayable'
                   ? { ...tool, state: 'unknown_outcome' as const }
                   : tool,
               ),
@@ -309,20 +334,15 @@ export class FileTurnRecoveryStore {
     if (previous.state === 'succeeded') {
       return {
         action: 'reuse',
+        originalCallId: previous.callId,
         resultSummary:
           previous.resultSummary || '上次执行已成功，已防止重复执行',
       };
     }
-    if (
-      previous.state === 'unknown_outcome' ||
-      previous.replayClass === 'never_replay'
-    ) {
-      return {
-        action: 'reconcile',
-        reason: record.reconciliationReason || '上次执行结果未知，禁止自动重放',
-      };
-    }
-    return { action: 'execute' };
+    return {
+      action: 'reconcile',
+      reason: record.reconciliationReason || '上次写入或外部操作结果未知，禁止自动重放',
+    };
   }
 
   async recordStarted(
@@ -360,6 +380,33 @@ export class FileTurnRecoveryStore {
         updatedAt: Date.now(),
         taskGraph: structuredClone(taskGraph),
       };
+      await this.write(next);
+      return next;
+    });
+  }
+
+  async recordContinuity(record: TurnRecoveryRecord, continuity: TaskContinuitySnapshot,
+    constraints?: ReturnType<TurnConstraintGuard['snapshot']>, taskGraph?: AgentTaskGraphSnapshot, nativeEvidence?: TurnNativeEvidenceCheckpoint, repairBudget?: RepairBudget): Promise<TurnRecoveryRecord> {
+    TaskContinuityLedger.restore(continuity);
+    if (repairBudget) validateRepairBudget(repairBudget);
+    return this.serialize(record.sessionId, async () => {
+      const latest = (await this.load(record.sessionId)) ?? record;
+      if (latest.turnId !== record.turnId || continuity.turnId !== record.turnId ||
+        (latest.continuity && (latest.continuity.events.length > continuity.events.length || latest.continuity.appliedRevision > continuity.appliedRevision ||
+          JSON.stringify(stableValue(latest.continuity.initial)) !== JSON.stringify(stableValue(continuity.initial)) ||
+          latest.continuity.events.some((e, i) => JSON.stringify(stableValue(e)) !== JSON.stringify(stableValue(continuity.events[i]))))))
+        throw new Error('Stale task continuity write refused');
+      const supersededGraphs = [...(latest.supersededGraphs ?? [])];
+      if (repairBudget && latest.repairBudget && (['batches', 'comparisons', 'formats'] as const).some(key => repairBudget[key] < latest.repairBudget![key])) throw new Error('Repair budget cannot decrease across recovery writes');
+      if (latest.taskGraph && latest.taskGraphRequestRevision && latest.taskGraphRequestRevision < continuity.appliedRevision) supersededGraphs.push({
+        requestRevision: latest.taskGraphRequestRevision,
+        graph: { ...latest.taskGraph, nodes: latest.taskGraph.nodes.map(n => n.status === 'completed' ? n : { ...n, status: 'cancelled' as const }) },
+      });
+      const next = { ...latest, continuity: structuredClone(continuity), supersededGraphs, updatedAt: Date.now(),
+        ...(repairBudget ? { repairBudget: { ...repairBudget } } : {}),
+        ...(nativeEvidence ? { nativeEvidence: structuredClone(nativeEvidence) } : {}),
+        ...(constraints ? { constraints: structuredClone(constraints) } : {}),
+        ...(taskGraph ? { taskGraph: structuredClone(taskGraph), taskGraphRequestRevision: continuity.appliedRevision } : {}) };
       await this.write(next);
       return next;
     });

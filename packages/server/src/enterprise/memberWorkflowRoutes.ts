@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as db from './db.js';
+import { KnowledgeVersionError } from '../modules/enterprise_knowledge/index.js';
 
 function worklogInputMessage(error: unknown): string | null {
   const message = error instanceof Error ? error.message : String(error);
@@ -448,13 +449,19 @@ export async function handleMemberWorkflowRoute({
       sendJSON(res, 400, { error: 'action must be approve or archive' });
       return true;
     }
-    const knowledge = db.reviewKnowledge({
+    let knowledge;
+    try { knowledge = db.reviewKnowledge({
       id: Number(reviewMatch[1]),
+      expectedVersion: body.expectedVersion as number | undefined,
       organizationId: memberAccount!.organizationId,
       action: body.action,
       reviewer: memberAccount!.name,
       note: typeof body.note === 'string' ? body.note : undefined,
-    });
+    }); } catch (error) {
+      if (!(error instanceof KnowledgeVersionError)) throw error;
+      sendJSON(res, error.statusCode, { error: error.message });
+      return true;
+    }
     if (!knowledge) {
       sendJSON(res, 404, { error: 'knowledge not found' });
       return true;
@@ -495,9 +502,12 @@ export async function handleMemberWorkflowRoute({
       return true;
     }
     const body = await readBody(req);
-    const knowledge = db.reviseKnowledge({
+    let knowledge;
+    try { knowledge = db.reviseKnowledge({
       id: Number(knowledgeMatch[1]),
       organizationId: memberAccount!.organizationId,
+      expectedVersion: body.expectedVersion as number | undefined,
+      restoreVersion: body.restoreVersion as number | undefined,
       title: typeof body.title === 'string' ? body.title : undefined,
       category: typeof body.category === 'string' ? body.category : undefined,
       content: typeof body.content === 'string' ? body.content : undefined,
@@ -525,7 +535,11 @@ export async function handleMemberWorkflowRoute({
             : '',
         }
         : undefined,
-    });
+    }); } catch (error) {
+      if (!(error instanceof KnowledgeVersionError)) throw error;
+      sendJSON(res, error.statusCode, { error: error.message });
+      return true;
+    }
     if (!knowledge) {
       sendJSON(res, 404, { error: 'knowledge not found' });
       return true;

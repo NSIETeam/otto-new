@@ -34,11 +34,13 @@ const PROFILE_FIELDS = [
 
 export function PolicyIntelligenceDialog({
   open,
+  initialPolicyId,
   scopeId,
   seedProfile,
   onClose,
 }: {
   open: boolean;
+  initialPolicyId?: string;
   scopeId: string;
   seedProfile: PolicyEnterpriseProfile;
   onClose(): void;
@@ -100,6 +102,16 @@ export function PolicyIntelligenceDialog({
       epoch.current++;
     };
   }, [open, request]);
+  useEffect(() => {
+    if (open && initialPolicyId) {
+      setSelected(initialPolicyId);
+      setQuery('');
+      setLevel('all');
+      setCategory('all');
+      setStatus('all');
+      setTab('all');
+    }
+  }, [open, initialPolicyId]);
   const assessmentById = useMemo(
     () => new Map(state.assessments.map((item) => [item.policyId, item])),
     [state.assessments],
@@ -199,6 +211,41 @@ export function PolicyIntelligenceDialog({
         <p className="otto-policy-v2__muted">
           已配置来源不代表该地区政策已全部收录；未接入地区不会误用其他城市政策。
         </p>
+        {!!state.sourceHealth?.length && (
+          <details>
+            <summary>全国官方来源接入情况</summary>
+            <p>
+              包含中国内地31个省级政府入口；市县和部门并非全量覆盖。数字为最近一次采集的条目数，不代表当地政策总数。
+            </p>
+            {state.sourceHealth.map((source) => (
+              <p key={source.sourceId}>
+                <button
+                  type="button"
+                  onClick={() => void window.otto.openExternal(source.url)}
+                >
+                  {source.name}
+                </button>
+                {' · '}
+                {
+                  {
+                    unverified: '尚未完成采集核验',
+                    available: '最近采集成功',
+                    partial: '部分条目失败',
+                    unavailable: '暂不可采集，需检查适配',
+                  }[source.status]
+                }
+                {' · '}
+                {source.documentCount} 条
+                {source.checkedAt && (
+                  <small>
+                    最近检查：
+                    {new Date(source.checkedAt).toLocaleString('zh-CN')}
+                  </small>
+                )}
+              </p>
+            ))}
+          </details>
+        )}
         <details
           className="otto-policy-v2__profile"
           open={state.missingProfileFields.length > 0}
@@ -467,6 +514,8 @@ export function PolicyIntelligenceDialog({
                 </p>
                 <p className="otto-policy-v2__muted">
                   {doc.sourceName} ·{' '}
+                  {doc.batch?.year &&
+                    `${doc.batch.year}年 ${doc.batch.label ?? ''} · `}
                   {doc.deadline ? '截止 ' + doc.deadline : '申报时间尚未核验'} ·
                   第 {doc.version} 版
                 </p>
@@ -476,6 +525,32 @@ export function PolicyIntelligenceDialog({
                   </p>
                 )}
                 <footer>
+                  {
+                    <button
+                      type="button"
+                      disabled={
+                        loading ||
+                        !state.enabled ||
+                        state.notificationCapability !== true
+                      }
+                      title={
+                        state.notificationCapability !== true
+                          ? '企业服务器升级后可启用政策提醒'
+                          : '提醒进入我的消息，不自动提交申报'
+                      }
+                      onClick={() =>
+                        void request({
+                          action: 'watch',
+                          policyId: doc.id,
+                          enabled: !state.watchedPolicyIds?.includes(doc.id),
+                        })
+                      }
+                    >
+                      {state.watchedPolicyIds?.includes(doc.id)
+                        ? '取消政策提醒'
+                        : '关注截止与变更'}
+                    </button>
+                  }
                   <button
                     type="button"
                     onClick={() => setSelected(expanded ? undefined : doc.id)}
@@ -769,9 +844,10 @@ export function PolicyIntelligenceDialog({
                       </p>
                     )}
                     {doc.attachments.map((attachment) => (
-                      <p key={attachment.url}>
+                      <div key={attachment.url}>
                         <button
                           type="button"
+                          disabled={!attachment.url.startsWith('https://')}
                           onClick={() =>
                             void window.otto.openExternal(attachment.url)
                           }
@@ -779,8 +855,51 @@ export function PolicyIntelligenceDialog({
                           {attachment.label}
                         </button>{' '}
                         · {attachment.parsed ? '已解析' : '待核验附件'}
-                      </p>
+                        {attachment.reason && (
+                          <small>{attachment.reason}</small>
+                        )}
+                        {!!attachment.sections?.length && (
+                          <details>
+                            <summary>
+                              附件依据（{attachment.sections.length} 处）
+                            </summary>
+                            {attachment.sections.map((section, i) => (
+                              <blockquote key={i}>
+                                <strong>{section.locator}</strong>
+                                <p>{section.text}</p>
+                              </blockquote>
+                            ))}
+                          </details>
+                        )}
+                      </div>
                     ))}
+                    {!!doc.relatedBatches?.length && (
+                      <section>
+                        <h4>原文关联与历年批次</h4>
+                        <p>
+                          关联仅供查阅，往年条件、材料和期限不沿用到当前批次。
+                        </p>
+                        {doc.relatedBatches.map((batch) => (
+                          <p key={batch.policyId}>
+                            <button
+                              type="button"
+                              onClick={() => setSelected(batch.policyId)}
+                            >
+                              {batch.title}
+                            </button>
+                            <small>{batch.reason}</small>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void window.otto.openExternal(batch.evidenceUrl)
+                              }
+                            >
+                              查看关联依据
+                            </button>
+                          </p>
+                        ))}
+                      </section>
+                    )}
                   </div>
                 )}
               </article>

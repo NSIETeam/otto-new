@@ -50,6 +50,33 @@ const governanceAccount: PostgresEnterpriseAccountView = {
 };
 
 describe('PostgreSQL enterprise core authority', () => {
+  it.each(['self', 'admin'])('cleans recruitment cache within the locked %s deletion transaction', async (path) => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT is_admin, status FROM accounts')) return result([{ is_admin: false, status: 'active' }]);
+      if (sql.includes("to_regclass('enterprise_recruitment_records_v1')")) return result([{ present: true }]);
+      return result([]);
+    });
+    const pool = { query, connect: async () => ({ query, release() {} }) } as unknown as PostgresPoolLike;
+    const repository = createPostgresEnterpriseCoreRepository({ pool });
+    if (path === 'self') await repository.deleteOwnAccountData({ ...governanceAccount, isAdmin: false });
+    else await repository.deleteAccount(governanceAccount.organizationId, governanceAccount.id);
+    const sql = query.mock.calls.map(([statement]) => statement);
+    const scan = sql.findIndex((statement) => statement.includes('SELECT record_id,payload FROM enterprise_recruitment_records_v1'));
+    expect(scan).toBeGreaterThan(sql.findIndex((statement) => statement.includes('FOR UPDATE')));
+    expect(scan).toBeLessThan(sql.indexOf('COMMIT'));
+  });
+  it.each([true, false])('scrubs optional Workable grants during account deletion (table present: %s)', async (present) => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT is_admin, status FROM accounts')) return result([{ is_admin: false, status: 'active' }]);
+      if (sql.includes("to_regclass('enterprise_workable_connections_v1')")) return result([{ present }]);
+      return result([]);
+    });
+    const pool = { query, connect: async () => ({ query, release() {} }) } as unknown as PostgresPoolLike;
+    await createPostgresEnterpriseCoreRepository({ pool }).deleteOwnAccountData({ ...governanceAccount, isAdmin: false });
+    const cleared = query.mock.calls.find(([sql]) => sql.startsWith('UPDATE enterprise_workable_connections_v1'));
+    expect(Boolean(cleared)).toBe(present);
+    if (cleared) expect(cleared[0]).toContain("SET revision=revision+1,payload='' WHERE organization_id=$1 AND account_id=$2");
+  });
   it('installs authoritative organization, account, session, audit and E2EE tables', () => {
     const migration = ENTERPRISE_POSTGRES_MIGRATIONS.find(
       (candidate) => candidate.version === 4,

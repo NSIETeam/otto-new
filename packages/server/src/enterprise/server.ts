@@ -84,6 +84,14 @@ import {
   startPrivateDeploymentBootstrapRuntime,
   type PrivateDeploymentBootstrapCoordinator,
 } from '../modules/deployment_lifecycle/index.js';
+import {
+  handleRecruitmentSourceRoute,
+  startRecruitmentIntake,
+  startRecruitmentBackgroundAnalysis,
+  handleRecruitmentJobRoute,
+  handleWorkableConnectionRoute,
+  type RecruitmentSourceRuntime,
+} from '../modules/recruitment_intelligence/index.js';
 import { createEnterprisePrivateDeploymentBootstrap } from './privateDeploymentBootstrapIntegration.js';
 
 export { adminAccountsHTML } from './adminAccountsPage.js';
@@ -139,6 +147,8 @@ export interface EnterpriseServerOptions {
   privateDeploymentBootstrapCoordinator?: PrivateDeploymentBootstrapCoordinator;
   /** Host-owned resident scheduler; injectable for deterministic tests. */
   taskRegistry?: RecurringTaskRegistry;
+  /** Authorized recruitment connectors composed by the deployment host. */
+  recruitmentSources?: RecruitmentSourceRuntime;
 }
 
 /** 与 control_command 边界的信封/执行结果类型对齐（避免 server.ts 循环依赖）。 */
@@ -207,6 +217,7 @@ export function createEnterpriseRecurringTaskRegistry(): RecurringTaskRegistry {
 export const ENTERPRISE_CAPABILITIES = [
   'policy_intelligence_v2',
   'policy_intelligence_v3',
+  'policy_intelligence_inbox_v1',
   'password_auth',
   'sms_login',
   'sms_registration',
@@ -324,6 +335,7 @@ function makeHandler(
   privateDeploymentBootstrap: PrivateDeploymentBootstrapCoordinator,
   featureFlags?: FeatureFlagManager,
   billingFetch: typeof fetch = fetch,
+  recruitmentSources?: RecruitmentSourceRuntime,
   controlCommandHandle?: (deps: {
     path: string;
     method: string;
@@ -334,6 +346,10 @@ function makeHandler(
     sendJSON(res: ServerResponse, status: number, data: unknown): void;
   }) => Promise<boolean>,
 ) {
+  const capabilities = recruitmentSources
+    ? [...ENTERPRISE_CAPABILITIES, 'recruitment_intake_claims_v1', 'recruitment_intake_v1', 'recruitment_workable_connections_v1', 'recruitment_jobs_v1', 'recruitment_people_v1', 'recruitment_source_gateway_v1', ...(recruitmentSources.getCandidateMaterial ? ['recruitment_source_material_v1'] : [])]
+    : [...ENTERPRISE_CAPABILITIES, 'recruitment_workable_connections_v1', 'recruitment_jobs_v1', 'recruitment_people_v1'];
+  capabilities.push('recruitment_auto_archive_v1', 'recruitment_workable_acceptance_v1', 'recruitment_organization_budget_v1', 'recruitment_intake_once_v1');
   // 同一账号可能在多台桌面端同时在线。服务端对现有 direct_messages 队列做
   // 短租约 claim，保证一条 A2A 请求同一时刻只交给一个客户端；进程异常后
   // 租约自动过期并可重试，不新增另一套聊天存储。
@@ -675,6 +691,29 @@ function makeHandler(
         }
       }
 
+      if (memberAccount && await handleRecruitmentJobRoute({ path, method, req, res, accountId: memberAccount.id, service: () => db.getRecruitmentJobService(recruitmentSources), readBody, sendJson: sendJSON })) return;
+      if (memberAccount && await handleWorkableConnectionRoute({ path, method, req, res, accountId: memberAccount.id, service: db.getWorkableConnectionService, readBody, sendJson: sendJSON })) return;
+      if (
+        memberAccount &&
+        await handleRecruitmentSourceRoute({
+          path,
+          method,
+          req,
+          res,
+          principal: {
+            organizationId: memberAccount.organizationId,
+            accountId: memberAccount.id,
+            isAdmin: memberAccount.isAdmin,
+          },
+          runtime: recruitmentSources,
+          authorizeJob: (accountId, jobId) => db.getRecruitmentJobService().canAccess(accountId, jobId),
+          readBody,
+          sendJson: sendJSON,
+        })
+      ) {
+        return;
+      }
+
       if (
         await dispatchEnterpriseRoute({
           path,
@@ -691,7 +730,7 @@ function makeHandler(
           loginRateLimiter,
           deploymentInfo,
           apiVersion: ENTERPRISE_API_VERSION,
-          capabilities: ENTERPRISE_CAPABILITIES,
+          capabilities,
           privateDeploymentBootstrap,
           atoaClaims,
           atoaClaimTtlMs: ATOA_CLAIM_TTL_MS,
@@ -768,6 +807,7 @@ export function createEnterpriseServer(opts: EnterpriseServerOptions = {}): {
   repairSmsSender: RepairNotificationSender | null;
   repairFeishuSender: RepairNotificationSender | null;
   privateDeploymentBootstrap: PrivateDeploymentBootstrapCoordinator;
+  recruitmentIntakeWorker: import('../modules/recruitment_intelligence/recruitmentIntake.js').RecruitmentIntakeWorker;
 } {
   const host = opts.host || process.env.OTTO_ENTERPRISE_HOST || '127.0.0.1';
   const port =
@@ -888,6 +928,7 @@ export function createEnterpriseServer(opts: EnterpriseServerOptions = {}): {
       publicOrigin: publicBaseUrl,
       applyProvisioningCommand,
     });
+  const recruitmentSources = opts.recruitmentSources ?? db.createDefaultRecruitmentSources();
   const server = createServer(
     makeHandler(
       adminToken,
@@ -901,6 +942,7 @@ export function createEnterpriseServer(opts: EnterpriseServerOptions = {}): {
       privateDeploymentBootstrap,
       featureFlags,
       opts.billingFetch,
+      recruitmentSources,
       controlBoundary.enabled ? controlBoundary.handleRoute : undefined,
     ),
   );
@@ -914,6 +956,7 @@ export function createEnterpriseServer(opts: EnterpriseServerOptions = {}): {
     repairSmsSender,
     repairFeishuSender,
     privateDeploymentBootstrap,
+    recruitmentIntakeWorker: db.createRecruitmentIntakeWorker(recruitmentSources),
   };
 }
 
@@ -1021,6 +1064,7 @@ export function startEnterpriseServer(
     repairSmsSender,
     repairFeishuSender,
     privateDeploymentBootstrap,
+    recruitmentIntakeWorker,
   } = createEnterpriseServer(validatedOptions);
   const generatedTokenPath = generatedToken
     ? persistGeneratedAdminToken(adminToken)
@@ -1135,6 +1179,9 @@ export function startEnterpriseServer(
   };
   let stopTicketNotificationRuntime: () => void = () => undefined;
   let stopPolicyIntelligenceRuntime: () => void = () => undefined;
+  let stopRecruitmentCacheRuntime: () => void = () => undefined;
+  let stopRecruitmentIntakeRuntime: () => void = () => undefined;
+  let stopRecruitmentAnalysisRuntime: () => void = () => undefined;
   try {
     stopTicketNotificationRuntime = canaryMode
       ? () => undefined
@@ -1146,6 +1193,9 @@ export function startEnterpriseServer(
             console.error('[Otto Enterprise] 工单通知升级任务失败', error),
         });
     stopPolicyIntelligenceRuntime = canaryMode ? () => undefined : db.startPolicyIntelligenceRuntime(taskRegistry);
+    stopRecruitmentCacheRuntime = canaryMode ? () => undefined : db.startRecruitmentCacheRuntime(taskRegistry);
+    stopRecruitmentIntakeRuntime = canaryMode ? () => undefined : startRecruitmentIntake(recruitmentIntakeWorker, taskRegistry);
+    stopRecruitmentAnalysisRuntime = canaryMode ? () => undefined : startRecruitmentBackgroundAnalysis(db.createRecruitmentBackgroundWorker(), taskRegistry);
   } catch (error) {
     clearInitialMlsCleanup();
     stopMlsCleanup();
@@ -1155,6 +1205,9 @@ export function startEnterpriseServer(
     stopDataProtectionRuntime();
     stopTicketNotificationRuntime();
     stopPolicyIntelligenceRuntime();
+    stopRecruitmentCacheRuntime();
+    stopRecruitmentIntakeRuntime();
+    stopRecruitmentAnalysisRuntime();
     server.close();
     throw error;
   }
@@ -1165,6 +1218,9 @@ export function startEnterpriseServer(
   const cleanupRuntimes = () => {
     if (runtimesCleaned) return;
     runtimesCleaned = true;
+    stopRecruitmentAnalysisRuntime();
+    stopRecruitmentIntakeRuntime();
+    stopRecruitmentCacheRuntime();
     stopPolicyIntelligenceRuntime();
     stopMlsCleanup();
     stopPrivateDeploymentRuntime();

@@ -6,6 +6,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { assertEnterpriseSkillContentSafe } from '../modules/enterprise_skill_market/index.js';
+import { checkKnowledgeVersion, KnowledgeVersionError, knowledgeRestoreNote } from '../modules/enterprise_knowledge/index.js';
+import { listClusteredKnowledgeSnapshots, clusteredKnowledgeSnapshotView, type ClusteredKnowledgePayload as KnowledgePayload } from './clusteredKnowledgeVersions.js';
 import {
   MODULE_UPDATE_ROLLOUTS,
   MODULE_UPDATE_SHA256_RE,
@@ -94,25 +96,6 @@ export interface ClusteredBusinessRouteInput {
   commercialFeatureAvailable(feature: OrganizationFeatureKey): Promise<boolean>;
   commercialLicenseSummary(): Promise<ClusteredLicenseSummary>;
 }
-
-type KnowledgePayload = {
-  title: string | null;
-  department: string | null;
-  category: string;
-  content: string;
-  tags: string[];
-  contributor: string;
-  contributorAccountId: string;
-  confidence: number;
-  sourceType: string;
-  sourceId: string | null;
-  sourceLabel: string | null;
-  reviewedBy: string | null;
-  reviewedAt: string | null;
-  reviewNote: string | null;
-  reviewDueAt?: string | null;
-  expiresAt?: string | null;
-};
 
 type SkillPayload = {
   slug: string;
@@ -492,7 +475,8 @@ async function handleKnowledge(
       });
       return true;
     }
-    const saved = await updateRecordWithRetry<KnowledgePayload>(
+    let saved;
+    try { saved = await updateRecordWithRetry<KnowledgePayload>(
       input.repository,
       {
         organizationId,
@@ -500,7 +484,12 @@ async function handleKnowledge(
         resourceType: 'entry',
         resourceId: decodeURIComponent(review[1]!),
       },
-      (current) => ({
+      (current) => {
+        checkKnowledgeVersion(current.version, body.expectedVersion);
+        if (body.action === 'approve' && (current.status === 'archived' || current.payload.sourceLabel?.includes('证据存在冲突'))) {
+          throw new KnowledgeVersionError('已归档或存在冲突的记忆不能直接发布', 409);
+        }
+        return ({
         status: body.action === 'approve' ? 'active' : 'archived',
         payload: {
           ...current.payload,
@@ -511,8 +500,12 @@ async function handleKnowledge(
             ? clusteredKnowledgeLifecycle(current.payload.sourceType)
             : { reviewDueAt: null, expiresAt: null }),
         },
-      }),
-    );
+      }); },
+    ); } catch (error) {
+      if (!(error instanceof KnowledgeVersionError)) throw error;
+      input.sendJson(input.res, error.statusCode, { error: error.message });
+      return true;
+    }
     input.sendJson(
       input.res,
       saved ? 200 : 404,
@@ -533,15 +526,9 @@ async function handleKnowledge(
       });
       return true;
     }
-    input.sendJson(input.res, 200, {
-      revisions: await input.repository.listBusinessEvents({
-        organizationId,
-        domain: 'knowledge',
-        resourceType: 'entry',
-        resourceId: decodeURIComponent(revisions[1]!),
-        limit: 500,
-      }),
-    });
+    const current = await input.repository.getBusinessRecord<KnowledgePayload>({ organizationId, domain: 'knowledge', resourceType: 'entry', resourceId: decodeURIComponent(revisions[1]!) });
+    if (!current) { input.sendJson(input.res, 404, { error: 'knowledge not found' }); return true; }
+    input.sendJson(input.res, 200, { revisions: (await listClusteredKnowledgeSnapshots(input.repository, current)).map(clusteredKnowledgeSnapshotView) });
     return true;
   }
 
@@ -663,59 +650,58 @@ async function handleKnowledge(
       input.sendJson(input.res, 404, { error: 'knowledge not found' });
       return true;
     }
-    const saved = await updateRecordWithRetry<KnowledgePayload>(
-      input.repository,
-      {
-        organizationId,
-        domain: 'knowledge',
-        resourceType: 'entry',
-        resourceId,
-      },
-      (current) => ({
-        status: current.status,
-        payload: {
-          ...current.payload,
-          title:
-            body.title === undefined
-              ? current.payload.title
-              : text(body.title, 'title', 300, false),
-          category:
-            body.category === undefined
-              ? current.payload.category
-              : text(body.category, 'category', 120)!,
-          content:
-            body.content === undefined
-              ? current.payload.content
-              : text(body.content, 'content', 20_000)!,
-          confidence:
-            typeof body.confidence === 'number'
-              ? Math.min(1, Math.max(0, body.confidence))
-              : current.payload.confidence,
-          sourceLabel:
-            body.sourceLabel === undefined
-              ? current.payload.sourceLabel
-              : text(body.sourceLabel, 'source label', 300, false),
-          ...(current.status === 'active'
-            ? clusteredKnowledgeLifecycle(current.payload.sourceType)
-            : {}),
+    let saved: PostgresBusinessRecord<KnowledgePayload> | null;
+    try {
+      checkKnowledgeVersion(before.version, body.expectedVersion, body.restoreVersion);
+      if (before.status === 'archived' || before.payload.sourceLabel?.includes('证据存在冲突')) {
+        throw new KnowledgeVersionError('已停止使用或存在冲突的记忆不能直接修订或恢复，请先完成审查', 409);
+      }
+      let payload: KnowledgePayload;
+      let status = before.status;
+      let changeNote = text(body.changeNote, 'change note', 1_000, false);
+      if (body.restoreVersion !== undefined) {
+        const historical = (await listClusteredKnowledgeSnapshots(input.repository, before)).find((snapshot) => snapshot.version === body.restoreVersion);
+        if (!historical || historical.payload.sourceLabel?.includes('证据存在冲突')) {
+          throw new KnowledgeVersionError('该历史版本缺少完整快照或存在冲突，不能恢复', 409);
+        }
+        changeNote = knowledgeRestoreNote(body.changeNote, Number(body.restoreVersion));
+        if (historical.payload.title === before.payload.title && historical.payload.category === before.payload.category && historical.payload.content === before.payload.content) {
+          throw new KnowledgeVersionError('历史内容与当前内容相同，无需恢复', 409);
+        }
+        status = 'pending_review';
+        payload = { ...before.payload, title: historical.payload.title, category: historical.payload.category, content: historical.payload.content,
+          reviewedBy: null, reviewedAt: null, reviewNote: null, reviewDueAt: null, expiresAt: null,
+          sourceLabel: '历史内容恢复，需重新确认来源与适用范围' };
+      } else {
+        payload = {
+          ...before.payload,
+          title: body.title === undefined ? before.payload.title : text(body.title, 'title', 300, false),
+          category: body.category === undefined ? before.payload.category : text(body.category, 'category', 120)!,
+          content: body.content === undefined ? before.payload.content : text(body.content, 'content', 20_000)!,
+          confidence: typeof body.confidence === 'number' ? Math.min(1, Math.max(0, body.confidence)) : before.payload.confidence,
+          sourceLabel: body.sourceLabel === undefined ? before.payload.sourceLabel : text(body.sourceLabel, 'source label', 300, false),
+          ...(before.status === 'active' ? clusteredKnowledgeLifecycle(before.payload.sourceType) : {}),
+        };
+      }
+      saved = await input.repository.updateBusinessRecord({
+        organizationId, domain: 'knowledge', resourceType: 'entry', resourceId,
+        expectedVersion: before.version, status, payload,
+        auditEvent: {
+          actorAccountId: input.member.id, eventType: body.restoreVersion !== undefined ? 'restored' : 'revised',
+          payload: {
+            fromVersion: before.version, toVersion: before.version + 1, changeNote,
+            restoredFromVersion: body.restoreVersion,
+            previousSnapshot: { version: before.version, payload: before.payload, status: before.status, createdAt: before.updatedAt, changedBy: before.payload.reviewedBy, changeNote: '修订前保留的快照' },
+            currentSnapshot: { version: before.version + 1, payload, status, createdAt: new Date().toISOString(), changedBy: input.member.name, changeNote },
+          },
         },
-      }),
-    );
-    if (!saved) throw new Error('business record changed concurrently');
-    await input.repository.appendBusinessEvent({
-      organizationId,
-      domain: 'knowledge',
-      resourceType: 'entry',
-      resourceId,
-      actorAccountId: input.member.id,
-      eventType: 'revised',
-      payload: {
-        fromVersion: before.version,
-        toVersion: saved.version,
-        changeNote: text(body.changeNote, 'change note', 1_000, false),
-        previous: before.payload,
-      },
-    });
+      });
+      if (!saved) throw new KnowledgeVersionError('企业记忆版本已变化，请刷新后重新比较，不会覆盖他人的修改。', 409);
+    } catch (error) {
+      if (!(error instanceof KnowledgeVersionError)) throw error;
+      input.sendJson(input.res, error.statusCode, { error: error.message });
+      return true;
+    }
     input.sendJson(input.res, 200, { knowledge: knowledgeView(saved) });
     return true;
   }

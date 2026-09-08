@@ -5,6 +5,7 @@
 import { createHash } from 'node:crypto';
 import type { Database } from '../data_platform/index.js';
 import { enterpriseKnowledgeContradictoryEvidenceIndexes } from './knowledgeRetentionPolicy.js';
+import { checkKnowledgeVersion, KnowledgeVersionError, knowledgeRestoreNote } from './knowledgeVersionPolicy.js';
 
 export const ENTERPRISE_KNOWLEDGE_MAX_DEPARTMENT_LENGTH = 120;
 export const ENTERPRISE_KNOWLEDGE_MAX_CATEGORY_LENGTH = 120;
@@ -123,6 +124,9 @@ export interface SaveEnterpriseKnowledgeResult {
 
 export interface ReviseEnterpriseKnowledgeInput {
   id: number;
+  expectedVersion?: number;
+  /** 从服务端历史快照恢复内容；不恢复权限、有效期或审核状态。 */
+  restoreVersion?: number;
   organizationId?: string;
   title?: string;
   category?: string;
@@ -877,6 +881,7 @@ export function reviewEnterpriseKnowledgeInRepository(
   store: EnterpriseKnowledgeRepositoryStore,
   input: {
     id: number;
+    expectedVersion?: number;
     organizationId?: string;
     action: 'approve' | 'archive';
     reviewer: string;
@@ -894,6 +899,7 @@ export function reviewEnterpriseKnowledgeInRepository(
   return runTransaction(database, () => {
     const entry = getEntry(database, input.id, organizationId);
     if (!entry) return null;
+    checkKnowledgeVersion(entry.version, input.expectedVersion);
     if (input.action === 'approve' && entry.status === 'active') return entry;
     if (input.action === 'approve' && entry.status !== 'pending_review') {
       throw new Error('only pending knowledge can be approved');
@@ -962,8 +968,36 @@ export function reviseEnterpriseKnowledgeInRepository(
   return runTransaction(database, () => {
     const current = getEntry(database, input.id, organizationId);
     if (!current) return null;
-    if (current.status === 'archived') throw new Error('archived knowledge cannot be revised');
+    if (current.status === 'archived') throw new KnowledgeVersionError('archived knowledge cannot be revised；已停止使用的记忆不能直接恢复', 409);
+    checkKnowledgeVersion(current.version, input.expectedVersion, input.restoreVersion);
     const contested = Boolean(current.source_label?.includes('证据存在冲突'));
+    if (input.restoreVersion !== undefined) {
+      if (contested || input.resolveConflict || input.adjudication) {
+        throw new KnowledgeVersionError('请先裁决当前冲突，不能通过恢复历史版本绕过证据审查', 409);
+      }
+      const historical = database.prepare(
+        'SELECT * FROM knowledge_revisions WHERE knowledge_id = ? AND organization_id = ? AND version = ?',
+      ).get(current.id, organizationId, input.restoreVersion) as EnterpriseKnowledgeRevisionView | undefined;
+      if (!historical) throw new KnowledgeVersionError('该历史版本没有完整快照，不能恢复', 409);
+      if (historical.source_label?.includes('证据存在冲突')) {
+        throw new KnowledgeVersionError('该历史版本存在冲突，请通过人工修订并核对证据处理', 409);
+      }
+      const note = knowledgeRestoreNote(input.changeNote, input.restoreVersion);
+      const changedBy = normalizeRequiredText(input.changedBy, ENTERPRISE_KNOWLEDGE_MAX_CONTRIBUTOR_LENGTH, 'knowledge editor');
+      const hash = knowledgeHash({ title: historical.title, department: current.department, category: historical.category, content: historical.content });
+      if (hash === current.content_hash) throw new KnowledgeVersionError('历史内容与当前内容相同，无需恢复', 409);
+      writeRevision(database, current, current.reviewed_by, '恢复前保留当前版本');
+      database.prepare(
+        `UPDATE knowledge SET title = ?, category = ?, content = ?, content_hash = ?,
+         version = version + 1, status = 'pending_review', reviewed_by = NULL, reviewed_at = NULL,
+         source_label = '历史内容恢复，需重新确认来源与适用范围',
+         review_due_at = NULL, expires_at = NULL, updated_at = datetime('now')
+         WHERE id = ? AND organization_id = ?`,
+      ).run(historical.title, historical.category, historical.content, hash, current.id, organizationId);
+      const restored = getEntry(database, current.id, organizationId)!;
+      writeRevision(database, restored, changedBy, note);
+      return restored;
+    }
     if (input.resolveConflict === true && !contested) {
       throw new Error('knowledge is not contested');
     }
@@ -1032,7 +1066,7 @@ export function reviseEnterpriseKnowledgeInRepository(
     const sourceLabel = input.resolveConflict === true
       && current.source_label?.includes('证据存在冲突')
       ? '管理员已裁决冲突；以本次人工修订结论为准'
-      : input.sourceLabel === undefined
+      : contested || input.sourceLabel === undefined
         ? current.source_label
         : normalizeOptionalText(
           input.sourceLabel,

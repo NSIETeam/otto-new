@@ -17,6 +17,7 @@ import type { Config } from '../config/config.js';
 import { SceneType, SceneManager } from '../core/sceneManager.js';
 import { getResponseText } from '../utils/partUtils.js';
 import { resolveAutoSkillSkillsDir } from './autoSkillGenerator.js';
+import { describeSkillFunction } from './skillReleaseEvidence.js';
 
 /** 自动化专家基础数据（存盘格式，不依赖桌面类型）。 */
 export interface AutoSkillProfileData {
@@ -52,7 +53,7 @@ async function writeJsonAtomic(filePath: string, value: unknown): Promise<void> 
  * config 从全局注入（由 otto-server / CLI 侧在启动时调用 setAutoSkillConfig）。
  */
 export async function generateProfilePipeline(
-  skills: Array<{ skillName: string; skillDir: string; skillContent: string }>,
+  skills: Array<{ skillName: string; skillDir: string; skillContent: string; refresh?: boolean }>,
 ): Promise<void> {
   const config = getGlobalConfig();
   if (!config) {
@@ -63,8 +64,14 @@ export async function generateProfilePipeline(
     return;
   }
 
-  for (const { skillName, skillDir, skillContent } of skills) {
-    if (await fileExists(profilePath(skillDir))) continue; // Already has a profile
+  for (const { skillName, skillDir, skillContent, refresh } of skills) {
+    if (await fileExists(profilePath(skillDir))) {
+      if (refresh) {
+        const previous = JSON.parse(await fs.readFile(profilePath(skillDir), 'utf8')) as { id?: string };
+        if (previous.id === `auto-skill-${skillName}`) await writeJsonAtomic(profilePath(skillDir), templateProfile(skillName, skillContent));
+      }
+      continue;
+    }
     try {
       const profile = await generateViaLLM(config, skillName, skillContent);
       await writeJsonAtomic(profilePath(skillDir), profile);
@@ -95,7 +102,7 @@ async function generateViaLLM(
     '',
     '## 输出（JSON）',
     '- name: 专家名称，4-8字中文，概括核心价值',
-    '- tagline: 15-25字简介',
+    '- tagline: 用普通用户能懂的话说明能做什么、得到什么，不写自动孵化、成功率或生产级保证',
     '- systemPrompt: 200-400字系统指令（角色、擅长、方法、注意事项、输出要求）',
     '',
     '```json',
@@ -131,7 +138,7 @@ async function generateViaLLM(
   return {
     id: `auto-skill-${skillName}`,
     name: parsed.name || skillName,
-    tagline: parsed.tagline || `自动孵化的专家: ${skillName}`,
+    tagline: parsed.tagline || describeSkillFunction(skillContent, skillName).summary,
     scope: 'personal',
     department: null,
     skills: [skillName],
@@ -141,13 +148,13 @@ async function generateViaLLM(
 
 /** 纯模板回退（不需要 LLM）。 */
 function templateProfile(skillName: string, skillContent: string): AutoSkillProfileData {
-  const firstHeading = skillContent.split('\n').find(l => l.startsWith('# ') && !l.startsWith('## '));
-  const title = firstHeading?.replace(/^#\s*/, '').trim() || skillName;
+  const functionCard = describeSkillFunction(skillContent, skillName);
+  const title = functionCard.title;
 
   return {
     id: `auto-skill-${skillName}`,
     name: title,
-    tagline: `自动孵化的专家: ${skillName}`,
+    tagline: functionCard.summary,
     scope: 'personal',
     department: null,
     skills: [skillName],

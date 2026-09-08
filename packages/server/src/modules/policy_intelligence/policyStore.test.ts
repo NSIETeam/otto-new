@@ -3,7 +3,62 @@ import { Database } from '../data_platform/sqliteCompat.js';
 import { createEncryptedFieldCipher } from '../data_platform/encryptedFieldCipher.js';
 import { createSqlitePolicyStore, MemoryPolicyStore } from './policyStore.js';
 import { policyCollectionSlot } from './policyRuntime.js';
+import { EnterprisePolicyService } from './policyService.js';
+import type { PolicyMailbox } from './policyNotifications.js';
+import { policyMailboxKey } from './policyNotifications.js';
 describe('policy persistence and schedule', () => {
+  it('retains inbox and read acknowledgements across service reconstruction using the encrypted SQLite store', async () => {
+    const db = new Database(':memory:');
+    const cipher = createEncryptedFieldCipher({
+      keyProvider: { getKey: () => Buffer.alloc(32, 9), clear() {} },
+    });
+    const actor = {
+      id: 'a',
+      organizationId: 'org',
+      organizationName: '企业',
+      isAdmin: false,
+      active: true,
+    };
+    try {
+      const store = createSqlitePolicyStore(() => db, cipher);
+      const id = 'a'.repeat(64);
+      await store.update<PolicyMailbox>(policyMailboxKey(actor), () => ({
+        accountId: actor.id,
+        organizationId: actor.organizationId,
+        watches: {},
+        notices: [
+          {
+            id,
+            policyId: 'p',
+            policyTitle: '政策期限',
+            url: 'https://www.gov.cn/p',
+            kind: 'deadline',
+            body: '准备申报材料',
+            createdAt: '2026-09-01T00:00:00Z',
+            policyVersion: 1,
+          },
+        ],
+      }));
+      const service = () =>
+        new EnterprisePolicyService({
+          store: createSqlitePolicyStore(() => db, cipher),
+          sources: [],
+          getActor: async () => actor,
+        });
+      await service().readNotifications(actor.id, [id]);
+      const restored = await service().inbox(actor.id);
+      expect(restored.notices).toHaveLength(1);
+      expect(restored.notices[0].readAt).toBeTruthy();
+      expect(restored.unreadCount).toBe(0);
+      expect(
+        JSON.stringify(
+          db.prepare('SELECT * FROM enterprise_policy_records_v1').all(),
+        ),
+      ).not.toContain('准备申报材料');
+    } finally {
+      db.close();
+    }
+  });
   it('encrypts database payloads and isolates prefixes with transaction rollback', async () => {
     const db = new Database(':memory:');
     const cipher = createEncryptedFieldCipher({

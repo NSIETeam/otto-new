@@ -28,6 +28,9 @@
  * import()（server-manager.ts 已经承担了对 otto-server 真正需要的值的动态加载）。
  */
 
+import { isEnterpriseKnowledgeId } from './enterpriseKnowledgeId.js';
+import { WorkableDesktopLogin } from './workableOAuthLogin.js';
+const workableDesktopLogin = new WorkableDesktopLogin();
 import {
   app,
   BrowserWindow,
@@ -188,6 +191,7 @@ import { transcribeRecruitmentInterview } from './recruitment-transcription.js';
 import { createRecruitmentIntelligenceAnalyzer } from './recruitmentIntelligenceModel.js';
 import { createParkConversationPlanner } from './parkConversationModel.js';
 import type { RecruitmentSemanticAnalysisInput } from './recruitmentSemantic.js';
+import { coordinateRecruitmentIntakeAnalysis } from './recruitmentIntakeCoordinator.js';
 import {
   createEnterpriseMemoryIntelligenceAnalyzer,
   type EnterpriseMemoryIntelligenceInput,
@@ -751,7 +755,16 @@ const IPC = {
   customerModuleCancel: 'otto:customer-module-cancel',
   generateCustomAgent: 'otto:generate-custom-agent',
   policyIntelligenceGet: 'otto:policy-intelligence-get',
+  policyIntelligenceInbox: 'otto:policy-intelligence-inbox',
   policyIntelligenceAction: 'policy-intelligence:action',
+  recruitmentSourcesList: 'otto:enterprise-recruitment-sources-list',
+  recruitmentJobs: 'otto:enterprise-recruitment-jobs',
+  recruitmentWorkable: 'otto:enterprise-recruitment-workable',
+  recruitmentWorkableLogin: 'otto:enterprise-recruitment-workable-login',
+  recruitmentWorkableCancel: 'otto:enterprise-recruitment-workable-cancel',
+  recruitmentSourcesSearch: 'otto:enterprise-recruitment-sources-search',
+  recruitmentSourceRunGet: 'otto:enterprise-recruitment-source-run-get',
+  recruitmentSourceMaterialGet: 'otto:enterprise-recruitment-source-material-get',
   setLocalTestUrl: 'otto:set-local-test-url',
   appVersion: 'otto:app-version',
   updateCheck: 'otto:update-check',
@@ -901,7 +914,7 @@ const IPC = {
 const customerModuleRunControllers = new Map<string, AbortController>();
 const customerModuleModelInvoke = createCustomerModuleModelInvoke();
 const generateCustomAgent = createCustomAgentGenerator();
-const analyzeRecruitmentResume = createRecruitmentIntelligenceAnalyzer();
+const analyzeRecruitmentResume = createRecruitmentIntelligenceAnalyzer({ getScope: () => JSON.stringify(enterpriseClient.snapshot()) });
 const planParkConversation = createParkConversationPlanner({ getScope: () => JSON.stringify(enterpriseClient.snapshot()) });
 const analyzeEnterpriseMemory = createEnterpriseMemoryIntelligenceAnalyzer();
 function parsePolicyScopeId(value: unknown): string {
@@ -923,6 +936,23 @@ function authorizePolicyScope(value: unknown): string {
   const expected = `${account.organizationId}:${account.id}`;
   if (scopeId !== expected) throw new Error('无权访问其他账号的政策智能资料');
   return scopeId;
+}
+
+function authorizeRecruitmentScope(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,160}$/u.test(value)) {
+    throw new Error('招聘工作台作用域格式不正确');
+  }
+  loadEnterpriseSession();
+  const account = enterpriseClient.authenticatedAccountSnapshot();
+  if (!account) {
+    if (INTERNAL_TEST_ACCESS_ENABLED) return value;
+    throw new Error('登录已失效，无法访问招聘来源');
+  }
+  if (account.accountType === 'personal') throw new Error('招聘来源仅支持企业账号');
+  if (value !== `${account.organizationId}:${account.id}`) {
+    throw new Error('无权访问其他账号的招聘来源');
+  }
+  return value;
 }
 
 
@@ -1125,6 +1155,7 @@ const enterpriseMls = new EnterpriseMlsSessionManager({
 const enterpriseClient = new EnterpriseClient(
   enterpriseFetch,
   () => {
+    analyzeRecruitmentResume.clearCache();
     resetEnterpriseModuleUpdateState();
     // 任一受保护接口返回 401 都会走这里：立即持久化清 token，并通知 renderer
     // 退出过期管理员界面。错误登录时 token 本来为空，不会触发此回调。
@@ -1335,6 +1366,7 @@ function loadEnterpriseSession(): void {
 
 function saveEnterpriseSession(): void {
   const snapshot = enterpriseClient.snapshot();
+  analyzeRecruitmentResume.refreshScope();
   const safeSnapshot =
     canRestoreEncryptedEnterpriseSession() &&
     safeStorage.isEncryptionAvailable()
@@ -3546,8 +3578,7 @@ function registerIpc(): void {
       throw new Error('知识审核格式不正确');
     const body = input as Record<string, unknown>;
     if (
-      typeof body.id !== 'string' ||
-      !/^\d+$/u.test(body.id) ||
+      !isEnterpriseKnowledgeId(body.id) ||
       (body.action !== 'approve' && body.action !== 'archive')
     ) {
       throw new Error('知识审核字段不完整');
@@ -3556,12 +3587,13 @@ function registerIpc(): void {
       body.id,
       body.action,
       typeof body.note === 'string' ? body.note : undefined,
+      body.expectedVersion as number | undefined,
     );
   });
   ipcMain.handle(IPC.enterpriseKnowledgeDelete, async (_e, input: unknown) => {
     loadEnterpriseSession();
     const body = input && typeof input === 'object' ? input as Record<string, unknown> : {};
-    if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
+    if (!isEnterpriseKnowledgeId(body.id)) {
       throw new Error('知识删除参数不正确');
     }
     return enterpriseClient.deleteKnowledge(body.id);
@@ -3574,7 +3606,7 @@ function registerIpc(): void {
     if (!input || typeof input !== 'object') throw new Error('企业记忆分析参数不正确');
     const body = input as Record<string, unknown>;
     if (
-      typeof body.id !== 'string' || !/^\d+$/u.test(body.id)
+      !isEnterpriseKnowledgeId(body.id)
       || typeof body.title !== 'string' || !body.title.trim()
       || typeof body.category !== 'string' || !body.category.trim()
       || typeof body.content !== 'string' || !body.content.trim()
@@ -3621,8 +3653,7 @@ function registerIpc(): void {
         ? (body.input as Record<string, unknown>)
         : {};
     if (
-      typeof body.id !== 'string' ||
-      !/^\d+$/u.test(body.id) ||
+      !isEnterpriseKnowledgeId(body.id) ||
       typeof revision.title !== 'string' ||
       !revision.title.trim() ||
       typeof revision.category !== 'string' ||
@@ -3631,6 +3662,14 @@ function registerIpc(): void {
       !revision.content.trim()
     ) {
       throw new Error('知识修订字段不完整');
+    }
+    for (const field of ['expectedVersion', 'restoreVersion'] as const) {
+      if (revision[field] !== undefined && (!Number.isSafeInteger(revision[field]) || Number(revision[field]) < 1)) {
+        throw new Error('知识版本参数不正确');
+      }
+    }
+    if (revision.restoreVersion !== undefined && revision.expectedVersion === undefined) {
+      throw new Error('恢复历史内容必须提供当前版本');
     }
     const adjudication =
       revision.adjudication && typeof revision.adjudication === 'object'
@@ -3651,6 +3690,8 @@ function registerIpc(): void {
       throw new Error('知识裁决字段不正确');
     }
     return enterpriseClient.reviseKnowledge(body.id, {
+      expectedVersion: revision.expectedVersion as number | undefined,
+      restoreVersion: revision.restoreVersion as number | undefined,
       title: revision.title,
       category: revision.category,
       content: revision.content,
@@ -3680,7 +3721,7 @@ function registerIpc(): void {
         input && typeof input === 'object'
           ? (input as Record<string, unknown>)
           : {};
-      if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
+      if (!isEnterpriseKnowledgeId(body.id)) {
         throw new Error('知识复核参数不正确');
       }
       const revalidation =
@@ -3710,7 +3751,7 @@ function registerIpc(): void {
         input && typeof input === 'object'
           ? (input as Record<string, unknown>)
           : {};
-      if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
+      if (!isEnterpriseKnowledgeId(body.id)) {
         throw new Error('知识版本参数不正确');
       }
       return enterpriseClient.listKnowledgeRevisions(body.id);
@@ -3724,7 +3765,7 @@ function registerIpc(): void {
         input && typeof input === 'object'
           ? (input as Record<string, unknown>)
           : {};
-      if (typeof body.id !== 'string' || !/^\d+$/u.test(body.id)) {
+      if (!isEnterpriseKnowledgeId(body.id)) {
         throw new Error('知识证据参数不正确');
       }
       return enterpriseClient.listKnowledgeEvidence(body.id);
@@ -5678,6 +5719,16 @@ function registerIpc(): void {
     if (enterpriseClient.snapshot().serverUrl !== serverUrl) throw new Error('企业连接已变化，请重新打开政策服务');
     return state;
   });
+  ipcMain.handle(IPC.policyIntelligenceInbox, async (_event, input: { scopeId?: unknown; ids?: unknown }) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('政策消息请求无效');
+    authorizePolicyScope(input.scopeId);
+    if (input.ids !== undefined && (!Array.isArray(input.ids) || input.ids.length > 200 || input.ids.some(id => typeof id !== 'string' || !/^[a-f0-9]{64}$/u.test(id)))) throw new Error('政策消息标识无效');
+    const serverUrl = enterpriseClient.snapshot().serverUrl;
+    const result = input.ids === undefined ? await enterpriseClient.getPolicyInbox() : await enterpriseClient.readPolicyInbox(input.ids as string[]);
+    authorizePolicyScope(input.scopeId);
+    if (enterpriseClient.snapshot().serverUrl !== serverUrl) throw new Error('企业连接已变化，请重新打开消息');
+    return result;
+  });
   ipcMain.handle(IPC.policyIntelligenceAction, async (_event, input: unknown) => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('政策操作格式不正确');
     const body = input as Record<string, unknown>;
@@ -5688,6 +5739,143 @@ function registerIpc(): void {
     authorizePolicyScope(body.scopeId);
     if (enterpriseClient.snapshot().serverUrl !== serverUrl) throw new Error('企业连接已变化，请重新打开政策服务');
     return state;
+  });
+
+  ipcMain.handle(IPC.recruitmentWorkable, async (_event, input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Workable 授权请求无效');
+    const body = input as Record<string, unknown>;
+    authorizeRecruitmentScope(body.scopeId);
+    if (!body.action || typeof body.action !== 'object' || Array.isArray(body.action) || Buffer.byteLength(JSON.stringify(body.action), 'utf8') > 8_192) throw new Error('Workable 授权请求格式不正确');
+    if (!['status', 'probe', 'material_probe', 'bind', 'unbind', 'revoke'].includes(String((body.action as Record<string, unknown>).kind))) throw new Error('请使用桌面浏览器授权入口');
+    const serverUrl = enterpriseClient.snapshot().serverUrl;
+    const result = await enterpriseClient.workableConnection(body.action as import('otto-server').WorkableConnectionAction);
+    authorizeRecruitmentScope(body.scopeId);
+    if (enterpriseClient.snapshot().serverUrl !== serverUrl) throw new Error('企业连接已变化，请重新打开招聘工作台');
+    return result;
+  });
+  ipcMain.handle(IPC.recruitmentWorkableLogin, async (event, input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Workable 登录请求无效');
+    const body = input as { scopeId: string; expectedRevision: number };
+    authorizeRecruitmentScope(body.scopeId);
+    if (!Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 0) throw new Error('Workable 授权修订号无效');
+    const captured = enterpriseClient.snapshot();
+    const assertCurrent = () => {
+      authorizeRecruitmentScope(body.scopeId);
+      const current = enterpriseClient.snapshot();
+      if (event.sender.isDestroyed() || captured.serverUrl !== current.serverUrl || captured.token !== current.token) throw new Error('企业登录已变化');
+    };
+    const closed = () => workableDesktopLogin.cancel(body.scopeId);
+    event.sender.once('destroyed', closed);
+    try {
+      return await workableDesktopLogin.start({ scopeId: body.scopeId, expectedRevision: body.expectedRevision, assertCurrent,
+        connection: (action) => { assertCurrent(); return enterpriseClient.workableConnection(action); },
+        openExternal: (url) => shell.openExternal(url),
+      });
+    } finally { if (!event.sender.isDestroyed()) event.sender.removeListener('destroyed', closed); }
+  });
+  ipcMain.handle(IPC.recruitmentWorkableCancel, (_event, scopeId: unknown) => {
+    if (typeof scopeId !== 'string' || scopeId.length > 1000) throw new Error('Workable 取消请求无效');
+    workableDesktopLogin.cancel(scopeId);
+  });
+  ipcMain.handle(IPC.recruitmentJobs, async (_event, input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('招聘档案请求无效');
+    const body = input as Record<string, unknown>;
+    authorizeRecruitmentScope(body.scopeId);
+    if (!body.action || typeof body.action !== 'object' || Buffer.byteLength(JSON.stringify(body.action), 'utf8') > 6_000_000) throw new Error('招聘档案请求过大或格式不正确');
+    const serverUrl = enterpriseClient.snapshot().serverUrl;
+    const result = await enterpriseClient.recruitmentJobs(body.action as import('otto-server').RecruitmentJobAction);
+    authorizeRecruitmentScope(body.scopeId);
+    if (enterpriseClient.snapshot().serverUrl !== serverUrl) throw new Error('企业连接已变化，请重新打开招聘工作台');
+    return result;
+  });
+  ipcMain.handle(IPC.recruitmentSourcesList, async (_event, scopeId: unknown, requisitionId: unknown) => {
+    authorizeRecruitmentScope(scopeId);
+    if (requisitionId !== undefined && (typeof requisitionId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u.test(requisitionId))) throw new Error('招聘岗位标识无效');
+    const serverUrl = enterpriseClient.snapshot().serverUrl;
+    const sources = await enterpriseClient.listRecruitmentSources(requisitionId as string | undefined);
+    authorizeRecruitmentScope(scopeId);
+    if (enterpriseClient.snapshot().serverUrl !== serverUrl) {
+      throw new Error('企业连接已变化，请重新打开招聘工作台');
+    }
+    return sources;
+  });
+  ipcMain.handle(IPC.recruitmentSourcesSearch, async (_event, input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error('招聘来源检索参数不正确');
+    }
+    const body = input as Record<string, unknown>;
+    authorizeRecruitmentScope(body.scopeId);
+    const validId = (value: unknown): value is string => (
+      typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u.test(value)
+    );
+    if (
+      !validId(body.requisitionId)
+      || typeof body.query !== 'string'
+      || !body.query.trim()
+      || body.query.length > 10_000
+      || (body.sourceIds !== undefined && (
+        !Array.isArray(body.sourceIds)
+        || body.sourceIds.length > 16
+        || !body.sourceIds.every(validId)
+      ))
+      || (body.limitPerSource !== undefined && (
+        !Number.isSafeInteger(body.limitPerSource)
+        || Number(body.limitPerSource) < 1
+        || Number(body.limitPerSource) > 200
+      ))
+    ) {
+      throw new Error('招聘来源检索参数不正确');
+    }
+    const serverUrl = enterpriseClient.snapshot().serverUrl;
+    const result = await enterpriseClient.searchRecruitmentSources({
+      requisitionId: body.requisitionId,
+      query: body.query.trim(),
+      ...(body.sourceIds ? { sourceIds: body.sourceIds as string[] } : {}),
+      ...(body.limitPerSource !== undefined
+        ? { limitPerSource: Number(body.limitPerSource) }
+        : {}),
+    });
+    authorizeRecruitmentScope(body.scopeId);
+    if (enterpriseClient.snapshot().serverUrl !== serverUrl) {
+      throw new Error('企业连接已变化，请重新打开招聘工作台');
+    }
+    return result;
+  });
+  ipcMain.handle(IPC.recruitmentSourceRunGet, async (_event, input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error('招聘来源检索记录参数不正确');
+    }
+    const body = input as Record<string, unknown>;
+    authorizeRecruitmentScope(body.scopeId);
+    if (
+      typeof body.runId !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u.test(body.runId)
+    ) {
+      throw new Error('招聘来源检索记录参数不正确');
+    }
+    const serverUrl = enterpriseClient.snapshot().serverUrl;
+    const result = await enterpriseClient.getRecruitmentSourceRun(body.runId);
+    authorizeRecruitmentScope(body.scopeId);
+    if (enterpriseClient.snapshot().serverUrl !== serverUrl) {
+      throw new Error('企业连接已变化，请重新打开招聘工作台');
+    }
+    return result;
+  });
+  ipcMain.handle(IPC.recruitmentSourceMaterialGet, async (_event, input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('招聘材料参数不正确');
+    const body = input as Record<string, unknown>;
+    authorizeRecruitmentScope(body.scopeId);
+    if (![body.runId, body.requisitionId, body.canonicalId, body.sourceId].every((value) => (
+      typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u.test(value)
+    ))) throw new Error('招聘材料参数不正确');
+    const serverUrl = enterpriseClient.snapshot().serverUrl;
+    const result = await enterpriseClient.getRecruitmentSourceMaterial({
+      runId: body.runId as string, requisitionId: body.requisitionId as string,
+      canonicalId: body.canonicalId as string, sourceId: body.sourceId as string,
+    });
+    authorizeRecruitmentScope(body.scopeId);
+    if (enterpriseClient.snapshot().serverUrl !== serverUrl) throw new Error('企业连接已变化，请重新打开招聘工作台');
+    return result;
   });
 
   ipcMain.handle(IPC.enterpriseSkillReview, async (_event, input: unknown) => {
@@ -6231,7 +6419,10 @@ function registerIpc(): void {
         || (body.enterpriseContext !== undefined && typeof body.enterpriseContext !== 'string')
         || (body.workSampleArtifact !== undefined && typeof body.workSampleArtifact !== 'string')
       ) throw new Error('招聘分析缺少完整岗位或简历正文');
-      return analyzeRecruitmentResume(body as unknown as RecruitmentSemanticAnalysisInput);
+      return coordinateRecruitmentIntakeAnalysis(body as unknown as RecruitmentSemanticAnalysisInput, {
+        analyze: analyzeRecruitmentResume, call: (action) => enterpriseClient.recruitmentJobs(action), assertScope: authorizeRecruitmentScope,
+        getSessionKey: () => JSON.stringify(enterpriseClient.snapshot()),
+      });
     },
   );
 

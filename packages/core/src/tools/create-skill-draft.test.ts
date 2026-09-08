@@ -7,7 +7,8 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { CreateSkillDraftTool } from './create-skill-draft.js';
-import { confirmPendingSkill } from '../orchestration/autoSkillGenerator.js';
+import { confirmPendingSkill, stageProactiveSkillDraft } from '../orchestration/autoSkillGenerator.js';
+import { listSkillReleases } from '../orchestration/skillReleaseEvidence.js';
 
 const roots: string[] = [];
 let previousUserDir: string | undefined;
@@ -64,6 +65,8 @@ describe('CreateSkillDraftTool', () => {
     );
 
     expect(result.returnDisplay).toContain('尚未安装、未执行');
+    expect(result.returnDisplay).toContain('合同审查');
+    expect(result.returnDisplay).toContain('业务效果尚未验证');
     await expect(
       fs.access(path.join(root, 'skills', 'contract-review-flow')),
     ).rejects.toThrow();
@@ -95,5 +98,14 @@ describe('CreateSkillDraftTool', () => {
       ),
     ).resolves.toContain('auto-skill-contract-review-flow');
     await expect(fs.access(sentinel)).rejects.toThrow();
+    const oldProfile = await fs.readFile(path.join(root, 'skills/contract-review-flow/profile.json'), 'utf8');
+    expect(oldProfile).not.toContain('自动孵化的专家: contract-review-flow');
+    const update = await stageProactiveSkillDraft({ name: 'contract-review-flow', description: '按合同全文整理问题，供法务复核，并说明材料缺口。', reason: '用户要求补充合同缺失材料检查', skillContent: (await fs.readFile(installedPath, 'utf8')).replace('# 合同审查', '# 合同材料核对') });
+    expect(update.recommendation).toBe('enhance');
+    expect(update.draft?.baseContentHash).toBeTruthy();
+    await confirmPendingSkill(update.id);
+    const releases = await listSkillReleases(root);
+    expect(releases[0].history).toHaveLength(1);
+    expect(releases[0].current.function.title).toBe('合同材料核对');
   });
 });

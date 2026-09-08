@@ -472,8 +472,10 @@ export function observeEnterpriseKnowledgeInRepository(
       + `${summary.distinctContributorCount} 名贡献者`;
     if (existingKnowledge) {
       let knowledge = existingKnowledge;
-      if (existingKnowledge.status === 'pending_review'
-        || existingKnowledge.status === 'archived') {
+      const restoredDraft = existingKnowledge.status === 'pending_review'
+        && Boolean(existingKnowledge.source_label?.startsWith('历史内容恢复'));
+      if (!restoredDraft && (existingKnowledge.status === 'pending_review'
+        || existingKnowledge.status === 'archived')) {
         knowledge = saveEnterpriseKnowledgeInRepository(store, {
           organizationId,
           sourceId: `retention:${topicId}`.slice(0, MAX_SOURCE_LENGTH),
@@ -501,9 +503,9 @@ export function observeEnterpriseKnowledgeInRepository(
         id: knowledge.id,
         organizationId,
         confidence: decision.reliabilityScore,
-        sourceLabel,
+        sourceLabel: restoredDraft ? existingKnowledge.source_label! : sourceLabel,
         changedBy: 'Otto 企业记忆保留策略',
-        changeNote: existingKnowledge.status === 'active'
+        changeNote: restoredDraft ? '新增观察已保留，不改写管理员选择恢复的待确认内容' : existingKnowledge.status === 'active'
           ? '新增支持证据，已刷新组织可靠度'
           : '候选证据摘要已刷新',
       }) ?? knowledge;

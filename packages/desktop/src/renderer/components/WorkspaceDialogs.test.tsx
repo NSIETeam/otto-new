@@ -48,6 +48,40 @@ beforeEach(() => {
 });
 
 describe('WorkspaceDialogs', () => {
+  it('版本沿革保留待确认和停止使用的记忆，而不是仅展示当前启用项', async () => {
+    Object.assign(window.otto, {
+      enterpriseKnowledgeList: vi.fn(async () => [
+        { id: 'pending', title: '待确认流程', category: '流程', content: '待复核', confidence: 0.8, status: 'pending_review', version: 2, createdAt: '2026-09-01' },
+        { id: 'archived', title: '停用流程', category: '流程', content: '已停用', confidence: 0.8, status: 'archived', version: 3, createdAt: '2026-09-01' },
+      ]),
+      enterpriseKnowledgeRevisions: vi.fn(async (id) => [{ id: `r-${id}`, version: 1, title: '历史流程', category: '流程', content: `${id} 的历史内容` }]),
+    });
+    render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
+    await screen.findByText('待确认流程');
+    fireEvent.click(screen.getByRole('tab', { name: '版本与变更记录' }));
+    expect(await screen.findByText('pending 的历史内容')).toBeTruthy();
+    expect(await screen.findByText('archived 的历史内容')).toBeTruthy();
+  });
+
+  it('恢复历史内容绑定当前版本并显示待确认，不声称立刻启用', async () => {
+    const item = { id: '12', title: '交付流程', category: '流程', content: '第二版流程', version: 2, confidence: 0.7, status: 'active', department: '研发部', createdAt: '2026-09-01' };
+    Object.assign(window.otto, {
+      enterpriseKnowledgeList: vi.fn(async () => [item]),
+      enterpriseKnowledgeRevisions: vi.fn(async () => [{ id: 'r1', version: 1, title: '交付流程', category: '流程', content: '第一版流程' }]),
+      enterpriseKnowledgeRevise: vi.fn(async () => ({ ...item, content: '第一版流程', version: 3, status: 'pending_review' })),
+    });
+    render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
+    await screen.findByText('交付流程');
+    fireEvent.click(screen.getByRole('tab', { name: '已掌握与待确认' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看变化' }));
+    await screen.findByText('所选历史 v1');
+    fireEvent.change(screen.getByLabelText('恢复依据'), { target: { value: '流程已经调整，需要恢复旧版并再次核对' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '恢复为待确认版本' }));
+    await waitFor(() => expect(window.otto.enterpriseKnowledgeRevise).toHaveBeenCalledWith('12', expect.objectContaining({ expectedVersion: 2, restoreVersion: 1, content: '第一版流程' })));
+    expect(await screen.findByText(/已恢复为 v3，待管理员重新确认/)).toBeTruthy();
+  });
+
   it('关闭再打开后，旧范围的企业记忆响应不能覆盖新结果', async () => {
     const oldRequest = deferred<Awaited<ReturnType<typeof window.otto.enterpriseKnowledgeList>>>();
     const newRequest = deferred<Awaited<ReturnType<typeof window.otto.enterpriseKnowledgeList>>>();
@@ -80,7 +114,7 @@ describe('WorkspaceDialogs', () => {
 
     await screen.findByText('Otto 正在学习这家企业怎样工作');
     expect(screen.getByText(/完成对话和工作后，Otto 会自动识别/)).toBeTruthy();
-    expect(screen.getByText(/已经确认的记忆会在相关问题中自动调用/)).toBeTruthy();
+    expect(screen.getByText(/已经确认且未过期的记忆/)).toBeTruthy();
     expect(screen.queryByText('最近成果候选')).toBeNull();
     expect(screen.queryByRole('button', { name: '沉淀' })).toBeNull();
     expect(window.otto.workLogRecent).not.toHaveBeenCalled();
@@ -106,8 +140,8 @@ describe('WorkspaceDialogs', () => {
     });
     render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
 
-    await screen.findByText('企业记忆治理完成度');
-    expect(screen.getAllByText('证据充分').length).toBeGreaterThan(0);
+    await screen.findByText('企业记忆依据概览');
+    expect(screen.getAllByText('有确认记录').length).toBeGreaterThan(0);
     expect(screen.getAllByText('存在冲突').length).toBeGreaterThan(0);
     expect(screen.getByText(/哪一条正式制度/)).toBeTruthy();
     expect(screen.getByText('生成检查清单和复盘')).toBeTruthy();
@@ -136,10 +170,10 @@ describe('WorkspaceDialogs', () => {
     await screen.findByText('交付规范');
     fireEvent.click(screen.getByRole('tab', { name: '已掌握与待确认' }));
     expect(screen.getByText('客户成功部')).toBeTruthy();
-    expect(screen.getByText('已被 3 次工作验证')).toBeTruthy();
-    expect(screen.getByText('Otto 会自动用于')).toBeTruthy();
+    expect(screen.getByText('累计 3 条观察记录')).toBeTruthy();
+    expect(screen.getByText('建议适用场景（不代表已验证）')).toBeTruthy();
     expect(screen.getByText('生成检查清单和复盘')).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: '如何变得更准确' }));
+    fireEvent.click(screen.getByRole('tab', { name: '版本与变更记录' }));
     await screen.findByText('初版流程');
     expect(screen.getByText(/管理员 · 形成知识/)).toBeTruthy();
   });
@@ -234,7 +268,8 @@ describe('WorkspaceDialogs', () => {
         title: '客户交付前安全检查规则',
         category: '交付流程',
         content: '客户验收前必须完成安全扫描，并留存扫描报告。',
-        confidence: 0.94,
+        confidence: 0.78,
+        expectedVersion: 2,
         changeNote: expect.stringContaining('管理员确认 AI 深化建议'),
       }),
     ));

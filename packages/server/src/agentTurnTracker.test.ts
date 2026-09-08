@@ -13,6 +13,9 @@ import {
 } from './protocol.js';
 import { InMemorySessionStore } from './sessions.js';
 import { deriveTurnControlPolicy } from './turnControlPolicy.js';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 function tool(overrides: Partial<ToolCall> = {}): ToolCall {
   return {
@@ -59,6 +62,7 @@ describe('AgentTurnTracker', () => {
       }),
     ]);
     tracker.attachAssistantMessage('follow-up-message');
+    tracker.completeAssistantMessage(true);
     tracker.complete();
 
     const events = frames.filter(
@@ -184,6 +188,7 @@ describe('AgentTurnTracker', () => {
         toolName: 'read_file',
         parameters: { path: 'login.ts' },
         status: ToolCallStatus.Success,
+        result: { success: true, executionTime: 1, toolName: 'read_file' },
       }),
       tool({
         id: 'edit-1',
@@ -292,7 +297,7 @@ describe('AgentTurnTracker', () => {
       expect.objectContaining({
         uri: expect.stringContaining('example.com/report'),
         sourceType: 'web',
-        verified: true,
+        verified: false,
       }),
     ]);
     expect(JSON.stringify(snapshot.citations)).not.toContain('private-value');
@@ -321,6 +326,292 @@ describe('AgentTurnTracker', () => {
     ]);
     snapshot = tracker.snapshot();
     expect(snapshot.artifacts[0]?.verified).toBe(false);
+  });
+
+  it('does not accept a claimed artifact path when no deliverable exists', () => {
+    const store = new InMemorySessionStore();
+    const session = store.createSession();
+    const policy = deriveTurnControlPolicy({
+      text: '生成一份 PDF 报告',
+      source: 'local',
+      toolFree: false,
+    });
+    const tracker = new AgentTurnTracker(store, session.sessionId, policy);
+    tracker.completeAssistantMessage(true);
+    tracker.updateToolCalls([
+      tool({
+        id: 'missing-artifact',
+        toolName: 'generate_document',
+        parameters: { outputPath: path.join(tmpdir(), 'does-not-exist.pdf') },
+        status: ToolCallStatus.Success,
+        result: {
+          success: true,
+          executionTime: 1,
+          toolName: 'generate_document',
+        },
+      }),
+    ]);
+
+    expect(tracker.snapshot().artifacts[0]?.verified).toBe(false);
+    expect(tracker.deliveryReadiness().missing).toContainEqual(
+      expect.objectContaining({ id: 'criterion-artifact' }),
+    );
+  });
+
+  it('natively verifies a readable artifact, not only a file signature', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'otto-artifact-'));
+    const report = path.join(directory, 'report.json');
+    writeFileSync(report, '{"report":"evidence"}');
+    try {
+      const store = new InMemorySessionStore();
+      const session = store.createSession();
+      const policy = deriveTurnControlPolicy({
+        text: '生成一份 JSON 报告',
+        source: 'local',
+        toolFree: false,
+      });
+      const tracker = new AgentTurnTracker(store, session.sessionId, policy);
+      tracker.completeAssistantMessage(true);
+      tracker.updateToolCalls([
+        tool({
+          id: 'real-artifact',
+          toolName: 'generate_document',
+          parameters: { outputPath: report },
+          status: ToolCallStatus.Success,
+          result: {
+            success: true,
+            executionTime: 1,
+            toolName: 'generate_document',
+          },
+        }),
+      ]);
+
+      expect(tracker.snapshot().artifacts[0]).toEqual(
+        expect.objectContaining({
+          path: report,
+          verified: true,
+          verification: expect.objectContaining({
+            status: 'verified',
+            check: 'native_format',
+            toolCallId: 'real-artifact',
+          }),
+        }),
+      );
+      expect(tracker.deliveryReadiness().missing).not.toContainEqual(
+        expect.objectContaining({ id: 'criterion-artifact' }),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a non-empty artifact whose contents do not match its extension', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'otto-artifact-'));
+    const fakePdf = path.join(directory, 'fake.pdf');
+    writeFileSync(fakePdf, 'plain text pretending to be a PDF');
+    try {
+      const store = new InMemorySessionStore();
+      const session = store.createSession();
+      const tracker = new AgentTurnTracker(
+        store,
+        session.sessionId,
+        deriveTurnControlPolicy({
+          text: '生成一份 PDF 报告',
+          source: 'local',
+          toolFree: false,
+        }),
+      );
+      tracker.updateToolCalls([
+        tool({
+          id: 'fake-artifact',
+          toolName: 'generate_document',
+          parameters: { outputPath: fakePdf },
+          status: ToolCallStatus.Success,
+          result: {
+            success: true,
+            executionTime: 1,
+            toolName: 'generate_document',
+          },
+        }),
+      ]);
+
+      expect(tracker.snapshot().artifacts[0]).toEqual(
+        expect.objectContaining({
+          verified: false,
+          verification: expect.objectContaining({ status: 'format_mismatch' }),
+        }),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not mistake an existing input file for a missing output artifact', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'otto-artifact-'));
+    const input = path.join(directory, 'source.pdf');
+    const output = path.join(directory, 'result.pdf');
+    writeFileSync(input, '%PDF-1.7\nsource');
+    try {
+      const store = new InMemorySessionStore();
+      const session = store.createSession();
+      const tracker = new AgentTurnTracker(
+        store,
+        session.sessionId,
+        deriveTurnControlPolicy({
+          text: '根据现有 PDF 生成一份新 PDF 报告',
+          source: 'local',
+          toolFree: false,
+        }),
+      );
+      tracker.updateToolCalls([
+        tool({
+          id: 'missing-output',
+          toolName: 'generate_document',
+          parameters: { inputPath: input, outputPath: output },
+          status: ToolCallStatus.Success,
+          result: {
+            success: true,
+            executionTime: 1,
+            toolName: 'generate_document',
+          },
+        }),
+      ]);
+
+      expect(tracker.snapshot().artifacts.map((item) => item.path)).toEqual([
+        output,
+      ]);
+      expect(tracker.deliveryReadiness().missing).toContainEqual(
+        expect.objectContaining({ id: 'criterion-artifact' }),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rechecks an artifact at delivery instead of trusting a stale file receipt', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'otto-artifact-'));
+    const report = path.join(directory, 'report.json');
+    writeFileSync(report, '{"report":"evidence"}');
+    try {
+      const store = new InMemorySessionStore();
+      const session = store.createSession();
+      const tracker = new AgentTurnTracker(
+        store,
+        session.sessionId,
+        deriveTurnControlPolicy({
+          text: '生成一份 JSON 报告',
+          source: 'local',
+          toolFree: false,
+        }),
+      );
+      tracker.updateToolCalls([
+        tool({
+          id: 'deleted-output',
+          toolName: 'generate_document',
+          parameters: { outputPath: report },
+          status: ToolCallStatus.Success,
+          result: {
+            success: true,
+            executionTime: 1,
+            toolName: 'generate_document',
+          },
+        }),
+      ]);
+      expect(tracker.snapshot().artifacts[0]?.verified).toBe(true);
+      rmSync(report);
+
+      expect(tracker.deliveryReadiness().missing).toContainEqual(
+        expect.objectContaining({ id: 'criterion-artifact' }),
+      );
+      expect(tracker.snapshot().artifacts[0]).toEqual(
+        expect.objectContaining({
+          verified: false,
+          verification: expect.objectContaining({ status: 'missing' }),
+        }),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not accept a source-like tool without a returned or retrieved citation', () => {
+    const store = new InMemorySessionStore();
+    const session = store.createSession();
+    const tracker = new AgentTurnTracker(
+      store,
+      session.sessionId,
+      deriveTurnControlPolicy({
+        text: '查找最新政策并核实官方来源',
+        source: 'local',
+        toolFree: false,
+      }),
+    );
+    tracker.completeAssistantMessage(true);
+    tracker.updateToolCalls([
+      tool({
+        id: 'empty-search',
+        toolName: 'web_search',
+        parameters: { query: 'compare https://example.com/policy' },
+        status: ToolCallStatus.Success,
+        result: {
+          success: true,
+          executionTime: 1,
+          toolName: 'web_search',
+          data: 'No source was returned.',
+        },
+      }),
+    ]);
+
+    expect(tracker.snapshot().citations).toEqual([]);
+    expect(tracker.deliveryReadiness().missing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'criterion-evidence' }),
+        expect.objectContaining({ id: 'criterion-verification' }),
+      ]),
+    );
+  });
+
+  it('keeps a successful direct retrieval URL as a candidate, not verified claim evidence', () => {
+    const store = new InMemorySessionStore();
+    const session = store.createSession();
+    const tracker = new AgentTurnTracker(
+      store,
+      session.sessionId,
+      deriveTurnControlPolicy({
+        text: '查找最新政策并核实官方来源',
+        source: 'local',
+        toolFree: false,
+      }),
+    );
+    tracker.completeAssistantMessage(true);
+    tracker.updateToolCalls([
+      tool({
+        id: 'official-fetch',
+        toolName: 'fetch_url',
+        parameters: { url: 'https://example.gov/policy' },
+        status: ToolCallStatus.Success,
+        result: {
+          success: true,
+          executionTime: 1,
+          toolName: 'fetch_url',
+          data: 'Policy body',
+        },
+      }),
+    ]);
+
+    expect(tracker.snapshot().citations).toEqual([
+      expect.objectContaining({
+        uri: 'https://example.gov/policy',
+        verified: false,
+        toolCallId: 'official-fetch',
+      }),
+    ]);
+    expect(tracker.deliveryReadiness().missing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'criterion-evidence' }),
+        expect.objectContaining({ id: 'criterion-verification' }),
+      ]),
+    );
   });
 
   it('preserves a home-relative PPT path instead of truncating it to /Desktop', () => {

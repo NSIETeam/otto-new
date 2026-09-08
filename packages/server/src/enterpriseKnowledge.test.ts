@@ -39,6 +39,60 @@ function createStore(database: Database): EnterpriseKnowledgeRepositoryStore {
 }
 
 describe('enterprise knowledge kernel', () => {
+  it('restores authoritative historical content as a new pending version without widening scope or reviving approval', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+    try {
+      const first = knowledge.saveKnowledge({ organizationId: 'org-a', department: '研发部', title: '交付规则', category: '流程', content: '先检查再交付', sourceType: 'manual', confidence: 0.9 }).entry;
+      const second = knowledge.reviseKnowledge({ id: first.id, organizationId: 'org-a', content: '先检查，再审批，最后交付', changedBy: '管理员' })!;
+      const restored = knowledge.reviseKnowledge({ id: first.id, organizationId: 'org-a', expectedVersion: second.version, restoreVersion: first.version, content: '客户端伪造内容', changedBy: '管理员', changeNote: '审批流程已调整，申请恢复旧版内容复核' })!;
+      expect(restored).toMatchObject({ content: first.content, department: '研发部', status: 'pending_review', version: second.version + 1, reviewed_by: null, reviewed_at: null, review_due_at: null, expires_at: null });
+      expect(knowledge.getMemberKnowledge('研发部', '', 'org-a')).toEqual([]);
+      const history = knowledge.getKnowledgeRevisions(first.id, 'org-a');
+      expect(history.map((entry) => entry.content)).toEqual([first.content, second.content, first.content]);
+      expect(history[0].change_note).toContain(`恢复历史 v${first.version}`);
+      expect(() => knowledge.reviewKnowledge({ id: first.id, expectedVersion: second.version, action: 'approve', reviewer: '管理员' })).toThrow(/版本已变化/);
+      expect(knowledge.reviseKnowledge({ id: first.id, organizationId: 'org-b', expectedVersion: restored.version, restoreVersion: first.version, changedBy: '另一个企业', changeNote: '尝试越权恢复其他企业的历史' })).toBeNull();
+    } finally { database.close(); }
+  });
+
+  it('keeps an administrator-selected restored draft intact when new automatic observations arrive', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+    try {
+      const observe = (n: number) => knowledge.observeKnowledge({ organizationId: 'org-a', category: 'convention', content: '客户验收前需要先核对交付清单。', department: '客服部', contributor: `员工${n % 2}`, contributorAccountId: `account-${n % 2}`, sourceId: `capture-${n}`, sourceSessionId: `session-${n}`, sourceFingerprint: 'acceptance-checklist', confidence: 0.9, verified: false });
+      observe(1); observe(2);
+      const first = observe(3).knowledge!;
+      expect(first).toBeTruthy();
+      const revised = knowledge.reviseKnowledge({ id: first.id, content: '暂定新流程', changedBy: '管理员' })!;
+      const restored = knowledge.reviseKnowledge({ id: first.id, expectedVersion: revised.version, restoreVersion: first.version, changedBy: '管理员', changeNote: '恢复旧版作为待复核内容，禁止自动覆盖选择' })!;
+      const observed = observe(4).knowledge!;
+      expect(observed.content).toBe(restored.content);
+      expect(observed.status).toBe('pending_review');
+      expect(observed.source_label).toContain('历史内容恢复');
+    } finally { database.close(); }
+  });
+
+  it('rejects stale edits, invalid restore versions and conflict/archival bypasses without changing history', () => {
+    const database = createDatabase();
+    const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
+    try {
+      const first = knowledge.saveKnowledge({ title: '规则', category: '流程', content: '第一版', sourceType: 'manual' }).entry;
+      const next = knowledge.reviseKnowledge({ id: first.id, content: '第二版', changedBy: '管理员' })!;
+      expect(() => knowledge.reviseKnowledge({ id: first.id, expectedVersion: first.version, content: '过时的建议', changedBy: '管理员' })).toThrow(/版本已变化/);
+      const restore = { id: first.id, expectedVersion: next.version, restoreVersion: first.version, changedBy: '管理员', changeNote: '核对旧版内容后申请恢复并重新复核' };
+      expect(() => knowledge.reviseKnowledge({ ...restore, expectedVersion: undefined })).toThrow(/expectedVersion/);
+      expect(() => knowledge.reviseKnowledge({ ...restore, restoreVersion: next.version })).toThrow(/历史版本/);
+      expect(() => knowledge.reviseKnowledge({ ...restore, changeNote: '恢复' })).toThrow(/12/);
+      expect(knowledge.getKnowledgeRevisions(first.id)).toHaveLength(2);
+      database.prepare("UPDATE knowledge SET source_label = '证据存在冲突' WHERE id = ?").run(first.id);
+      expect(() => knowledge.reviseKnowledge(restore)).toThrow(/冲突/);
+      database.prepare("UPDATE knowledge SET source_label = NULL, status = 'archived' WHERE id = ?").run(first.id);
+      expect(() => knowledge.reviseKnowledge(restore)).toThrow(/archived/);
+      expect(knowledge.getKnowledgeRevisions(first.id)).toHaveLength(2);
+    } finally { database.close(); }
+  });
+
   it('incubates ordinary conversation evidence and only promotes repeated or high-impact knowledge', () => {
     const database = createDatabase();
     const knowledge = createEnterpriseKnowledgeFacade(createStore(database));
@@ -99,7 +153,7 @@ describe('enterprise knowledge kernel', () => {
       });
       expect(promoted.knowledge?.content).toContain('## 长期结论');
       expect(promoted.knowledge?.content).toContain('## 形成依据');
-      expect(promoted.knowledge?.content).toContain('3 条独立证据');
+      expect(promoted.knowledge?.content).toContain('3 条观察记录');
       expect(promoted.reliabilityScore).toBeGreaterThanOrEqual(0.7);
       expect(promoted.knowledge!.confidence).toBe(promoted.reliabilityScore);
       expect(promoted.knowledge!.confidence).toBeLessThan(ordinary.confidence);
@@ -163,7 +217,7 @@ describe('enterprise knowledge kernel', () => {
           version: 2,
         }),
       });
-      expect(refinedDeep.knowledge?.content).toContain('3 条独立证据');
+      expect(refinedDeep.knowledge?.content).toContain('3 条观察记录');
       expect(JSON.stringify(knowledge.getKnowledgeForAdministration('', undefined, 'org-b')))
         .not.toContain('租户缓存');
     } finally {

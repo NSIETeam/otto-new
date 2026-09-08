@@ -32,7 +32,9 @@ import {
   MESSAGE_ROLES,
   SceneType,
   ToolConfirmationOutcome,
+  WebFetchTool,
   executeToolCall,
+  installTurnExecutionGuard,
   getModelCapabilities,
   areAllFunctionCallsValid,
   fixAllFunctionCalls,
@@ -60,10 +62,27 @@ import { randomUUID } from 'node:crypto';
 import type { SessionStore, SessionRuntime } from './sessions.js';
 import { AgentTurnTracker } from './agentTurnTracker.js';
 import { TASK_PLAN_DECLARATION, TASK_PLAN_TOOL_NAME } from './taskContract.js';
+import { TaskContinuityLedger, type TurnSteeringRequest, type SteeringReceipt } from './taskContinuity.js';
+import {
+  DeliveryClosure,
+  deliveryClosureDirective,
+} from './deliveryClosure.js';
+import { DeliveryRepairGuard } from './deliveryRepair.js';
+import { REPAIR_PLAN_TOOL_NAME, REPAIR_FORMAT_TOOL_NAME, REPAIR_TOOL_DECLARATIONS } from './repairStrategyTools.js';
+import { CLAIM_REVIEW_TOOL_NAME, CLAIM_REVIEW_DECLARATION } from './claimEvidenceTools.js';
+import { TurnDirectiveLedger } from './turnDirectiveLedger.js';
+import { TurnConstraintGuard } from './turnConstraints.js';
+import { resolveTurnRequest } from './turnContinuation.js';
+import {
+  incompleteDelivery,
+  retainedDeliveryDraft,
+  unverifiedDeliveryText,
+} from './incompleteDelivery.js';
+import { hasSuccessfulProcessReceipt, hasFailedVerificationReceipt, verificationKind } from './verificationEvidence.js';
 import { refineComplexityFromObjectives } from './complexityRouter.js';
 import {
   AdaptiveExecutionCoordinator,
-  type ExecutionFailureObservation,
+  type AdaptiveAttemptReview,
 } from './adaptiveExecution.js';
 import {
   deriveTurnControlPolicy,
@@ -436,10 +455,34 @@ export class CoreSessionRuntime implements SessionRuntime {
   private authorizationMode: RuntimeAuthorizationMode = 'manual';
   /** Active semantic turn; one runtime never runs two turns concurrently. */
   private activeTurnTracker?: AgentTurnTracker;
+  private activeConstraints?: TurnConstraintGuard;
+  private activeDeliveryRepair?: DeliveryRepairGuard;
   private activeTurnControl?: TurnControlPolicy;
   private readonly recoveryStore?: FileTurnRecoveryStore;
   private pendingRecovery: TurnRecoveryRecord | null = null;
   private activeRecovery?: TurnRecoveryRecord;
+  private continuity?: TaskContinuityLedger;
+  private steeringApplying = false;
+  private steeringPersistence: Promise<void> = Promise.resolve();
+  private steeringPersistenceFailed = false;
+  private steeringBlocked = new Set<string>();
+  private steeringClosed = true;
+
+  private get steeringFence(): boolean { return !!this.continuity?.pending || this.steeringApplying || this.steeringPersistenceFailed; }
+  async steer(input: TurnSteeringRequest): Promise<SteeringReceipt> {
+    if (!this.running || !this.continuity || this.steeringClosed || this.continuity.request.source !== 'local' || this.abort?.signal.aborted) throw new Error('No running local turn available for steering');
+    const receipt = this.continuity.accept(input); // synchronous fence before any persistence await
+    for (const resolve of this.pendingConfirmations.values()) resolve({ outcome: 'rejected' });
+    this.pendingConfirmations.clear();
+    this.steeringPersistence = this.persistContinuity().catch(error => { this.steeringPersistenceFailed = true; throw error; });
+    await this.steeringPersistence;
+    this.store.publish(this.sessionId, { type: 'turn_steering', payload: { sessionId: this.sessionId, ...receipt } });
+    return receipt;
+  }
+  private async persistContinuity(): Promise<void> {
+    if (this.recoveryStore && this.activeRecovery && this.continuity) this.activeRecovery =
+      await this.recoveryStore.recordContinuity(this.activeRecovery, this.continuity.snapshot(), this.activeConstraints?.snapshot(), this.activeTurnTracker?.taskGraphSnapshot(), this.activeTurnTracker?.nativeCheckpoint(), this.activeDeliveryRepair?.budgetSnapshot());
+  }
   /**
    * 挂起中的工具确认：callId → resolver。AskUserQuestion 弹卡后在此登记，
    * server 收到 tool_confirmation_response 调 resolveToolConfirmation 唤醒。
@@ -606,7 +649,11 @@ export class CoreSessionRuntime implements SessionRuntime {
    * 跑一整轮对话（可能多回合工具往返）。
    * 期间所有流式/工具事件经 store.publish 广播；不写 stdout。
    */
-  async run(input: MessageContent, source: MessageSource): Promise<void> {
+  async run(
+    input: MessageContent,
+    source: MessageSource,
+    context?: { userMessageId: string },
+  ): Promise<void> {
     if (this.running) {
       // 同一会话已有一轮在跑：拒绝并行（保护 core chat 历史一致性）。
       this.store.publish(this.sessionId, {
@@ -631,23 +678,102 @@ export class CoreSessionRuntime implements SessionRuntime {
       return;
     }
     const toolRegistry = this.toolRegistry;
-    const taskText = messageContentToParts(input)
-      .map((part) => part.text ?? '')
-      .filter(Boolean)
-      .join('\n');
     // Keep existing recovery intent hashes stable; preserve line breaks separately
     // for exact request citations and explicitly listed acceptance requirements.
     const intentHash = turnIntentHash(messageContentToText(input));
     let recovery = this.pendingRecovery;
-    if (recovery && recovery.intentHash !== intentHash) {
-      this.fail(
-        'recovery_reconciliation_required',
-        '上一项任务仍有执行结果需要核对。为避免重复产生外部操作，Otto 已暂停新任务。',
-      );
-      this.running = false;
-      this.abort = undefined;
+    // The server identifies the actual user message separately from retrieved
+    // enterprise documents prepended to the model input. Those are not authority.
+    const history = this.store.getHistory(this.sessionId, 200);
+    const userMessage = context
+      ? history.find(
+          (message) =>
+            message.id === context.userMessageId &&
+            message.role === 'user' &&
+            message.source === source,
+        )
+      : undefined;
+    const submittedText = messageContentToParts(userMessage?.content ?? input)
+      .map((part) => part.text ?? '')
+      .filter(Boolean)
+      .join('\n');
+    const recoveredContinuity = recovery?.continuity ? TaskContinuityLedger.restore(recovery.continuity) : undefined;
+    const resumeUtterance = /^(?:继续(?:吧|执行|处理)?|接着(?:执行|处理)?|continue|proceed)[。.!！]?$/iu.test(submittedText.trim());
+    const workspacePath = this.store.getSession(this.sessionId)?.workspacePath;
+    const validOrigin = !context || !!userMessage;
+    const canResume = recoveredContinuity && validOrigin && source === 'local' && recoveredContinuity.request.source === source &&
+      recoveredContinuity.request.workspacePath === workspacePath && (resumeUtterance || recoveredContinuity.request.text === submittedText || recovery?.intentHash === intentHash);
+    if (recovery && ((recoveredContinuity && !canResume) || (!recoveredContinuity && recovery.intentHash !== intentHash))) {
+      this.fail('recovery_reconciliation_required', '上一项任务仍有未完成工作或待核对的执行结果。请明确继续原任务，或先核对并结束其恢复记录。');
+      this.running = false; this.abort = undefined; return;
+    }
+    let requestResolution = resolveTurnRequest({
+      text: submittedText,
+      source,
+      history,
+      workspacePath: this.store.getSession(this.sessionId)?.workspacePath,
+      ...(context
+        ? {
+            currentUserMessageId: userMessage?.id ?? '__missing_user_message__',
+          }
+        : {}),
+    });
+    if (canResume && recoveredContinuity) {
+      requestResolution = { kind: 'continued', request: recoveredContinuity.request };
+      // The ledger was committed before the WS acknowledgement. Recreate a
+      // missing display message after a crash, never resend an external action.
+      for (const event of recoveredContinuity.snapshot().events) {
+        if (!history.some(message => message.id === event.clientMessageId)) {
+          const message = this.store.appendMessage(this.sessionId, { id: event.clientMessageId, role: 'user', source: 'local',
+            turnId: recovery!.turnId, content: [{ type: 'text', value: event.text }], timestamp: event.acceptedAt });
+          this.store.publish(this.sessionId, { type: 'message_start', payload: { message } });
+        }
+      }
+      if (recoveredContinuity.paused && !recoveredContinuity.pending && resumeUtterance) recoveredContinuity.accept({
+        version: 1, turnId: recovery!.turnId, expectedRevision: recoveredContinuity.revision,
+        clientMessageId: context?.userMessageId ?? randomUUID(), mode: 'append', text: '继续当前任务。',
+      });
+    }
+    if (requestResolution.kind === 'clarify') {
+      try {
+        const tracker = new AgentTurnTracker(
+          this.store,
+          this.sessionId,
+          undefined,
+          {
+            request: requestResolution.request,
+          },
+        );
+        const message = this.store.appendMessage(this.sessionId, {
+          role: 'assistant',
+          source: 'local',
+          isStreaming: false,
+          content: [{ type: 'text', value: requestResolution.question }],
+          turnId: tracker.snapshot().turnId,
+        });
+        this.store.publish(this.sessionId, {
+          type: 'message_start',
+          payload: { message },
+        });
+        tracker.attachAssistantMessage(message.id);
+        tracker.requestClarification(requestResolution.question);
+        this.store.publish(this.sessionId, {
+          type: 'chat_complete',
+          payload: {
+            sessionId: this.sessionId,
+            messageId: message.id,
+            text: requestResolution.question,
+            finishReason: 'stop',
+          },
+        });
+        this.store.setStatus(this.sessionId, 'idle');
+      } finally {
+        this.running = false;
+        this.abort = undefined;
+      }
       return;
     }
+    let taskText = requestResolution.request.text;
     if (this.recoveryStore && !recovery) {
       recovery = await this.recoveryStore.begin({
         sessionId: this.sessionId,
@@ -657,7 +783,7 @@ export class CoreSessionRuntime implements SessionRuntime {
     }
     this.pendingRecovery = null;
     this.activeRecovery = recovery ?? undefined;
-    const turnControl = deriveTurnControlPolicy({
+    let turnControl = deriveTurnControlPolicy({
       text: taskText,
       source,
       toolFree: Boolean(this.options.toolFree),
@@ -670,17 +796,23 @@ export class CoreSessionRuntime implements SessionRuntime {
         turnControl,
         {
           taskText,
+          request: requestResolution.request,
+          ...(requestResolution.kind === 'continued' &&
+          requestResolution.contract
+            ? { taskContractSnapshot: requestResolution.contract }
+            : {}),
           ...(recovery
             ? {
                 turnId: recovery.turnId,
                 attempt: recovery.attempt,
-                ...(recovery.taskGraph
+                ...(recovery.taskGraph && (!recoveredContinuity || recovery.taskGraphRequestRevision === recoveredContinuity.request.revision)
                   ? { taskGraphSnapshot: recovery.taskGraph }
                   : {}),
               }
             : {}),
         },
       );
+      if (recoveredContinuity && recovery?.nativeEvidence) turnTracker.restoreNativeCheckpoint(recovery.nativeEvidence);
     } catch {
       const reason = '上次任务图无法安全恢复，需要核对已执行操作';
       if (this.recoveryStore && recovery) {
@@ -696,6 +828,7 @@ export class CoreSessionRuntime implements SessionRuntime {
         turnControl,
         {
           taskText,
+          request: requestResolution.request,
           ...(recovery
             ? { turnId: recovery.turnId, attempt: recovery.attempt }
             : {}),
@@ -710,6 +843,21 @@ export class CoreSessionRuntime implements SessionRuntime {
       this.activeRecovery = recovery;
     }
     const adaptiveExecution = new AdaptiveExecutionCoordinator();
+    let constraints = new TurnConstraintGuard(taskText, {
+      turnId: turnTracker.snapshot().turnId,
+      sourceMessageId: context?.userMessageId,
+      workspacePath: requestResolution.request.workspacePath,
+    });
+    // A recovered turn without the complete native trace is not negative evidence.
+    if (recoveredContinuity && recovery?.constraints) constraints.inherit(recovery.constraints, true);
+    else if ((recovery?.attempt ?? 1) > 1) constraints.markGap();
+    const safeText = (text: string) => constraints.sanitize(text);
+    const deliveryClosure = new DeliveryClosure();
+    let closingDelivery = false;
+    const deliveryRepair = new DeliveryRepairGuard(turnTracker.repairContext());
+    if (recovery?.repairBudget) deliveryRepair.restoreBudget(recovery.repairBudget);
+    this.activeDeliveryRepair = deliveryRepair;
+    const partialDeliveries: string[] = [];
     if (recovery?.status === 'reconciliation_required') {
       turnTracker.markReconciliationRequired(
         recovery.reconciliationReason || '上次执行结果未知，禁止自动重放',
@@ -717,6 +865,11 @@ export class CoreSessionRuntime implements SessionRuntime {
     }
     this.activeTurnTracker = turnTracker;
     this.activeTurnControl = turnControl;
+    this.continuity = recoveredContinuity ?? new TaskContinuityLedger(turnTracker.snapshot().turnId, requestResolution.request);
+    this.steeringClosed = false;
+    this.steeringPersistenceFailed = false;
+    this.steeringPersistence = Promise.resolve();
+    this.steeringBlocked.clear();
 
     // 自然语言“做 PPT”与 /ppt、专家卡片走同一内置 Skill。直接更新 system
     // instruction，不把可靠性寄托在模型是否记得调用 use_skill。
@@ -753,14 +906,54 @@ export class CoreSessionRuntime implements SessionRuntime {
     const modelName = this.config.getModel();
     const caps = getModelCapabilities(modelName);
 
+    const directiveLedger = new TurnDirectiveLedger();
+    let modelRequests = 0;
+    const continuationContext =
+      requestResolution.kind === 'continued'
+        ? `原始用户任务（本轮继续其未完成工作，旧回执不代表本轮验证，仍须遵守当前授权）：\n${JSON.stringify(taskText)}`
+        : '';
+    const runtimeDirective = (includeGraph = false): string => {
+      const contract = turnTracker.taskContractInstructions();
+      // Read only user-role context: model/tool output is not runtime metadata.
+      const retained =
+        typeof chat.getUserTextHistory === 'function'
+          ? chat.getUserTextHistory()
+          : typeof chat.getHistory === 'function'
+            ? chat
+                .getHistory(true)
+                .filter((entry) => entry.role === MESSAGE_ROLES.USER)
+                .flatMap(
+                  (entry) =>
+                    entry.parts?.flatMap((part) =>
+                      part.text ? [part.text] : [],
+                    ) ?? [],
+                )
+            : undefined;
+      const control = formatTurnControlDirective(turnControl);
+      const delta = directiveLedger.update(
+        {
+          control,
+          rules: contract.rules,
+          request: this.continuity && ((this.continuity.request.revision ?? 1) > 1 || !!recoveredContinuity ||
+            (modelRequests > 0 && retained !== undefined && !retained.some(entry => entry.includes(taskText))))
+            ? this.continuity.directive() : continuationContext,
+          state: contract.state,
+        },
+        retained,
+      );
+      // Rehydrate the CURRENT graph after context loss, never a cached old plan.
+      return [
+        delta,
+        includeGraph || delta.includes(control)
+          ? turnTracker.taskGraphDirective()
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    };
+
     // 首轮 user message：把协议 content 构造成 core Part[]（文本 + 图片 inlineData）。
-    const turnDirective = [
-      formatTurnControlDirective(turnControl),
-      turnTracker.taskGraphDirective(),
-      turnTracker.taskContractDirective(),
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const turnDirective = runtimeDirective(true);
     let currentMessages: Content[] = [
       {
         role: MESSAGE_ROLES.USER,
@@ -774,13 +967,34 @@ export class CoreSessionRuntime implements SessionRuntime {
     // 本轮 assistant 消息：先落一条占位（isStreaming），后续 chunk 增量填充。
     let assistantId: string | null = null;
     let assistantText = '';
+    // Tool calls may arrive after text in the same model stream. Lexical intent
+    // (especially a short continuation) cannot prove that this is a final answer.
+    // Only an explicitly tool-free turn can stream before the native gate;
+    // other drafts stay private, including history reloads, errors and cancels.
+    let deferAssistantText =
+      !this.options.toolFree ||
+      turnControl.requiresVerification ||
+      constraints.protectsOutput ||
+      turnControl.requiresPlan;
     // cancel() 必须立即让 UI 收口，不能等一个忽略 AbortSignal 的工具自行返回。
     // 后续循环仍会检查 signal；此闸门保证 chat_complete(cancelled) 只发布一次。
     let cancellationPublished = false;
     const publishCancellation = (): void => {
       if (cancellationPublished) return;
       cancellationPublished = true;
-      this.onCancelled(assistantId, assistantText);
+      if (constraints.snapshot().pending.length) constraints.markGap();
+      turnTracker.updateConstraints(constraints, safeText(assistantText));
+      this.onCancelled(
+        assistantId,
+        safeText(deferAssistantText
+          ? [
+              '本轮已停止，尚未完成验收。',
+              unverifiedDeliveryText(assistantText),
+            ]
+              .filter(Boolean)
+              .join('\n\n')
+          : assistantText),
+      );
     };
     const onAbort = (): void => publishCancellation();
     signal.addEventListener('abort', onAbort, { once: true });
@@ -802,18 +1016,64 @@ export class CoreSessionRuntime implements SessionRuntime {
       return msg.id;
     };
 
+    let releaseConstraintGuard: (() => void) | undefined;
+    const applySteering = async (): Promise<boolean> => {
+      if (!this.continuity?.pending) return false;
+      this.steeringApplying = true;
+      try {
+        let writing: Promise<void>;
+        do { writing = this.steeringPersistence; await writing; } while (writing !== this.steeringPersistence);
+        if (this.steeringPersistenceFailed) throw new Error('Steering persistence failed; execution stopped');
+        const previousConstraints = constraints.snapshot();
+        const receipts = this.continuity.apply();
+        const request = this.continuity.request;
+        taskText = request.text;
+        turnControl = deriveTurnControlPolicy({ text: taskText, source, toolFree: Boolean(this.options.toolFree) });
+        turnTracker.reviseRequest(request, turnControl);
+        deliveryRepair.revise(turnTracker.repairContext());
+        constraints = new TurnConstraintGuard(taskText, { turnId: turnTracker.snapshot().turnId, workspacePath: request.workspacePath, sourceMessageId: receipts.at(-1)?.clientMessageId });
+        constraints.inherit(previousConstraints);
+        this.activeConstraints = constraints;
+        this.activeTurnControl = turnControl;
+        turnTracker.updateConstraints(constraints, '');
+        await this.persistContinuity();
+        for (const receipt of receipts) this.store.publish(this.sessionId, { type: 'turn_steering', payload: { sessionId: this.sessionId, ...receipt } });
+        if (this.continuity.paused) { this.cancel(); return true; }
+        closingDelivery = false;
+        deferAssistantText = true;
+        return true;
+      } finally { this.steeringApplying = false; }
+    };
     try {
+      this.activeConstraints = constraints;
+      releaseConstraintGuard = installTurnExecutionGuard(this.config, call => {
+        if (this.steeringFence) { this.steeringBlocked.add(call.callId); throw new Error('Current request changed; old dispatch cancelled'); }
+        constraints.review(call);
+        if (!deliveryRepair.validateReserved(call.callId, call)) throw new Error('Repair target or authority changed before native dispatch');
+      });
+      constraints.coverageStarted();
+      turnTracker.updateConstraints(constraints, '');
+      await this.persistContinuity();
       this.store.setStatus(this.sessionId, 'thinking');
       this.publishRuntimeActivity('turn', 'started');
       let turnCount = 0;
       let toolCallCount = 0;
       let replanCount = 0;
       const configuredMaxTurns = this.config.getMaxSessionTurns();
+      let admittedMaxTurns = turnControl.complexity.budget.maxModelRounds;
 
       // 多回合工具往返循环（移植自 nonInteractiveCli）。
       // 每一轮：流式拿文本+functionCalls；有工具则执行并回灌，无工具则收口。
       while (true) {
-        const routedMaxTurns = turnControl.complexity.budget.maxModelRounds;
+        if (await applySteering()) {
+          if (assistantId) this.store.patchMessage(this.sessionId, assistantId, { isStreaming: false, content: [{ type: 'text', value: '' }] });
+          assistantId = null; assistantText = '';
+          currentMessages = [{ role: MESSAGE_ROLES.USER, parts: [
+            ...(currentMessages[0]?.parts ?? []).filter(part => !!part.functionResponse), { text: runtimeDirective(true) },
+          ] }];
+        }
+        admittedMaxTurns = Math.max(admittedMaxTurns, turnControl.complexity.budget.maxModelRounds);
+        const routedMaxTurns = admittedMaxTurns;
         const maxTurns =
           configuredMaxTurns > 0
             ? Math.min(configuredMaxTurns, routedMaxTurns)
@@ -844,6 +1104,11 @@ export class CoreSessionRuntime implements SessionRuntime {
 
         while (true) {
           try {
+            // Compression is a projection, never authority. Rehydrate the latest
+            // native revision if model history dropped it, without a second loop/store.
+            const refresh = runtimeDirective();
+            if (refresh && !(currentMessages[0]?.parts ?? []).some(p => p.text?.includes(refresh)))
+              currentMessages[0].parts = [...(currentMessages[0].parts ?? []), { text: refresh }];
             const routedRequest = {
               message: currentMessages[0]?.parts ?? [],
               runtimeControl: {
@@ -860,9 +1125,11 @@ export class CoreSessionRuntime implements SessionRuntime {
                             .getFunctionDeclarations()
                             .filter(
                               (declaration) =>
-                                declaration.name !== TASK_PLAN_TOOL_NAME,
+                                ![TASK_PLAN_TOOL_NAME, REPAIR_PLAN_TOOL_NAME, REPAIR_FORMAT_TOOL_NAME, CLAIM_REVIEW_TOOL_NAME].includes(declaration.name ?? ''),
                             ),
                           TASK_PLAN_DECLARATION,
+                          ...(turnTracker.offersClaimReview() ? [CLAIM_REVIEW_DECLARATION] : []),
+                          ...(closingDelivery ? REPAIR_TOOL_DECLARATIONS : []),
                         ],
                       },
                     ],
@@ -870,6 +1137,7 @@ export class CoreSessionRuntime implements SessionRuntime {
             } as Parameters<typeof chat.sendMessageStream>[0] & {
               runtimeControl: { allowWorkflow: boolean };
             };
+            modelRequests++;
             const responseStream = await chat.sendMessageStream(
               routedRequest,
               promptId,
@@ -886,6 +1154,7 @@ export class CoreSessionRuntime implements SessionRuntime {
               if (resp.usageMetadata) {
                 lastUsage = resp.usageMetadata;
               }
+              if (resp.functionCalls?.length) deferAssistantText = true;
               const delta = extractStreamText(resp);
               if (delta) {
                 if (assistantId === null) {
@@ -893,22 +1162,24 @@ export class CoreSessionRuntime implements SessionRuntime {
                 }
                 assistantText += delta;
                 turnTracker.markStreaming();
-                // 每个 delta 都同步把累积文本落进 store：客户端切走（退订）再切回时
-                // get_history 才能拿到已生成的部分，而不是空占位（否则切走期间的
-                // delta 全部丢失、回复缺头）。不改 isStreaming——收口仍由 patch 定稿。
-                // 持久层对高频 patch 已做去抖合并写盘（WRITE_DEBOUNCE_MS），不会写爆；
-                // patchMessage 不广播，不会产生重复帧。
-                this.store.patchMessage(this.sessionId, assistantId, {
-                  content: [{ type: 'text', value: assistantText }],
-                });
-                this.store.publish(this.sessionId, {
-                  type: 'chat_chunk',
-                  payload: {
-                    sessionId: this.sessionId,
-                    messageId: assistantId,
-                    delta,
-                  },
-                });
+                if (!deferAssistantText) {
+                  // 每个 delta 都同步把累积文本落进 store：客户端切走（退订）再切回时
+                  // get_history 才能拿到已生成的部分，而不是空占位（否则切走期间的
+                  // delta 全部丢失、回复缺头）。不改 isStreaming——收口仍由 patch 定稿。
+                  // 持久层对高频 patch 已做去抖合并写盘（WRITE_DEBOUNCE_MS），不会写爆；
+                  // patchMessage 不广播，不会产生重复帧。
+                  this.store.patchMessage(this.sessionId, assistantId, {
+                    content: [{ type: 'text', value: assistantText }],
+                  });
+                  this.store.publish(this.sessionId, {
+                    type: 'chat_chunk',
+                    payload: {
+                      sessionId: this.sessionId,
+                      messageId: assistantId,
+                      delta,
+                    },
+                  });
+                }
               }
               if (resp.functionCalls) {
                 functionCalls.push(...resp.functionCalls);
@@ -943,7 +1214,9 @@ export class CoreSessionRuntime implements SessionRuntime {
         if (this.options.toolFree && functionCalls.length > 0) {
           if (assistantId !== null) {
             this.store.patchMessage(this.sessionId, assistantId, {
-              content: [{ type: 'text', value: assistantText }],
+              content: [
+                { type: 'text', value: unverifiedDeliveryText(assistantText) },
+              ],
               isStreaming: false,
               isProcessingTools: false,
             });
@@ -958,25 +1231,117 @@ export class CoreSessionRuntime implements SessionRuntime {
 
         // 无工具调用：本轮即终轮，定稿 assistant 消息并收口。
         if (functionCalls.length === 0) {
+          if (await applySteering()) {
+            if (assistantId) this.store.patchMessage(this.sessionId, assistantId, { isStreaming: false, content: [{ type: 'text', value: '' }] });
+            assistantId = null; assistantText = '';
+            currentMessages = [{ role: MESSAGE_ROLES.USER, parts: [{ text: runtimeDirective(true) }] }];
+            continue;
+          }
+          assistantText = safeText(assistantText);
+          turnTracker.setDeliveryDraft(assistantText);
           if (assistantId === null) {
             // 模型一句话都没出（极少见）：补一条空 assistant 以保 UI 一致。
             assistantId = startAssistant();
           }
           turnTracker.completeAssistantMessage(Boolean(assistantText.trim()));
+          if (constraints.needsManualReview && source === 'local' && !signal.aborted) {
+            const review = constraints.prepareReview(assistantText);
+            if (review) {
+              const waiting = this.waitForConfirmation(review.id, signal);
+              const card: ToolCall = { id: review.id, toolName: 'otto_delivery_review', displayName: '确认当前交付',
+                parameters: {}, status: ToolCallStatus.WaitingForConfirmation,
+                confirmationDetails: { type: 'info', title: '请核对当前交付', requiresConfirmation: true,
+                  message: safeText(`此确认仅适用于下面这版内容和文件，不会批准工具操作或改变原有约束。\n\n${assistantText}`) } };
+              const reviewCards = new Map([[review.id, card]]);
+              this.publishToolCards(reviewCards, assistantId);
+              this.store.publish(this.sessionId, { type: 'tool_confirmation_request',
+                payload: { sessionId: this.sessionId, callId: review.id, toolCall: card } });
+              const result = await waiting;
+              const approved = constraints.confirmReview(review.id, assistantText, result.outcome === 'approved' && !signal.aborted);
+              reviewCards.set(review.id, { ...card, status: approved ? ToolCallStatus.Success : ToolCallStatus.Canceled,
+                confirmationDetails: undefined, result: { success: approved, toolName: card.toolName, executionTime: 0,
+                  data: approved ? '当前交付已获人工确认' : '当前交付未获有效人工确认' } });
+              this.publishToolCards(reviewCards, assistantId);
+              if (signal.aborted) { publishCancellation(); break; }
+            }
+          }
+          turnTracker.updateConstraints(constraints, assistantText);
+          await turnTracker.prepareDeliveryEvidence();
+          if (signal.aborted) { publishCancellation(); break; }
+          // A user edit may arrive during manual review or asynchronous format validation.
+          if (this.steeringFence) continue;
+          await this.persistContinuity();
+          if (this.steeringFence) continue;
+          const readiness = turnTracker.deliveryReadiness();
+          if (
+            deliveryClosure.next(readiness, {
+              remainingRounds: maxTurns - turnCount,
+              toolFree: Boolean(this.options.toolFree),
+              restricted:
+                turnControl.executionMode === 'restricted' ||
+                ['external_write', 'destructive'].includes(
+                  turnControl.riskLevel,
+                ),
+            })
+          ) {
+            closingDelivery = true;
+            turnTracker.recordDeliveryClosure();
+            // Replace the provisional success statement; never notify clients of
+            // completion before the native gate has accepted the delivery.
+          const partial = retainedDeliveryDraft(assistantText);
+            if (partial) partialDeliveries.push(partial);
+            const progress = safeText([
+              '还有验收项需要核对，我会继续检查。',
+              ...(partial ? ['以下工作说明暂未通过整体验收：', partial] : []),
+            ].join('\n\n'));
+            this.store.patchMessage(this.sessionId, assistantId, {
+              content: [{ type: 'text', value: progress }],
+              isStreaming: false,
+              phase: 'commentary',
+            });
+            this.store.publish(this.sessionId, {
+              type: 'chat_complete',
+              payload: {
+                sessionId: this.sessionId,
+                messageId: assistantId,
+                text: progress,
+                tokenUsage: toProtocolTokenUsage(lastUsage, modelName),
+                phase: 'commentary',
+              },
+            });
+            const closureState = runtimeDirective();
+            currentMessages = [
+              {
+                role: MESSAGE_ROLES.USER,
+                parts: [
+                  { text: deliveryClosureDirective(readiness) },
+                  ...(closureState ? [{ text: closureState }] : []),
+                ],
+              },
+            ];
+            assistantId = null;
+            assistantText = '';
+            continue;
+          }
+          this.steeringClosed = true; // no await between final gate and closing steering
           turnTracker.complete();
           const finalTurn = turnTracker.snapshot();
           const succeeded = finalTurn.status === 'completed';
-          if (finalTurn.status === 'incomplete') {
-            const outstanding = [
-              ...new Set(
-                (finalTurn.verification?.checks ?? [])
-                  .filter((check) => check.status !== 'passed')
-                  .map((check) => check.label),
-              ),
-            ].slice(0, 6);
-            assistantText =
-              `${assistantText.trim()}\n\n尚未完成验收：${outstanding.join('；') || '必要的交付条件'}。当前结果不能视为已全部验证通过。`.trim();
+          if (!succeeded) {
+            assistantText = incompleteDelivery(
+              [
+                ...new Set([
+                  ...partialDeliveries,
+                  retainedDeliveryDraft(assistantText),
+                ]),
+              ]
+                .filter(Boolean)
+                .join('\n\n'),
+              turnTracker.deliveryReadiness(),
+              finalTurn.artifacts,
+            );
           }
+          assistantText = safeText(assistantText);
           this.store.patchMessage(this.sessionId, assistantId, {
             content: [{ type: 'text', value: assistantText }],
             isStreaming: false,
@@ -1016,8 +1381,9 @@ export class CoreSessionRuntime implements SessionRuntime {
         // 有工具调用：定稿当前 assistant 文本段（若有），再执行工具并回灌。
         if (assistantId !== null) {
           turnTracker.completeAssistantMessage(Boolean(assistantText.trim()));
+          const progressText = safeText(unverifiedDeliveryText(assistantText));
           this.store.patchMessage(this.sessionId, assistantId, {
-            content: [{ type: 'text', value: assistantText }],
+            content: [{ type: 'text', value: progressText }],
             isStreaming: false,
             isProcessingTools: true,
             phase: 'commentary',
@@ -1029,7 +1395,7 @@ export class CoreSessionRuntime implements SessionRuntime {
               messageId: assistantId,
               tokenUsage: toProtocolTokenUsage(lastUsage, modelName),
               // 同收口处：带定稿全文供客户端对账自愈。
-              text: assistantText,
+              text: progressText,
               phase: 'commentary',
             },
           });
@@ -1076,6 +1442,9 @@ export class CoreSessionRuntime implements SessionRuntime {
           caps.maxConcurrentTools,
           signal,
           toolMessageId,
+          closingDelivery,
+          deliveryRepair,
+          adaptiveExecution,
         );
 
         if (signal.aborted) {
@@ -1083,17 +1452,8 @@ export class CoreSessionRuntime implements SessionRuntime {
           break;
         }
 
-        const adaptiveDecisions = toolBatch.failures.map((failure) =>
-          adaptiveExecution.observe(failure),
-        );
-        for (const decision of adaptiveDecisions) {
-          turnTracker.recordAdaptation({
-            category: decision.category,
-            action: decision.action,
-            toolName: decision.toolName,
-            attempt: decision.attempt,
-          });
-        }
+        const adaptiveDecisions = toolBatch.decisions;
+        await applySteering();
         const requestedReplans = adaptiveDecisions.some(
           (decision) => decision.replanRequired,
         )
@@ -1129,13 +1489,15 @@ export class CoreSessionRuntime implements SessionRuntime {
           this.config.getOttoClient().scheduleHierarchicalCompaction('L3');
         }
         const adaptiveDirective = [
-          turnTracker.taskContractDirective(),
+          runtimeDirective(
+            adaptiveDecisions.some((decision) => decision.replanRequired),
+          ),
           adaptiveExecution.buildDirective(
             adaptiveDecisions,
             toolBatch.completedToolNames,
           ),
-          adaptiveDecisions.some((decision) => decision.replanRequired)
-            ? turnTracker.taskGraphDirective()
+          toolBatch.blockedAttempts.length > 0
+            ? adaptiveExecution.buildAttemptDirective(toolBatch.blockedAttempts)
             : '',
         ]
           .filter(Boolean)
@@ -1159,9 +1521,15 @@ export class CoreSessionRuntime implements SessionRuntime {
       if (signal.aborted) {
         publishCancellation();
       } else {
-        const message = userFacingRuntimeError(e);
+        const message = safeText(userFacingRuntimeError(e));
         if (assistantId !== null) {
-          const finalText = assistantText.trim() ? assistantText : message;
+          const finalText = safeText(deferAssistantText
+            ? [message, unverifiedDeliveryText(assistantText)]
+                .filter(Boolean)
+                .join('\n\n')
+            : assistantText.trim()
+              ? assistantText
+              : message);
           this.store.patchMessage(this.sessionId, assistantId, {
             content: [{ type: 'text', value: finalText }],
             isStreaming: false,
@@ -1193,13 +1561,21 @@ export class CoreSessionRuntime implements SessionRuntime {
         this.publishRuntimeActivity('turn', 'failed', message);
       }
     } finally {
-      await this.settleRecovery(turnTracker);
-      signal.removeEventListener('abort', onAbort);
-      this.running = false;
-      this.abort = undefined;
-      this.activeTurnTracker = undefined;
-      this.activeTurnControl = undefined;
-      this.activeRecovery = undefined;
+      this.steeringClosed = true;
+      releaseConstraintGuard?.();
+      try { await this.settleRecovery(turnTracker); }
+      finally {
+        this.activeConstraints = undefined;
+        this.activeDeliveryRepair = undefined;
+        signal.removeEventListener('abort', onAbort);
+        this.running = false;
+        this.abort = undefined;
+        this.activeTurnTracker = undefined;
+        this.activeTurnControl = undefined;
+        this.activeRecovery = undefined;
+        this.continuity = undefined;
+        this.steeringApplying = false;
+      }
     }
   }
 
@@ -1214,36 +1590,53 @@ export class CoreSessionRuntime implements SessionRuntime {
     maxConcurrent: number,
     signal: AbortSignal,
     messageId: string,
+    closingDelivery = false,
+    deliveryRepair?: DeliveryRepairGuard,
+    adaptiveExecution = new AdaptiveExecutionCoordinator(),
   ): Promise<{
     parts: Part[];
-    failures: ExecutionFailureObservation[];
+    decisions: Array<ReturnType<AdaptiveExecutionCoordinator['observe']>>;
     completedToolNames: string[];
+    blockedAttempts: AdaptiveAttemptReview[];
   }> {
     const responseParts: Part[] = [];
+    const blockedAttempts: AdaptiveAttemptReview[] = [];
+    const blockedCallIds = new Set<string>();
+    const reusedCallIds = new Set<string>();
+    const decisions: Array<ReturnType<AdaptiveExecutionCoordinator['observe']>> = [];
+    const batchIds = new Set<string>();
 
     // 某些 provider（尤其 Gemini 原生 functionCall）不提供 id。一次绑定后全程复用，
     // 避免建卡与执行各生成一个随机 id，导致 cards.get() 永远取不到同一张卡。
     const callsWithIds = calls.map((fc) => {
       const name = (fc.name as string) ?? 'unknown';
       const parameters = (fc.args ?? {}) as Record<string, unknown>;
+      const callId = this.callIdOf(fc);
+      if (batchIds.has(callId) || this.activeTurnTracker?.hasObservedTool(callId)) throw new Error('Duplicate tool call ID; refusing ambiguous execution receipts');
+      batchIds.add(callId);
       return {
         fc,
-        callId: this.callIdOf(fc),
+        callId,
         name,
         parameters,
         fingerprint: toolExecutionFingerprint(name, parameters),
         replayClass: classifyRecoveryTool(name),
+        sideEffect: isParallelSafeToolName(name)
+          ? ('read_only' as const)
+          : classifyRecoveryTool(name) === 'never_replay'
+            ? ('external_write' as const)
+            : ('local_write' as const),
       };
     });
 
-    // 先把所有工具卡以 Executing 状态广播一遍，让 UI 立即出现工具调用卡。
+    // Queued cards are not execution evidence. Capture input versions only at dispatch.
     const cards = new Map<string, ToolCall>();
     for (const { callId, name, parameters } of callsWithIds) {
       const card: ToolCall = {
         id: callId,
         toolName: name,
         parameters,
-        status: ToolCallStatus.Executing,
+        status: ToolCallStatus.Scheduled,
         startTime: Date.now(),
       };
       cards.set(callId, card);
@@ -1318,6 +1711,7 @@ export class CoreSessionRuntime implements SessionRuntime {
               parameters,
               fingerprint,
               replayClass,
+              sideEffect,
             }) => {
               const card = cards.get(callId)!;
               const requestInfo: ToolCallRequestInfo = {
@@ -1330,6 +1724,76 @@ export class CoreSessionRuntime implements SessionRuntime {
 
               let executionStarted = false;
               try {
+                if (this.steeringFence) { this.steeringBlocked.add(callId); throw new Error('Old direction cancelled at steering boundary'); }
+                this.activeConstraints?.review(requestInfo);
+                if (name === CLAIM_REVIEW_TOOL_NAME) {
+                  if (!this.activeTurnTracker || this.options.toolFree) throw new Error('Evidence review unavailable');
+                  const result = this.activeTurnTracker.reviewAnswerEvidence(parameters);
+                  cards.set(callId, { ...card, status: ToolCallStatus.Success,
+                    result: { success: true, data: result, executionTime: 0, toolName: name }, endTime: Date.now() });
+                  responseParts.push({ functionResponse: { id: callId, name, response: { ...result } } });
+                  return;
+                }
+                if ([REPAIR_PLAN_TOOL_NAME, REPAIR_FORMAT_TOOL_NAME].includes(name)) {
+                  if (!closingDelivery || !deliveryRepair || !this.activeTurnTracker || this.options.toolFree) throw new Error('Repair strategy tools are available only during authorized delivery closure');
+                  const context = this.activeTurnTracker.repairContext();
+                  deliveryRepair.revise(context);
+                  const result = name === REPAIR_PLAN_TOOL_NAME
+                    ? deliveryRepair.compare(parameters, context, ['read_file', 'write_file', 'replace'].filter(tool => !!toolRegistry.getTool(tool)))
+                    : await deliveryRepair.prepareFormat(parameters.file_path as string);
+                  if (this.steeringFence || signal.aborted) { this.steeringBlocked.add(callId); throw new Error('Repair proposal superseded'); }
+                  cards.set(callId, { ...card, status: ToolCallStatus.Success,
+                    result: { success: true, data: result, executionTime: 0, toolName: name }, endTime: Date.now() });
+                  responseParts.push({ functionResponse: { id: callId, name, response: { success: true, ...result } } });
+                  return;
+                }
+                const attemptReview = adaptiveExecution.reviewAttempt({
+                  toolName: name,
+                  callFingerprint: fingerprint,
+                  sideEffect,
+                  verification: Boolean(verificationKind(card)),
+                });
+                if (!attemptReview.allowed) {
+                  blockedAttempts.push(attemptReview);
+                  blockedCallIds.add(callId);
+                  const error = attemptReview.guidance ?? 'Tool path blocked';
+                  cards.set(callId, {
+                    ...card,
+                    status: ToolCallStatus.Error,
+                    result: {
+                      success: false,
+                      error,
+                      executionTime: 0,
+                      toolName: name,
+                    },
+                    endTime: Date.now(),
+                  });
+                  responseParts.push({
+                    functionResponse: {
+                      id: callId,
+                      name,
+                      response: { error, strategyGuard: true },
+                    },
+                  });
+                  return;
+                }
+                // An ADDITIONAL closure restriction, never a replacement for the
+                // original central policy/confirmation gate below. Check runners
+                // may themselves have side effects and still require that gate.
+                const sourceTool = name === WebFetchTool.Name ? toolRegistry.getTool(name) : undefined;
+                const nativeEvidenceRead = parameters.evidence_only === true && sourceTool &&
+                  Object.getPrototypeOf(sourceTool) === WebFetchTool.prototype && sourceTool.execute === WebFetchTool.prototype.execute;
+                if (
+                  closingDelivery &&
+                  name !== TASK_PLAN_TOOL_NAME &&
+                  !nativeEvidenceRead &&
+                  !isParallelSafeToolName(name) &&
+                  !verificationKind(card) &&
+                  !deliveryRepair?.reserve(card)
+                )
+                  throw new Error(
+                    'Pre-delivery repair requires a failed check, fresh file versions and remaining budget. For multiple related files or new tests use plan_delivery_repair first. Shell repairs, new authority and external actions are not allowed.',
+                  );
                 // Native in-memory planning only. It cannot execute code or authorize a tool.
                 if (name === TASK_PLAN_TOOL_NAME) {
                   if (
@@ -1340,6 +1804,7 @@ export class CoreSessionRuntime implements SessionRuntime {
                     throw new Error('Task planning unavailable');
                   const result =
                     this.activeTurnTracker.updateTaskContract(parameters);
+                  deliveryRepair?.revise(this.activeTurnTracker.repairContext());
                   this.activeTurnControl.complexity =
                     refineComplexityFromObjectives(
                       this.activeTurnControl.complexity,
@@ -1375,6 +1840,7 @@ export class CoreSessionRuntime implements SessionRuntime {
                       })
                     : { action: 'execute' as const };
                 if (decision.action === 'reuse') {
+                  reusedCallIds.add(callId);
                   const currentCard = cards.get(callId) ?? card;
                   cards.set(callId, {
                     ...currentCard,
@@ -1393,6 +1859,9 @@ export class CoreSessionRuntime implements SessionRuntime {
                       name,
                       response: {
                         recovered: true,
+                        originalCallId: decision.originalCallId,
+                        executed: false,
+                        evidenceNote: 'This is the previous receipt, not a new execution or verification. Retain its original evidence ID; current file/version checks still apply.',
                         result: decision.resultSummary,
                       },
                     },
@@ -1452,6 +1921,14 @@ export class CoreSessionRuntime implements SessionRuntime {
                   );
                 }
 
+                if (
+                  deliveryRepair &&
+                  !deliveryRepair.validateReserved(callId, requestInfo)
+                ) {
+                  throw new Error(
+                    'Repair target changed while awaiting confirmation; reread and reconcile the user edit before continuing.',
+                  );
+                }
                 if (this.recoveryStore && this.activeRecovery) {
                   this.activeRecovery = await this.recoveryStore.recordStarted(
                     this.activeRecovery,
@@ -1463,6 +1940,11 @@ export class CoreSessionRuntime implements SessionRuntime {
                   }
                 }
 
+                if (this.steeringFence) { this.steeringBlocked.add(callId); throw new Error('Old approval superseded by steering'); }
+                this.activeConstraints?.start(requestInfo);
+                await this.persistContinuity();
+                cards.set(callId, { ...(cards.get(callId) ?? card), status: ToolCallStatus.Executing });
+                this.publishToolCards(cards, messageId);
                 const toolResponse = await executeToolCall(
                   this.config,
                   requestInfo,
@@ -1480,6 +1962,8 @@ export class CoreSessionRuntime implements SessionRuntime {
                   },
                 );
 
+                if (this.steeringBlocked.has(callId)) throw new Error('Cancelled by native steering fence before execution');
+
                 if (signal.aborted) {
                   cards.set(callId, cancelToolCall(cards.get(callId) ?? card));
                   return;
@@ -1490,6 +1974,7 @@ export class CoreSessionRuntime implements SessionRuntime {
                 );
                 const currentCard = cards.get(callId) ?? card;
                 const execResult: ToolExecutionResult = {
+                  ...(toolResponse.sourceEvidence ? { sourceEvidence: toolResponse.sourceEvidence } : {}),
                   ...(name === 'run_shell_command' && toolResponse.process
                     ? { process: toolResponse.process }
                     : {}),
@@ -1555,6 +2040,14 @@ export class CoreSessionRuntime implements SessionRuntime {
                   }
                 }
               } catch (e) {
+                if (this.steeringBlocked.has(callId) || (this.steeringFence && !executionStarted)) {
+                  blockedCallIds.add(callId);
+                  cards.set(callId, { ...(cards.get(callId) ?? card), status: ToolCallStatus.Canceled,
+                    result: { toolName: name, success: false, executionTime: 0, error: '未执行：用户已调整当前任务' } });
+                  responseParts.push({ functionResponse: { id: callId, name, response: { cancelled: true, executed: false, reason: 'User steering superseded this call' } } });
+                  if (executionStarted && this.recoveryStore && this.activeRecovery) this.activeRecovery = await this.recoveryStore.recordFailed(this.activeRecovery, { callId, name, fingerprint, replayClass, errorSummary: 'Cancelled before dispatch by native steering fence' });
+                  return;
+                }
                 const message = e instanceof Error ? e.message : String(e);
                 const currentCard = cards.get(callId) ?? card;
                 if (
@@ -1607,6 +2100,25 @@ export class CoreSessionRuntime implements SessionRuntime {
                     response: { error: message },
                   },
                 });
+              } finally {
+                this.activeConstraints?.finish(callId);
+                // Publish/observe the terminal receipt BEFORE the next serial call can start.
+                this.publishToolCards(cards, messageId);
+                const final = cards.get(callId)!;
+                if (!reusedCallIds.has(callId)) deliveryRepair?.observe(final, closingDelivery, this.activeTurnTracker?.observedInputPaths(callId) ?? []);
+                const observation = { toolName: name, callFingerprint: fingerprint, sideEffect,
+                  verification: Boolean(verificationKind(final)), targetPaths: this.activeTurnTracker?.observedInputPaths(callId) ?? [] };
+                if (final.status === ToolCallStatus.Error && !blockedCallIds.has(callId)) {
+                  const decision = adaptiveExecution.observe({ ...observation, nativeVerificationFailed: hasFailedVerificationReceipt(final), message: final.result?.error || 'tool execution failed' });
+                  decisions.push(decision);
+                  this.activeTurnTracker?.recordAdaptation({ category: decision.category, action: decision.action,
+                    toolName: name, attempt: decision.attempt, failureFingerprint: fingerprint, failedToolCallId: callId, alternatives: decision.alternatives });
+                } else if (!reusedCallIds.has(callId) && final.status === ToolCallStatus.Success && final.result?.success === true &&
+                  (!final.result.process || hasSuccessfulProcessReceipt(final))) {
+                  const resolved = adaptiveExecution.recordSuccess(observation);
+                  this.activeTurnTracker?.resolveRecoveries(resolved, callId);
+                }
+                await this.persistContinuity();
               }
             },
           ),
@@ -1628,7 +2140,6 @@ export class CoreSessionRuntime implements SessionRuntime {
     const callsById = new Map(
       callsWithIds.map((call) => [call.callId, call] as const),
     );
-    const failures: ExecutionFailureObservation[] = [];
     const completedToolNames: string[] = [];
     for (const [callId, card] of cards) {
       const call = callsById.get(callId);
@@ -1637,20 +2148,14 @@ export class CoreSessionRuntime implements SessionRuntime {
         completedToolNames.push(call.name);
         continue;
       }
-      if (card.status !== ToolCallStatus.Error) continue;
-      failures.push({
-        toolName: call.name,
-        callFingerprint: call.fingerprint,
-        message: card.result?.error || 'tool execution failed',
-        sideEffect: isParallelSafeToolName(call.name)
-          ? 'read_only'
-          : call.replayClass === 'never_replay'
-            ? 'external_write'
-            : 'local_write',
-      });
     }
 
-    return { parts: responseParts, failures, completedToolNames };
+    return {
+      parts: responseParts,
+      decisions,
+      completedToolNames,
+      blockedAttempts,
+    };
   }
 
   /** 普通工具确认：手动模式全问；自动模式只问高危/删除。 */
@@ -1702,7 +2207,7 @@ export class CoreSessionRuntime implements SessionRuntime {
       this.publishToolCards(cards, messageId);
       this.store.publish(this.sessionId, {
         type: 'tool_confirmation_request',
-        payload: { sessionId: this.sessionId, callId, toolCall: awaiting },
+        payload: { sessionId: this.sessionId, callId, toolCall: this.activeConstraints?.presentation(awaiting) ?? awaiting },
       });
     }
 
@@ -1730,7 +2235,8 @@ export class CoreSessionRuntime implements SessionRuntime {
     cards: Map<string, ToolCall>,
     messageId: string,
   ): void {
-    const toolCalls = Array.from(cards.values());
+    const nativeToolCalls = Array.from(cards.values());
+    const toolCalls = this.activeConstraints?.presentation(nativeToolCalls) ?? nativeToolCalls;
     const isProcessingTools = toolCalls.some((card) =>
       isToolCallInFlight(card.status),
     );
@@ -1741,7 +2247,7 @@ export class CoreSessionRuntime implements SessionRuntime {
       isProcessingTools,
       toolsCompleted: !isProcessingTools,
     });
-    this.activeTurnTracker?.updateToolCalls(toolCalls);
+    this.activeTurnTracker?.updateToolCalls(nativeToolCalls);
     this.store.publish(this.sessionId, {
       type: 'tool_calls_update',
       payload: {
@@ -1815,7 +2321,7 @@ export class CoreSessionRuntime implements SessionRuntime {
         payload: {
           sessionId: this.sessionId,
           callId,
-          toolCall: awaitingCard,
+          toolCall: this.activeConstraints?.presentation(awaitingCard) ?? awaitingCard,
         },
       });
     }
@@ -1897,7 +2403,7 @@ export class CoreSessionRuntime implements SessionRuntime {
       (tool) => tool.state === 'started',
     );
     if (
-      snapshot.status !== 'interrupted' &&
+      (snapshot.status === 'completed' || (!latest.continuity?.events.length && !latest.tools.length && snapshot.status !== 'interrupted')) &&
       !hasInFlightTool &&
       latest.status !== 'reconciliation_required'
     ) {

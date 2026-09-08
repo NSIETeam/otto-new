@@ -214,7 +214,8 @@ describe('enterprise knowledge retention policy', () => {
     expect(document.content).toContain('## 长期结论');
     expect(document.content).toContain('## 适用范围');
     expect(document.content).toContain('交付部');
-    expect(document.content).toContain('3 条独立证据');
+    expect(document.content).toContain('3 条观察记录');
+    expect(document.content).not.toContain('组织可靠度');
     expect(document.content).toContain('3 个会话');
     expect(document.content).not.toContain('助手：');
   });

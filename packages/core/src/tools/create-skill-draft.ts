@@ -196,7 +196,7 @@ export class CreateSkillDraftTool extends BaseTool<
           draft,
           nextStep:
             draft?.validationPassed && draft.packageReady
-              ? '请用户在“自动 Skill”候选界面查看权限、文件变更和风险后确认安装。'
+              ? '请用户在右侧“自动 Skill”的功能、草稿与版本界面查看用途、输入输出、权限、文件变更和风险后确认安装。静态检查不证明业务效果，不得宣称生产级可用。'
               : '先修复草稿验证或测试错误；当前不能安装。',
         },
         null,
@@ -204,8 +204,8 @@ export class CreateSkillDraftTool extends BaseTool<
       ),
       returnDisplay:
         draft?.validationPassed && draft.packageReady
-          ? `✅ Skill 草稿已进入待确认区：${candidate.name}（尚未安装、未执行）`
-          : `⚠️ Skill 草稿已保存但未通过检查：${candidate.name}（尚未安装、未执行）`,
+          ? `功能草稿已准备：${draft.function?.title ?? candidate.name}（尚未安装、未执行）\n${draft.function?.summary ?? candidate.description}\n静态检查通过，业务效果尚未验证。请在右侧“自动 Skill”查看功能与使用范围。`
+          : `功能草稿需要修正：${draft?.function?.title ?? candidate.name}（尚未安装、未执行）\n请先修复检查失败项，当前不能安装。`,
     };
   }
 }

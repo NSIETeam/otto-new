@@ -251,11 +251,18 @@ function parseBlocks(value: string): Block[] {
 //   4. ** 加粗 → 单 * / _ 斜体：** 先于单 * 匹配，避免被拆成两个 *。
 // 组号：m[1]=code，m[2..3]=[文本](url) 的文本/url，m[4]=裸 url，m[5]=bold，m[6]=* 斜体，m[7]=_ 斜体。
 const INLINE =
-  /(`[^`\n]+`)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()[\]，。！？；：、）】》「」""'']+)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\b_[^_\n]+_\b)/g;
+  /(`[^`\n]+`)|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()[\]，。！？；：、）】》「」""'']+)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\b_[^_\n]+_\b)|\[([^\]\n]+)\]\(<?((?:[a-zA-Z]:[\\/]|~[\\/]|\/|\\\\|file:\/\/)[^\r\n)]*?)>?\)/g;
 
 /** 只把明确的本机绝对路径识别为输出文件，避免把命令和普通代码变成按钮。 */
 export function normalizeLocalOutputPath(value: string): string | null {
   let candidate = value.trim();
+  if (/^file:\/\//iu.test(candidate)) {
+    try {
+      const url = new URL(candidate);
+      if (url.hostname && url.hostname !== 'localhost') return null;
+      candidate = decodeURIComponent(url.pathname).replace(/^\/([a-z]:[\\/])/iu, '$1');
+    } catch { return null; }
+  }
   if (
     candidate.length >= 2 &&
     ((candidate.startsWith('"') && candidate.endsWith('"')) ||
@@ -266,7 +273,7 @@ export function normalizeLocalOutputPath(value: string): string | null {
   if (/^[a-zA-Z]:[\\/][^\r\n]+$/u.test(candidate)) return candidate;
   if (/^\\\\[^\\/\s]+[\\/][^\r\n]+$/u.test(candidate)) return candidate;
   if (/^~[\\/][^\r\n]+$/u.test(candidate)) return candidate;
-  if (/^\/(?:Users|home|tmp|var\/tmp|Volumes)\/[^\r\n]+$/u.test(candidate)) return candidate;
+  if (/^\/(?!\/)[^\r\n]+$/u.test(candidate)) return candidate;
   return null;
 }
 
@@ -351,12 +358,12 @@ export function LocalOutputPath({
   };
 
   const presentation = isPresentationPath(value) && info?.kind !== 'directory';
+  const visibleLabel = label || localFileName(value);
   if (!presentation && !info?.exists) {
-    return <code title={value}>{label ?? value}</code>;
+    return <span title={info?.kind === 'missing' ? '文件不存在或不可访问' : '正在检查文件'}>{visibleLabel}</span>;
   }
   const availableInfo = info?.exists ? info : null;
   const targetName = info?.kind === 'directory' ? '文件夹' : '文件';
-  const visibleLabel = label || localFileName(value);
   return (
     <span className="otto-local-path">
       {presentation ? (
@@ -372,7 +379,12 @@ export function LocalOutputPath({
           <span>{visibleLabel}</span>
         </a>
       ) : (
-        <code title={value}>{value}</code>
+        <a href="#" className="otto-local-path__preview-link"
+          title={`在文件夹中显示 ${visibleLabel}`}
+          aria-label={`在文件夹中显示 ${visibleLabel}`}
+          onClick={(event) => { event.preventDefault(); if (busy === null) void activate('reveal'); }}>
+          <IconFile size={15} /><span>{visibleLabel}</span>
+        </a>
       )}
       {!presentation && availableInfo ? (
         <span className="otto-local-path__actions">
@@ -489,11 +501,38 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
       nodes.push(<em key={`${keyPrefix}-i-${key++}`}>{m[6].slice(1, -1)}</em>);
     } else if (m[7]) {
       nodes.push(<em key={`${keyPrefix}-u-${key++}`}>{m[7].slice(1, -1)}</em>);
+    } else if (m[8] !== undefined && m[9] !== undefined) {
+      const localPath = normalizeLocalOutputPath(m[9]);
+      nodes.push(localPath
+        ? <LocalOutputPath key={`${keyPrefix}-p-${key++}`} value={localPath} label={m[8]} />
+        : <span key={`${keyPrefix}-p-${key++}`}>{m[8]}</span>);
     }
     last = m.index + m[0].length;
   }
   if (last < text.length) nodes.push(text.slice(last));
   return nodes;
+}
+
+/** Use the SAME parser as display, not substring matches (code fences are not links).
+ * This only constructs inline elements; it does not mount components or perform IO.
+ */
+export function renderedLocalOutputPaths(text: string): Set<string> {
+  const paths = new Set<string>();
+  for (const segment of parseSegments(text)) {
+    if (segment.type !== 'text') continue;
+    for (const block of parseBlocks(segment.value)) {
+      const inlines = block.kind === 'hr' ? []
+        : block.kind === 'table' ? [...block.headers, ...block.rows.flat()]
+        : block.kind === 'ul' || block.kind === 'ol' ? block.items : [block.text];
+      for (const inline of inlines) {
+        for (const node of renderInline(inline, 'reference')) {
+          if (React.isValidElement<{ value: string }>(node) && node.type === LocalOutputPath)
+            paths.add(node.props.value);
+        }
+      }
+    }
+  }
+  return paths;
 }
 
 /** 渲染一个普通文本段的块级元素。 */

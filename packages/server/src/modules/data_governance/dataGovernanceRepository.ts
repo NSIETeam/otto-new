@@ -16,6 +16,7 @@ import {
   type LegalDocumentReference,
 } from './legalDocuments.js';
 import type { PrivacyDeletionTombstone } from './privacyDeletionLedger.js';
+import { deleteSqliteRecruitmentSearchesForAccount } from '../recruitment_intelligence/recruitmentSourceStore.js';
 
 export interface DataGovernanceAccount {
   id: string;
@@ -330,7 +331,17 @@ function scrubAccountData(
     employee_id: string | null; username: string; name: string;
     is_admin: number; status: 'active' | 'disabled'; deleted_at: string | null;
   } | undefined;
-  if (!account || account.deleted_at) return null;
+  if (!account) return null;
+  if (account.deleted_at) {
+    // Restored backups may still contain pre-deletion integration snapshots.
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      deleteSqliteRecruitmentSearchesForAccount(database, store.fieldCipher, organizationId, accountId);
+      runIfTable(database, 'enterprise_workable_connections_v1', "UPDATE enterprise_workable_connections_v1 SET revision=revision+1,payload='' WHERE organization_id=? AND account_id=? AND payload<>''", organizationId, accountId);
+      database.exec('COMMIT');
+    } catch (error) { database.exec('ROLLBACK'); throw error; }
+    return null;
+  }
   if (options.enforceAdminContinuity && account.account_type === 'enterprise'
       && account.is_admin === 1 && account.status === 'active') {
     const other = database.prepare(
@@ -362,6 +373,8 @@ function scrubAccountData(
        VALUES (?, ?, ?, 'delete', 'requested', ?)`,
     ).run(requestId, accountId, organizationId, now);
     runIfTable(database, 'account_sync_snapshots', 'DELETE FROM account_sync_snapshots WHERE account_id = ?', accountId);
+    runIfTable(database, 'enterprise_workable_connections_v1', "UPDATE enterprise_workable_connections_v1 SET revision=revision+1,payload='' WHERE organization_id=? AND account_id=?", organizationId, accountId);
+    deleteSqliteRecruitmentSearchesForAccount(database, store.fieldCipher, organizationId, accountId);
     if (account.employee_id) runIfTable(database, 'task_logs', 'DELETE FROM task_logs WHERE employee_id = ?', account.employee_id);
     runIfTable(database, 'account_token_usage', 'DELETE FROM account_token_usage WHERE account_id = ?', accountId);
     runIfTable(database, 'account_presence', 'DELETE FROM account_presence WHERE account_id = ?', accountId);
@@ -441,7 +454,7 @@ function scrubAccountData(
       accountId,
       organizationId,
       completedAt: new Date(now).toISOString(),
-      deleted: ['会话与验证码', '账号标签', '个人记忆同步快照', '工作日志', 'Token 明细', '在线状态', '本人私聊及附件', '园区消息接收与专员分派', 'Skill 安装及评分身份记录'],
+      deleted: ['会话与验证码', '账号标签', '个人记忆同步快照', 'Workable 授权与岗位绑定', '工作日志', 'Token 明细', '在线状态', '本人私聊及附件', '园区消息接收与专员分派', 'Skill 安装及评分身份记录'],
       anonymized: ['账号与员工档案', '园区服务工单', '企业知识贡献者', '企业 Skill 作者', '积分交易说明', '安全审计详情'],
       retained: [
         { category: '园区服务统计', reason: '企业年度服务、金额和履约统计', restriction: '仅保留服务类型、时间、状态、数量和金额，不保留联系人及表单原文' },

@@ -8,6 +8,9 @@
 import { useEffect, useMemo, useReducer } from 'react';
 import type {
   AutoSkillCandidateInfo,
+  InstalledSkillReleases,
+  SkillRollbackInput,
+  SkillAcceptanceInput,
   ProductWorkspaceSnapshot,
   ScheduleItemInfo,
   ServerToClient,
@@ -15,6 +18,10 @@ import type {
 import * as transport from '../transport.js';
 
 export interface ProductWorkspaceState {
+  skillReleases: InstalledSkillReleases[];
+  skillReleaseBusy: boolean;
+  skillReleaseError: string | null;
+  skillReleaseStatus: string;
   workspace: ProductWorkspaceSnapshot | null;
   schedules: ScheduleItemInfo[];
   pendingAutoSkills: AutoSkillCandidateInfo[];
@@ -34,6 +41,10 @@ export interface ProductWorkspaceState {
 }
 
 export const initialProductWorkspaceState: ProductWorkspaceState = {
+  skillReleases: [],
+  skillReleaseBusy: false,
+  skillReleaseError: null,
+  skillReleaseStatus: '',
   workspace: null,
   schedules: [],
   pendingAutoSkills: [],
@@ -45,6 +56,8 @@ export const initialProductWorkspaceState: ProductWorkspaceState = {
 };
 
 export type ProductWorkspaceAction =
+  | { kind: 'skill_release_busy' }
+  | { kind: 'skill_release_timeout' }
   | { kind: 'frame'; frame: ServerToClient }
   | { kind: 'select_date'; date: string }
   | { kind: 'clear_invite' }
@@ -54,12 +67,19 @@ export function productWorkspaceReducer(
   state: ProductWorkspaceState,
   action: ProductWorkspaceAction,
 ): ProductWorkspaceState {
+  if (action.kind === 'skill_release_busy') return { ...state, skillReleaseBusy: true, skillReleaseError: null, skillReleaseStatus: '' };
+  if (action.kind === 'skill_release_timeout') return { ...state, skillReleaseBusy: false, skillReleaseError: '未收到操作结果，请刷新核对当前版本。不会自动重试回滚或复核写入。', skillReleaseStatus: '' };
   if (action.kind === 'select_date') {
     return { ...state, selectedDate: action.date };
   }
   if (action.kind === 'clear_invite') return { ...state, lastInvite: null };
   if (action.kind === 'clear_error') return { ...state, error: null };
   const frame = action.frame;
+  if (frame.type === 'skill_releases') return {
+    ...state, skillReleases: frame.payload.skills, skillReleaseBusy: false, skillReleaseError: null,
+    skillReleaseStatus: frame.payload.lastAction?.kind === 'rolled-back' ? '已恢复所选版本，原版本完整保留。请在新会话中使用。' : frame.payload.lastAction?.kind === 'reviewed' ? '已保存人工复核证据，仅适用于记录中的案例与环境。' : '',
+  };
+  if (frame.type === 'error' && (frame.payload.code === 'skill_release_failed' || state.skillReleaseBusy && ['offline_write_rejected', 'bad_payload'].includes(frame.payload.code))) return { ...state, skillReleaseBusy: false, skillReleaseError: frame.payload.message, skillReleaseStatus: '' };
   if (frame.type === 'product_workspace') {
     return { ...state, workspace: frame.payload, loading: false, error: null };
   }
@@ -95,6 +115,9 @@ export function productWorkspaceReducer(
 }
 
 export interface ProductWorkspaceActions {
+  refreshSkillReleases(): void;
+  rollbackSkillRelease(input: SkillRollbackInput): void;
+  recordSkillAcceptance(input: SkillAcceptanceInput): void;
   refresh(): void;
   configureEnterprise(input: {
     managerName: string;
@@ -150,6 +173,11 @@ export function useProductWorkspace(activeSessionId?: string | null): UseProduct
     productWorkspaceReducer,
     initialProductWorkspaceState,
   );
+  useEffect(() => {
+    if (!state.skillReleaseBusy) return;
+    const timer = setTimeout(() => dispatch({ kind: 'skill_release_timeout' }), 20_000);
+    return () => clearTimeout(timer);
+  }, [state.skillReleaseBusy]);
 
   useEffect(() => {
     const off = transport.onFrame((frame) => dispatch({ kind: 'frame', frame }));
@@ -160,6 +188,18 @@ export function useProductWorkspace(activeSessionId?: string | null): UseProduct
   }, []);
 
   const actions = useMemo<ProductWorkspaceActions>(() => ({
+    refreshSkillReleases: () => {
+      dispatch({ kind: 'skill_release_busy' });
+      transport.send({ type: 'get_skill_releases', payload: {} });
+    },
+    rollbackSkillRelease: (input) => {
+      dispatch({ kind: 'skill_release_busy' });
+      transport.send({ type: 'rollback_skill_release', payload: input });
+    },
+    recordSkillAcceptance: (input) => {
+      dispatch({ kind: 'skill_release_busy' });
+      transport.send({ type: 'record_skill_acceptance', payload: input });
+    },
     refresh: () => transport.send({ type: 'get_product_workspace', payload: {} }),
     configureEnterprise: (input) =>
       transport.send({ type: 'configure_enterprise', payload: input }),

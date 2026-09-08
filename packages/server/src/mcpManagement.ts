@@ -512,7 +512,7 @@ export async function resolvePublicMcpEndpoint(
   return { hostname, addresses };
 }
 
-function pinnedEndpointDispatcher(endpoint: PublicMcpEndpoint): Agent {
+export function pinnedEndpointDispatcher(endpoint: PublicMcpEndpoint): Agent {
   const expectedHostname = endpoint.hostname.toLowerCase();
   return new Agent({
     connect: {

@@ -127,6 +127,22 @@ beforeEach(() => {
     enterpriseTicketAction: vi.fn(async () => parkTicket()),
   };
 });
+it('keeps read policy messages in the common conversation list after leaving and returning', async () => {
+  const notice = { id: 'a'.repeat(64), policyId: 'policy-1', policyTitle: '创新项目申报', url: 'https://www.gov.cn/a', kind: 'deadline' as const, body: '申报将于2026-10-01截止，请准备材料', createdAt: '2026-09-30T00:00:00Z', policyVersion: 1 };
+  const read = vi.fn(async () => undefined);
+  const open = vi.fn();
+  const props = { enterpriseAccount: account, onBack: vi.fn(), onPolicyRead: read, onOpenPolicy: open };
+  const first = render(<InboxPage {...props} policyInbox={{ notices: [notice], unreadCount: 1, watchedPolicyIds: ['policy-1'] }} />);
+  fireEvent.click(await screen.findByRole('listitem', { name: '政策助手，1 条未读' }));
+  expect(read).toHaveBeenCalledWith([notice.id]);
+  fireEvent.click(screen.getByRole('button', { name: '查看政策与材料' }));
+  expect(open).toHaveBeenCalledWith('policy-1');
+  first.unmount();
+  render(<InboxPage {...props} policyInbox={{ notices: [{ ...notice, readAt: '2026-09-30T00:01:00Z' }], unreadCount: 0, watchedPolicyIds: ['policy-1'] }} />);
+  fireEvent.click(await screen.findByRole('listitem', { name: '政策助手，0 条未读' }));
+  expect(screen.getByText(notice.policyTitle)).toBeTruthy();
+  expect(read).toHaveBeenCalledTimes(1);
+});
 
 afterEach(() => {
   cleanup();

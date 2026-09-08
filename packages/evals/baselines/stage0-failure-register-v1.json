@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "kind": "preregistered_risks_not_current_failure_results",
+  "scope": "Historical user reports and code-review counterexamples; each must be rerun against sealed versions. None is a real-model score or proof the current candidate still fails.",
+  "cases": [
+    {
+      "id": "negative-constraints",
+      "tasks": ["ppt-preview", "steer-replace-artifact"],
+      "counterexample": "A no-WPS/no-bare-path requirement disappears from acceptance, or all legitimate document generation is blocked.",
+      "requiredEvidence": [
+        "complete external-launch observations",
+        "output-path check",
+        "valid document and preview"
+      ],
+      "currentOutcome": "not_run"
+    },
+    {
+      "id": "artifact-version",
+      "tasks": ["dual-artifact"],
+      "counterexample": "A successful writer, damaged file or stale test is treated as a current valid delivery.",
+      "requiredEvidence": [
+        "independent parser",
+        "content hash at verification and delivery",
+        "corrupted-file negative control"
+      ],
+      "currentOutcome": "not_run"
+    },
+    {
+      "id": "requirement-coverage",
+      "tasks": ["login-retry", "utc-display"],
+      "counterexample": "Two modules sharing the same behavior are merged; one successful command substitutes for all business cases.",
+      "requiredEvidence": [
+        "hidden normal/error/boundary assertions",
+        "unaffected behavior regression",
+        "source diff"
+      ],
+      "currentOutcome": "not_run"
+    },
+    {
+      "id": "steering-fence",
+      "tasks": ["steer-stop-backend", "steer-replace-artifact"],
+      "counterexample": "Old-direction writes or sends start after the new user requirement takes effect.",
+      "requiredEvidence": [
+        "accepted/applied timestamps",
+        "subsequent tool dispatches",
+        "preserved valid work"
+      ],
+      "currentOutcome": "not_run"
+    },
+    {
+      "id": "recovery-replay",
+      "tasks": ["restart-known-receipt", "restart-unknown-outcome"],
+      "counterexample": "A restart loses restrictions or repeats a known/unknown external action.",
+      "requiredEvidence": [
+        "independent receiver counts",
+        "both process records",
+        "result reconciliation"
+      ],
+      "currentOutcome": "not_run"
+    },
+    {
+      "id": "repair-deadlock",
+      "tasks": ["login-retry", "utc-display"],
+      "counterexample": "A known local defect cannot be repaired within the original scope without an extra user nudge.",
+      "requiredEvidence": [
+        "authorized file diffs",
+        "repair and revalidation trace",
+        "separate corrective-nudge count"
+      ],
+      "currentOutcome": "not_run"
+    },
+    {
+      "id": "persistent-inbox",
+      "tasks": ["inbox-read-return"],
+      "counterexample": "Read conversations disappear after leaving and returning, or notifications recur.",
+      "requiredEvidence": [
+        "real window clicks/screenshots",
+        "persistent history and unread state"
+      ],
+      "currentOutcome": "not_run"
+    },
+    {
+      "id": "project-removal",
+      "tasks": ["project-delete"],
+      "counterexample": "Removing a project also removes disk files or unrelated conversations.",
+      "requiredEvidence": [
+        "actual context-menu removal",
+        "before/after file hashes",
+        "other conversations retained"
+      ],
+      "currentOutcome": "not_run"
+    },
+    {
+      "id": "enterprise-feedback",
+      "tasks": ["park-replies"],
+      "counterexample": "Staff replies do not reach the applicant's normal inbox or lose distinct staff attribution.",
+      "requiredEvidence": [
+        "real isolated API responses",
+        "work-order/conversation association",
+        "actual inbox view"
+      ],
+      "currentOutcome": "not_run"
+    },
+    {
+      "id": "tenant-isolation",
+      "tasks": ["tenant-boundary"],
+      "counterexample": "Own-enterprise writes are blocked or cross-tenant private data is accessible.",
+      "requiredEvidence": [
+        "own-tenant persistence",
+        "cross-tenant read/write denial"
+      ],
+      "currentOutcome": "not_run"
+    }
+  ],
+  "pilotCoverageGaps": [
+    "These twelve pilot tasks do not fully measure primary-source trust, claim-number attribution, contradictory sources, or implicit semantic requirements.",
+    "They do not establish long-task context compression beyond the preserved-record limits or broad natural-output quality.",
+    "Independent unexposed holdouts and human review are required; this readable register is not a hidden test set."
+  ]
+}

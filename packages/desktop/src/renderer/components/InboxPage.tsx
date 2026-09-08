@@ -21,6 +21,7 @@ import type {
   EnterpriseRepairTicket,
   EnterpriseRepairTicketHistoryEntry,
   EnterpriseUnreadMessageNotification,
+  PolicyInbox,
 } from '../../preload/index.js';
 import { isAuthenticatedEnterpriseAccount } from '../internal-test-access.js';
 import { createQrMatrix } from '../lib/qrMatrix.js';
@@ -171,6 +172,10 @@ function FederationVerificationQr({ payload }: { payload: string }): React.JSX.E
 }
 
 export interface InboxPageProps {
+  policyInbox?: PolicyInbox;
+  policyInboxError?: string;
+  onPolicyRead?: (ids: string[]) => Promise<void>;
+  onOpenPolicy?: (policyId: string) => void;
   enterpriseAccount?: EnterpriseAccount;
   /** Commercial Federation entitlement. Undefined is deliberately fail-closed. */
   effectiveDirectMessages?: boolean;
@@ -205,6 +210,7 @@ export interface ConversationItem {
 }
 
 type UnifiedInboxConversation =
+  | { key: string; kind: 'policy'; timestamp: number; unreadCount: number }
   | {
       key: string;
       kind: 'direct';
@@ -228,6 +234,10 @@ type UnifiedInboxConversation =
     };
 
 export function InboxPage({
+  policyInbox,
+  policyInboxError,
+  onPolicyRead,
+  onOpenPolicy,
   enterpriseAccount,
   effectiveDirectMessages = false,
   baselineDirectMessagesAvailable,
@@ -243,6 +253,8 @@ export function InboxPage({
   onBack,
 }: InboxPageProps): React.JSX.Element {
   const [filter, setFilter] = useState<InboxFilter>('all');
+  const [policySelected, setPolicySelected] = useState(false);
+  useEffect(() => { setPolicySelected(false); }, [enterpriseAccount?.id, enterpriseAccount?.organizationId]);
   const [notifications, setNotifications] = useState<EnterpriseUnreadMessageNotification[]>([]);
   const [orgMembers, setOrgMembers] = useState<EnterpriseOrganizationView['members']>([]);
   const [loading, setLoading] = useState(false);
@@ -450,6 +462,7 @@ export function InboxPage({
 
   // 企业私信、跨服务器联系人和园区工单共用一份会话目录，严格按最后动态时间混排。
   const unifiedConversations = useMemo<UnifiedInboxConversation[]>(() => [
+    ...(policyInbox?.notices.length ? [{ key: 'policy:assistant', kind: 'policy' as const, timestamp: inboxTimestamp(policyInbox.notices[0]?.createdAt), unreadCount: policyInbox.unreadCount }] : []),
     ...conversations.map((conversation): UnifiedInboxConversation => ({
       key: `direct:${conversation.peerAccountId}`,
       kind: 'direct',
@@ -475,7 +488,7 @@ export function InboxPage({
     if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
     if (a.unreadCount !== b.unreadCount) return b.unreadCount - a.unreadCount;
     return a.key.localeCompare(b.key);
-  }), [conversations, federationContacts, parkTickets]);
+  }), [conversations, federationContacts, parkTickets, policyInbox]);
 
   const filteredConversations = useMemo(() => {
     if (filter === 'unread') {
@@ -1115,6 +1128,17 @@ export function InboxPage({
               {filter === 'unread' ? '没有未读消息' : filter === 'handled' ? '没有已读消息' : '暂无消息'}
             </div>
           ) : filteredConversations.map((item) => {
+            if (item.kind === 'policy') return (
+              <button key={item.key} type="button" role="listitem" aria-label={`政策助手，${item.unreadCount} 条未读`} className={`otto-inbox-page__conv${policySelected ? ' is-selected' : ''}`} onClick={() => {
+                setPolicySelected(true); setSelectedPeer(null); setSelectedParkTicketId(null); setSelectedFederationContactId(null);
+                const ids = (policyInbox?.notices ?? []).filter(n => !n.readAt).map(n => n.id);
+                if (ids.length) void onPolicyRead?.(ids);
+              }}>
+                <span className="otto-inbox-page__conv-avatar" aria-hidden>政</span>
+                <span className="otto-inbox-page__conv-body"><strong>政策助手</strong><span className="otto-inbox-page__conv-preview">{policyInbox?.notices[0]?.body}</span></span>
+                <span className="otto-inbox-page__conv-side"><time>{formatInboxTimestamp(policyInbox?.notices[0]?.createdAt)}</time>{item.unreadCount > 0 && <span className="otto-inbox-page__unread">{item.unreadCount}</span>}</span>
+              </button>
+            );
             if (item.kind === 'park') {
               const { ticket } = item;
               const serviceName = PARK_REQUEST_SERVICE_NAMES.get(ticket.serviceId)
@@ -1240,7 +1264,19 @@ export function InboxPage({
 
         {/* 右：消息详情 */}
         <div className="otto-inbox-page__detail" aria-label="消息详情">
-          {selectedParkTicketId && selectedParkTicket ? (
+          {policyInboxError && <p role="alert">{policyInboxError}</p>}
+          {policySelected && !selectedPeer && !selectedParkTicketId && !selectedFederationContactId ? (
+            <><header className="otto-inbox-page__detail-header"><strong>政策助手</strong><span>你关注的政策 · 截止与原文变更提醒</span></header>
+              <div className="otto-inbox-page__messages">{[...(policyInbox?.notices ?? [])].reverse().map(notice => (
+                <article className="otto-inbox-page__msg" key={notice.id}>
+                  <div className="otto-inbox-page__msg-bubble"><strong>{notice.policyTitle}</strong><p>{notice.body}</p>
+                    <button type="button" onClick={() => onOpenPolicy?.(notice.policyId)}>查看政策与材料</button>{' '}
+                    <button type="button" onClick={() => void window.otto.openExternal(notice.url)}>官方原文</button>
+                  </div><time>{formatInboxTimestamp(notice.createdAt)}</time>
+                  {!notice.readAt && <button type="button" onClick={() => void onPolicyRead?.([notice.id])}>标记已读</button>}
+                </article>
+              ))}</div></>
+          ) : selectedParkTicketId && selectedParkTicket ? (
             <>
               <header className="otto-inbox-page__detail-header">
                 <strong>

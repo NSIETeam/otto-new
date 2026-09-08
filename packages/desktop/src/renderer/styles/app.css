@@ -14000,6 +14000,7 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-recruitment-advanced select { min-height: 36px; padding: 0 10px; border: 1px solid var(--otto-border); border-radius: 9px; color: var(--otto-text); background: var(--otto-surface); }
 .otto-recruitment-start__action { margin-top: 14px; display: flex; align-items: center; gap: 12px; }
 .otto-recruitment-start__action button { min-height: 42px; padding: 0 18px; border: 1px solid var(--otto-accent); border-radius: 11px; color: #fff; background: var(--otto-accent); font-weight: 700; cursor: pointer; }
+.otto-recruitment-start__action button + button { color: var(--otto-accent); background: var(--otto-surface); }
 .otto-recruitment-start__action button:disabled { cursor: wait; opacity: .72; }
 .otto-recruitment-start__action small { color: var(--otto-text-tertiary); }
 .otto-recruitment-value { margin-top: 18px; padding-top: 14px; border-top: 1px solid color-mix(in srgb, var(--otto-accent) 16%, var(--otto-border)); display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
@@ -14008,6 +14009,39 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-recruitment-welcome { min-height: 210px; padding: 34px; border: 1px dashed color-mix(in srgb, var(--otto-accent) 28%, var(--otto-border)); border-radius: 16px; display: grid; place-content: center; text-align: center; }
 .otto-recruitment-welcome strong { font-size: 17px; }
 .otto-recruitment-welcome p { max-width: 620px; margin: 8px auto 0; color: var(--otto-text-secondary); font-size: 12px; line-height: 1.75; }
+.otto-recruitment-welcome button { width: fit-content; min-height: 36px; margin: 15px auto 0; padding: 0 13px; border: 1px solid var(--otto-border); border-radius: 10px; color: var(--otto-accent); background: var(--otto-surface); cursor: pointer; }
+.otto-recruitment-sources__actions { display: flex !important; align-items: center; justify-content: flex-end; grid-auto-flow: column; gap: 7px !important; }
+.otto-recruitment-sources__actions b { color: var(--otto-accent); font-size: 11px; white-space: nowrap; }
+.otto-recruitment-source-group { margin-top: 17px; }
+.otto-recruitment-source-group > header { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
+.otto-recruitment-source-group > header strong { font-size: 12px; }
+.otto-recruitment-source-group > header span { min-width: 22px; height: 22px; border-radius: 999px; background: color-mix(in srgb, var(--otto-text) 6%, transparent); display: grid; place-items: center; color: var(--otto-text-tertiary); font-size: 10px; }
+.otto-recruitment-source-group > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.otto-recruitment-source-group article { min-width: 0; padding: 13px; border: 1px solid var(--otto-border); border-left: 3px solid var(--otto-text-tertiary); border-radius: 10px; background: var(--otto-surface); }
+.otto-recruitment-source-group article.is-ready,
+.otto-recruitment-source-group article.is-connected { border-left-color: #23825f; }
+.otto-recruitment-source-group article.is-incomplete { border-left-color: var(--otto-danger); }
+.otto-recruitment-source-group article.is-configuration_required,
+.otto-recruitment-source-group article.is-official_authorization_required { border-left-color: #c58a24; }
+.otto-recruitment-source-group article > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.otto-recruitment-source-group article > header strong { font-size: 13px; }
+.otto-recruitment-source-group article > header b { color: var(--otto-text-tertiary); font-size: 10px; white-space: nowrap; }
+.otto-recruitment-source-group article.is-ready > header b,
+.otto-recruitment-source-group article.is-connected > header b { color: #23825f; }
+.otto-recruitment-source-group article.is-incomplete > header b { color: var(--otto-danger); }
+.otto-recruitment-source-group article p { margin: 7px 0 4px; color: var(--otto-text-secondary); font-size: 11px; line-height: 1.55; }
+.otto-recruitment-source-group article small { display: block; color: var(--otto-text-tertiary); font-size: 10px; line-height: 1.5; }
+.otto-recruitment-source-group article code,
+.otto-recruitment-source-group article em { display: inline-block; margin: 8px 6px 0 0; padding: 3px 6px; border-radius: 6px; background: color-mix(in srgb, var(--otto-accent) 8%, transparent); color: var(--otto-text-secondary); font: 9px/1.4 ui-monospace, monospace; }
+.otto-recruitment-source-group article em { color: #9a6717; font-family: inherit; font-style: normal; }
+.otto-recruitment-source-results { margin-top: 14px; padding: 14px; border: 1px solid color-mix(in srgb, var(--otto-accent) 35%, var(--otto-border)); border-radius: 12px; background: color-mix(in srgb, var(--otto-accent) 5%, var(--otto-surface)); }
+.otto-recruitment-source-results > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.otto-recruitment-source-results > header > div { display: grid; gap: 3px; }
+.otto-recruitment-source-results > header span, .otto-recruitment-source-results > p { color: var(--otto-text-tertiary); font-size: 10px; }
+.otto-recruitment-source-results > div { display: grid; gap: 7px; }
+.otto-recruitment-source-results article { display: flex; align-items: center; gap: 12px; padding: 10px 11px; border: 1px solid var(--otto-border); border-radius: 9px; background: var(--otto-surface); }
+.otto-recruitment-source-results article > div { min-width: 0; display: grid; flex: 1; gap: 2px; }
+.otto-recruitment-source-results article span, .otto-recruitment-source-results article small { overflow: hidden; color: var(--otto-text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .otto-recruitment-result-hero { margin-bottom: 12px; padding: 22px; border: 1px solid color-mix(in srgb, var(--otto-accent) 34%, var(--otto-border)); border-radius: 17px; background: linear-gradient(135deg, color-mix(in srgb, var(--otto-accent) 10%, var(--otto-bg)), var(--otto-bg)); display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 22px; }
 .otto-recruitment-result-hero > div:last-child header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .otto-recruitment-result-hero > div:last-child header span { color: var(--otto-accent); font-size: 11px; font-weight: 700; }
@@ -14030,6 +14064,18 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-recruitment-command-bar button:hover { border-color: color-mix(in srgb, var(--otto-accent) 45%, var(--otto-border)); color: var(--otto-accent); }
 .otto-recruitment-command-bar button.is-primary { border-color: var(--otto-accent); color: #fff; background: var(--otto-accent); }
 .otto-recruitment-panel { margin-bottom: 14px; padding: 18px; border: 1px solid var(--otto-border); border-radius: 14px; background: var(--otto-bg); animation: otto-menu-in .14s ease-out both; }
+.otto-recruitment-archive > summary { cursor: pointer; font-weight: 650; color: var(--otto-text); }
+.otto-recruitment-archive p, .otto-recruitment-archive small { font-size: 12px; line-height: 1.6; color: var(--otto-text-secondary); }
+.otto-recruitment-archive label { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 12px; line-height: 1.5; }
+.otto-recruitment-archive input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; }
+.otto-recruitment-archive select { min-width: 0; flex: 1; padding: 8px; color: var(--otto-text); background: var(--otto-surface); border: 1px solid var(--otto-border); border-radius: 8px; }
+.otto-recruitment-archive button { margin: 4px 8px 4px 0; padding: 8px 12px; border: 1px solid var(--otto-border); border-radius: 8px; background: var(--otto-surface); color: var(--otto-text); cursor: pointer; }
+.otto-recruitment-archive button:disabled { cursor: not-allowed; opacity: .5; }
+.otto-recruitment-archive [role="alert"], .otto-recruitment-archive .is-danger { color: #b42318; }
+.otto-recruitment-person { overflow-wrap: anywhere; }
+.otto-recruitment-person summary { margin-top: 12px; cursor: pointer; font-size: 13px; font-weight: 650; }
+.otto-recruitment-person article { margin-top: 12px; padding: 12px; border: 1px solid var(--otto-border); border-radius: 10px; }
+.otto-recruitment-person h4 { margin: 0; font-size: 13px; }
 .otto-recruitment-panel > header { margin-bottom: 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .otto-recruitment-panel > header > div { display: grid; gap: 3px; }
 .otto-recruitment-panel > header strong { font-size: 14px; }
@@ -14165,6 +14211,14 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-recruitment-privacy dl > div { padding: 10px; border-radius: 9px; background: color-mix(in srgb, var(--otto-text) 3%, transparent); }
 .otto-recruitment-privacy dt { color: var(--otto-text-tertiary); font-size: 10px; }
 .otto-recruitment-privacy dd { margin: 4px 0 0; color: var(--otto-text-secondary); font-size: 12px; }
+.otto-recruitment-provenance { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--otto-border); display: grid; gap: 8px; }
+.otto-recruitment-provenance > strong { font-size: 12px; }
+.otto-recruitment-provenance article { padding: 10px; border: 1px solid var(--otto-border); border-radius: 9px; background: color-mix(in srgb, var(--otto-text) 3%, transparent); }
+.otto-recruitment-provenance article > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.otto-recruitment-provenance article b { font-size: 12px; }
+.otto-recruitment-provenance article span,
+.otto-recruitment-provenance article small { color: var(--otto-text-tertiary); font-size: 10px; }
+.otto-recruitment-provenance article small { display: block; margin-top: 5px; }
 .otto-recruitment-audit { display: grid; gap: 8px; }
 .otto-recruitment-audit article { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 12px; }
 .otto-recruitment-audit time { color: var(--otto-text-tertiary); font-size: 10px; }
@@ -14232,6 +14286,9 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
   .otto-recruitment__candidates { min-height: auto; max-height: 120px; border-right: 0; border-bottom: 1px solid var(--otto-border); }
   .otto-recruitment-fields,
   .otto-recruitment-privacy dl { grid-template-columns: 1fr; }
+  .otto-recruitment-source-group > div { grid-template-columns: 1fr; }
+  .otto-recruitment-sources > header { align-items: stretch; flex-direction: column; }
+  .otto-recruitment-sources__actions { justify-content: flex-start; grid-auto-flow: row; flex-wrap: wrap; }
   .otto-recruitment-advanced,
   .otto-recruitment-value,
   .otto-recruitment-result-hero,

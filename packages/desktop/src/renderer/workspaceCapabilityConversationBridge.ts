@@ -36,6 +36,7 @@ export interface ConversationalExpert {
 }
 
 export interface ConversationalAutoSkillCandidate {
+  function?: { title: string; summary: string };
   id: string;
   name: string;
   description: string;
@@ -431,7 +432,7 @@ function formatKnowledgeResults(items: readonly ConversationalKnowledgeItem[], n
       const reviewDue = Date.parse(item.reviewDueAt || '');
       const lifecycle = Number.isFinite(reviewDue) && reviewDue <= now ? ' · 待复核' : '';
       const source = item.sourceLabel ? ` · 来源：${boundedText(item.sourceLabel, 120)}` : '';
-      return `${index + 1}. ${boundedText(item.title || item.category, 120)}【${boundedText(item.category, 80)}】\n${boundedText(item.content, MAX_KNOWLEDGE_CONTENT)}\n置信度 ${Math.round(item.confidence * 100)}%${lifecycle}${source}`;
+      return `${index + 1}. ${boundedText(item.title || item.category, 120)}【${boundedText(item.category, 80)}】\n${boundedText(item.content, MAX_KNOWLEDGE_CONTENT)}\n参考资料，需核对来源与适用条件${lifecycle}${source}`;
     }),
   ].join('\n\n');
 }
@@ -461,8 +462,8 @@ function formatMemoryHealth(
     ].join('\n');
   }
   return [
-    `企业记忆治理完成度 ${health.governanceScore}/100（这是证据、有效期和人工确认的治理指标，不是模型概率）：`,
-    `- 证据充分：${health.counts.trusted}`,
+    '企业记忆依据概览（记录数量不代表准确率，重复观察不等于独立验证）：',
+    `- 有确认记录：${health.counts.trusted}`,
     `- 继续学习：${health.counts.learning}`,
     `- 等待确认：${health.counts.needs_review}`,
     `- 存在冲突：${health.counts.conflicted}`,
@@ -504,7 +505,7 @@ function formatAutoSkills(candidates: readonly ConversationalAutoSkillCandidate[
       const ready = candidate.draft?.validationPassed === true && candidate.draft.packageReady === true;
       const riskCount = (candidate.draft?.risk.securityRisks.length ?? 0)
         + (candidate.draft?.risk.permissions.length ?? 0);
-      return `${index + 1}. ${boundedText(candidate.name, 120)}：${boundedText(candidate.description, 240)}\n${ready ? '检查通过，等待确认' : '检查未通过，禁止安装'} · 风险/权限项 ${riskCount}`;
+      return `${index + 1}. ${boundedText(candidate.function?.title ?? candidate.name, 120)}（${boundedText(candidate.name, 80)}）：${boundedText(candidate.function?.summary ?? candidate.description, 240)}\n${ready ? '静态检查通过，等待确认试用' : '检查未通过，禁止安装'} · 风险/权限项 ${riskCount}。尚未验证业务效果；查看功能说明、实际试用证据与历史回滚，请打开右侧自动 Skill。`;
     }),
   ].join('\n\n');
 }

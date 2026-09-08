@@ -305,6 +305,8 @@ export function generateLegacySkillContent(
 
   content += `## 触发场景\n`;
   content += `当用户需要${steps[0]}时，按以下步骤完成完整工作流。\n\n`;
+  content += `## 需要你提供\n- 本次目标、相关资料、输出位置和验收标准。\n\n`;
+  content += `## 不适用与限制\n- 历史观察不是此 Skill 的测试结果；先用低风险样例复核。\n- 不编造缺失信息；写入、发送和外部操作仍需相应授权。\n\n`;
 
   content += `## 操作步骤\n`;
   for (let i = 0; i < steps.length; i++) {
@@ -559,7 +561,7 @@ async function generateWorkResultSkillCandidates(
     candidates.push({
       id: `auto_skill_${createHash('sha256').update(`work-result:${signature}`).digest('hex').slice(0, 16)}`,
       name,
-      description: `从反复完成的业务成果中沉淀：${title}`,
+      description: `帮你完成「${title}」，按常用格式整理结果，并标出需要核对的内容。`,
       triggerPatterns: [...new Set(sortedSamples.map((sample) =>
         sample.entry.taskTitle || sample.entry.action,
       ))].slice(0, 3),
@@ -623,12 +625,22 @@ function generateWorkResultSkillContent(
   return [
     '---',
     `name: ${skillName}`,
-    `description: Otto 从用户反复完成的「${title}」类业务成果中自动沉淀的工作流。`,
+    `description: 帮你完成「${title}」，按常用格式整理结果，并标出需要核对的内容。`,
     '---',
     '',
     `# ${title}`,
     '',
     '> 这个 Skill 来自 Otto 对工作成果日志的自动分析。它不是单个工具步骤，而是用户反复需要的业务交付流程。',
+    '',
+    '## 需要你提供',
+    '- 本次目标、原始资料、输出格式和验收要求；缺少关键内容时先补充。',
+    '',
+    '## 交付结果',
+    `- 「${title}」的成果文件或整理结果，以及来源、核对项和待确认事项。`,
+    '',
+    '## 不适用与限制',
+    '- 历史工作完成不代表新 Skill 已通过业务测试；不得编造缺失事实。',
+    '- 不擅自发送、覆盖或删除资料；涉及外部操作需另行授权。',
     '',
     '## 触发场景',
     `当用户提出与「${title}」相近的需求，或需要同类 ${categories} 交付物时，优先使用本 Skill。`,
@@ -953,10 +965,10 @@ async function callLLMForSkillCandidates(
     '    {',
     '      "name": "kebab-case 名称，如 auto-code-review",',
     '      "title": "人类可读标题，如 代码审查工作流",',
-    '      "description": "一句话描述，如 读取源码、按规范编辑后提交的完整审查流程。成功率 95%，工作日 14-16点执行",',
+    '      "description": "用普通用户能懂的话说明用途和结果，如 帮你检查代码改动，列出问题位置、影响和修改建议，供你确认；不要写成功率或质量分",',
     '      "triggerHint": "用户什么意图触发，如 帮我审查代码 / review 一下这个 PR",',
     '      "occurrenceNote": "频次 + 趋势说明，如 过去 7 天内出现 6 次，趋势上升。质量分 78",',
-    '      "skillMarkdown": "完整的 SKILL.md 正文（Markdown），包含: name/description YAML头、触发场景（2-3个典型例子）、操作步骤（每步简明扼要，标注成功关键前置条件）、注意事项（从失败日志中总结的坑和边界情况）、期望输出格式。中文，简介专业，至少 20 行。"',
+    '      "skillMarkdown": "完整 SKILL.md：name/description YAML 头、中文功能标题；用二级标题分别写 需要你提供、交付结果、适用范围、不适用与限制、操作步骤、触发场景。每项用简短段落或分点讲清楚。设计适用范围不是已验证范围；禁止编造评测、成功率、生产保证。至少 20 行。"',
     '    }',
     '  ]',
     '}',
@@ -1140,9 +1152,13 @@ export async function confirmAndSaveSkill(candidate: SkillCandidate): Promise<st
   const stagedCandidate = await ensureCandidateDraft(candidate);
   const draft = stagedCandidate.draft;
   if (!draft) throw new Error('Skill 草稿未生成');
-  const savedPath = await installConfirmedSkillDraft(resolveAutoSkillUserDir(), draft);
-  const skillDir = path.dirname(savedPath);
-  const contentWithEvidence = await fs.readFile(savedPath, 'utf8');
+  const savedPath = await installConfirmedSkillDraft(resolveAutoSkillUserDir(), draft, async (installedPath) => {
+    // Keep profile generation inside the same release lock as installation/rollback.
+    try {
+      const { generateProfilePipeline } = await import('./autoSkillProfile.js');
+      await generateProfilePipeline([{ skillName: installedName, skillDir: path.dirname(installedPath), skillContent: await fs.readFile(installedPath, 'utf8'), refresh: candidate.recommendation === 'enhance' }]);
+    } catch { /* Optional profile creation does not invalidate the installed Skill. */ }
+  });
 
   console.log(`[AutoSkill] Installed from confirmed draft: ${savedPath}`);
 
@@ -1159,16 +1175,6 @@ export async function confirmAndSaveSkill(candidate: SkillCandidate): Promise<st
       details: `模式：${candidate.detectedPattern} | 路径：${savedPath}`,
     });
   } catch { /* 不影响主流程 */ }
-
-  // 🆕 自动孵化专家：Skill写盘后生成 AgentProfile
-  try {
-    const { generateProfilePipeline } = await import("./autoSkillProfile.js");
-    await generateProfilePipeline([
-      { skillName: installedName, skillDir, skillContent: contentWithEvidence },
-    ]);
-  } catch {
-    // 专家孵化可选，Skill已就绪即可
-  }
 
   return savedPath;
 }
@@ -1190,6 +1196,7 @@ export async function stageProactiveSkillDraft(
   if (input.files?.some((file) => portableDraftPath(file.path) === 'SKILL.md')) {
     throw new Error('附加文件不能重复提供 SKILL.md');
   }
+  const updating = await fileExists(path.join(resolveAutoSkillSkillsDir(), input.name, 'SKILL.md'));
   const candidate: SkillCandidate = {
     id: `skill_draft_${createHash('sha256')
       .update(`${input.name}:${input.skillContent}:${Date.now()}`)
@@ -1203,7 +1210,8 @@ export async function stageProactiveSkillDraft(
     skillContent: input.skillContent,
     reason: input.reason,
     filePath: path.join(resolveAutoSkillSkillsDir(), input.name, 'SKILL.md'),
-    recommendation: 'create',
+    recommendation: updating ? 'enhance' : 'create',
+    ...(updating ? { targetSkillName: input.name } : {}),
     source: 'proactive',
     draftFiles: input.files ?? [],
   };
@@ -1398,10 +1406,10 @@ function generateSkillName(steps: string[]): string {
   return normalizeGeneratedSkillName(keywords.join('-') || firstStep);
 }
 
-function generateDescription(steps: string[], count: number): string {
+function generateDescription(steps: string[], _count: number): string {
   const firstStep = steps[0] || '工作';
   const lastStep = steps[steps.length - 1] || '完成';
-  return `从你的工作习惯中自动发现：${firstStep}到${lastStep}的完整流程。在过去${count}天中重复出现。当用户需要${firstStep}时使用。`;
+  return `帮你按顺序完成${firstStep}、${lastStep}等工作，并汇总结果与待确认事项。当你需要${firstStep}时使用，关键输入不足时先补充。`;
 }
 
 function formatTitle(steps: string[]): string {

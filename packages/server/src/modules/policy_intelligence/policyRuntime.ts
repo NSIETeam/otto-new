@@ -13,8 +13,8 @@ export function startPolicyRuntime(
   store: PolicyStore,
   registry?: RecurringTaskRegistry,
 ): () => void {
-  if (process.env.OTTO_POLICY_COLLECTION_ENABLED === 'false')
-    return () => undefined;
+  const collectionEnabled =
+    process.env.OTTO_POLICY_COLLECTION_ENABLED !== 'false';
   const tasks =
     registry ??
     new RecurringTaskRegistry({
@@ -25,28 +25,48 @@ export function startPolicyRuntime(
         ),
     });
   const controller = new AbortController();
-  const stop = tasks.register({
-    name: 'enterprise.policy-intelligence.collection',
+  const stopNotices = tasks.register({
+    name: 'enterprise.policy-intelligence.notifications',
     source: 'packages/server/src/modules/policy_intelligence/policyRuntime.ts',
     intervalMs: 60_000,
-    estimatedCostUsdPerRun: 1,
-    getInputVersion: () => policyCollectionSlot(new Date()),
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => String(Math.floor(Date.now() / 60_000)),
     run: async () => {
-      let accepted = false;
-      const slot = policyCollectionSlot(new Date());
-      await store.update<{ slot: string }>('collection:schedule', (current) => {
-        if (current?.slot === slot) return current;
-        accepted = true;
-        return { slot };
-      });
-      if (accepted && !controller.signal.aborted)
-        await service.collect(
-          AbortSignal.any([controller.signal, AbortSignal.timeout(600_000)]),
-        );
+      if (!controller.signal.aborted) await service.refreshNotifications();
     },
   });
+  const stop = collectionEnabled
+    ? tasks.register({
+        name: 'enterprise.policy-intelligence.collection',
+        source:
+          'packages/server/src/modules/policy_intelligence/policyRuntime.ts',
+        intervalMs: 60_000,
+        estimatedCostUsdPerRun: 1,
+        getInputVersion: () => policyCollectionSlot(new Date()),
+        run: async () => {
+          let accepted = false;
+          const slot = policyCollectionSlot(new Date());
+          await store.update<{ slot: string }>(
+            'collection:schedule',
+            (current) => {
+              if (current?.slot === slot) return current;
+              accepted = true;
+              return { slot };
+            },
+          );
+          if (accepted && !controller.signal.aborted)
+            await service.collect(
+              AbortSignal.any([
+                controller.signal,
+                AbortSignal.timeout(600_000),
+              ]),
+            );
+        },
+      })
+    : undefined;
   return () => {
     controller.abort();
     stop?.();
+    stopNotices?.();
   };
 }

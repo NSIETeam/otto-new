@@ -925,6 +925,15 @@ CREATE INDEX attachment_objects_mls_message
   ) WHERE mls_conversation_id IS NOT NULL;
 `,
   },
+  {
+    version: 15,
+    name: 'park-carpool-workflow-authority',
+    sql: `CREATE TABLE park_carpool_workflow (
+      park_id TEXT PRIMARY KEY,
+      encrypted_payload TEXT NOT NULL,
+      version BIGINT NOT NULL DEFAULT 1
+    );`,
+  },
 ];
 
 export const ENTERPRISE_POSTGRES_SCHEMA_VERSION =

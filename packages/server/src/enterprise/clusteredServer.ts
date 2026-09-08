@@ -1,3 +1,5 @@
+import { carpoolCommunicationCapabilities } from '../modules/park_carpool/parkCarpoolConfig.js';
+import { startCarpoolMaintenance } from '../modules/park_carpool/parkCarpoolRuntime.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  *
@@ -66,7 +68,7 @@ import {
 } from '../modules/model_gateway/index.js';
 import { loadEnterpriseModelCatalog } from '../modelCatalog.js';
 import { createClusteredAttachmentMaintenance } from './clusteredAttachmentMaintenance.js';
-import { handleClusteredBusinessRoute } from './clusteredBusinessRoutes.js';
+import { createClusteredCarpoolService, handleClusteredBusinessRoute } from './clusteredBusinessRoutes.js';
 import { EnterprisePolicyService } from '../modules/policy_intelligence/policyService.js';
 import { loadPolicySources } from '../modules/policy_intelligence/policySources.js';
 import { createPolicyModelFromEnv } from '../modules/policy_intelligence/policyModel.js';
@@ -887,6 +889,7 @@ export function createClusteredEnterpriseServer(
             'enterprise_skill_market_v1',
             'enterprise_park_services_v1',
             'park_carpool_v1',
+            ...carpoolCommunicationCapabilities(),
             'enterprise_ticketing_v1',
             'commercial_control_v1',
             'managed_model_gateway_v1',
@@ -2977,8 +2980,10 @@ export async function startClusteredEnterpriseServer(
         );
       },
     });
+    const stopCarpoolMaintenance=startCarpoolMaintenance({run:createClusteredCarpoolService(infrastructure.repository).maintain,cache:infrastructure.cache,onError:error=>console.error(`[Otto Enterprise] carpool maintenance failed: ${safeRouteError(error)}`)});
     created.server.once('close', () => {
       maintenance.close();
+      stopCarpoolMaintenance();
       mlsMaintenance.close();
       void infrastructure.close();
     });

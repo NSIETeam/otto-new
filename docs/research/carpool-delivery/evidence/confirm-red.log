@@ -1,0 +1,35 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolService.test.ts (10 tests | 1 failed) 28ms
+   ✓ createParkCarpoolService > upserts one daily intent and plans the route on the server 18ms
+   ✓ createParkCarpoolService > bounds a provider route before persistence and matching 1ms
+   ✓ createParkCarpoolService > fails closed for an unknown, disabled, or unbound principal 1ms
+   ✓ createParkCarpoolService > returns multiple privacy-safe matches and only lets the owner stop an intent 2ms
+   ✓ createParkCarpoolService > treats a stale active record as expired and never matches it 0ms
+   ✓ createParkCarpoolService > fails closed when a stored active intent has an invalid expiry 0ms
+   ✓ publish race and date regressions > rejects a departure outside the selected Shanghai date before planning 0ms
+   ✓ publish race and date regressions > revalidates identity after planning 0ms
+   ✓ publish race and date regressions > does not revive an intent stopped during planning 1ms
+   × only an explicit confirmation renews freshness and cannot restart stopped intents 4ms
+     → service.confirmIntent is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolService.test.ts > only an explicit confirmation renews freshness and cannot restart stopped intents
+TypeError: service.confirmIntent is not a function
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolService.test.ts:234:25
+    232|   await service.refreshMatches('self');
+    233|   expect((await store.getIntent('self'))?.lastConfirmedAt).toBe('2026-…
+    234|   expect((await service.confirmIntent('self', saved.id)).lastConfirmed…
+       |                         ^
+    235|   await service.stopIntent('self', saved.id);
+    236|   await expect(service.confirmIntent('self', saved.id)).rejects.toThro…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 passed (10)
+   Start at  09:07:00
+   Duration  290ms (transform 59ms, setup 0ms, collect 59ms, tests 28ms, environment 0ms, prepare 45ms)

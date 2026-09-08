@@ -1,0 +1,32 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new
+
+(node:77134) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts (5 tests | 1 failed) 17ms
+   ✓ park carpool SQLite store > encrypts exact locations/routes, upserts one daily intent, and decrypts for matching 10ms
+   ✓ park carpool SQLite store > lists only active, unexpired park/date records and enforces stop ownership 2ms
+   ✓ atomic carpool versions > rejects stale writes after stop, including identical clock timestamps 1ms
+   ✓ atomic carpool versions > allows exactly one concurrent creation and one update per version 1ms
+   × paginates before decoding and isolates a corrupt candidate 2ms
+     → store.listIntentPage is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts > paginates before decoding and isolates a corrupt candidate
+TypeError: store.listIntentPage is not a function
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts:160:31
+    158|     await store.saveIntent(intent({ id: 'intent-b', accountId: 'accoun…
+    159|     database.prepare("UPDATE park_carpool_intents SET sensitive_auth_t…
+    160|     const first = await store.listIntentPage!('park-a', '2026-09-02', …
+       |                               ^
+    161|     expect(first.intents).toEqual([]);
+    162|     expect(first.failedCount).toBe(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 passed (5)
+   Start at  09:01:00
+   Duration  2.34s (transform 1.03s, setup 0ms, collect 2.19s, tests 17ms, environment 0ms, prepare 31ms)

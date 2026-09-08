@@ -153,7 +153,7 @@ export function assertOttoNativeBinaryFormat(filePath, target) {
 export function probeOttoNativeBinary(filePath) {
   const result = spawnSync(filePath, [], {
     encoding: 'utf8',
-    input: `${JSON.stringify({ id: 1, method: 'ping' })}\n`,
+    input: [{id:1,method:'ping'},{id:2,method:'park_mls.inspect',params:{}}].map(request=>JSON.stringify(request)).join('\n')+'\n',
     timeout: 20_000,
     windowsHide: true,
   });
@@ -181,6 +181,8 @@ export function probeOttoNativeBinary(filePath) {
   ) {
     fail(`native ping probe returned an unexpected response: ${responseLine}`);
   }
+  const parkResponse = String(result.stdout).split(/\r?\n/u).filter(line=>line.trim()).map(line=>{try{return JSON.parse(line);}catch{return null;}}).find(response=>response?.id===2);
+  if (parkResponse?.error || !Array.isArray(parkResponse?.result?.generations)) fail('native park MLS probe failed: staged runtime lacks the required carpool protocol');
 }
 
 export function verifyStagedOttoNativeAsset({

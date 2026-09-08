@@ -11,6 +11,7 @@
  * 是发布型内容，仍由园区服务模块展示，不伪装成一对一客服会话。
  */
 
+import { CarpoolRequestCenter } from './CarpoolRequestCenter.js';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   EnterpriseAccount,
@@ -171,6 +172,7 @@ function FederationVerificationQr({ payload }: { payload: string }): React.JSX.E
 }
 
 export interface InboxPageProps {
+  onOpenCarpool?: () => void;
   enterpriseAccount?: EnterpriseAccount;
   /** Commercial Federation entitlement. Undefined is deliberately fail-closed. */
   effectiveDirectMessages?: boolean;
@@ -228,6 +230,7 @@ type UnifiedInboxConversation =
     };
 
 export function InboxPage({
+  onOpenCarpool,
   enterpriseAccount,
   effectiveDirectMessages = false,
   baselineDirectMessagesAvailable,
@@ -1037,6 +1040,8 @@ export function InboxPage({
         </div>
         <button type="button" onClick={onBack}>返回对话</button>
       </header>
+
+      {effectiveParkService ? <CarpoolRequestCenter onOpenCarpool={onOpenCarpool} /> : null}
 
       <div className="otto-inbox-page__filters" role="tablist" aria-label="消息过滤">
         {([

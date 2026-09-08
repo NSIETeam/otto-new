@@ -4,11 +4,22 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const carpoolDb = vi.hoisted(() => ({
+  executeSignedParkCarpoolTransport: vi.fn(),
+  executeParkCarpoolTransport: vi.fn(),
+  maintainParkCarpool: vi.fn(),
+  deleteParkCarpoolData: vi.fn(),
+  getParkCarpoolRoutePreview: vi.fn(),
+  reverseParkCarpoolPlace: vi.fn(),
+  getParkCarpoolStaticMap: vi.fn(),
+  getParkCarpoolWorkflow: vi.fn(),
+  executeParkCarpoolWorkflow: vi.fn(),
+
   getParkCarpoolState: vi.fn(),
   refreshParkCarpoolMatches: vi.fn(),
   searchParkCarpoolPlaces: vi.fn(),
   publishParkCarpoolIntent: vi.fn(),
   stopParkCarpoolIntent: vi.fn(),
+  confirmParkCarpoolIntent: vi.fn(),
 }));
 
 vi.mock('./db.js', () => carpoolDb);
@@ -52,7 +63,7 @@ describe('park carpool enterprise routes', () => {
     carpoolDb.getParkCarpoolState.mockResolvedValueOnce({ capability: 'park_carpool_v1' });
     const state = request({ path: '/enterprise/park-carpool' });
     await state.invoke();
-    expect(carpoolDb.getParkCarpoolState).toHaveBeenCalledWith('account-a');
+    expect(carpoolDb.getParkCarpoolState).toHaveBeenCalledWith('account-a', {cursor:undefined,filter:undefined});
     expect(state.responses[0]).toMatchObject({ status: 200 });
 
     carpoolDb.publishParkCarpoolIntent.mockResolvedValueOnce({ id: 'intent-a' });

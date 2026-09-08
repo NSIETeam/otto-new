@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new-carpool
+
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts (1 test) 5ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  11:46:00
+   Duration  625ms (transform 83ms, setup 0ms, collect 82ms, tests 5ms, environment 0ms, prepare 55ms)

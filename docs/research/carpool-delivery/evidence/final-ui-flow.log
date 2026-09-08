@@ -1,0 +1,12 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-validation-7f3a9c/packages/desktop
+
+(node:90590) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/renderer/components/CarpoolFlow.integration.test.tsx (1 test) 6403ms
+   ✓ real UI publishes, previews, requests, chats, groups, admits and leaves through SQLite and native MLS  6402ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  12:12:16
+   Duration  10.54s (transform 2.01s, setup 68ms, collect 3.59s, tests 6.40s, environment 267ms, prepare 49ms)

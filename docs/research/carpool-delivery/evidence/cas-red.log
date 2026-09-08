@@ -1,0 +1,106 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new
+
+(node:59371) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts (4 tests | 2 failed) 17ms
+   ✓ park carpool SQLite store > encrypts exact locations/routes, upserts one daily intent, and decrypts for matching 8ms
+   ✓ park carpool SQLite store > lists only active, unexpired park/date records and enforces stop ownership 1ms
+   × atomic carpool versions > rejects stale writes after stop, including identical clock timestamps 6ms
+     → promise resolved "{ id: 'intent-a', …(17) }" instead of rejecting
+   × atomic carpool versions > allows exactly one concurrent creation and one update per version 1ms
+     → expected [ { status: 'fulfilled', …(1) }, …(1) ] to have a length of 1 but got 2
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts > atomic carpool versions > rejects stale writes after stop, including identical clock timestamps
+AssertionError: promise resolved "{ id: 'intent-a', …(17) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "accountId": "account-a",
++   "createdAt": "2026-09-02T09:00:00.000Z",
++   "departureTime": "2026-09-02T10:30:00.000Z",
++   "destination": {
++     "coordinate": {
++       "latitude": 40.17,
++       "longitude": 116.31,
++     },
++     "label": "回龙观某小区 12 号楼",
++   },
++   "displayName": "张某",
++   "expiresAt": "2026-09-02T11:00:00.000Z",
++   "flexibleMinutes": 30,
++   "id": "intent-a",
++   "lastConfirmedAt": "2026-09-02T09:00:00.000Z",
++   "organizationId": "org-a",
++   "organizationName": "甲企业",
++   "origin": {
++     "coordinate": {
++       "latitude": 40.22,
++       "longitude": 116.23,
++     },
++     "label": "宏创园区南门",
++   },
++   "parkId": "park-a",
++   "route": {
++     "distanceMeters": 12000,
++     "durationSeconds": 1800,
++     "polyline": [
++       {
++         "latitude": 40.22,
++         "longitude": 116.23,
++       },
++       {
++         "latitude": 40.17,
++         "longitude": 116.31,
++       },
++     ],
++     "provider": "amap",
++   },
++   "status": "active",
++   "travelDate": "2026-09-02",
++   "travelOptions": [
++     "rider",
++   ],
++   "updatedAt": "2026-09-02T09:00:00.000Z",
+  }
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts:137:88
+    135|       const saved = await store.saveIntent(intent(), null);
+    136|       await store.stopIntent(saved.accountId, saved.id, saved.updatedA…
+    137|       await expect(store.saveIntent({ ...saved, status: 'active' }, sa…
+       |                                                                                        ^
+    138|       expect((await store.getIntent(saved.accountId))?.status).toBe('p…
+    139|     } finally { database.close(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts > atomic carpool versions > allows exactly one concurrent creation and one update per version
+AssertionError: expected [ { status: 'fulfilled', …(1) }, …(1) ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts:145:61
+    143|     try {
+    144|       const created = await Promise.allSettled([store.saveIntent(inten…
+    145|       expect(created.filter(r => r.status === 'fulfilled')).toHaveLeng…
+       |                                                             ^
+    146|       const current = (await store.getIntent('account-a'))!;
+    147|       const changed = await Promise.allSettled([store.saveIntent({ ...…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  08:56:23
+   Duration  3.14s (transform 1.28s, setup 0ms, collect 2.96s, tests 17ms, environment 0ms, prepare 38ms)

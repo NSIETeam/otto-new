@@ -1855,3 +1855,77 @@ export async function closeSharedProcess(): Promise<void> {
     sharedProcess = null;
   }
 }
+
+/** Independent park MLS context; never relaxes Enterprise direct-session scope. */
+export interface ParkMlsAuthority {
+  park_id: string;
+  conversation_id: string;
+  generation: number;
+  members: string[];
+}
+export interface ParkMlsPackage { device_scope: string; reference: string; key_package: string; }
+export interface ParkMlsInvitation { group_id: string; welcome: string; }
+export interface ParkMlsEncrypted { group_id: string; epoch: number; ciphertext: string; }
+export interface ParkMlsHistoryMessage { event_id: string; plaintext: string; sender: string; ciphertext: string; group_id: string; epoch: number; }
+export class ParkMlsNativeKernel {
+  readonly deviceScope: string;
+  private readonly native: NativeProcess;
+  private initialized = false;
+  private failed = false;
+  private queue: Promise<unknown> = Promise.resolve();
+  constructor(scope: MlsDeviceScope, private readonly persistence: MlsStatePersistence, binaryPath?: string) {
+    this.deviceScope = mlsDeviceScope(scope);
+    this.native = new NativeProcess(binaryPath);
+  }
+  private async initialize(): Promise<void> {
+    if (this.failed) throw new Error('园区加密状态已锁定，请重新登录后恢复');
+    if (this.initialized) return;
+    let stateKey: Uint8Array | undefined;
+    try {
+      const saved = await this.persistence.load();
+      stateKey = saved ? new Uint8Array(saved.stateKey) : new Uint8Array(randomBytes(32));
+      saved?.stateKey.fill(0);
+      if (stateKey.length !== 32) throw new Error('园区加密存储密钥无效');
+      await this.native.start();
+      await this.native.call('park_mls.initialize', { device_scope: this.deviceScope, state_key: Buffer.from(stateKey).toString('base64'), encrypted_state: saved?.encryptedState });
+      if (!saved) await this.persistence.create(stateKey, await this.snapshot());
+      this.initialized = true;
+    } catch (error) { this.failed = true; await this.native.stop().catch(() => undefined); throw error; }
+    finally { stateKey?.fill(0); }
+  }
+  private async snapshot(): Promise<string> {
+    const value = await this.native.call('park_mls.export', {}) as { encrypted_state?: unknown };
+    if (typeof value.encrypted_state !== 'string' || !value.encrypted_state || value.encrypted_state.length > 96 * 1024 * 1024) throw new Error('园区加密快照无效');
+    return value.encrypted_state;
+  }
+  private run<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    const operation = this.queue.then(async () => {
+      await this.initialize();
+      let result: T | undefined;
+      let callFailure: {error:unknown} | undefined;
+      try { result = await this.native.call(method, params) as T; }
+      catch (error) { callFailure = {error}; }
+      try { await this.persistence.save(await this.snapshot()); }
+      catch (error) { this.failed = true; throw new Error('园区加密状态保存失败，已停止收发', { cause: error }); }
+      if (callFailure) throw callFailure.error;
+      return result as T;
+    });
+    this.queue = operation.catch(() => undefined);
+    return operation;
+  }
+  createKeyPackage(): Promise<MlsKeyPackage> { return this.run('park_mls.key_package'); }
+  listKeyPackages(): Promise<Array<MlsKeyPackage & {publishable:boolean}>> { return this.run('park_mls.key_packages'); }
+  async retainConversations(conversationIds: string[]): Promise<void> { await this.run('park_mls.retain_conversations', { conversation_ids: conversationIds }); }
+  async retireKeyPackages(references: string[]): Promise<void> { await this.run('park_mls.retire_packages', { references }); }
+  async generations(): Promise<Array<{ authority: ParkMlsAuthority; group_id: string; retired: boolean }>> {
+    return (await this.run<{ generations: Array<{ authority: ParkMlsAuthority; group_id: string; retired: boolean }> }>('park_mls.inspect')).generations;
+  }
+  create(authority: ParkMlsAuthority, packages: ParkMlsPackage[]): Promise<ParkMlsInvitation> { return this.run('park_mls.create', { authority, packages }); }
+  async join(authority: ParkMlsAuthority, reference: string, groupId: string, welcome: string): Promise<void> { await this.run('park_mls.join', { authority, reference, group_id: groupId, welcome }); }
+  encrypt(authority: ParkMlsAuthority, eventId: string, plaintext: string): Promise<ParkMlsEncrypted> { return this.run('park_mls.encrypt', { authority, event_id: eventId, plaintext }); }
+  async decrypt(authority: ParkMlsAuthority, eventId: string, sender: string, ciphertext: string): Promise<string> {
+    return (await this.run<{ plaintext: string }>('park_mls.decrypt', { authority, event_id: eventId, sender, ciphertext })).plaintext;
+  }
+  async history(authority: ParkMlsAuthority): Promise<ParkMlsHistoryMessage[]> { return (await this.run<{ messages: ParkMlsHistoryMessage[] }>('park_mls.history', { authority })).messages; }
+  async close(): Promise<void> { await this.queue; await this.native.stop(); this.initialized = false; }
+}

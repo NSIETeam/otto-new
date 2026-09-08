@@ -1,3 +1,5 @@
+import { carpoolCommunicationCapabilities } from '../modules/park_carpool/parkCarpoolConfig.js';
+import { startCarpoolMaintenance } from '../modules/park_carpool/parkCarpoolRuntime.js';
 /**
  * @license Copyright 2026 Felix SPDX-License-Identifier: Apache-2.0
  *
@@ -245,6 +247,7 @@ export const ENTERPRISE_CAPABILITIES = [
   'park_tenant_profiles_v1',
   'park_service_statistics_v1',
   'park_carpool_v1',
+  ...carpoolCommunicationCapabilities(),
   'private_deployment_v1',
   'private_deployment_bootstrap_v1',
   'license_enforcement_v1',
@@ -1135,6 +1138,7 @@ export function startEnterpriseServer(
   };
   let stopTicketNotificationRuntime: () => void = () => undefined;
   let stopPolicyIntelligenceRuntime: () => void = () => undefined;
+  let stopCarpoolRuntime: () => void = () => undefined;
   try {
     stopTicketNotificationRuntime = canaryMode
       ? () => undefined
@@ -1146,6 +1150,7 @@ export function startEnterpriseServer(
             console.error('[Otto Enterprise] 工单通知升级任务失败', error),
         });
     stopPolicyIntelligenceRuntime = canaryMode ? () => undefined : db.startPolicyIntelligenceRuntime(taskRegistry);
+    stopCarpoolRuntime = canaryMode ? () => undefined : startCarpoolMaintenance({run:db.maintainParkCarpool,taskRegistry,onError:error=>console.error('[Otto Enterprise] carpool maintenance failed',error)});
   } catch (error) {
     clearInitialMlsCleanup();
     stopMlsCleanup();
@@ -1155,6 +1160,7 @@ export function startEnterpriseServer(
     stopDataProtectionRuntime();
     stopTicketNotificationRuntime();
     stopPolicyIntelligenceRuntime();
+    stopCarpoolRuntime();
     server.close();
     throw error;
   }
@@ -1166,6 +1172,7 @@ export function startEnterpriseServer(
     if (runtimesCleaned) return;
     runtimesCleaned = true;
     stopPolicyIntelligenceRuntime();
+    stopCarpoolRuntime();
     stopMlsCleanup();
     stopPrivateDeploymentRuntime();
     stopPrivateDeploymentBootstrapRuntime();
@@ -1199,6 +1206,7 @@ export function startEnterpriseServer(
     if (gracefulClosePromise) return gracefulClosePromise;
     closeInitiated = true;
     stopPolicyIntelligenceRuntime();
+    stopCarpoolRuntime();
     clearInitialMlsCleanup();
     // Stop accepting requests and stop scheduling resident work at the same
     // time. Keep the database and runtime resources alive until every task has
@@ -1233,6 +1241,7 @@ export function startEnterpriseServer(
   server.once('close', () => {
     if (closeInitiated) return;
     stopPolicyIntelligenceRuntime();
+    stopCarpoolRuntime();
     // Defensive path for an unexpected transport close that did not enter the
     // wrapped close method. There is no caller to await, but resident work is
     // still stopped, drained, and cleaned rather than orphaned.

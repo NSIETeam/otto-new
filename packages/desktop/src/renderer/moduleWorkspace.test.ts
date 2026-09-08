@@ -120,7 +120,7 @@ describe('module workspace parsing and normalization', () => {
     expect(parseModuleWorkspace(JSON.stringify({ version: 99 }), enterpriseCapabilities)).toEqual(defaults);
   });
 
-  it('restores available park entries into the complete park-services group', () => {
+  it('migrates ordinary park services without rearranging existing modules', () => {
     const parsed = parseModuleWorkspace(JSON.stringify({
       version: 1,
       groups: [
@@ -132,15 +132,7 @@ describe('module workspace parsing and normalization', () => {
       ],
     }), enterpriseCapabilities);
 
-    expect(parsed.groups[0].moduleIds).toEqual([
-      'park-announcement',
-      'park-satisfaction',
-      'park-renovation',
-      'park-parking',
-      'park-network-phone',
-      'park-meeting-room',
-      'park-repair',
-    ]);
+    expect(parsed.groups[0].moduleIds).toEqual(['park-announcement', 'park-repair', 'park-meeting-room', 'park-carpool']);
   });
 
   it('migrates the official daily-office group once to add policy intelligence', () => {
@@ -209,6 +201,23 @@ describe('module workspace parsing and normalization', () => {
     }), enterpriseCapabilities);
     expect(afterRemoval.groups[0].moduleIds).not.toContain('park-carpool');
     expect(afterRemoval.groups[0].package?.version).toBe('1.2.0');
+  });
+
+  it('adds carpool once to custom park groups while preserving other groups and manual removal', () => {
+    const original = {version: 1, groups: [
+      {id: 'custom-park', name: '园区服务', rows: 3, moduleIds: ['park-repair', 'park-announcement']},
+      {id: 'custom-other', name: '其他', rows: 2, moduleIds: ['park-meeting-room', 'agent-ppt']},
+    ]};
+    const migrated = parseModuleWorkspace(JSON.stringify(original), enterpriseCapabilities);
+    expect(migrated.groups[0].moduleIds).toEqual(['park-repair', 'park-announcement', 'park-carpool']);
+    expect(migrated.groups[1]).toMatchObject(original.groups[1]);
+    const removed = {...migrated, groups: migrated.groups.map(g => ({...g, moduleIds: g.moduleIds.filter(id => id !== 'park-carpool')}))};
+    expect(parseModuleWorkspace(JSON.stringify(removed), enterpriseCapabilities).groups.flatMap(g=>g.moduleIds)).not.toContain('park-carpool');
+    const unavailable = {...enterpriseCapabilities, availableModuleIds: enterpriseCapabilities.availableModuleIds.filter(id=>id !== 'park-carpool')};
+    const delayed = parseModuleWorkspace(JSON.stringify(original), unavailable);
+    expect(parseModuleWorkspace(JSON.stringify(delayed), enterpriseCapabilities).groups[0].moduleIds).toContain('park-carpool');
+    const moved = {...original, groups: [...original.groups, {id:'mine',name:'我的',rows:2,moduleIds:['park-carpool']}]};
+    expect(parseModuleWorkspace(JSON.stringify(moved), enterpriseCapabilities).groups[2].moduleIds).toContain('park-carpool');
   });
 
   it('deduplicates module IDs globally, repairs group IDs, clamps rows, and keeps unknown modules', () => {

@@ -205,6 +205,8 @@
         "/Contents/Resources/otto-native/"
       ],
       "extendInfo": {
+        "NSLocationWhenInUseUsageDescription": "仅当你点击使用当前位置时，Otto 使用位置帮助选择本次同行出发点。",
+        "NSLocationUsageDescription": "仅当你点击使用当前位置时，Otto 使用位置帮助选择本次同行出发点。",
         "NSMicrophoneUsageDescription": "Otto 使用麦克风将语音转换为聊天输入文字。"
       },
       "extraResources": [

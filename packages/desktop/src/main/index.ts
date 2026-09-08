@@ -1,3 +1,4 @@
+import { ParkCarpoolChat } from './park-carpool-chat.js';
 /**
  * @license
  * Copyright 2025 Otto
@@ -852,11 +853,23 @@ const IPC = {
   enterpriseAtoaInbox: 'otto:enterprise-atoa-inbox',
   enterpriseParkServicePush: 'otto:enterprise-park-service-push',
   enterpriseParkView: 'otto:enterprise-park-view',
+  enterpriseParkCarpoolChanged: 'otto:enterprise-park-carpool-changed',
+  enterpriseParkCarpoolDeleteData: 'otto:enterprise-park-carpool-delete-data',
+  enterpriseParkCarpoolRoutePreview: 'otto:enterprise-park-carpool-route-preview',
+  enterpriseParkCarpoolReverse: 'otto:enterprise-park-carpool-reverse',
+  enterpriseParkCarpoolMap: 'otto:enterprise-park-carpool-map',
+  enterpriseParkCarpoolLocate: 'otto:enterprise-park-carpool-locate',
+  enterpriseParkCarpoolChatRecover: 'otto:enterprise-park-carpool-chat-recover',
+  enterpriseParkCarpoolChatRead: 'otto:enterprise-park-carpool-chat-read',
+  enterpriseParkCarpoolChatSend: 'otto:enterprise-park-carpool-chat-send',
+  enterpriseParkCarpoolWorkflowGet: 'otto:enterprise-park-carpool-workflow-get',
+  enterpriseParkCarpoolWorkflowExecute: 'otto:enterprise-park-carpool-workflow-execute',
   enterpriseParkCarpoolGet: 'otto:enterprise-park-carpool-get',
   enterpriseParkCarpoolSearchPlaces: 'otto:enterprise-park-carpool-search-places',
   enterpriseParkCarpoolPublish: 'otto:enterprise-park-carpool-publish',
   enterpriseParkCarpoolRefresh: 'otto:enterprise-park-carpool-refresh',
   enterpriseParkCarpoolStop: 'otto:enterprise-park-carpool-stop',
+  enterpriseParkCarpoolConfirm: 'otto:enterprise-park-carpool-confirm',
   enterpriseParkRegister: 'otto:enterprise-park-register',
   enterpriseParkJoin: 'otto:enterprise-park-join',
   enterpriseParkProfileUpdate: 'otto:enterprise-park-profile-update',
@@ -988,11 +1001,13 @@ async function synchronizeAuthenticatedEnterpriseAccount(
     serverManager.setAuthenticatedEnterpriseAccount(next),
   );
   if (!account) {
+    await parkCarpoolChat.close();
     await enterpriseMlsOutboxRetry.stop();
     await enterpriseMlsInboundPoll.stop();
     await enterpriseMls.close();
     return;
   }
+  await parkCarpoolChat.close();
   let e2eeDevice: Awaited<
     ReturnType<EnterpriseClient['ensureE2eeDeviceReady']>
   > | null = null;
@@ -1005,6 +1020,13 @@ async function synchronizeAuthenticatedEnterpriseAccount(
     console.warn('[otto-desktop] E2EE device registration failed:', error);
   }
   if (e2eeDevice) {
+    try {
+      await parkCarpoolChat.activate({ serverUrl: enterpriseClient.snapshot().serverUrl, organizationId: account.organizationId, accountId: account.id, deviceId: e2eeDevice.deviceId, approvalState: e2eeDevice.approvalState });
+      parkCarpoolChat.start();
+    } catch (error) {
+      await parkCarpoolChat.close();
+      console.warn('[otto-desktop] Park carpool encryption unavailable:', error);
+    }
     if (enterpriseClient.supportsMlsTransportFoundation()) {
       await enterpriseMlsOutboxRetry.stop();
       await enterpriseMlsInboundPoll.stop();
@@ -1041,6 +1063,7 @@ async function synchronizeAuthenticatedEnterpriseAccount(
     await enterpriseMlsInboundPoll.stop();
     await enterpriseMls.close();
   }
+  parkCarpoolChat.start();
   const identity = accountDataSyncIdentity(account);
   if (!identity) return;
   try {
@@ -1094,7 +1117,10 @@ const enterpriseE2eeVault = new EnterpriseE2eeKeyVault({
 const enterpriseE2ee = new EnterpriseE2eeCrypto(enterpriseE2eeVault);
 
 function packagedOpenMlsBinaryPath(): string | undefined {
-  if (!app.isPackaged) return undefined;
+  if (!app.isPackaged) {
+    const built=path.join(path.dirname(require.resolve('@otto/native')),'..','target','release',process.platform==='win32'?'otto-native.exe':'otto-native');
+    return fs.existsSync(built)?built:undefined;
+  }
   return path.join(
     process.resourcesPath,
     'otto-native',
@@ -1143,6 +1169,21 @@ const enterpriseClient = new EnterpriseClient(
   },
   enterpriseE2ee,
 );
+let carpoolLocationGrantUntil = 0;
+const parkCarpoolChat = new ParkCarpoolChat({
+  onWorkflow(workflow){
+    if(enterpriseClient.authenticatedAccountSnapshot()?.id!==workflow.accountId)return;
+    const unread=workflow.notices.filter(notice=>!notice.readAt);const latest=unread.at(-1);
+    if(latest)notificationService.show({sessionId:'enterprise:carpool',messageId:`carpool:${latest.id}`,source:'enterprise',title:'拼车助手',preview:latest.text,persistent:true});
+    else notificationService.markRead('enterprise:carpool');
+    mainWindow?.webContents.send(IPC.enterpriseParkCarpoolChanged,{accountId:workflow.accountId,unreadCount:unread.length});
+  },
+  client: enterpriseClient, stateDirectory: path.join(app.getPath('userData'), 'park-carpool-mls'), binaryPath: packagedOpenMlsBinaryPath(),
+  secureStorage: { assertAvailable: assertEnterpriseE2eeSecureStorage,
+    protect(value) { assertEnterpriseE2eeSecureStorage(); return safeStorage.encryptString(value).toString('base64'); },
+    unprotect(value) { assertEnterpriseE2eeSecureStorage(); return safeStorage.decryptString(Buffer.from(value, 'base64')); },
+  },
+});
 const enterpriseMlsCoordinator = new EnterpriseMlsSessionCoordinator(
   enterpriseMls,
   enterpriseClient,
@@ -2917,14 +2958,20 @@ function applyCsp(): void {
     });
   });
 
-  // 仅放行本地 renderer 的音频录制；摄像头/地理位置等继续拒绝。
+  // Location is a short, explicit main-window grant. Other surfaces stay denied.
+  session.defaultSession.setPermissionCheckHandler((wc, permission, _origin, details) => {
+    if(permission==='geolocation')return wc===mainWindow?.webContents&&details.isMainFrame&&Date.now()<carpoolLocationGrantUntil;
+    return wc===mainWindow?.webContents&&permission==='media'&&details.mediaType!=='video';
+  });
   session.defaultSession.setPermissionRequestHandler(
     (wc, perm, cb, details) => {
       const trusted = wc === mainWindow?.webContents;
       const mediaTypes = 'mediaTypes' in details ? details.mediaTypes : [];
       const wantsAudio = perm === 'media' && mediaTypes?.includes('audio');
       const wantsVideo = perm === 'media' && mediaTypes?.includes('video');
-      cb(Boolean(trusted && wantsAudio && !wantsVideo));
+      const location = trusted && perm === 'geolocation' && Date.now() < carpoolLocationGrantUntil && details.isMainFrame;
+      if(location)carpoolLocationGrantUntil=0;
+      cb(Boolean(location || (trusted && wantsAudio && !wantsVideo)));
     },
   );
 }
@@ -4300,6 +4347,41 @@ function registerIpc(): void {
     loadEnterpriseSession();
     return enterpriseClient.getParkView();
   });
+  ipcMain.handle(IPC.enterpriseParkCarpoolLocate, async (event) => {
+    if(event.sender!==mainWindow?.webContents||event.senderFrame!==mainWindow.webContents.mainFrame)throw new Error('仅主窗口允许请求定位');
+    loadEnterpriseSession();await enterpriseClient.getParkCarpoolWorkflow();carpoolLocationGrantUntil=Date.now()+15_000;
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolDeleteData, async () => {
+    loadEnterpriseSession();await enterpriseClient.deleteParkCarpoolData();
+    try{await parkCarpoolChat.clearLocalData();}catch{throw new Error('服务器同行数据已删除，但本机密钥清理或重建失败，请重新登录后重试清理');}
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolRoutePreview, async (_event, intentId:string, groupId?:string) => {loadEnterpriseSession();return enterpriseClient.getParkCarpoolRoutePreview(intentId,groupId);});
+  ipcMain.handle(IPC.enterpriseParkCarpoolReverse, async (_event, coordinate: {longitude:number;latitude:number}, system: 'gps'|'autonavi') => {loadEnterpriseSession();return enterpriseClient.reverseParkCarpoolPlace(coordinate,system);});
+  ipcMain.handle(IPC.enterpriseParkCarpoolMap, async (_event, coordinate: {longitude:number;latitude:number}, zoom: number) => {loadEnterpriseSession();return enterpriseClient.getParkCarpoolMap(coordinate,zoom);});
+  ipcMain.handle(IPC.enterpriseParkCarpoolChatRecover, async (_event, conversationId: string, generation: number) => {
+    loadEnterpriseSession();
+    if (typeof conversationId !== 'string' || !Number.isSafeInteger(generation)) throw new Error('同行会话无效');
+    return parkCarpoolChat.recover(conversationId, generation);
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolChatRead, async (_event, conversationId: string) => {
+    loadEnterpriseSession();
+    if (typeof conversationId !== 'string') throw new Error('同行会话无效');
+    return parkCarpoolChat.read(conversationId);
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolChatSend, async (_event, conversationId: string, text: string, eventId: string) => {
+    loadEnterpriseSession();
+    if (typeof conversationId !== 'string' || typeof text !== 'string' || typeof eventId !== 'string') throw new Error('同行消息无效');
+    return parkCarpoolChat.send(conversationId, text, eventId);
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolWorkflowGet, async () => {
+    loadEnterpriseSession();
+    return enterpriseClient.getParkCarpoolWorkflow();
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolWorkflowExecute, async (_event, command: unknown) => {
+    loadEnterpriseSession();
+    if (!command || typeof command !== 'object' || typeof (command as {type?: unknown}).type !== 'string') throw new Error('同行操作无效');
+    return enterpriseClient.executeParkCarpoolWorkflow(command as Parameters<EnterpriseClient['executeParkCarpoolWorkflow']>[0]);
+  });
   ipcMain.handle(IPC.enterpriseParkCarpoolGet, async () => {
     loadEnterpriseSession();
     return enterpriseClient.getParkCarpoolState();
@@ -4336,9 +4418,10 @@ function registerIpc(): void {
       );
     },
   );
-  ipcMain.handle(IPC.enterpriseParkCarpoolRefresh, async () => {
+  ipcMain.handle(IPC.enterpriseParkCarpoolRefresh, async (_event,query:unknown) => {
     loadEnterpriseSession();
-    return enterpriseClient.refreshParkCarpoolMatches();
+    if(query!==undefined&&(typeof query!=='object'||query===null||Array.isArray(query)))throw new Error('同行分页参数无效');
+    return enterpriseClient.refreshParkCarpoolMatches(query as {cursor?:string;filter?:string}|undefined);
   });
   ipcMain.handle(IPC.enterpriseParkCarpoolStop, async (_event, intentId: unknown) => {
     loadEnterpriseSession();
@@ -4346,6 +4429,13 @@ function registerIpc(): void {
       throw new Error('同行意向编号不正确');
     }
     return enterpriseClient.stopParkCarpoolIntent(intentId);
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolConfirm, async (_event, intentId: unknown) => {
+    loadEnterpriseSession();
+    if (typeof intentId !== 'string' || !intentId.trim()) {
+      throw new Error('同行意向编号不正确');
+    }
+    return enterpriseClient.confirmParkCarpoolIntent(intentId);
   });
   ipcMain.handle(IPC.enterpriseParkRegister, async (_event, input: unknown) => {
     loadEnterpriseSession();

@@ -1235,6 +1235,7 @@ const parkCarpoolStore = createParkCarpoolSqliteStore({
       displayName: account.name,
       parkId: park?.status === 'active' ? park.id : null,
       active: account.status === 'active' && organization?.status === 'active',
+      parkAdmin: Boolean(account.isAdmin && park?.adminOrganizationId === account.organizationId),
       parkServiceEnabled:
         getOrganizationFeatures(account.organizationId).park_service,
     };
@@ -1259,11 +1260,21 @@ const parkCarpoolService = createParkCarpoolService({
 });
 
 export const {
+  executeSignedTransport: executeSignedParkCarpoolTransport,
+  executeTransport: executeParkCarpoolTransport,
+  maintain: maintainParkCarpool,
+  deleteData: deleteParkCarpoolData,
+  routePreview: getParkCarpoolRoutePreview,
+  reversePlace: reverseParkCarpoolPlace,
+  staticMap: getParkCarpoolStaticMap,
+  getWorkflow: getParkCarpoolWorkflow,
+  executeWorkflow: executeParkCarpoolWorkflow,
   getState: getParkCarpoolState,
   searchPlaces: searchParkCarpoolPlaces,
   publishIntent: publishParkCarpoolIntent,
   stopIntent: stopParkCarpoolIntent,
   refreshMatches: refreshParkCarpoolMatches,
+  confirmIntent: confirmParkCarpoolIntent,
 } = parkCarpoolService;
 
 export {

@@ -821,3 +821,12 @@ describe('enterprise private-chat E2EE', () => {
     expect(files).not.toContain(device.identitySigningPublicKey);
   });
 });
+
+it('signs carpool commands with the approved identity and binds account, time and payload',()=>{
+ const endpoint=createEndpoint('carpool-device');const device=endpoint.crypto.localDevice('server','a');
+ const command={type:'state',deviceId:device.deviceId,conversationId:'carpool-test'};
+ const proof=endpoint.crypto.signParkCarpoolCommand({serverScope:'server',accountId:'a',command});
+ const bytes=Buffer.from(JSON.stringify(['otto:park-carpool-device:v1','a',proof.timestamp,command]));
+ expect(verify(null,bytes,device.identitySigningPublicKey,Buffer.from(proof.signature,'base64'))).toBe(true);
+ expect(()=>endpoint.crypto.signParkCarpoolCommand({serverScope:'server',accountId:'a',command:{...command,deviceId:'another-device'}})).toThrow(/设备/);
+});

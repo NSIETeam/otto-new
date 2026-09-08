@@ -1,0 +1,55 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolDomain.test.ts (13 tests | 2 failed) 16ms
+   ✓ normalizeCarpoolIntentInput > normalizes travel choices while retaining only a resolved route 2ms
+   ✓ normalizeCarpoolIntentInput > rejects unknown choices, an invalid date, and the same origin/destination 1ms
+   ✓ routeOverlap > recognizes nearby same-direction routes and rejects the reverse direction 0ms
+   ✓ buildCarpoolMatches > filters by park, date, time, compatible mode and route, then sorts by overlap 1ms
+   ✓ PRD route and input regressions > counts only the actual short common interval, symmetrically 0ms
+   ✓ PRD route and input regressions > does not turn parallel roads or a crossing into shared travel 0ms
+   ✓ PRD route and input regressions > is independent of sample density and duplicate vertices 4ms
+   ✓ PRD route and input regressions > never derives public areas from a private label: 测试小区十二号楼三单元二〇一室 0ms
+   ✓ PRD route and input regressions > never derives public areas from a private label: 测试小区12栋A座201室 0ms
+   ✓ PRD route and input regressions > never derives public areas from a private label: Apartment 201, 12 Example Road 0ms
+   ✓ PRD route and input regressions > rejects calendar rollover and timezone-less departure 0ms
+   × clips the near-road strip independently of diagonal sampling density 5ms
+     → expected +0 to be close to 0.6529564720358884, received difference is 0.6529564720358884, but expected 0.005
+   × isolates structurally invalid decrypted candidates 1ms
+     → Cannot read properties of null (reading 'length')
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolDomain.test.ts > clips the near-road strip independently of diagonal sampling density
+AssertionError: expected +0 to be close to 0.6529564720358884, received difference is 0.6529564720358884, but expected 0.005
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolDomain.test.ts:201:26
+    199|   const sparse = routeOverlap([denseA[0]!, denseA.at(-1)!], [denseB[0]…
+    200|   const dense = routeOverlap(denseA, denseB);
+    201|   expect(sparse.overlap).toBeCloseTo(dense.overlap, 2);
+       |                          ^
+    202|   expect(sparse.overlap).toBeGreaterThan(0.6);
+    203| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolDomain.test.ts > isolates structurally invalid decrypted candidates
+TypeError: Cannot read properties of null (reading 'length')
+ ❯ routeSegments packages/server/src/modules/park_carpool/parkCarpoolDomain.ts:171:37
+    169| function routeSegments(route: readonly ParkCarpoolCoordinate[]): Segme…
+    170|   const segments: Segment[] = [];
+    171|   for (let index = 1; index < route.length; index += 1) {
+       |                                     ^
+    172|     const start = route[index - 1]!;
+    173|     const end = route[index]!;
+ ❯ routeOverlap packages/server/src/modules/park_carpool/parkCarpoolDomain.ts:242:17
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolDomain.ts:316:21
+ ❯ buildCarpoolMatches packages/server/src/modules/park_carpool/parkCarpoolDomain.ts:297:21
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolDomain.test.ts:208:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 11 passed (13)
+   Start at  09:09:45
+   Duration  188ms (transform 35ms, setup 0ms, collect 32ms, tests 16ms, environment 0ms, prepare 32ms)

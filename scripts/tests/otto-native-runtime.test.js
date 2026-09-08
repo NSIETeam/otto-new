@@ -9,6 +9,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  probeOttoNativeBinary,
   OTTO_NATIVE_RELEASE_TOOLCHAIN,
   OTTO_NATIVE_TARGETS,
   verifyStagedOttoNativeAsset,
@@ -165,4 +166,11 @@ describe('Otto native release runtime', () => {
       verifyStagedOttoNativeAsset({ root, target: 'win32-x64' }),
     ).toThrow(/not Windows x64/u);
   });
+});
+
+it('rejects a legacy runtime that answers ping but has no park MLS operations', () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'otto-native-legacy-probe-'));temporaryDirectories.push(root);
+ const binary=path.join(root,'legacy-runtime');
+ fs.writeFileSync(binary, "#!/bin/sh\nprintf '{\"id\":1,\"result\":{\"pong\":true}}\\n'\n", {mode:0o755});
+ expect(()=>probeOttoNativeBinary(binary)).toThrow(/park.*MLS/i);
 });

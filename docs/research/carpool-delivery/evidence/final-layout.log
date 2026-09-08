@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-validation-7f3a9c/packages/desktop
+
+ ✓ src/renderer/moduleWorkspace.test.ts (22 tests) 9ms
+
+ Test Files  1 passed (1)
+      Tests  22 passed (22)
+   Start at  12:06:03
+   Duration  462ms (transform 48ms, setup 43ms, collect 35ms, tests 9ms, environment 187ms, prepare 37ms)

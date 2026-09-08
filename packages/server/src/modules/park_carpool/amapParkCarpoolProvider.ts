@@ -16,16 +16,22 @@ interface AmapResponse {
   info?: unknown;
   pois?: unknown;
   route?: unknown;
+  locations?: unknown;
+  regeocode?: unknown;
 }
 
 function parseCoordinate(value: unknown): ParkCarpoolCoordinate | null {
   if (typeof value !== 'string') return null;
   const [longitude, latitude] = value.split(',').map(Number);
   if (
-    !Number.isFinite(longitude) || !Number.isFinite(latitude)
-    || longitude! < -180 || longitude! > 180
-    || latitude! < -90 || latitude! > 90
-  ) return null;
+    !Number.isFinite(longitude) ||
+    !Number.isFinite(latitude) ||
+    longitude! < -180 ||
+    longitude! > 180 ||
+    latitude! < -90 ||
+    latitude! > 90
+  )
+    return null;
   return { longitude: longitude!, latitude: latitude! };
 }
 
@@ -58,7 +64,7 @@ async function request(
   if (!response.ok) throw new Error('地图服务暂时不可用，请稍后重试');
   let body: AmapResponse;
   try {
-    body = await response.json() as AmapResponse;
+    body = (await response.json()) as AmapResponse;
   } catch {
     throw new Error('地图服务返回了无法识别的数据');
   }
@@ -85,6 +91,102 @@ export function createAmapParkCarpoolProvider(input: {
 
   return {
     configured,
+    async reverseGeocode(coordinate, system = 'autonavi') {
+      requireConfigured();
+      if (system === 'gps') {
+        const url = new URL(
+          'https://restapi.amap.com/v3/assistant/coordinate/convert',
+        );
+        url.search = new URLSearchParams({
+          key,
+          locations: coordinateParameter(coordinate),
+          coordsys: 'gps',
+        }).toString();
+        const converted = parseCoordinate(
+          (await request(fetchImpl, url)).locations,
+        );
+        if (!converted) throw new Error('地图坐标转换失败');
+        coordinate = converted;
+      }
+      const url = new URL('https://restapi.amap.com/v3/geocode/regeo');
+      url.search = new URLSearchParams({
+        key,
+        location: coordinateParameter(coordinate),
+        extensions: 'base',
+        radius: '1000',
+      }).toString();
+      const response = await request(fetchImpl, url);
+      const geo = response.regeocode as
+        | {
+            formatted_address?: unknown;
+            addressComponent?: {
+              province?: unknown;
+              city?: unknown;
+              district?: unknown;
+              adcode?: unknown;
+            };
+          }
+        | undefined;
+      const component = geo?.addressComponent;
+      const code = string(component?.adcode);
+      const label = [
+        ...new Set(
+          [
+            string(component?.province),
+            string(component?.city),
+            string(component?.district),
+          ].filter(Boolean),
+        ),
+      ].join('');
+      if (!/^[0-9]{6}$/.test(code) || !label)
+        throw new Error('地图服务未返回标准行政区域，请重新选点');
+      return {
+        id: `point:${coordinateParameter(coordinate)}`,
+        label: string(geo?.formatted_address) || label,
+        address: '地图选定位置',
+        district: string(component?.district),
+        coordinate,
+        publicArea: { label, code, precision: 'district' as const },
+      };
+    },
+    async staticMap(coordinate, zoom) {
+      requireConfigured();
+      const url = new URL('https://restapi.amap.com/v3/staticmap');
+      url.search = new URLSearchParams({
+        key,
+        location: coordinateParameter(coordinate),
+        zoom: String(zoom),
+        size: '600*400',
+        scale: '1',
+      }).toString();
+      const response = await fetchImpl(url, {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!response.ok) throw new Error('地图图片暂时不可用');
+      const type = response.headers.get('content-type')?.split(';')[0];
+      if (type !== 'image/png' && type !== 'image/jpeg')
+        throw new Error('地图服务未返回有效图片');
+      if (Number(response.headers.get('content-length')) > 4 * 1024 * 1024)
+        throw new Error('地图图片过大');
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('地图图片为空');
+      const chunks: Uint8Array[] = [];
+      let length = 0;
+      try {
+        while (true) {
+          const part = await reader.read();
+          if (part.done) break;
+          length += part.value.length;
+          if (length > 4 * 1024 * 1024) throw new Error('地图图片过大');
+          chunks.push(part.value);
+        }
+      } finally {
+        await reader.cancel();
+      }
+      const bytes = Buffer.concat(chunks);
+      if (!bytes.length) throw new Error('地图图片为空');
+      return `data:${type};base64,${bytes.toString('base64')}`;
+    },
     async searchPlaces(query, city): Promise<ParkCarpoolPlaceSuggestion[]> {
       requireConfigured();
       const url = new URL('https://restapi.amap.com/v3/place/text');
@@ -105,13 +207,15 @@ export function createAmapParkCarpoolProvider(input: {
         const label = string(poi.name);
         const coordinate = parseCoordinate(poi.location);
         if (!id || !label || !coordinate) return [];
-        return [{
-          id,
-          label,
-          coordinate,
-          address: string(poi.address),
-          district: string(poi.adname),
-        }];
+        return [
+          {
+            id,
+            label,
+            coordinate,
+            address: string(poi.address),
+            district: string(poi.adname),
+          },
+        ];
       });
     },
     async planDrivingRoute(origin, destination): Promise<ParkCarpoolRoute> {
@@ -125,35 +229,45 @@ export function createAmapParkCarpoolProvider(input: {
         extensions: 'base',
       }).toString();
       const response = await request(fetchImpl, url);
-      const route = response.route && typeof response.route === 'object'
-        ? response.route as Record<string, unknown>
-        : {};
-      const path = Array.isArray(route.paths) && route.paths[0]
-        && typeof route.paths[0] === 'object'
-        ? route.paths[0] as Record<string, unknown>
-        : null;
+      const route =
+        response.route && typeof response.route === 'object'
+          ? (response.route as Record<string, unknown>)
+          : {};
+      const path =
+        Array.isArray(route.paths) &&
+        route.paths[0] &&
+        typeof route.paths[0] === 'object'
+          ? (route.paths[0] as Record<string, unknown>)
+          : null;
       if (!path) throw new Error('地图服务未返回可用路线');
-      const points = (Array.isArray(path.steps) ? path.steps : []).flatMap((raw) => {
-        if (!raw || typeof raw !== 'object') return [];
-        const polyline = string((raw as Record<string, unknown>).polyline);
-        return polyline.split(';').flatMap((item) => {
-          const parsed = parseCoordinate(item);
-          return parsed ? [parsed] : [];
-        });
-      });
+      const points = (Array.isArray(path.steps) ? path.steps : []).flatMap(
+        (raw) => {
+          if (!raw || typeof raw !== 'object') return [];
+          const polyline = string((raw as Record<string, unknown>).polyline);
+          return polyline.split(';').flatMap((item) => {
+            const parsed = parseCoordinate(item);
+            return parsed ? [parsed] : [];
+          });
+        },
+      );
       const polyline = points.filter((point, index) => {
         const previous = points[index - 1];
-        return !previous
-          || previous.longitude !== point.longitude
-          || previous.latitude !== point.latitude;
+        return (
+          !previous ||
+          previous.longitude !== point.longitude ||
+          previous.latitude !== point.latitude
+        );
       });
       const distanceMeters = Number(path.distance);
       const durationSeconds = Number(path.duration);
       if (
-        polyline.length < 2
-        || !Number.isFinite(distanceMeters) || distanceMeters <= 0
-        || !Number.isFinite(durationSeconds) || durationSeconds <= 0
-      ) throw new Error('地图服务未返回可用于匹配的路线');
+        polyline.length < 2 ||
+        !Number.isFinite(distanceMeters) ||
+        distanceMeters <= 0 ||
+        !Number.isFinite(durationSeconds) ||
+        durationSeconds <= 0
+      )
+        throw new Error('地图服务未返回可用于匹配的路线');
       return {
         provider: 'amap',
         distanceMeters: Math.round(distanceMeters),

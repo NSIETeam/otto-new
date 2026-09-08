@@ -2170,7 +2170,7 @@ function OttoWorkspaceApp({
           policyInbox={policyMessages.inbox}
           policyInboxError={policyMessages.error}
           onPolicyRead={policyMessages.read}
-          onOpenPolicy={(id) => { setOpenedPolicyId(id); setModuleModal({ kind: 'policy-intelligence' }); }}
+          onOpenPolicy={(id) => { setOpenedPolicyId(id); openModuleModal({ kind: 'policy-intelligence' }); }}
           enterpriseAccount={account}
           effectiveDirectMessages={
             effectiveDirectMessages

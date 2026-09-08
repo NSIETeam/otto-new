@@ -116,6 +116,9 @@ export function PolicyIntelligenceDialog({
     () => new Map(state.assessments.map((item) => [item.policyId, item])),
     [state.assessments],
   );
+  useEffect(() => {
+    if (open && selected) document.getElementById(`otto-policy-${selected}`)?.scrollIntoView?.({ block: 'start' });
+  }, [open, selected, state.policies.length]);
   const policies = state.policies.filter(
     (doc) =>
       (tab === 'all' ||
@@ -494,7 +497,7 @@ export function PolicyIntelligenceDialog({
               doc.interpretationStatus !== 'ready' ||
               doc.attachments.some((item) => !item.parsed);
             return (
-              <article key={doc.id}>
+              <article key={doc.id} id={`otto-policy-${doc.id}`}>
                 <div className="otto-policy-v2__tags">
                   <span>{POLICY_LEVEL_LABELS[doc.level]}</span>
                   {doc.categories.map((item) => (

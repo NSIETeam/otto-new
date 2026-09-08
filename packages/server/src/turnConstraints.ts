@@ -56,15 +56,23 @@ function localTarget(raw: unknown, root: WorkspacePathIdentity): string {
     typeof raw !== 'string' ||
     !raw.trim() ||
     /\0|^[a-z][\w+.-]*:\/\//iu.test(raw) ||
+    /(?:^|[\\/])\.\.(?:[\\/]|$)/u.test(raw) ||
     /^[a-z]:(?![\\/])/iu.test(raw)
   )
     throw new Error('无法核对文件目标');
   const target = root.resolveTarget(raw);
+  // Reject out-of-scope spellings before probing them (including remote UNC
+  // targets). The only pre-scope IO above rechecks the trusted host root.
+  if (!within(root.canonicalPath, target)) throw new Error('文件目标超出工作目录');
   for (let cursor = target; ; cursor = path.dirname(cursor)) {
-    if (existsSync(cursor)) {
+    try {
       const stat = lstatSync(cursor);
       if (stat.isSymbolicLink() || (stat.isFile() && stat.nlink > 1))
         throw new Error('文件目标含链接或目录联接');
+    } catch (error) {
+      // existsSync follows links and hides dangling ones. lstat must inspect
+      // the directory entry itself; only genuinely absent entries are allowed.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
     if (cursor === path.dirname(cursor)) break;
   }

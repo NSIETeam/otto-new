@@ -1,6 +1,6 @@
 /** Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0 */
 import { expect, it } from 'vitest';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, mkdir, symlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,22 @@ const fixed = {
   'utc-display':
     'module.exports.parseTimestamp = function parseTimestamp(value) { if(typeof value!=="string"||!value.trim())return null;const s=value.trim().replace(" ","T");const n=Date.parse(/(?:Z|[+-]\\d{2}:?\\d{2})$/i.test(s)?s:s+"Z");return Number.isFinite(n)?n:null; };\n',
 };
+it('confines absolute and relative fixture paths through the selected root alias without following descendants', async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), 'otto-real-confined-alias-'));
+  const physical = path.join(fixture, 'physical');
+  await mkdir(path.join(physical, 'workspace'), { recursive: true });
+  const alias = path.join(fixture, 'alias');
+  await symlink(physical, alias, 'junction');
+  const selected = path.join(alias, 'workspace');
+  const expected = path.join(await realpath(selected), 'result.json');
+  expect(await confinedFile(selected, path.join(selected, 'result.json'), false)).toBe(expected);
+  expect(await confinedFile(selected, 'result.json', false)).toBe(expected);
+  await expect(confinedFile(selected, path.join(physical, 'outside.json'), false)).rejects.toThrow();
+  await symlink(physical, path.join(selected, 'escape'), 'junction');
+  await expect(confinedFile(selected, path.join(selected, 'escape/outside.json'), false)).rejects.toThrow();
+  // Approval must reject the raw spelling: native write_file uses it unchanged.
+  await expect(confinedFile(selected, `${selected}/escape/../result.json`, false)).rejects.toThrow();
+});
 it('grades actual rich-message text, not an array coerced to [object Object]', () => {
   expect(
     assistantText([

@@ -7,6 +7,8 @@ import {
   writeFileSync,
   symlinkSync,
   mkdirSync,
+  unlinkSync,
+  existsSync,
 } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
@@ -39,6 +41,27 @@ function setup() {
   };
   return { root, tool, params };
 }
+it('uses a host-selected ancestor alias but rejects nested links and later root retargeting', async () => {
+  const { root, params } = setup();
+  const physical = path.join(root, 'physical');
+  const other = path.join(root, 'other');
+  mkdirSync(path.join(physical, 'workspace'), { recursive: true });
+  mkdirSync(path.join(other, 'workspace'), { recursive: true });
+  const alias = path.join(root, 'alias');
+  symlinkSync(physical, alias, 'junction');
+  const selected = path.join(alias, 'workspace');
+  const tool = new GenerateSafeDocumentTool({ getTargetDir: () => selected } as Config);
+  const input = { ...params, file_path: path.join(selected, 'alias.pptx') };
+  expect(tool.validateToolParams(input)).toBeNull();
+  await tool.execute(input, new AbortController().signal);
+  const zip = await JSZip.loadAsync(readFileSync(path.join(physical, 'workspace/alias.pptx')));
+  expect(await zip.file('ppt/slides/slide1.xml')!.async('string')).toContain('结果');
+  symlinkSync(other, path.join(physical, 'workspace/escape'), 'junction');
+  expect(tool.validateToolParams({ ...input, file_path: path.join(selected, 'escape/outside.pptx') })).not.toBeNull();
+  unlinkSync(alias);
+  symlinkSync(other, alias, 'junction');
+  expect(tool.validateToolParams({ ...input, file_path: path.join(selected, 'changed.pptx') })).not.toBeNull();
+});
 it('generates a real PPTX containing literal user text without executable or remote relationships', async () => {
   const { tool, params } = setup();
   await tool.execute(params, new AbortController().signal);
@@ -62,6 +85,23 @@ it('generates a real PPTX containing literal user text without executable or rem
   ).not.toEqual(
     expect.arrayContaining([expect.stringMatching(/vbaProject|embeddings/)]),
   );
+});
+it('revalidates the bound root after asynchronous rendering before writing any bytes', async () => {
+  const { root, params } = setup();
+  const physical = path.join(root, 'physical');
+  const other = path.join(root, 'other');
+  mkdirSync(physical);
+  mkdirSync(other);
+  const alias = path.join(root, 'alias');
+  symlinkSync(physical, alias, 'junction');
+  const tool = new GenerateSafeDocumentTool({ getTargetDir: () => alias } as Config);
+  const pending = tool.execute({ ...params, file_path: path.join(alias, 'pending.pptx') }, new AbortController().signal);
+  // execute validated synchronously, then yielded at the lazy renderer import.
+  unlinkSync(alias);
+  symlinkSync(other, alias, 'junction');
+  await expect(pending).rejects.toThrow();
+  expect(existsSync(path.join(physical, 'pending.pptx'))).toBe(false);
+  expect(existsSync(path.join(other, 'pending.pptx'))).toBe(false);
 });
 it('rejects scripts, remote assets, unsupported formats, oversize inputs and out-of-workspace writes', async () => {
   const { tool, params, root } = setup();

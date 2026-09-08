@@ -3,6 +3,7 @@ import { lstatSync, realpathSync, existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Type } from '@google/genai';
 import type { Config } from '../config/config.js';
+import { WorkspacePathIdentity } from '../utils/workspacePathIdentity.js';
 import { BaseTool, Icon, type ToolResult, type ToolLocation } from './tools.js';
 
 export interface SafeDocumentParams {
@@ -12,7 +13,7 @@ export interface SafeDocumentParams {
 }
 const canonical = (p: string) =>
   process.platform === 'win32' ? p.toLowerCase() : p;
-function target(config: Config, raw: string): string {
+function target(workspace: WorkspacePathIdentity, raw: string): string {
   if (
     typeof raw !== 'string' ||
     raw.length > 1000 ||
@@ -20,8 +21,9 @@ function target(config: Config, raw: string): string {
     /[\0]|^\\\\|^\/\//u.test(raw)
   )
     throw new Error('需要工作目录内的本地 PPTX 路径');
-  const root = path.resolve(config.getTargetDir());
-  const file = path.resolve(raw);
+  const root = workspace.currentPath();
+  if (!root) throw new Error('工作目录身份已改变或无法核实');
+  const file = workspace.resolveTarget(raw);
   const relative = path.relative(root, file);
   if (
     !relative ||
@@ -34,7 +36,8 @@ function target(config: Config, raw: string): string {
     throw new Error(
       '受控入口目前仅支持工作目录内的 PPTX；不能改写为脚本或其他格式',
     );
-  // Existing parent only; no junctions, no aliases, no overwrite. Repeat after rendering.
+  // Only the bound host root is canonicalized. Descendant aliases and
+  // overwrites remain forbidden; repeat the identity check after rendering.
   for (let parent = path.dirname(file); ; parent = path.dirname(parent)) {
     const stat = lstatSync(parent);
     if (
@@ -49,7 +52,7 @@ function target(config: Config, raw: string): string {
     throw new Error('目标已存在，请使用新文件名；受控生成不会覆盖文件');
   return file;
 }
-function validate(config: Config, input: SafeDocumentParams): string {
+function validate(workspace: WorkspacePathIdentity, input: SafeDocumentParams): string {
   if (
     !input ||
     Object.keys(input).some(
@@ -80,7 +83,7 @@ function validate(config: Config, input: SafeDocumentParams): string {
         '每页需要纯文本标题和正文（最多 2400 字符），不接受可执行内容字段',
       );
   }
-  return target(config, input.file_path);
+  return target(workspace, input.file_path);
 }
 
 /** Narrow data-to-file capability. Heavy renderer is lazy; there is deliberately
@@ -90,7 +93,8 @@ export class GenerateSafeDocumentTool extends BaseTool<
   ToolResult
 > {
   static readonly Name = 'generate_safe_document';
-  constructor(private readonly config: Config) {
+  private readonly workspace: WorkspacePathIdentity;
+  constructor(config: Config) {
     super(
       GenerateSafeDocumentTool.Name,
       '生成受控演示文稿',
@@ -116,10 +120,11 @@ export class GenerateSafeDocumentTool extends BaseTool<
         required: ['file_path', 'title', 'slides'],
       },
     );
+    this.workspace = new WorkspacePathIdentity(config.getTargetDir());
   }
   validateToolParams(params: SafeDocumentParams): string | null {
     try {
-      validate(this.config, params);
+      validate(this.workspace, params);
       return null;
     } catch (e) {
       return (e as Error).message;
@@ -137,7 +142,7 @@ export class GenerateSafeDocumentTool extends BaseTool<
   ): Promise<ToolResult> {
     signal.throwIfAborted();
     const input = structuredClone(params);
-    const file = validate(this.config, input);
+    const file = validate(this.workspace, input);
     const { default: PptxGenJS } = await import('pptxgenjs');
     signal.throwIfAborted();
     // The package's legacy export-as-namespace declaration is not constructable
@@ -193,7 +198,7 @@ export class GenerateSafeDocumentTool extends BaseTool<
     if (!Buffer.isBuffer(output) || output.length > 8_000_000)
       throw new Error('生成文件超过受控大小限制');
     signal.throwIfAborted();
-    validate(this.config, input);
+    validate(this.workspace, input);
     writeFileSync(file, output, { flag: 'wx', mode: 0o600 });
     const label = path.basename(file).replace(/[[\]<>\r\n]/gu, '_');
     const link = `[${label}](<${file.replace(/\\/gu, '/')}>)`;

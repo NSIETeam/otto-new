@@ -7,6 +7,7 @@ import {
   mkdirSync,
   unlinkSync,
   renameSync,
+  realpathSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,7 +47,8 @@ describe('native operational constraints', () => {
     const review = (file_path: string) => guard.review({
       callId: file_path, name: 'write_file', nativeSafe: true, args: { file_path },
     });
-    for (const target of ['result.json', path.join(selected, 'result.json'), path.join(workspace, 'result.json')])
+    // The temp root can itself be an OS alias, so the native spelling must be realpath.
+    for (const target of ['result.json', path.join(selected, 'result.json'), path.join(realpathSync(workspace), 'result.json')])
       expect(() => review(target)).not.toThrow();
     expect(() => review(path.join(selected, 'config.json'))).toThrow();
     expect(() => review(path.join(physical, 'outside.json'))).toThrow();
@@ -92,6 +94,51 @@ describe('native operational constraints', () => {
     const call = { callId: 'write', name: 'write_file', args: { file_path: 'result.json' } };
     expect(() => guard.review(call)).not.toThrow();
     symlinkSync(fixture, workspace, 'junction');
+    expect(() => guard.start(call)).toThrow();
+  });
+  it('pins a newly created workspace identity before a later same-path replacement', () => {
+    const fixture = mkdtempSync(path.join(tmpdir(), 'otto-constraint-late-root-'));
+    dirs.push(fixture);
+    const workspace = path.join(fixture, 'workspace');
+    const guard = new TurnConstraintGuard('只允许修改当前工作区。', { turnId: 'late-root', workspacePath: workspace });
+    const call = { callId: 'write', name: 'write_file', args: { file_path: 'result.json' } };
+    mkdirSync(workspace);
+    expect(() => guard.review(call)).not.toThrow();
+    renameSync(workspace, path.join(fixture, 'original'));
+    mkdirSync(workspace);
+    expect(() => guard.start(call)).toThrow();
+  });
+  it.each(['file', 'parent'] as const)('rejects a dangling descendant %s link before any write', (kind) => {
+    const { root, guard } = harness('只允许修改当前工作区。');
+    const link = path.join(root, kind === 'file' ? 'result.json' : 'linked');
+    // Windows needs elevated privileges for file symlinks; a final-component
+    // junction exercises the same lstat rejection. POSIX uses a real file link.
+    symlinkSync(path.join(root, '../missing-external-target'), link, process.platform === 'win32' ? 'junction' : kind === 'file' ? 'file' : 'dir');
+    expect(() => guard.review({ callId: kind, name: 'write_file', args: {
+      file_path: kind === 'file' ? link : path.join(link, 'result.json'),
+    } })).toThrow();
+  });
+  it('rejects raw parent traversal that could hide a descendant link during normalization', () => {
+    const { root, guard } = harness('只允许修改当前工作区。');
+    const outside = mkdtempSync(path.join(tmpdir(), 'otto-constraint-dotdot-'));
+    dirs.push(outside);
+    symlinkSync(outside, path.join(root, 'escape'), 'junction');
+    // Do not path.join this value: the native writer receives the raw spelling.
+    for (const file_path of [`${root}/escape/../victim.json`, 'escape/../victim.json'])
+      expect(() => guard.review({ callId: file_path, name: 'write_file', args: { file_path } })).toThrow();
+  });
+  it('pins newly observed intermediate directories while the workspace is still missing', () => {
+    const fixture = mkdtempSync(path.join(tmpdir(), 'otto-constraint-late-parent-'));
+    dirs.push(fixture);
+    const parent = path.join(fixture, 'new-parent');
+    const guard = new TurnConstraintGuard('只允许修改当前工作区。', {
+      turnId: 'late-parent', workspacePath: path.join(parent, 'workspace'),
+    });
+    const call = { callId: 'write', name: 'write_file', args: { file_path: 'result.json' } };
+    mkdirSync(parent);
+    expect(() => guard.review(call)).not.toThrow();
+    renameSync(parent, path.join(fixture, 'original'));
+    mkdirSync(parent);
     expect(() => guard.start(call)).toThrow();
   });
   it('permits bounded native document generation, but still blocks arbitrary scripts and protected targets', () => {

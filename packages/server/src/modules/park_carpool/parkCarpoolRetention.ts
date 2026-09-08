@@ -1,9 +1,9 @@
-import { readCarpoolConfig } from './parkCarpoolConfig.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import type { CarpoolWorkflowState } from './parkCarpoolWorkflow.js';
 export interface CarpoolMaintenanceInput {
   now: string;
   positionRetentionHours: number;
+  communicationRetentionDays?: number;
   deleteAccountId?: string;
 }
 export interface CarpoolMaintenanceResult {
@@ -14,7 +14,7 @@ export function pruneCarpoolWorkflow(
   state: CarpoolWorkflowState,
   now: string,
   deletedAccounts: readonly string[] = [],
-  retentionDays = readCarpoolConfig().communicationRetentionDays,
+  retentionDays = 30,
 ): void {
   const deleted = new Set(deletedAccounts);
   const cutoff = Date.parse(now) - retentionDays * 86400_000;

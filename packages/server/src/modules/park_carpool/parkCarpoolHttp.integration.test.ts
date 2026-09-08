@@ -1,3 +1,4 @@
+import { carpoolTestConfig } from './parkCarpoolTestSupport.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -13,13 +14,13 @@ it('executes HTTP publish → matches → confirm → stop against encrypted SQL
   await h.approveDevices(
     keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
   );
-  const service = createParkCarpoolService({
+  const service = createParkCarpoolService({ config: carpoolTestConfig,
     store: h.store,
     now: () => fixed,
     createId: (id) => `intent-${id}`,
     mapProvider: {
       configured: true,
-      searchPlaces: async () => [],
+      searchPlaces: async (query) => { if (query === 'internal-failure') throw new Error('INTERNAL_SECRET_database_path'); return []; },
       planDrivingRoute: async (origin, destination) => ({
         provider: 'synthetic-http-fixture',
         distanceMeters: 8500,
@@ -73,6 +74,11 @@ it('executes HTTP publish → matches → confirm → stop against encrypted SQL
     };
     expect(receipt.intent).toMatchObject({ accountId: 'a', parkId: 'park-a' });
     await service.publishIntent('b', publish);
+    const stale = await call('/intents', 'PUT', {...publish, requestKey: 'stale-new-key', expectedVersion: 0});
+    expect(stale.status).toBe(409);
+    const failure = await call('/places?q=internal-failure');
+    expect(failure.status).toBe(500);
+    expect(await failure.json()).toEqual({error: '拼车助手请求失败，请稍后重试'});
     const results = (await (await call('/matches')).json()) as {
       state: { matches: unknown[] };
     };
@@ -147,6 +153,9 @@ it('executes HTTP publish → matches → confirm → stop against encrypted SQL
     ).toBe(403);
     expect((await h.store.getIntent('a'))?.status).toBe('paused');
     expect((await service.getWorkflow('a')).hasActiveIntent).toBe(false);
+    expect((await call('/data?accountId=b', 'DELETE', {accountId: 'b', parkId: 'forged'})).status).toBe(200);
+    expect(await h.store.getIntent('a')).toBeNull();
+    expect((await h.store.getIntent('b'))?.accountId).toBe('b');
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));

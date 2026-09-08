@@ -1,3 +1,4 @@
+import { carpoolRuntimeConfig } from '../modules/park_carpool/parkCarpoolConfig.js';
 import { E2EE_PRODUCTION_RELEASE_POLICY } from './e2eeProductionReleasePolicy.js';
 import { createMarketSqliteRuntime } from '../modules/park_services/flea_market/fleaMarketSqliteRuntime.js';
 import { PARK_FLEA_MARKET_SCHEMA_CONTRIBUTOR } from '../modules/park_services/flea_market/fleaMarketSchema.js';
@@ -1257,8 +1258,8 @@ const parkCarpoolStore = createParkCarpoolSqliteStore({
   },
 });
 
-const configuredCarpoolOverlap = Number(process.env.OTTO_PARK_CARPOOL_MINIMUM_OVERLAP || 0.35);
 const parkCarpoolService = createParkCarpoolService({
+    config: carpoolRuntimeConfig,
   store: parkCarpoolStore,
   mapProvider: createAmapParkCarpoolProvider({
     key: process.env.OTTO_AMAP_WEB_SERVICE_KEY,
@@ -1267,11 +1268,7 @@ const parkCarpoolService = createParkCarpoolService({
     .update(`${accountId}\0${travelDate}`, 'utf8')
     .digest('hex')
     .slice(0, 32)}`,
-  minimumOverlap: Number.isFinite(configuredCarpoolOverlap)
-    && configuredCarpoolOverlap >= 0
-    && configuredCarpoolOverlap <= 1
-    ? configuredCarpoolOverlap
-    : 0.35,
+  minimumOverlap: carpoolRuntimeConfig.minimumOverlap,
 });
 
 export const {

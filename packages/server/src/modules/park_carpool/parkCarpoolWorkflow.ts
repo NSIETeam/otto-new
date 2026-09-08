@@ -1,3 +1,5 @@
+import { carpoolParkEnabled } from './parkCarpoolConfig.js';
+import type { CarpoolConfig } from './parkCarpoolConfig.js';
 import {
   carpoolMeasurement,
   summarizeCarpoolMeasurements,
@@ -344,6 +346,8 @@ function live(
 }
 
 export function createCarpoolWorkflow(input: {
+  config?: CarpoolConfig;
+  signal?: AbortSignal;
   store: ParkCarpoolStore;
   now?(): Date;
   minimumOverlap?: number;
@@ -353,7 +357,7 @@ export function createCarpoolWorkflow(input: {
   mapProvider?: ParkCarpoolMapProvider;
   groupPolicy?: CarpoolGroupPolicy;
 }) {
-  const config = readCarpoolConfig();
+  const config = input.config ?? readCarpoolConfig();
   const groupPolicy = input.groupPolicy ?? config;
   const clock = input.now ?? (() => new Date());
   const taxiLimit = input.maxTaxiMembers ?? config.maxTaxiMembers;
@@ -552,6 +556,7 @@ export function createCarpoolWorkflow(input: {
     accountId: string,
     operation: (ctx: CarpoolWorkflowContext, now: string) => T,
   ): Promise<T> {
+    input.signal?.throwIfAborted();
     const actor = await input.store.getPrincipal(accountId);
     if (!actor?.active || !actor.parkServiceEnabled || !actor.parkId)
       throw new Error('当前账号无权使用园区同行');
@@ -565,6 +570,7 @@ export function createCarpoolWorkflow(input: {
         ctx.actor.organizationId !== actor.organizationId
       )
         throw new Error('当前园区身份已失效');
+      input.signal?.throwIfAborted();
       const now = clock().toISOString();
       reconcile(ctx, now);
       return operation(ctx, now);
@@ -578,7 +584,11 @@ export function createCarpoolWorkflow(input: {
       hasActiveIntent: ctx.intents.some(
         (intent) => intent.accountId === id && live(intent, clock().getTime()),
       ),
-      capabilities: carpoolCommunicationCapabilities(),
+      capabilities: carpoolCommunicationCapabilities(config, actor!.parkId!),
+      readiness: {
+        map: Boolean(input.mapProvider?.configured),
+        approvedDevice: Boolean(ctx.devices?.some(device => device.accountId === id)),
+      },
       metrics: actor!.parkAdmin
         ? {
             ...summarizeCarpoolMeasurements(state.measurements),
@@ -738,7 +748,10 @@ export function createCarpoolWorkflow(input: {
         group,
         members,
         candidate,
-        input.mapProvider!,
+        {...input.mapProvider!, planDrivingRoute: (...args) => {
+          input.signal?.throwIfAborted();
+          return input.mapProvider!.planDrivingRoute(...args);
+        }},
       );
     } catch (error) {
       failed = true;
@@ -798,7 +811,7 @@ export function createCarpoolWorkflow(input: {
       accountId: string,
       acceptMatch: (match: CarpoolGroupMatch) => void,
     ) {
-      if (!config.groupsEnabled || !config.invitationsEnabled)
+      if (!config.requestsEnabled || !config.groupsEnabled || !config.invitationsEnabled)
         return { failedCount: 0 };
       let failedCount = 0;
       let cursor: string | undefined;
@@ -808,7 +821,7 @@ export function createCarpoolWorkflow(input: {
             (i) => i.accountId === accountId && live(i, clock().getTime()),
           );
           if (
-            !mine ||
+            !mine || !carpoolParkEnabled(config, ctx.actor!.parkId!) ||
             ctx.state.availability.some(
               (a) => a.accountId === accountId && !a.accepting,
             )
@@ -877,6 +890,7 @@ export function createCarpoolWorkflow(input: {
         });
         for (const snapshot of page.snapshots)
           try {
+            input.signal?.throwIfAborted();
             if (!input.mapProvider?.configured)
               throw new Error('地图服务未配置');
             const detour = await planObserved(
@@ -1018,7 +1032,7 @@ export function createCarpoolWorkflow(input: {
           }
         } else if (command.type === 'request') {
           if (
-            !config.requestsEnabled ||
+            !config.requestsEnabled || !carpoolParkEnabled(config, actor!.parkId!) ||
             (command.kind === 'carpool_invite' && !config.invitationsEnabled) ||
             (['group_join', 'group_invite'].includes(command.kind) &&
               (!config.invitationsEnabled || !config.groupsEnabled))
@@ -1219,7 +1233,7 @@ export function createCarpoolWorkflow(input: {
             );
           } else if (command.action === 'accept') {
             if (
-              !config.requestsEnabled ||
+              !config.requestsEnabled || !carpoolParkEnabled(config, actor!.parkId!) ||
               (request.kind === 'carpool_invite' &&
                 !config.invitationsEnabled) ||
               (['group_join', 'group_invite'].includes(request.kind) &&

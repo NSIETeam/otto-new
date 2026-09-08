@@ -1,0 +1,63 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ✓ src/renderer/components/CarpoolPointPicker.test.ts (1 test) 4ms
+ ✓ src/renderer/parkCarpoolConversationBridge.test.ts (8 tests) 29ms
+ ✓ src/renderer/components/CarpoolConfirmation.test.tsx (1 test) 95ms
+ ✓ src/renderer/components/ParkCarpoolDialog.test.tsx (4 tests) 312ms
+(node:99017) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:99014) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:99015) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-carpool-chat.integration.test.ts [ src/main/park-carpool-chat.integration.test.ts ]
+TypeError: (0 , readCarpoolConfig) is not a function
+ ❯ src/test/carpoolTestSupport.ts:5:34
+      3| import { fileURLToPath } from 'node:url';
+      4| import { readCarpoolConfig } from 'otto-server';
+      5| export const carpoolTestConfig = readCarpoolConfig({
+       |                                  ^
+      6|   OTTO_PARK_CARPOOL_REQUESTS_ENABLED: 'true',
+      7|   OTTO_PARK_CARPOOL_INVITATIONS_ENABLED: 'true',
+ ❯ src/main/park-carpool-chat.integration.test.ts:1:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/renderer/parkCarpoolContract.integration.test.ts [ src/renderer/parkCarpoolContract.integration.test.ts ]
+TypeError: (0 , readCarpoolConfig) is not a function
+ ❯ src/test/carpoolTestSupport.ts:5:34
+      3| import { fileURLToPath } from 'node:url';
+      4| import { readCarpoolConfig } from 'otto-server';
+      5| export const carpoolTestConfig = readCarpoolConfig({
+       |                                  ^
+      6|   OTTO_PARK_CARPOOL_REQUESTS_ENABLED: 'true',
+      7|   OTTO_PARK_CARPOOL_INVITATIONS_ENABLED: 'true',
+ ❯ src/renderer/parkCarpoolContract.integration.test.ts:1:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/renderer/components/CarpoolFlow.integration.test.tsx [ src/renderer/components/CarpoolFlow.integration.test.tsx ]
+TypeError: (0 , readCarpoolConfig) is not a function
+ ❯ src/test/carpoolTestSupport.ts:5:34
+      3| import { fileURLToPath } from 'node:url';
+      4| import { readCarpoolConfig } from 'otto-server';
+      5| export const carpoolTestConfig = readCarpoolConfig({
+       |                                  ^
+      6|   OTTO_PARK_CARPOOL_REQUESTS_ENABLED: 'true',
+      7|   OTTO_PARK_CARPOOL_INVITATIONS_ENABLED: 'true',
+ ❯ src/renderer/components/CarpoolFlow.integration.test.tsx:1:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  3 failed | 4 passed (7)
+      Tests  14 passed (14)
+   Start at  20:18:41
+   Duration  6.98s (transform 3.62s, setup 725ms, collect 898ms, tests 440ms, environment 4.45s, prepare 748ms)
+
+
+EXIT_CODE=1

@@ -1,3 +1,4 @@
+import { carpoolTestConfig } from './parkCarpoolTestSupport.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from 'vitest';
 import {
@@ -23,7 +24,7 @@ describe('real database carpool contract (synthetic map only)', () => {
           : postgresHarness());
         let planned = 0;
         const store: ParkCarpoolStore = harness.store;
-        const service = createParkCarpoolService({
+        const service = createParkCarpoolService({ config: carpoolTestConfig,
           store,
           now: () => fixed,
           createId: (id) => `intent-${id}`,
@@ -134,7 +135,7 @@ for (const [name, factory] of [
     `${name}: scans beyond 200 candidates before ranking/filtering and pages without duplicates`,
     async () => {
       const h = await factory();
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         createId: (id) => `intent-${id}`,
@@ -209,7 +210,7 @@ for (const [name, factory] of [
 
 for(const [name,factory] of [['SQLite',sqliteHarness],['PostgreSQL',postgresHarness]] as const) {
  it.skipIf(name==='PostgreSQL'&&process.env.OTTO_CARPOOL_POSTGRES_TEST!=='1')(`${name}: evaluates group invitations across multiple planning batches`,async()=>{
-  const h=await factory();const service=createParkCarpoolService({store:h.store,now:()=>fixed,createId:id=>`intent-${id}`,mapProvider:{configured:true,searchPlaces:async()=>[],planDrivingRoute:async(a,b)=>({provider:'synthetic-group-batches',distanceMeters:8500,durationSeconds:1200,polyline:[a,b]})}});
+  const h=await factory();const service=createParkCarpoolService({ config: carpoolTestConfig,store:h.store,now:()=>fixed,createId:id=>`intent-${id}`,mapProvider:{configured:true,searchPlaces:async()=>[],planDrivingRoute:async(a,b)=>({provider:'synthetic-group-batches',distanceMeters:8500,durationSeconds:1200,polyline:[a,b]})}});
   try{
    const ids=Array.from({length:30},(_,i)=>`external-${i}`);await h.seedAccounts(ids);
    const base=await service.publishIntent('a',publish);await service.publishIntent('b',publish);

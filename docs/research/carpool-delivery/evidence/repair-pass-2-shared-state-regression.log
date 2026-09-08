@@ -1,0 +1,16 @@
+COMMAND=["./node_modules/.bin/vitest", "run", "--config", "packages/server/vitest.config.ts", "packages/server/src/modules/data_platform/enterpriseSharedCache.test.ts", "packages/server/src/modules/data_platform/enterpriseInfrastructureRuntime.test.ts", "packages/server/src/enterprise/clusteredSharedState.test.ts"]
+CWD=/Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ ✓ packages/server/src/modules/data_platform/enterpriseInfrastructureRuntime.test.ts (2 tests) 3ms
+ ✓ packages/server/src/modules/data_platform/enterpriseSharedCache.test.ts (4 tests) 4ms
+ ✓ packages/server/src/enterprise/clusteredSharedState.test.ts (3 tests) 5ms
+
+ Test Files  3 passed (3)
+      Tests  9 passed (9)
+   Start at  22:38:21
+   Duration  169ms (transform 70ms, setup 0ms, collect 90ms, tests 12ms, environment 0ms, prepare 94ms)
+
+
+EXIT_CODE=0

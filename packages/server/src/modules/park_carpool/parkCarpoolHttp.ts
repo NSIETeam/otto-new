@@ -1,3 +1,4 @@
+import { publicCarpoolError } from './parkCarpoolHttpErrors.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -16,14 +17,6 @@ export interface ParkCarpoolHttpDeps {
   service: ReturnType<typeof createParkCarpoolService>;
   readBody(req: IncomingMessage): Promise<Record<string, unknown>>;
   sendJSON(res: ServerResponse, status: number, data: unknown): void;
-}
-
-function errorStatus(error: unknown): number {
-  const message = error instanceof Error ? error.message : '';
-  if (/账号不可用|未启用园区服务|尚未绑定园区|无权/u.test(message)) return 403;
-  if (/其他操作更新|已更新|正在处理/u.test(message)) return 409;
-  if (/地图服务/u.test(message)) return 503;
-  return 400;
 }
 
 export async function handleParkCarpoolHttp(
@@ -186,9 +179,8 @@ export async function handleParkCarpoolHttp(
     }
     input.sendJSON(input.res, 404, { error: '拼车助手接口不存在' });
   } catch (error) {
-    input.sendJSON(input.res, errorStatus(error), {
-      error: error instanceof Error ? error.message : '拼车助手请求失败',
-    });
+    const failure = publicCarpoolError(error);
+    input.sendJSON(input.res, failure.status, { error: failure.message });
   }
   return true;
 }

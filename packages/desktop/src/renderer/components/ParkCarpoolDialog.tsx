@@ -434,6 +434,7 @@ export function ParkCarpoolDialog({
   };
   const canPublish = Boolean(
     state.mapConfigured &&
+    state.availability?.canPublish !== false &&
     origin &&
     destination &&
     travelOptions.length &&
@@ -611,6 +612,7 @@ export function ParkCarpoolDialog({
         也可以直接在对话框说：“今天 18:30 从宏创园区南门到回龙观，想搭车，前后
         30 分钟都可以”。Otto 会补问缺失信息并在发布前确认。
       </p>
+      {state.availability?.reason && <p role="status">{state.availability.reason}</p>}
       {!state.mapConfigured && !loading ? (
         <p role="alert" className="otto-workspace-dialog__error">
           服务器尚未配置高德 Web
@@ -728,7 +730,7 @@ export function ParkCarpoolDialog({
           提交后，你的通勤意向将对同园区且路线、时间符合条件的用户可见。你可以随时修改或停止寻找。
         </p>
         <div className="otto-carpool__actions">
-          <button type="submit" disabled={!state.mapConfigured || loading}>
+          <button type="submit" disabled={!state.mapConfigured || state.availability?.canPublish === false || loading}>
             {loading
               ? '正在处理…'
               : active

@@ -157,7 +157,10 @@ export function useModuleWorkspaceCapabilities(input: {
             if (ticketResult.status === 'fulfilled') {
               canViewStaffTasks = ticketResult.value.some((ticket) => ticket.isRecipient === true);
             }
-            if (carpoolResult.status === 'fulfilled') canUseCarpool = true;
+            if (carpoolResult.status === 'fulfilled') {
+              const carpool = carpoolResult.value;
+              canUseCarpool = carpool.availability?.canPublish === true || Boolean(carpool.currentIntent || carpool.hasGroup);
+            }
             if (marketResult.status === 'fulfilled') { const market = marketResult.value as { parkId?: string; enabled?: boolean; ready?: boolean }; canUseMarket = !!market.parkId && market.enabled === true && market.ready === true; }
           }
           parkAuthorization = {

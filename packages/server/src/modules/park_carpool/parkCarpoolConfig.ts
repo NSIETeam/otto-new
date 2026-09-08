@@ -15,8 +15,7 @@ export function readCarpoolConfig(env: NodeJS.ProcessEnv = process.env) {
   };
   const flag = (key: string) => {
     const value = env[key];
-    if (value === undefined)
-      return env.NODE_ENV === 'test' || env.NODE_ENV === 'development';
+    if (value === undefined) return false;
     if (!['true', 'false', '1', '0'].includes(value))
       throw new Error(`${key} 配置无效`);
     return value === 'true' || value === '1';
@@ -28,7 +27,12 @@ export function readCarpoolConfig(env: NodeJS.ProcessEnv = process.env) {
     staleMinutes,
     1440,
   );
-  return {
+  const pilotParkIds = env.OTTO_PARK_CARPOOL_PILOT_PARK_IDS?.split(',').map(id => id.trim());
+  if (pilotParkIds && (pilotParkIds.length > 100 || pilotParkIds.some(id => !/^[a-zA-Z0-9_-]{1,128}$/.test(id))))
+    throw new Error('OTTO_PARK_CARPOOL_PILOT_PARK_IDS 配置无效');
+  return Object.freeze({
+    pilotParkIds: pilotParkIds ? Object.freeze([...new Set(pilotParkIds)]) : undefined,
+    minimumOverlap: number('OTTO_PARK_CARPOOL_MINIMUM_OVERLAP', 0.35, 0, 1),
     requestLimitPerHour: integer(
       'OTTO_PARK_CARPOOL_REQUEST_LIMIT_PER_HOUR',
       10,
@@ -72,10 +76,16 @@ export function readCarpoolConfig(env: NodeJS.ProcessEnv = process.env) {
     requestsEnabled: flag('OTTO_PARK_CARPOOL_REQUESTS_ENABLED'),
     invitationsEnabled: flag('OTTO_PARK_CARPOOL_INVITATIONS_ENABLED'),
     groupsEnabled: flag('OTTO_PARK_CARPOOL_GROUPS_ENABLED'),
-  };
+  });
 }
-export function carpoolCommunicationCapabilities(): string[] {
-  const config = readCarpoolConfig();
+export type CarpoolConfig = ReturnType<typeof readCarpoolConfig>;
+/** One startup snapshot shared by both server compositions and health. Restart to change. */
+export const carpoolRuntimeConfig = readCarpoolConfig();
+export function carpoolParkEnabled(config: CarpoolConfig, parkId: string): boolean {
+  return !config.pilotParkIds || config.pilotParkIds.includes(parkId);
+}
+export function carpoolCommunicationCapabilities(config: CarpoolConfig = carpoolRuntimeConfig, parkId?: string): string[] {
+  if (parkId && !carpoolParkEnabled(config, parkId)) return [];
   return [
     ...(config.requestsEnabled
       ? ['park_carpool_requests_v1', 'park_carpool_mls_v1']

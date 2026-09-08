@@ -1,4 +1,4 @@
-import { readCarpoolConfig } from './parkCarpoolConfig.js';
+import { readCarpoolConfig, type CarpoolConfig } from './parkCarpoolConfig.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -354,12 +354,13 @@ function maskedDisplayName(value: string): string {
 function freshness(
   intent: ParkCarpoolIntent,
   now: Date,
+  config: CarpoolConfig,
 ): ParkCarpoolMatch['freshness'] {
   const untilDeparture = Date.parse(intent.departureTime) - now.getTime();
   if (untilDeparture >= 0 && untilDeparture <= 30 * 60_000)
     return 'departing_soon';
   const age = now.getTime() - Date.parse(intent.lastConfirmedAt);
-  return age > readCarpoolConfig().staleMinutes * 60_000
+  return age > config.staleMinutes * 60_000
     ? 'needs_confirmation'
     : age <= 5 * 60_000
       ? 'just_updated'
@@ -370,12 +371,14 @@ export function buildCarpoolMatches(
   current: ParkCarpoolIntent,
   candidates: readonly ParkCarpoolIntent[],
   options: {
+    config?: CarpoolConfig;
     minimumOverlap?: number;
     now?: Date;
     onCandidateError?(intentId: string): void;
   } = {},
 ): ParkCarpoolMatch[] {
-  const configuredMinimum = options.minimumOverlap ?? 0.35;
+  const config = options.config ?? readCarpoolConfig();
+  const configuredMinimum = options.minimumOverlap ?? config.minimumOverlap;
   const minimumOverlap = Number.isFinite(configuredMinimum)
     ? Math.max(0, Math.min(1, configuredMinimum))
     : 0.35;
@@ -395,7 +398,7 @@ export function buildCarpoolMatches(
           return [];
         if (
           now.getTime() - Date.parse(candidate.lastConfirmedAt) >
-          readCarpoolConfig().pauseMinutes * 60_000
+          config.pauseMinutes * 60_000
         )
           return [];
         const timeDifferenceMinutes = Math.round(
@@ -461,7 +464,7 @@ export function buildCarpoolMatches(
             destinationArea:
               candidate.destination.publicArea?.label ||
               '目的地区域（具体位置已隐藏）',
-            freshness: freshness(candidate, now),
+            freshness: freshness(candidate, now, config),
             explanation: `按路线几何近似估算（无法区分相邻道路或立交），同向共同路段约 ${(overlap.commonDistanceMeters / 1_000).toFixed(1)} 公里，路线重合度约 ${overlapPercent}%，出发时间相差 ${timeDifferenceMinutes} 分钟。`,
           },
         ];

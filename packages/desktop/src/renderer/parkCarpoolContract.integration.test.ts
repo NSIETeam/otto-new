@@ -1,3 +1,4 @@
+import { carpoolTestConfig } from '../main/park-carpool-test-support.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { expect, it, vi } from 'vitest';
 import { render, fireEvent, screen, waitFor } from '@testing-library/react';
@@ -27,7 +28,7 @@ async function sqliteHarness() {
 
 it('passes real conversation output through the real service and encrypted SQLite, rejects stale drafts', async () => {
   const h = await sqliteHarness();
-  const service = createParkCarpoolService({ store: h.store, now: () => fixed, createId: id => `intent-${id}`, mapProvider: {
+  const service = createParkCarpoolService({ config: carpoolTestConfig, store: h.store, now: () => fixed, createId: id => `intent-${id}`, mapProvider: {
     configured: true,
     searchPlaces: async query => [{ id: query, label: query, district: '测试区', address: '', coordinate: query.includes('南门') ? publish.origin.coordinate : publish.destination.coordinate }],
     planDrivingRoute: async (origin, destination) => ({ provider: 'synthetic-contract-fixture', distanceMeters: 8500, durationSeconds: 1200, polyline: [origin, destination] }),
@@ -60,7 +61,7 @@ it('real UI can restart after stop and confirmation cannot carry forward another
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(fixed);
   const h = await sqliteHarness();
-  const service = createParkCarpoolService({ store: h.store, now: () => fixed, createId: id => `intent-${id}`, mapProvider: {
+  const service = createParkCarpoolService({ config: carpoolTestConfig, store: h.store, now: () => fixed, createId: id => `intent-${id}`, mapProvider: {
     configured: true, searchPlaces: async () => [],
     planDrivingRoute: async (origin, destination) => ({ provider: 'synthetic-ui-fixture', distanceMeters: 8500, durationSeconds: 1200, polyline: [origin, destination] }),
   } });
@@ -93,7 +94,7 @@ it('real UI can restart after stop and confirmation cannot carry forward another
 
 it('request center accepts a persisted request and renders the authoritative response', async () => {
   const h = await sqliteHarness();
-  const service = createParkCarpoolService({store:h.store,now:()=>fixed,createId:id=>`intent-${id}`,mapProvider:{configured:true,searchPlaces:async()=>[],planDrivingRoute:async(a,b)=>({provider:'synthetic-ui',distanceMeters:8500,durationSeconds:1200,polyline:[a,b]})}});
+  const service = createParkCarpoolService({ config: carpoolTestConfig,store:h.store,now:()=>fixed,createId:id=>`intent-${id}`,mapProvider:{configured:true,searchPlaces:async()=>[],planDrivingRoute:async(a,b)=>({provider:'synthetic-ui',distanceMeters:8500,durationSeconds:1200,polyline:[a,b]})}});
   try {
     await service.publishIntent('a',publish);
     await service.publishIntent('b',publish);

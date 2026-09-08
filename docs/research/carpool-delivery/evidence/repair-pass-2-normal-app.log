@@ -1,0 +1,5 @@
+{"status":"failed","reason":"OTTO_DATABASE_ENCRYPTION_KEY_FILE is required for offline SQLCipher custody","temp":"/var/folders/mg/ctd9153d5_g93y9n6w7tvmf80000gn/T/otto-carpool-normal-app-KDBxoE"}
+(node:31558) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+EXIT_CODE=1

@@ -1,3 +1,4 @@
+import { carpoolTestConfig } from './parkCarpoolTestSupport.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -75,7 +76,7 @@ function createHarness() {
     searchPlaces: vi.fn(async () => []),
     planDrivingRoute: vi.fn(async () => route),
   };
-  const service = createParkCarpoolService({
+  const service = createParkCarpoolService({ config: carpoolTestConfig,
     store,
     mapProvider: provider,
     createId: () => 'intent-new',

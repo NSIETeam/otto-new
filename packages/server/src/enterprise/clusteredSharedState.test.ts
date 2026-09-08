@@ -32,6 +32,7 @@ function dependencies() {
       values.delete(`otto:${key}`);
     }),
     acquireLease: vi.fn(),
+    renewLease: vi.fn(),
     releaseLease: vi.fn(),
     close: vi.fn(),
   } as EnterpriseSharedCache;

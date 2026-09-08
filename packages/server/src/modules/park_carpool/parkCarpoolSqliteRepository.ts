@@ -229,7 +229,7 @@ export function createParkCarpoolSqliteStore(input: {
           pruneCarpoolWorkflow(state, options.now, [
             ...removed,
             ...(removedByPark.get(row.park_id) ?? []),
-          ]);
+          ], options.communicationRetentionDays);
           database
             .prepare(
               'UPDATE park_carpool_workflow SET encrypted_payload=?,version=version+1 WHERE park_id=?',

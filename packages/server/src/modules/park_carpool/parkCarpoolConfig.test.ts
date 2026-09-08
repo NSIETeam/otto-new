@@ -30,7 +30,7 @@ it('validates independent rollout flags and bounded request/capacity settings', 
 });
 
 it('keeps production and unspecified environments closed unless explicitly enabled', () => {
-  for (const NODE_ENV of [undefined, 'production'])
+  for (const NODE_ENV of [undefined, 'production', 'test', 'development'])
     expect(readCarpoolConfig({ NODE_ENV })).toMatchObject({
       requestsEnabled: false,
       invitationsEnabled: false,
@@ -46,7 +46,7 @@ it('keeps production and unspecified environments closed unless explicitly enabl
     invitationsEnabled: false,
     groupsEnabled: false,
   });
-  expect(readCarpoolConfig({ NODE_ENV: 'test' }).requestsEnabled).toBe(true);
+  expect(readCarpoolConfig({ NODE_ENV: 'test' }).requestsEnabled).toBe(false);
 });
 
 it('advertises only explicitly enabled production stages with their prerequisites', () => {
@@ -54,19 +54,43 @@ it('advertises only explicitly enabled production stages with their prerequisite
     vi.stubEnv('NODE_ENV', 'production');
     for (const key of ['REQUESTS', 'INVITATIONS', 'GROUPS'])
       vi.stubEnv(`OTTO_PARK_CARPOOL_${key}_ENABLED`, undefined);
-    expect(carpoolCommunicationCapabilities()).toEqual([]);
+    expect(carpoolCommunicationCapabilities(readCarpoolConfig())).toEqual([]);
     vi.stubEnv('OTTO_PARK_CARPOOL_GROUPS_ENABLED', 'true');
-    expect(carpoolCommunicationCapabilities()).toEqual([]);
+    expect(carpoolCommunicationCapabilities(readCarpoolConfig())).toEqual([]);
     vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'true');
-    expect(carpoolCommunicationCapabilities()).toEqual([
+    expect(carpoolCommunicationCapabilities(readCarpoolConfig())).toEqual([
       'park_carpool_requests_v1',
       'park_carpool_mls_v1',
     ]);
     vi.stubEnv('OTTO_PARK_CARPOOL_INVITATIONS_ENABLED', 'true');
-    expect(carpoolCommunicationCapabilities()).toContain(
+    expect(carpoolCommunicationCapabilities(readCarpoolConfig())).toContain(
       'park_carpool_groups_v1',
     );
   } finally {
     vi.unstubAllEnvs();
   }
+});
+
+it('uses an immutable supplied snapshot even when the process environment changes', () => {
+  const enabled = readCarpoolConfig({
+    OTTO_PARK_CARPOOL_REQUESTS_ENABLED: 'true',
+    OTTO_PARK_CARPOOL_INVITATIONS_ENABLED: 'true',
+    OTTO_PARK_CARPOOL_GROUPS_ENABLED: 'true',
+  });
+  vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'false');
+  try {
+    expect(Object.isFrozen(enabled)).toBe(true);
+    expect(carpoolCommunicationCapabilities(enabled)).toContain('park_carpool_groups_v1');
+    expect(carpoolCommunicationCapabilities(readCarpoolConfig({}))).toEqual([]);
+  } finally { vi.unstubAllEnvs(); }
+});
+
+it('limits pilot capabilities to configured parks without conflating map readiness', () => {
+  const pilot = readCarpoolConfig({
+    OTTO_PARK_CARPOOL_REQUESTS_ENABLED: 'true',
+    OTTO_PARK_CARPOOL_PILOT_PARK_IDS: 'park-a',
+  });
+  expect(carpoolCommunicationCapabilities(pilot, 'park-a')).toContain('park_carpool_requests_v1');
+  expect(carpoolCommunicationCapabilities(pilot, 'park-b')).toEqual([]);
+  expect(() => readCarpoolConfig({OTTO_PARK_CARPOOL_PILOT_PARK_IDS: 'park-a,,park-b'})).toThrow(/配置无效/);
 });

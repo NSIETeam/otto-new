@@ -1,3 +1,4 @@
+import { carpoolTestConfig } from './parkCarpoolTestSupport.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { describe, expect, it } from 'vitest';
 import { createParkCarpoolService } from './parkCarpoolService.js';
@@ -18,7 +19,7 @@ for (const [name, factory] of [
   )(`${name} persistent carpool requests`, () => {
     it('invalidates outstanding pair invitations on joining and allows blocking a fellow group member without a direct request', async () => {
       const h = await factory();
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         createId: (id) => `intent-${id}`,
@@ -89,7 +90,7 @@ for (const [name, factory] of [
         const before = (await service.getWorkflow('b')).conversations.find(
           (c) => c.kind === 'group',
         )!;
-        await createCarpoolWorkflow({
+        await createCarpoolWorkflow({ config: carpoolTestConfig,
           store: h.store,
           now: () => fixed,
         }).withContext('a', (ctx) => {
@@ -164,7 +165,7 @@ for (const [name, factory] of [
     it('does not restore a candidate who stops accepting during group route planning', async () => {
       const h = await factory();
       let armed = false;
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         createId: (id) => `intent-${id}`,
@@ -211,7 +212,7 @@ for (const [name, factory] of [
     });
     it('stopping new matches invalidates pending invitations without removing a group', async () => {
       const h = await factory();
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         createId: (id) => `intent-${id}`,
@@ -256,7 +257,7 @@ for (const [name, factory] of [
     it('matches and admits today’s intents when the same account has yesterday’s stored route', async () => {
       const h = await factory();
       let clock = fixed;
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => clock,
         createId: (id, date) => `intent-${id}-${date}`,
@@ -338,8 +339,8 @@ for (const [name, factory] of [
           }),
         },
       };
-      const base = createParkCarpoolService(options);
-      const service = createParkCarpoolService({
+      const base = createParkCarpoolService({ ...options, config: carpoolTestConfig });
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         ...options,
         store: {
           ...h.store,
@@ -367,7 +368,7 @@ for (const [name, factory] of [
 
     it('persists administrator public meeting points, denies member writes and protects edit versions', async () => {
       const h = await factory();
-      const workflow = createCarpoolWorkflow({
+      const workflow = createCarpoolWorkflow({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
       });
@@ -401,7 +402,7 @@ for (const [name, factory] of [
 
     it('requires a live match, deduplicates reverse requests, conceals ignore and accepts chat without grouping', async () => {
       const h = await factory();
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         createId: (id) => `intent-${id}`,
@@ -416,7 +417,7 @@ for (const [name, factory] of [
           }),
         },
       });
-      const workflow = createCarpoolWorkflow({
+      const workflow = createCarpoolWorkflow({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
       });
@@ -474,7 +475,7 @@ for (const [name, factory] of [
           action: 'accept',
         });
         expect((await workflow.read('a')).conversations).toHaveLength(1);
-        const restarted = createCarpoolWorkflow({
+        const restarted = createCarpoolWorkflow({ config: carpoolTestConfig,
           store: h.store,
           now: () => fixed,
         });
@@ -490,7 +491,7 @@ for (const [name, factory] of [
 
     it('invalidates changed intent versions and enforces block in both directions', async () => {
       const h = await factory();
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         createId: (id) => `intent-${id}`,
@@ -505,7 +506,7 @@ for (const [name, factory] of [
           }),
         },
       });
-      const workflow = createCarpoolWorkflow({
+      const workflow = createCarpoolWorkflow({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         mapProvider: {
@@ -566,7 +567,7 @@ for (const [name, factory] of [
 
     it('accepts one explicit invitation atomically and never creates duplicate two-person groups', async () => {
       const h = await factory();
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         createId: (id) => `intent-${id}`,
@@ -581,7 +582,7 @@ for (const [name, factory] of [
           }),
         },
       });
-      const workflow = createCarpoolWorkflow({
+      const workflow = createCarpoolWorkflow({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         mapProvider: {
@@ -669,7 +670,7 @@ for (const [name, factory] of [
           polyline: [a, b],
         }),
       };
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         createId: (id) => `intent-${id}`,
@@ -753,7 +754,7 @@ for (const [name, factory] of [
 
     it('serializes the last place, rotates member generations, and persists leave-and-stop', async () => {
       const h = await factory();
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         createId: (id) => `intent-${id}`,
@@ -768,7 +769,7 @@ for (const [name, factory] of [
           }),
         },
       });
-      const workflow = createCarpoolWorkflow({
+      const workflow = createCarpoolWorkflow({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         mapProvider: {
@@ -860,7 +861,7 @@ for (const [name, factory] of [
 
     it('rolls back rather than expiring requests when a stored route cannot be decrypted', async () => {
       const h = await factory();
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         createId: (id) => `intent-${id}`,
@@ -875,7 +876,7 @@ for (const [name, factory] of [
           }),
         },
       });
-      const workflow = createCarpoolWorkflow({
+      const workflow = createCarpoolWorkflow({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         mapProvider: {
@@ -914,7 +915,7 @@ it.skipIf(process.env.OTTO_CARPOOL_POSTGRES_TEST !== '1')(
   async () => {
     const h = await postgresHarness(1);
     try {
-      const workflow = createCarpoolWorkflow({
+      const workflow = createCarpoolWorkflow({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         mapProvider: {

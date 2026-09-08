@@ -1,3 +1,4 @@
+import { carpoolRuntimeConfig } from '../modules/park_carpool/parkCarpoolConfig.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -1272,10 +1273,8 @@ async function clusteredCarpoolPrincipal(
 }
 
 export function createClusteredCarpoolService(repository:BusinessRepository) {
-  const configuredOverlap = Number(
-    process.env.OTTO_PARK_CARPOOL_MINIMUM_OVERLAP || 0.35,
-  );
   const service = createParkCarpoolService({
+    config: carpoolRuntimeConfig,
     store: createParkCarpoolPostgresStore({ repository, getPrincipal: accountId => clusteredCarpoolPrincipal(repository, accountId) }),
     mapProvider: createAmapParkCarpoolProvider({
       key: process.env.OTTO_AMAP_WEB_SERVICE_KEY,
@@ -1284,11 +1283,7 @@ export function createClusteredCarpoolService(repository:BusinessRepository) {
       .update(`${accountId}\0${travelDate}`, 'utf8')
       .digest('hex')
       .slice(0, 32)}`,
-    minimumOverlap: Number.isFinite(configuredOverlap)
-      && configuredOverlap >= 0
-      && configuredOverlap <= 1
-      ? configuredOverlap
-      : 0.35,
+    minimumOverlap: carpoolRuntimeConfig.minimumOverlap,
   });
   return service;
 }

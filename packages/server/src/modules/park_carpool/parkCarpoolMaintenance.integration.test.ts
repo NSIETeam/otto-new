@@ -1,3 +1,4 @@
+import { carpoolTestConfig } from './parkCarpoolTestSupport.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { expect, it } from 'vitest';
 import {
@@ -18,7 +19,7 @@ for (const [name, factory] of [
     async () => {
       const h = await factory();
       let clock = fixed;
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => clock,
         createId: (id, date) => `intent-${id}-${date}`,
@@ -60,7 +61,7 @@ for (const [name, factory] of [
         const gate = new Promise<void>((resolve) => {
           release = resolve;
         });
-        const pendingService = createParkCarpoolService({
+        const pendingService = createParkCarpoolService({ config: carpoolTestConfig,
           store: h.store,
           now: () => clock,
           createId: (id, date) => `intent-${id}-${date}`,
@@ -119,7 +120,7 @@ for (const [name, factory] of [
     async () => {
       const h = await factory();
       let clock = new Date('2026-09-07T00:00:00Z');
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => clock,
         createId: (id, date) => `intent-${id}-${date}`,
@@ -164,3 +165,31 @@ for (const [name, factory] of [
     },
     30_000,
   );
+
+it('cancels maintenance before candidate effects after ownership is lost during a database read', async () => {
+ const h=await sqliteHarness();
+ const controller=new AbortController();
+ let pause=false;
+ let entered!:()=>void;let release!:()=>void;
+ const waiting=new Promise<void>(resolve=>{entered=resolve;});
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ const original=h.store.listIntentPage!.bind(h.store);
+ const store={...h.store,listIntentPage:async(...args:Parameters<typeof original>)=>{
+  const result=await original(...args);if(pause){entered();await gate;}return result;
+ }};
+ const service=createParkCarpoolService({config:carpoolTestConfig,store,now:()=>fixed,createId:id=>`intent-${id}`,mapProvider:{configured:true,searchPlaces:async()=>[],planDrivingRoute:async(a,b)=>({provider:'synthetic',distanceMeters:8500,durationSeconds:1200,polyline:[a,b]})}});
+ try {
+  await service.publishIntent('a',publish);await service.publishIntent('b',publish);
+  const before=(await service.getWorkflow('a')).metrics;
+  pause=true;
+  const running=service.maintain(controller.signal).then(()=>null,error=>error);
+  await waiting;controller.abort();release();
+  expect(await running).toBeInstanceOf(Error);
+  const after=(await service.getWorkflow('a')).metrics;
+  expect(after?.averageCandidates).toEqual(before?.averageCandidates);
+  expect((await service.getWorkflow('a')).notices.filter(n=>n.type==='new_match')).toHaveLength(0);
+  pause=false;await Promise.all([service.maintain(),service.maintain()]);
+  expect((await service.getWorkflow('a')).metrics?.averageCandidates).toEqual(before?.averageCandidates);
+  expect((await service.getWorkflow('a')).notices.filter(n=>n.type==='new_match')).toHaveLength(1);
+ }finally{release();await h.close();}
+});

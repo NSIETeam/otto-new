@@ -1,3 +1,5 @@
+import { carpoolTestConfig } from './park-carpool-test-support.js';
+import { carpoolTestNativeBinary } from './park-carpool-test-support.js';
 import { createHash } from 'node:crypto';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -43,7 +45,7 @@ it('desktop coordinators exchange, retry after lost response, and restore actual
   });
   let clock = new Date('2026-09-08T00:00:00Z');
   const now = () => clock;
-  const service = createParkCarpoolService({
+  const createService = (enabled: boolean) => createParkCarpoolService({ config: Object.freeze({...carpoolTestConfig, requestsEnabled: enabled}),
     store,
     now,
     createId: (id) => `intent-${id}`,
@@ -58,12 +60,13 @@ it('desktop coordinators exchange, retry after lost response, and restore actual
       }),
     },
   });
+  let service = createService(true);
   let loseResponse = false;
   let pauseOnAppend = false;
   const create = (id: string) =>
     new ParkCarpoolChat({
       stateDirectory: directory,
-      binaryPath: path.resolve('../../otto-native/target/debug/otto-native'),
+      binaryPath: carpoolTestNativeBinary(),
       secureStorage: {
         assertAvailable: () => undefined,
         protect: (s) => `test:${s}`,
@@ -73,7 +76,7 @@ it('desktop coordinators exchange, retry after lost response, and restore actual
         getParkCarpoolWorkflow: () => service.getWorkflow(id),
         executeParkCarpoolTransport: async (command) => {
           if (pauseOnAppend && command.type === 'append')
-            vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'false');
+            service = createService(false);
           const result = await service.executeTransport(id, command);
           if (loseResponse && command.type === 'append') {
             loseResponse = false;
@@ -123,9 +126,9 @@ it('desktop coordinators exchange, retry after lost response, and restore actual
       action: 'accept',
     });
     const id = (await service.getWorkflow('a')).conversations[0]!.id;
-    vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'false');
+    service = createService(false);
     expect((await alice.read(id)).canSend).toBe(false);
-    vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'true');
+    service = createService(true);
     await alice.read(id);
     await bob.read(id);
     loseResponse = true;
@@ -147,14 +150,14 @@ it('desktop coordinators exchange, retry after lost response, and restore actual
     expect(paused.messages.find((m) => m.id === 'pause-pending')?.pending).toBe(
       true,
     );
-    vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'true');
+    service = createService(true);
     const rejectedRetry = await alice.read(id);
     expect(rejectedRetry.pendingSendError).toMatch(/暂停/);
     expect(
       rejectedRetry.messages.find((m) => m.id === 'stable-message-id')?.text,
     ).toBe('真实桌面加密消息');
     pauseOnAppend = false;
-    vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'true');
+    service = createService(true);
     expect(
       (await alice.read(id)).messages.find((m) => m.id === 'pause-pending')
         ?.pending,

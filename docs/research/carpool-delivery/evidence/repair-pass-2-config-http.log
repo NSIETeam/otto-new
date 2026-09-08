@@ -1,0 +1,19 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts (5 tests) 4ms
+(node:77130) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:77131) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolHttp.integration.test.ts (1 test) 73ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolConfig.integration.test.ts (2 tests) 1080ms
+   ✓ PostgreSQL: injected rollout snapshot survives env drift and restart preserves historical management  1014ms
+
+ Test Files  3 passed (3)
+      Tests  8 passed (8)
+   Start at  20:14:11
+   Duration  4.21s (transform 1.48s, setup 0ms, collect 6.01s, tests 1.16s, environment 0ms, prepare 111ms)
+
+
+EXIT_CODE=0

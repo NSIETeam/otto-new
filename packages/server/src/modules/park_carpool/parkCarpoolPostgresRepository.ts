@@ -136,7 +136,7 @@ export function createParkCarpoolPostgresStore(input: {
               `park-carpool-workflow:${parkId}`,
             ),
           ) as CarpoolWorkflowState;
-          pruneCarpoolWorkflow(state, options.now, removed);
+          pruneCarpoolWorkflow(state, options.now, removed, options.communicationRetentionDays);
           return JSON.stringify(
             input.repository.encryptBusinessSensitiveText(
               JSON.stringify(state),

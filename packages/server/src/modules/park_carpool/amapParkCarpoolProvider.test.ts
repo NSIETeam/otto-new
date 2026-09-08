@@ -156,3 +156,29 @@ it('converts clicked GPS only when requested, derives district-only public areas
     await provider.staticMap!({ longitude: 116, latitude: 40 }, 14),
   ).toMatch(/^data:image\/png;base64,/);
 });
+
+it.each([null, [], 'bad'])('maps malformed provider envelopes to a controlled map failure: %j', async body => {
+  const provider = createAmapParkCarpoolProvider({key:'test-only',fetchImpl:async()=>new Response(JSON.stringify(body))});
+  await expect(provider.searchPlaces('公共站点','杭州')).rejects.toThrow(/地图服务/);
+});
+it('rejects invalid converted coordinates and hides network details for static maps', async () => {
+  const provider=createAmapParkCarpoolProvider({key:'test-only',fetchImpl:async()=>new Response(JSON.stringify({status:'1',locations:'120,30,999'}))});
+  await expect(provider.reverseGeocode!({longitude:120,latitude:30},'gps')).rejects.toThrow(/坐标转换失败/);
+  const offline=createAmapParkCarpoolProvider({key:'test-only',fetchImpl:async()=>{throw new Error('INTERNAL_SECRET_endpoint');}});
+  await expect(offline.staticMap!({longitude:120,latitude:30},12)).rejects.toThrow('地图服务连接失败，请稍后重试');
+});
+it.each([
+  ['rate limit',()=>new Response('{}',{status:429})],
+  ['bad JSON',()=>new Response('{')],
+  ['no route',()=>new Response(JSON.stringify({status:'1',route:{paths:[]}}))],
+] as const)('fails explicitly for %s without inventing a route',async (_name,response)=>{
+ const provider=createAmapParkCarpoolProvider({key:'test-only',fetchImpl:async()=>response()});
+ await expect(provider.planDrivingRoute({longitude:120,latitude:30},{longitude:120.1,latitude:30})).rejects.toThrow(/地图服务/);
+});
+it('uses an eight second abort deadline and returns a controlled timeout',async()=>{
+ const provider=createAmapParkCarpoolProvider({key:'test-only',fetchImpl:async(_url,options)=>{
+   expect(options?.signal).toBeInstanceOf(AbortSignal);
+   throw new DOMException('timed out','TimeoutError');
+ }});
+ await expect(provider.searchPlaces('公共站点','杭州')).rejects.toThrow('地图服务连接失败，请稍后重试');
+});

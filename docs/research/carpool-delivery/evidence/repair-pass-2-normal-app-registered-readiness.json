@@ -1,0 +1,71 @@
+{
+  "serverUrl": "http://127.0.0.1:49232",
+  "legacy": false,
+  "readiness": {
+    "state": "degraded",
+    "canAuthenticate": true,
+    "canUseLicensedFeatures": true,
+    "bootstrap": {
+      "phase": "activated",
+      "lastAttemptAt": null,
+      "lastSuccessAt": "2026-09-08T14:36:51.308Z",
+      "errorCode": null
+    },
+    "steps": [
+      {
+        "id": "deployment_identity",
+        "state": "ready",
+        "required": true,
+        "message": "部署身份已绑定到当前服务器"
+      },
+      {
+        "id": "license",
+        "state": "ready",
+        "required": true,
+        "message": "授权已生效，套餐为 enterprise"
+      },
+      {
+        "id": "modules",
+        "state": "ready",
+        "required": true,
+        "message": "已按套餐启用 6 项功能模块"
+      },
+      {
+        "id": "model_and_credits",
+        "state": "disabled",
+        "required": false,
+        "message": "当前套餐未启用集中模型与积分网关"
+      },
+      {
+        "id": "storage",
+        "state": "ready",
+        "required": true,
+        "message": "数据库、附件存储与数据隔离已就绪"
+      },
+      {
+        "id": "federation",
+        "state": "disabled",
+        "required": false,
+        "message": "当前部署未启用跨服务器协作"
+      },
+      {
+        "id": "updates",
+        "state": "action_required",
+        "required": false,
+        "message": "签名更新通道尚未完成初始化"
+      },
+      {
+        "id": "telemetry",
+        "state": "disabled",
+        "required": false,
+        "message": "运行数据上报已按套餐或客户策略关闭"
+      },
+      {
+        "id": "account_identity",
+        "state": "ready",
+        "required": true,
+        "message": "企业与管理员身份已就绪，可直接登录"
+      }
+    ]
+  }
+}

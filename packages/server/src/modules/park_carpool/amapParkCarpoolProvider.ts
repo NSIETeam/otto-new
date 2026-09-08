@@ -22,7 +22,9 @@ interface AmapResponse {
 
 function parseCoordinate(value: unknown): ParkCarpoolCoordinate | null {
   if (typeof value !== 'string') return null;
-  const [longitude, latitude] = value.split(',').map(Number);
+  const parts = value.split(',');
+  if (parts.length !== 2 || parts.some(part => !part.trim())) return null;
+  const [longitude, latitude] = parts.map(Number);
   if (
     !Number.isFinite(longitude) ||
     !Number.isFinite(latitude) ||
@@ -44,7 +46,7 @@ function coordinateParameter(value: ParkCarpoolCoordinate): string {
 }
 
 function assertAmapSuccess(value: AmapResponse): void {
-  if (value.status !== '1') throw new Error('地图服务暂时不可用，请稍后重试');
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.status !== '1') throw new Error('地图服务暂时不可用，请稍后重试');
 }
 
 async function request(
@@ -159,9 +161,12 @@ export function createAmapParkCarpoolProvider(input: {
         size: '600*400',
         scale: '1',
       }).toString();
-      const response = await fetchImpl(url, {
-        signal: AbortSignal.timeout(8000),
-      });
+      let response: Response;
+      try {
+        response = await fetchImpl(url, {signal: AbortSignal.timeout(8000)});
+      } catch {
+        throw new Error('地图服务连接失败，请稍后重试');
+      }
       if (!response.ok) throw new Error('地图图片暂时不可用');
       const type = response.headers.get('content-type')?.split(';')[0];
       if (type !== 'image/png' && type !== 'image/jpeg')

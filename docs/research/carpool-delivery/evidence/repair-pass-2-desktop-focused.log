@@ -1,0 +1,44 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ✓ src/renderer/components/CarpoolPointPicker.test.ts (1 test) 4ms
+ ✓ src/renderer/parkCarpoolConversationBridge.test.ts (8 tests) 36ms
+ ✓ src/renderer/components/CarpoolConfirmation.test.tsx (1 test) 62ms
+ ✓ src/renderer/components/ParkCarpoolDialog.test.tsx (4 tests) 265ms
+(node:12769) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:12770) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:12771) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/main/park-carpool-chat.integration.test.ts (1 test | 1 failed) 6ms
+   × desktop coordinators exchange, retry after lost response, and restore actual MLS ciphertext from SQLite 6ms
+     → Native test binary missing or not executable: /@fs/Users/yang/Desktop/otto-carpool-fixed-91bc4e/otto-native/target/debug/otto-native. From repository root run: cargo build --manifest-path otto-native/Cargo.toml --bin otto-native
+ ✓ src/renderer/parkCarpoolContract.integration.test.ts (3 tests) 194ms
+ ✓ src/renderer/components/CarpoolFlow.integration.test.tsx (1 test) 5839ms
+   ✓ real UI publishes, previews, requests, chats, groups, admits and leaves through SQLite and native MLS  5839ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-carpool-chat.integration.test.ts > desktop coordinators exchange, retry after lost response, and restore actual MLS ciphertext from SQLite
+Error: Native test binary missing or not executable: /@fs/Users/yang/Desktop/otto-carpool-fixed-91bc4e/otto-native/target/debug/otto-native. From repository root run: cargo build --manifest-path otto-native/Cargo.toml --bin otto-native
+ ❯ carpoolTestNativeBinary src/test/carpoolTestSupport.ts:16:11
+     14|     accessSync(binary, process.platform === 'win32' ? constants.F_OK :…
+     15|   } catch {
+     16|     throw new Error(`Native test binary missing or not executable: ${b…
+       |           ^
+     17|   }
+     18|   return binary;
+ ❯ create src/main/park-carpool-chat.integration.test.ts:69:19
+ ❯ src/main/park-carpool-chat.integration.test.ts:89:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 6 passed (7)
+      Tests  1 failed | 18 passed (19)
+   Start at  20:21:14
+   Duration  10.83s (transform 2.68s, setup 1.20s, collect 12.90s, tests 6.41s, environment 3.65s, prepare 588ms)
+
+
+EXIT_CODE=1

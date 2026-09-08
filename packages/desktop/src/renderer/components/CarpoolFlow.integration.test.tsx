@@ -1,3 +1,4 @@
+import { carpoolTestConfig, carpoolTestNativeBinary } from '../../main/park-carpool-test-support.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -72,7 +73,7 @@ it('real UI publishes, previews, requests, chats, groups, admits and leaves thro
       coordinate: { longitude: 116.1, latitude: 40 },
     },
   ];
-  const service = createParkCarpoolService({
+  const service = createParkCarpoolService({ config: carpoolTestConfig,
     store,
     createId: (id) => `intent-${id}`,
     mapProvider: {
@@ -92,7 +93,7 @@ it('real UI publishes, previews, requests, chats, groups, admits and leaves thro
       id,
       new ParkCarpoolChat({
         stateDirectory: directory,
-        binaryPath: path.resolve('../../otto-native/target/debug/otto-native'),
+        binaryPath: carpoolTestNativeBinary(),
         secureStorage: {
           assertAvailable: () => undefined,
           protect: (s) => `test-only:${s}`,

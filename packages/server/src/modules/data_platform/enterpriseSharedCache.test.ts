@@ -75,3 +75,14 @@ describe('Redis enterprise shared cache', () => {
     await expect(cache.healthCheck()).rejects.toThrow(/health.*failed/i);
   });
 });
+
+it('renews only the current owner atomically and propagates expired ownership', async () => {
+ const client={ping:vi.fn(async()=> 'PONG'),get:vi.fn(async()=>null),set:vi.fn(async()=> 'OK'),del:vi.fn(async()=>0),eval:vi.fn(async()=>1),quit:vi.fn(async()=>{})};
+ const cache=createRedisEnterpriseSharedCache({client});
+ expect(await cache.renewLease('maintenance','owner-a',120000)).toBe(true);
+ expect(client.eval).toHaveBeenCalledWith(expect.stringMatching(/get.*\n.*pexpire/s),{keys:['otto:maintenance'],arguments:['owner-a','120000']});
+ client.eval.mockResolvedValueOnce(0);
+ expect(await cache.renewLease('maintenance','old-owner',120000)).toBe(false);
+ await expect(cache.renewLease('maintenance','owner-a',0)).rejects.toThrow(/TTL/);
+ expect(client.set).not.toHaveBeenCalled();
+});

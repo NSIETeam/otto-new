@@ -1,3 +1,5 @@
+import { carpoolParkEnabled } from './parkCarpoolConfig.js';
+import type { CarpoolConfig } from './parkCarpoolConfig.js';
 import { carpoolMeasurement } from './parkCarpoolMetrics.js';
 import {
   createCarpoolResultPage,
@@ -122,6 +124,7 @@ export interface ParkCarpoolState {
     'searching' | 'needs_confirmation' | 'not_accepting' | 'inactive';
   capability: 'park_carpool_v1';
   mapConfigured: boolean;
+  availability?: { parkEnabled: boolean; canPublish: boolean; reason?: string };
   parkId: string;
   currentIntent: ParkCarpoolIntent | null;
   capabilities?: string[];
@@ -168,13 +171,14 @@ function requirePrincipal(
 }
 
 export function createParkCarpoolService(input: {
+  config?: CarpoolConfig;
   store: ParkCarpoolStore;
   mapProvider: ParkCarpoolMapProvider;
   createId(accountId: string, travelDate: string): string;
   now?(): Date;
   minimumOverlap?: number;
 }) {
-  const config = readCarpoolConfig();
+  const config = input.config ?? readCarpoolConfig();
   let maintenanceCursor = '';
   const now = input.now ?? (() => new Date());
 
@@ -189,7 +193,7 @@ export function createParkCarpoolService(input: {
     change: (row: ReturnType<typeof carpoolMeasurement>) => void,
   ) {
     if (!input.store.transactWorkflow) return;
-    await createCarpoolWorkflow({ store: input.store, now })
+    await createCarpoolWorkflow({ config, store: input.store, now })
       .withContext(accountId, (ctx) =>
         change(carpoolMeasurement(ctx.state, accountId, now().toISOString())),
       )
@@ -219,7 +223,10 @@ export function createParkCarpoolService(input: {
     currentIntent: ParkCarpoolIntent | null,
     query: CarpoolResultsQuery = {},
     targetIntentId?: string,
+    signal?: AbortSignal,
+    sampleCandidates = true,
   ): Promise<ParkCarpoolState> {
+    signal?.throwIfAborted();
     const generatedAt = now();
     const expiry = currentIntent
       ? Date.parse(currentIntent.expiresAt)
@@ -230,7 +237,7 @@ export function createParkCarpoolService(input: {
         ? { ...currentIntent, status: 'expired' as const }
         : currentIntent;
     const workflow = input.store.transactWorkflow
-      ? await createCarpoolWorkflow({ store: input.store, now }).read(
+      ? await createCarpoolWorkflow({ config, signal, store: input.store, now }).read(
           actor.accountId,
         )
       : null;
@@ -242,13 +249,14 @@ export function createParkCarpoolService(input: {
     const resultPage = createCarpoolResultPage(query, targetIntentId);
     let failedCandidateCount = 0;
     const collect = (candidates: ParkCarpoolIntent[]) => {
-      if (effectiveIntent?.status !== 'active' || excluded.has(actor.accountId))
+      if (!config.requestsEnabled || !carpoolParkEnabled(config, actor.parkId) || effectiveIntent?.status !== 'active' || excluded.has(actor.accountId))
         return;
       for (const match of buildCarpoolMatches(
         effectiveIntent,
         candidates.filter((candidate) => !excluded.has(candidate.accountId)),
         {
-          minimumOverlap: input.minimumOverlap,
+          minimumOverlap: input.minimumOverlap ?? config.minimumOverlap,
+              config,
           now: generatedAt,
           onCandidateError: () => {
             failedCandidateCount++;
@@ -267,6 +275,7 @@ export function createParkCarpoolService(input: {
             cursor,
             200,
           );
+          signal?.throwIfAborted();
           collect(page.intents);
           failedCandidateCount += page.failedCount;
           if (page.nextCursor && page.nextCursor === cursor)
@@ -284,7 +293,7 @@ export function createParkCarpoolService(input: {
         );
     }
     const groups = input.store.transactWorkflow
-      ? await createCarpoolWorkflow({
+      ? await createCarpoolWorkflow({ config, signal,
           store: input.store,
           now,
           mapProvider: input.mapProvider,
@@ -303,7 +312,7 @@ export function createParkCarpoolService(input: {
         'groupId' in match,
     );
     if (input.store.transactWorkflow && effectiveIntent?.status === 'active') {
-      await createCarpoolWorkflow({ store: input.store, now }).withContext(
+      await createCarpoolWorkflow({ config, signal, store: input.store, now }).withContext(
         actor.accountId,
         (ctx) => {
           if (
@@ -314,7 +323,7 @@ export function createParkCarpoolService(input: {
             )
           )
             return;
-          if (!query.cursor && !targetIntentId) {
+          if (sampleCandidates && !query.cursor && !targetIntentId) {
             const measurement = carpoolMeasurement(
               ctx.state,
               actor.accountId,
@@ -354,8 +363,9 @@ export function createParkCarpoolService(input: {
         },
       );
     }
+    signal?.throwIfAborted();
     return {
-      capabilities: carpoolCommunicationCapabilities(),
+      capabilities: carpoolCommunicationCapabilities(config, actor.parkId),
       hasGroup: Boolean(workflow?.myGroup),
       parkAdmin: Boolean(actor.parkAdmin),
       meetingPoints: workflow?.meetingPoints ?? [],
@@ -364,6 +374,13 @@ export function createParkCarpoolService(input: {
       failedCandidateCount: failedCandidateCount + groups.failedCount,
       capability: 'park_carpool_v1',
       mapConfigured: input.mapProvider.configured,
+      availability: {
+        parkEnabled: carpoolParkEnabled(config, actor.parkId),
+        canPublish: config.requestsEnabled && carpoolParkEnabled(config, actor.parkId) && input.mapProvider.configured,
+        reason: !carpoolParkEnabled(config, actor.parkId) ? '当前园区尚未开放拼车试点'
+          : !config.requestsEnabled ? '服务器已暂停新增同行业务，历史管理仍可使用'
+          : !input.mapProvider.configured ? '地图服务尚未配置，历史聊天和退组仍可使用' : undefined,
+      },
       parkId: actor.parkId,
       currentIntent: effectiveIntent,
       searchStatus:
@@ -384,9 +401,12 @@ export function createParkCarpoolService(input: {
   async function getState(
     accountId: string,
     query: CarpoolResultsQuery = {},
+    signal?: AbortSignal,
+    sampleCandidates = true,
   ): Promise<ParkCarpoolState> {
+    signal?.throwIfAborted();
     const actor = await principal(accountId);
-    return stateFor(actor, await input.store.getIntent(actor.accountId), query);
+    return stateFor(actor, await input.store.getIntent(actor.accountId), query, undefined, signal, sampleCandidates);
   }
 
   async function searchPlaces(
@@ -530,6 +550,7 @@ export function createParkCarpoolService(input: {
     raw: ParkCarpoolPublishInput,
   ): Promise<ParkCarpoolIntent> {
     const actor = await principal(accountId);
+    if (!config.requestsEnabled || !carpoolParkEnabled(config, actor.parkId)) throw new Error('服务器已暂停新增同行业务，历史管理仍可使用');
     if (!input.store.publications) return performPublish(accountId, raw);
     const requestKey = raw.requestKey ?? randomUUID();
     raw = { ...raw, requestKey };
@@ -608,17 +629,20 @@ export function createParkCarpoolService(input: {
   async function refreshMatches(
     accountId: string,
     query: CarpoolResultsQuery = {},
+    signal?: AbortSignal,
+    sampleCandidates = true,
   ): Promise<ParkCarpoolState> {
+    signal?.throwIfAborted();
     const actor = await principal(accountId);
     const current = await input.store.getIntent(actor.accountId);
-    return stateFor(actor, current, query);
+    return stateFor(actor, current, query, undefined, signal, sampleCandidates);
   }
 
-  const workflow = createCarpoolWorkflow({
+  const workflow = createCarpoolWorkflow({ config,
     store: input.store,
     now,
     mapProvider: input.mapProvider,
-    minimumOverlap: input.minimumOverlap,
+    minimumOverlap: input.minimumOverlap ?? config.minimumOverlap,
   });
   function publicWorkflow(value: Awaited<ReturnType<typeof workflow.read>>) {
     const {
@@ -629,11 +653,13 @@ export function createParkCarpoolService(input: {
     return publicValue;
   }
   return {
-    maintain: async () => {
+    maintain: async (signal?: AbortSignal) => {
+      signal?.throwIfAborted();
       if (!input.store.maintain) throw new Error('同行生命周期存储不可用');
       const result = await input.store.maintain({
         now: now().toISOString(),
         positionRetentionHours: config.positionRetentionHours,
+        communicationRetentionDays: config.communicationRetentionDays,
       });
       let failures = 0;
       const sorted = [...result.accountIds].sort();
@@ -641,8 +667,10 @@ export function createParkCarpoolService(input: {
       const batch = next.length ? next : sorted.slice(0, 20);
       for (const accountId of batch)
         try {
-          await getState(accountId);
+          signal?.throwIfAborted();
+          await getState(accountId, {}, signal, false);
         } catch {
+          signal?.throwIfAborted();
           failures += 1;
         }
       maintenanceCursor = batch.at(-1) ?? '';
@@ -654,6 +682,7 @@ export function createParkCarpoolService(input: {
       await input.store.maintain({
         now: now().toISOString(),
         positionRetentionHours: config.positionRetentionHours,
+        communicationRetentionDays: config.communicationRetentionDays,
         deleteAccountId: accountId,
       });
       return { deleted: true };
@@ -766,7 +795,8 @@ export function createParkCarpoolService(input: {
           !group &&
           !buildCarpoolMatches(mine, [target], {
             now: now(),
-            minimumOverlap: input.minimumOverlap,
+            minimumOverlap: input.minimumOverlap ?? config.minimumOverlap,
+              config,
           }).length
         )
           throw new Error('无权查看该路线，匹配已失效');
@@ -821,14 +851,14 @@ export function createParkCarpoolService(input: {
       proof: ParkTransportProof | undefined,
     ) => {
       if (!proof) throw new Error('无权使用加密接口，缺少设备签名');
-      return createParkCarpoolTransport({ store: input.store, now }).execute(
+      return createParkCarpoolTransport({ config, store: input.store, now }).execute(
         accountId,
         command,
         proof,
       );
     },
     executeTransport: (accountId: string, command: ParkTransportCommand) =>
-      createParkCarpoolTransport({ store: input.store, now }).execute(
+      createParkCarpoolTransport({ config, store: input.store, now }).execute(
         accountId,
         command,
       ),

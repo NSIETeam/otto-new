@@ -1,0 +1,37 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ ✓ packages/server/src/modules/data_platform/enterpriseSharedCache.test.ts (4 tests) 5ms
+(node:12073) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts (4 tests) 8ms
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts (5 tests | 1 failed) 2183ms
+   ✓ SQLite: expires without user reads, cleans precise positions and deletes own workflow facts 19ms
+   ✓ PostgreSQL: expires without user reads, cleans precise positions and deletes own workflow facts  1101ms
+   ✓ SQLite: moving parks prunes old scope without deleting new valid intent 5ms
+   ✓ PostgreSQL: moving parks prunes old scope without deleting new valid intent  1054ms
+   × cancels maintenance before candidate effects after ownership is lost during a database read 3ms
+     → Cannot read properties of undefined (reading 'bind')
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts > cancels maintenance before candidate effects after ownership is lost during a database read
+TypeError: Cannot read properties of undefined (reading 'bind')
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts:176:48
+    174|  const waiting=new Promise<void>(resolve=>{entered=resolve;});
+    175|  const gate=new Promise<void>(resolve=>{release=resolve;});
+    176|  const original=h.store.listActiveIntentsPage!.bind(h.store);
+       |                                                ^
+    177|  const store={...h.store,listActiveIntentsPage:async(...args:Parameter…
+    178|   const result=await original(...args);if(pause){entered();await gate;…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 12 passed (13)
+   Start at  20:21:12
+   Duration  5.93s (transform 1.87s, setup 0ms, collect 6.42s, tests 2.20s, environment 0ms, prepare 151ms)
+
+
+EXIT_CODE=1

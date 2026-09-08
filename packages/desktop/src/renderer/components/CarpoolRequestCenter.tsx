@@ -112,6 +112,7 @@ export function CarpoolRequestCenter({
           刷新同行消息
         </button>
       </header>
+      {state?.readiness && !state.readiness.approvedDevice ? <p role="status">当前账号尚无已批准的安全设备；请在账号安全设置完成设备批准后使用加密聊天。</p> : null}
       {error ? <p role="alert">{error}</p> : null}
       {!state && !error ? <p role="status">正在读取同行消息…</p> : null}
       {intent && showCurrentIntent ? (

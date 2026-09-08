@@ -105,3 +105,5 @@ export type { CarpoolGroupMatch } from './modules/park_carpool/parkCarpoolGroupM
 export type { CarpoolRoutePreview } from './modules/park_carpool/parkCarpoolRoutePreview.js';
 
 export type { CarpoolMeetingPoint } from './modules/park_carpool/parkCarpoolWorkflow.js';
+
+export { readCarpoolConfig, type CarpoolConfig } from './modules/park_carpool/parkCarpoolConfig.js';

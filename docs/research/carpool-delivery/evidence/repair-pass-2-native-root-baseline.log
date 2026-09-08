@@ -1,0 +1,14 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:35135) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolTransport.integration.test.ts (6 tests | 3 skipped) 231ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 3 skipped (6)
+   Start at  20:05:42
+   Duration  2.60s (transform 1.12s, setup 0ms, collect 2.23s, tests 231ms, environment 0ms, prepare 25ms)
+
+
+EXIT_CODE=0

@@ -1,3 +1,5 @@
+import { carpoolParkEnabled } from './parkCarpoolConfig.js';
+import type { CarpoolConfig } from './parkCarpoolConfig.js';
 import { readCarpoolConfig } from './parkCarpoolConfig.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { randomUUID, verify } from 'node:crypto';
@@ -133,10 +135,12 @@ function rotateForDevices(conversation: CarpoolConversation, now: string) {
   });
 }
 export function createParkCarpoolTransport(input: {
+  config?: CarpoolConfig;
   store: ParkCarpoolStore;
   now?(): Date;
 }) {
-  const workflow = createCarpoolWorkflow(input);
+  const config = input.config ?? readCarpoolConfig();
+  const workflow = createCarpoolWorkflow({...input, config});
   return {
     execute: (
       accountId: string,
@@ -349,7 +353,7 @@ export function createParkCarpoolTransport(input: {
           return { rekeyed: true, generation: conversation.generation };
         }
         if (command.type === 'activate' || command.type === 'append') {
-          if (!readCarpoolConfig().requestsEnabled)
+          if (!config.requestsEnabled || !carpoolParkEnabled(config, actor!.parkId!))
             throw new Error('服务器已暂停同行消息写入，历史仍可查看');
           if (
             !isMember ||
@@ -575,7 +579,7 @@ export function createParkCarpoolTransport(input: {
               role,
             };
           }),
-          writeEnabled: readCarpoolConfig().requestsEnabled,
+          writeEnabled: config.requestsEnabled && carpoolParkEnabled(config, actor!.parkId!),
           status: conversation.status,
           generation: conversation.generation,
           sessions: sessions.map((s) => ({

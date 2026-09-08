@@ -883,6 +883,7 @@ export interface EnterpriseParkCarpoolState {
   capabilities?:string[];
   failedCandidateCount?: number;
   capability: 'park_carpool_v1';
+  availability?: { parkEnabled: boolean; canPublish: boolean; reason?: string };
   mapConfigured: boolean;
   parkId: string;
   currentIntent: EnterpriseParkCarpoolIntent | null;

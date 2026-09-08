@@ -1,3 +1,4 @@
+import { carpoolTestConfig } from './parkCarpoolTestSupport.js';
 import { generateKeyPairSync, sign } from 'node:crypto';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -8,6 +9,7 @@ import { FileMlsStatePersistence, ParkMlsNativeKernel } from '@otto/native';
 import { createParkCarpoolService } from './parkCarpoolService.js';
 import { createParkCarpoolTransport } from './parkCarpoolTransport.js';
 import {
+  carpoolTestNativeBinary,
   sqliteHarness,
   postgresHarness,
   fixed,
@@ -28,7 +30,7 @@ for (const [name, factory] of [
       await h.approveDevices(
         keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
       );
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         mapProvider: {
@@ -96,7 +98,7 @@ for (const [name, factory] of [
       const h = await factory();
       await h.approveDevices();
       let now = fixed;
-      const transport = createParkCarpoolTransport({
+      const transport = createParkCarpoolTransport({ config: carpoolTestConfig,
         store: h.store,
         now: () => now,
       });
@@ -137,7 +139,7 @@ for (const [name, factory] of [
       const directory = await mkdtemp(
         path.join(tmpdir(), 'otto-park-native-contract-'),
       );
-      const nativePath = path.resolve('otto-native/target/debug/otto-native');
+      const nativePath = carpoolTestNativeBinary();
       const kernels = ['a', 'b'].map(
         (accountId) =>
           new ParkMlsNativeKernel(
@@ -159,7 +161,7 @@ for (const [name, factory] of [
         ParkMlsNativeKernel,
         ParkMlsNativeKernel,
       ];
-      const service = createParkCarpoolService({
+      const service = createParkCarpoolService({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
         createId: (id) => `intent-${id}`,
@@ -174,7 +176,7 @@ for (const [name, factory] of [
           }),
         },
       });
-      const transport = createParkCarpoolTransport({
+      const transport = createParkCarpoolTransport({ config: carpoolTestConfig,
         store: h.store,
         now: () => fixed,
       });

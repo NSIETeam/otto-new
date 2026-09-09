@@ -21,7 +21,12 @@ vi.mock('../starMap/EnterpriseGraphCanvas.js', () => ({
       zoom: vi.fn(),
     }));
     return (
-      <div data-testid="graph" data-focus={props.hover ?? props.selected ?? ''}>
+      <div
+        data-testid="graph"
+        data-focus={props.hover ?? props.selected ?? ''}
+        data-size-mode={props.sizeMode}
+        data-reduced-motion={String(props.reducedMotion)}
+      >
         {props.index.nodes.map((node: any) => (
           <button
             key={node.organizationId}
@@ -77,12 +82,89 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('enterprise star map exploration', () => {
+  it('uses a fixed visual policy and ignores legacy view preferences', async () => {
+    localStorage.setItem(
+      'otto:star-map:demo',
+      JSON.stringify({
+        sizeMode: 'uniform',
+        showIndustries: false,
+        motion: 'reduce',
+      }),
+    );
+    try {
+      render(
+        <EnterpriseStarMapView onBack={() => undefined} initialSource="demo" />,
+      );
+      const graph = await screen.findByTestId('graph');
+      expect(screen.queryByRole('button', { name: '视图设置' })).toBeNull();
+      expect(graph.getAttribute('data-size-mode')).toBe('degree');
+      expect(screen.queryByText(/对关系/)).toBeNull();
+      expect(graph.getAttribute('data-reduced-motion')).toBe('false');
+    } finally {
+      localStorage.removeItem('otto:star-map:demo');
+    }
+  });
+  it('automatically respects system reduced motion', async () => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: () => ({
+        matches: true,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }),
+    });
+    render(
+      <EnterpriseStarMapView onBack={() => undefined} initialSource="demo" />,
+    );
+    expect(
+      (await screen.findByTestId('graph')).getAttribute('data-reduced-motion'),
+    ).toBe('true');
+  });
+  it('shows only the graph by default even on narrow windows, without refresh or list buttons', async () => {
+    const width = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 600,
+    });
+    try {
+      render(
+        <EnterpriseStarMapView onBack={() => undefined} initialSource="demo" />,
+      );
+      await screen.findByTestId('graph');
+      expect(screen.queryByRole('button', { name: '刷新企业资料' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '企业列表' })).toBeNull();
+      expect(
+        screen.queryByRole('complementary', { name: '企业列表' }),
+      ).toBeNull();
+      fireEvent.change(
+        screen.getByRole('combobox', { name: '搜索企业名称或业务' }),
+        { target: { value: '国金源富' } },
+      );
+      expect(
+        await screen.findByRole('complementary', { name: '企业列表' }),
+      ).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: '清空搜索' }));
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('complementary', { name: '企业列表' }),
+        ).toBeNull(),
+      );
+    } finally {
+      Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: width,
+      });
+    }
+  });
   it('loads 17 researched demo enterprises explicitly without calling the real service', async () => {
     render(
       <EnterpriseStarMapView onBack={() => undefined} initialSource="demo" />,
     );
     expect(await screen.findByText(/公开资料演示数据/)).toBeTruthy();
     expect(await screen.findByTestId('graph')).toBeTruthy();
+    const fitButton = screen.getByRole('button', { name: '适配全图' });
+    expect(fitButton.textContent).toBe('');
+    expect(fitButton.querySelector('svg')).toBeTruthy();
     expect(window.otto.enterpriseParkStarMap).not.toHaveBeenCalled();
     expect(
       within(screen.getByTestId('graph')).getAllByRole('button'),
@@ -155,7 +237,7 @@ describe('enterprise star map exploration', () => {
     render(<EnterpriseStarMapView onBack={() => undefined} />);
     await screen.findByTestId('graph');
     loader.mockRejectedValueOnce(new Error('network unavailable'));
-    fireEvent.click(screen.getByRole('button', { name: '刷新企业资料' }));
+    fireEvent(window, new Event('otto:enterprise-profile-updated'));
     expect(await screen.findByText(/显示上次加载内容/)).toBeTruthy();
     expect(screen.getByTestId('graph')).toBeTruthy();
     loader.mockRejectedValueOnce(
@@ -178,7 +260,7 @@ describe('enterprise star map exploration', () => {
       (n) => n.organizationId !== 'demo:bhc-demo-018',
     );
     loader.mockResolvedValueOnce(next as any);
-    fireEvent.click(screen.getByRole('button', { name: '刷新企业资料' }));
+    fireEvent(window, new Event('otto:enterprise-profile-updated'));
     await waitFor(() =>
       expect(
         screen.queryByRole('complementary', { name: '企业资料' }),

@@ -18,6 +18,6 @@ export function StarMapPerformance():React.JSX.Element{
    <button onClick={()=>{setMounted(value=>!value);setRound(value=>value+1);}}>关闭 / 重开画布</button><span>操作轮次 {round}</span>
    <button onClick={()=>{const canvas=document.querySelector<HTMLElement>('[data-render-frames]');const before=canvas?.dataset.renderFrames;setIdle('检查中');setTimeout(()=>setIdle(`5秒新增绘制帧：${Number(canvas?.dataset.renderFrames??0)-Number(before??0)}`),5000);}}>检查稳定后空闲绘制</button>
    <output aria-label="性能测量">{metrics?JSON.stringify(metrics):'正在布局'}</output><output>{idle}</output>
-  </header><div style={{flex:1,position:'relative'}}>{mounted?<EnterpriseGraphCanvas key={round} index={index} ownId="" selected={selected} hover={hover} scope={null} matches={new Set()} sizeMode="uniform" reducedMotion={false} showIndustries onSelect={setSelected} onHover={setHover} onMetrics={record}/>:<p>画布已卸载</p>}</div>
+  </header><div style={{flex:1,position:'relative'}}>{mounted?<EnterpriseGraphCanvas key={round} index={index} ownId="" selected={selected} hover={hover} scope={null} matches={new Set()} sizeMode="uniform" reducedMotion={false} onSelect={setSelected} onHover={setHover} onMetrics={record}/>:<p>画布已卸载</p>}</div>
  </div>;
 }

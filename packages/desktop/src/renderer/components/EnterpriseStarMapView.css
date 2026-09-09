@@ -135,24 +135,6 @@
   border-radius: 20px;
   padding: 5px 9px;
 }
-.star-settings {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 18px;
-  padding: 12px 26px;
-  background: var(--star-surface);
-  border-bottom: 1px solid var(--star-line);
-  font-size: 12px;
-}
-.star-settings label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.star-settings small {
-  color: var(--star-muted);
-}
 .star-feedback,
 .star-own-notice,
 .star-scope {
@@ -202,13 +184,12 @@
 .star-canvas-controls button {
   box-shadow: 0 2px 8px #2e204908;
 }
-.star-canvas-caption {
-  position: absolute;
-  right: 20px;
-  bottom: 8px;
-  font-size: 10px;
-  color: var(--star-muted);
-  pointer-events: none;
+.star-canvas-controls .star-fit-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  padding: 0;
 }
 .star-hover-name {
   position: absolute;
@@ -499,3 +480,16 @@ body.dark .enterprise-star {
 .enterprise-star .is-keyboard-active{outline:2px solid var(--star-accent);outline-offset:-2px}
 
 .star-list{display:flex;flex-direction:column;overflow:hidden}.star-result-window{flex:1;min-height:180px;overflow:auto;position:relative}.star-company-row>span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.star-company-row small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.star-hover-name {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.star-hover-name strong {
+  font-weight: 500;
+}
+.star-hover-name span {
+  font-size: 11px;
+  color: var(--star-text);
+}

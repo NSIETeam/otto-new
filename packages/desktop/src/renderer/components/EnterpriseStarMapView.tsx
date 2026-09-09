@@ -21,7 +21,6 @@ import {
   safeWebsite,
   searchEnterprises,
   type RelationMode,
-  type SizeMode,
   type StarMapData,
 } from '../starMap/model.js';
 import type {
@@ -96,11 +95,6 @@ export function EnterpriseStarMapView({
   const [localRoot, setLocalRoot] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
-  const [listOpen, setListOpen] = useState(() => window.innerWidth < 768);
-  const [settings, setSettings] = useState(false);
-  const [sizeMode, setSizeMode] = useState<SizeMode>('degree');
-  const [showIndustries, setShowIndustries] = useState(true);
-  const [motion, setMotion] = useState<'system' | 'reduce'>('system');
   const [systemReduce, setSystemReduce] = useState(
     () =>
       window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
@@ -130,7 +124,6 @@ export function EnterpriseStarMapView({
     emitStarMapEvent('star_map_open', source, relation);
   }, [source, relation]);
   const frame = useRef<number>();
-  const reduced = motion === 'reduce' || systemReduce;
   const schedule = useCallback((fn: () => void) => {
     if (frame.current) cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(fn);
@@ -290,34 +283,6 @@ export function EnterpriseStarMapView({
     media.addEventListener?.('change', update);
     return () => media.removeEventListener?.('change', update);
   }, []);
-  const preferenceKey =
-    source === 'demo'
-      ? 'otto:star-map:demo'
-      : accountKey
-        ? `otto:star-map:${accountKey}`
-        : '';
-  useEffect(() => {
-    if (!preferenceKey) return;
-    try {
-      const value = JSON.parse(localStorage.getItem(preferenceKey) ?? '{}');
-      setSizeMode(value.sizeMode === 'uniform' ? 'uniform' : 'degree');
-      setMotion(value.motion === 'reduce' ? 'reduce' : 'system');
-      setShowIndustries(value.showIndustries !== false);
-    } catch {
-      /* Defaults survive malformed local preferences. */
-    }
-  }, [preferenceKey]);
-  const savePreferences = (patch: Record<string, unknown>) => {
-    if (!preferenceKey) return;
-    try {
-      localStorage.setItem(
-        preferenceKey,
-        JSON.stringify({ sizeMode, motion, showIndustries, ...patch }),
-      );
-    } catch {
-      /* Storage is optional. */
-    }
-  };
   const isSupplyDemo = source === 'demo' && data?.parkId === supplyDemo.parkId;
   const activeData = useMemo(
     () =>
@@ -465,10 +430,6 @@ export function EnterpriseStarMapView({
       closeEditor();
       return;
     }
-    if (settings) {
-      setSettings(false);
-      return;
-    }
     if (query) {
       setQuery('');
       return;
@@ -547,7 +508,6 @@ export function EnterpriseStarMapView({
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                 event.preventDefault();
-                setListOpen(true);
                 const next = Math.max(
                   0,
                   Math.min(
@@ -578,12 +538,6 @@ export function EnterpriseStarMapView({
             </button>
           ) : null}
         </div>
-        <button
-          aria-pressed={listOpen}
-          onClick={() => setListOpen((value) => !value)}
-        >
-          企业列表
-        </button>
         <div className="star-toolbar-spacer" />
         {source === 'demo' ? (
           <span className="star-demo-badge">公开资料演示数据 · 供需为模拟</span>
@@ -591,64 +545,7 @@ export function EnterpriseStarMapView({
         <button onClick={switchSource}>
           {source === 'real' ? '体验演示' : '返回真实园区'}
         </button>
-        <button
-          aria-expanded={settings}
-          onClick={() => setSettings((value) => !value)}
-        >
-          视图设置
-        </button>
-        <button
-          onClick={() => void load()}
-          disabled={loading || source === 'demo'}
-          aria-label="刷新企业资料"
-        >
-          {loading ? '更新中…' : '刷新'}
-        </button>
       </div>
-      {settings ? (
-        <div className="star-settings" aria-label="视图设置">
-          <label>
-            节点大小
-            <select
-              value={sizeMode}
-              onChange={(event) => {
-                const value = event.target.value as SizeMode;
-                setSizeMode(value);
-                savePreferences({ sizeMode: value });
-              }}
-            >
-              <option value="uniform">统一</option>
-              <option value="degree">按关联企业数</option>
-            </select>
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={showIndustries}
-              onChange={(event) => {
-                setShowIndustries(event.target.checked);
-                savePreferences({ showIndustries: event.target.checked });
-              }}
-            />
-            显示行业标识
-          </label>
-          <label>
-            动态效果
-            <select
-              value={motion}
-              onChange={(event) => {
-                const value = event.target.value as 'system' | 'reduce';
-                setMotion(value);
-                savePreferences({ motion: value });
-              }}
-            >
-              <option value="system">跟随系统</option>
-              <option value="reduce">减少动态效果</option>
-            </select>
-          </label>
-          <small>节点大小表示关联企业数，不代表企业规模或实力。</small>
-        </div>
-      ) : null}
       {error ? (
         <div className="star-feedback" role="alert">
           {data ? '更新失败，显示上次加载内容。 ' : ''}
@@ -704,7 +601,7 @@ export function EnterpriseStarMapView({
         </div>
       ) : null}
       <div className="star-workspace">
-        {listOpen || search.trim() || overCapacity || graphFailed ? (
+        {search.trim() || overCapacity || graphFailed ? (
           <aside className="star-list" aria-label="企业列表">
             <div className="star-list-title">
               <strong>{search.trim() ? '搜索整个园区' : '企业列表'}</strong>
@@ -752,7 +649,6 @@ export function EnterpriseStarMapView({
               key={`${source}:${data.parkId}:${graphKey}`}
               onFail={() => {
                 setGraphFailed(true);
-                setListOpen(true);
               }}
             >
               <Suspense
@@ -767,11 +663,8 @@ export function EnterpriseStarMapView({
                   ownId={data.currentOrganizationId}
                   matches={matches}
                   scope={scope}
-                  sizeMode={sizeMode}
-                  reducedMotion={reduced}
-                  showIndustries={
-                    showIndustries && relation === 'same_industry'
-                  }
+                  sizeMode="degree"
+                  reducedMotion={systemReduce}
                   onSelect={select}
                   onHover={setHover}
                 />
@@ -799,7 +692,28 @@ export function EnterpriseStarMapView({
             <button onClick={() => canvas.current?.zoom(0.8)} aria-label="缩小">
               −
             </button>
-            <button onClick={() => canvas.current?.fit()}>适配全图</button>
+            <button
+              className="star-fit-control"
+              onClick={() => canvas.current?.fit()}
+              aria-label="适配全图"
+              title="适配全图"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5" />
+                <rect x="8" y="8" width="8" height="8" rx="1" />
+              </svg>
+            </button>
             <button
               disabled={!own}
               title={
@@ -813,19 +727,6 @@ export function EnterpriseStarMapView({
             >
               回到本企业
             </button>
-          </div>
-          <div className="star-canvas-caption">
-            {scope?.size ?? index.nodes.length} 家企业 ·{' '}
-            {relation === 'supply_demand' ? '供需匹配' : '同行业连接'}·{' '}
-            {Array.from(index.peers.values()).reduce(
-              (sum, peers) => sum + peers.length,
-              0,
-            ) / 2}{' '}
-            对关系
-            {relation === 'same_industry' &&
-            index.groups.some((g) => g.memberOrganizationIds.length > 12)
-              ? ' · 密集行业的连线在聚焦企业时显示'
-              : ''}
           </div>
         </div>
         {detail ? (

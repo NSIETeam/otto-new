@@ -51,7 +51,6 @@ interface Props {
   scope: Set<string> | null;
   sizeMode: SizeMode;
   reducedMotion: boolean;
-  showIndustries: boolean;
   onSelect(id: string | null): void;
   onHover(id: string | null): void;
 }
@@ -90,6 +89,10 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
     const current = useRef(props);
     current.current = props;
     const dragging = useRef(false);
+    // Keep names readable while the dragged graph moves and settles.
+    const labelPlacements = useRef(new Map<string, number>());
+    const frozenLabels = useRef<Map<string, number> | null>(null);
+    const labelContext = useRef('');
     const suppressClickUntil = useRef(0);
     const pointerStart = useRef<{ x: number; y: number } | null>(null);
     const didFit = useRef(Boolean(initialLayout.current));
@@ -344,6 +347,9 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
       [props.index.matches],
     );
     const focus = props.hover ?? props.selected;
+    const hoveredCompany = props.hover
+      ? props.index.byId.get(props.hover)
+      : undefined;
     const related = useMemo(
       () =>
         new Set(focus ? [focus, ...(props.index.peers.get(focus) ?? [])] : []),
@@ -430,9 +436,11 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
             minZoom={0.25}
             maxZoom={4}
             warmupTicks={warmup.current}
-            cooldownTime={!ready || props.reducedMotion ? 0 : 2200}
-            cooldownTicks={!ready || props.reducedMotion ? 0 : 130}
+            // Finish the initial simulation while hidden, including reduced-motion mode.
+            cooldownTime={ready && props.reducedMotion ? 0 : 2200}
+            cooldownTicks={ready && props.reducedMotion ? 0 : 130}
             onEngineStop={() => {
+              if (!dragging.current) frozenLabels.current = null;
               const measured = metrics.current;
               const sorted = measured.intervals.slice().sort((a, b) => a - b);
               props.onMetrics?.({
@@ -443,7 +451,7 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
                 frames: measured.frames,
               });
               if (!didFit.current) {
-                engine.current?.zoomToFit(0, 80);
+                engine.current?.zoomToFit(0, 65);
                 didFit.current = true;
               }
               if (!ready) {
@@ -467,6 +475,8 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
               if (Date.now() > suppressClickUntil.current) props.onSelect(null);
             }}
             onNodeDrag={(node, delta) => {
+              if (!dragging.current)
+                frozenLabels.current = new Map(labelPlacements.current);
               dragging.current = true;
               suppressClickUntil.current = Date.now() + 250;
               for (const id of props.index.peers.get(node.id) ?? []) {
@@ -580,14 +590,31 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
               ctx.globalAlpha = 1;
             }}
             onRenderFramePost={(ctx, scale) => {
-              const boxes: Array<[number, number, number, number]> = graph.nodes
+              const context = JSON.stringify([
+                topology,
+                props.scope ? [...props.scope] : null,
+                scale,
+              ]);
+              if (labelContext.current !== context) {
+                labelContext.current = context;
+                labelPlacements.current.clear();
+                frozenLabels.current = null;
+              }
+              type LabelBox = {
+                id: string;
+                rect: [number, number, number, number];
+              };
+              const boxes: LabelBox[] = graph.nodes
                 .filter((node) => isVisible(node.id))
-                .map((node) => [
-                  (node.x ?? 0) - 7 / scale,
-                  (node.y ?? 0) - 7 / scale,
-                  14 / scale,
-                  14 / scale,
-                ]);
+                .map((node) => ({
+                  id: node.id,
+                  rect: [
+                    (node.x ?? 0) - 7 / scale,
+                    (node.y ?? 0) - 7 / scale,
+                    14 / scale,
+                    14 / scale,
+                  ],
+                }));
               const priority = (id: string) =>
                 id === props.selected
                   ? 6
@@ -612,63 +639,87 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
               ctx.textBaseline = 'top';
               for (const node of sorted) {
                 const p = priority(node.id);
-                if (graph.nodes.length > 50 && scale < 0.5 && p < 3) continue;
                 const profile = props.index.byId.get(node.id);
                 if (!profile) continue;
                 const text = shortName(
                   profile.displayName || profile.organizationName,
                 );
                 const width = ctx.measureText(text).width;
-                const x = node.x ?? 0;
-                const y = (node.y ?? 0) + radius(node.id, scale) + 5 / scale;
-                const box: [number, number, number, number] = [
+                const nx = node.x ?? 0;
+                const ny = node.y ?? 0;
+                const gap = radius(node.id, scale) + 5 / scale;
+                // Move crowded names around their node instead of suppressing them.
+                const candidates: Array<[number, number]> = [];
+                for (let ring = 0; ring < 5; ring++) {
+                  const extra = (ring * 18) / scale;
+                  candidates.push(
+                    [nx, ny + gap + extra],
+                    [nx, ny - gap - 12 / scale - extra],
+                    [nx + gap + width / 2 + extra, ny - 6 / scale],
+                    [nx - gap - width / 2 - extra, ny - 6 / scale],
+                  );
+                }
+                const boxAt = ([x, y]: [number, number]): LabelBox['rect'] => [
                   x - width / 2 - 3 / scale,
                   y - 2 / scale,
                   width + 6 / scale,
                   16 / scale,
                 ];
-                if (
-                  p < 5 &&
-                  boxes.some(
-                    (b) =>
-                      box[0] < b[0] + b[2] &&
-                      box[0] + box[2] > b[0] &&
-                      box[1] < b[1] + b[3] &&
-                      box[1] + box[3] > b[1],
-                  )
-                )
-                  continue;
-                boxes.push(box);
-                ctx.globalAlpha = focus && !related.has(node.id) ? 0.18 : 1;
+                const overlapArea = (box: LabelBox['rect']) =>
+                  boxes.reduce((sum, { id, rect: b }) => {
+                    if (id === node.id) return sum;
+                    const w =
+                      Math.min(box[0] + box[2], b[0] + b[2]) -
+                      Math.max(box[0], b[0]);
+                    const h =
+                      Math.min(box[1] + box[3], b[1] + b[3]) -
+                      Math.max(box[1], b[1]);
+                    return (
+                      sum + (w > 0.5 / scale && h > 0.5 / scale ? w * h : 0)
+                    );
+                  }, 0);
+                let placement = frozenLabels.current?.get(node.id);
+                if (placement === undefined) {
+                  const previous = labelPlacements.current.get(node.id) ?? 0;
+                  placement = previous;
+                  let best = overlapArea(boxAt(candidates[previous]));
+                  if (best > 0) {
+                    for (let i = 0; i < candidates.length; i++) {
+                      const score = overlapArea(boxAt(candidates[i]));
+                      if (score < best) {
+                        best = score;
+                        placement = i;
+                      }
+                      if (best === 0) break;
+                    }
+                  }
+                }
+                labelPlacements.current.set(node.id, placement);
+                const [x, y] = candidates[placement];
+                boxes.push({ id: node.id, rect: boxAt([x, y]) });
+                // Background names remain legible while a relationship is highlighted.
+                ctx.globalAlpha = focus && !related.has(node.id) ? 0.65 : 1;
+                if (placement >= 4) {
+                  ctx.beginPath();
+                  ctx.strokeStyle = palette.line;
+                  ctx.lineWidth = 0.6 / scale;
+                  ctx.moveTo(nx, ny);
+                  ctx.lineTo(x, y + 6 / scale);
+                  ctx.stroke();
+                }
                 ctx.fillStyle = p >= 5 ? palette.accent : palette.text;
                 ctx.fillText(text, x, y);
               }
               ctx.globalAlpha = 1;
-              if (props.showIndustries && !focus) {
-                ctx.font = `${10 / scale}px system-ui, sans-serif`;
-                ctx.fillStyle = palette.text;
-                ctx.globalAlpha = 0.5;
-                for (const group of props.index.groups) {
-                  const members = group.memberOrganizationIds
-                    .map((id) => cache.current.get(id))
-                    .filter((n): n is Point => Boolean(n) && isVisible(n!.id));
-                  if (members.length < 2) continue;
-                  const x =
-                    members.reduce((sum, n) => sum + (n.x ?? 0), 0) /
-                    members.length;
-                  const y =
-                    Math.min(...members.map((n) => n.y ?? 0)) - 32 / scale;
-                  ctx.fillText(`${group.name} · ${members.length}`, x, y);
-                }
-                ctx.globalAlpha = 1;
-              }
             }}
           />
         </div>
-        {ready && focus && props.index.byId.get(focus) ? (
+        {ready && hoveredCompany ? (
           <div className="star-hover-name" role="tooltip">
-            {props.index.byId.get(focus)!.organizationName} · 关联{' '}
-            {props.index.peers.get(focus)?.length ?? 0} 家企业
+            <strong>{hoveredCompany.organizationName}</strong>
+            <span>
+              所属行业：{hoveredCompany.primaryIndustryName || '行业待完善'}
+            </span>
           </div>
         ) : null}
       </div>

@@ -25,6 +25,15 @@ class FixtureInterruption(BaseException):
     pass
 
 
+def reset_failed_fixture(run, service, active_state):
+    # A successful stop may let systemd garbage-collect an inactive fixture.
+    # reset-failed is only meaningful for a retained failed unit; calling it
+    # unconditionally made the first actual success case fail during cleanup.
+    p.need(active_state in ('inactive', 'failed'), 'Fixture cleanup state is not stopped')
+    if active_state == 'failed':
+        run(['/usr/bin/systemctl', 'reset-failed', service], 8)
+
+
 def main():
     p.need(sys.platform == 'linux' and os.geteuid() == 0, 'Disposable Linux root required')
     p.need(os.environ.get('GITHUB_ACTIONS') == 'true'
@@ -212,7 +221,9 @@ while True:time.sleep(0.1)
             # Exact nonce paths were constructed above; no wildcards or pkill.
             run(['/usr/bin/systemctl', 'stop', service], 15)
             host.cgroup_empty()
-            run(['/usr/bin/systemctl', 'reset-failed', service], 8)
+            stopped = host.state()
+            p.need(stopped['MainPID'] == '0' and stopped['ControlPID'] == '0', 'Fixture cleanup process remains')
+            reset_failed_fixture(run, service, stopped['ActiveState'])
             p.need(unit.parent == Path('/etc/systemd/system') and nonce in unit.name,
                    'Fixture cleanup target escaped')
             unit.unlink()

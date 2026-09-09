@@ -353,5 +353,36 @@ class ProductionContractTests(unittest.TestCase):
         self.assertNotIn('print(values', source)
 
 
+class SystemdFixtureCleanupTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('systemd_fixture', FILE.with_name('carpool-config-systemd-fixture.py'))
+        self.harness = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.harness)
+
+    def test_normal_inactive_unit_does_not_call_reset_failed(self):
+        from unittest.mock import Mock
+        run = Mock()
+        self.harness.reset_failed_fixture(run, 'nonce-fixture.service', 'inactive')
+        run.assert_not_called()
+
+    def test_real_failed_unit_requires_successful_reset(self):
+        from unittest.mock import Mock
+        run = Mock()
+        self.harness.reset_failed_fixture(run, 'nonce-fixture.service', 'failed')
+        run.assert_called_once_with(['/usr/bin/systemctl', 'reset-failed', 'nonce-fixture.service'], 8)
+        run.side_effect = self.harness.p.Refusal('fixture rejection')
+        with self.assertRaises(self.harness.p.Refusal):
+            self.harness.reset_failed_fixture(run, 'nonce-fixture.service', 'failed')
+
+    def test_active_unknown_or_missing_state_cannot_be_cleanup_success(self):
+        from unittest.mock import Mock
+        for state in ('active', 'activating', 'deactivating', '', None, 'not-found'):
+            with self.subTest(state=state):
+                run = Mock()
+                with self.assertRaises(self.harness.p.Refusal):
+                    self.harness.reset_failed_fixture(run, 'nonce-fixture.service', state)
+                run.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -6,7 +6,7 @@
 
 - `carpool-config-activation.py`：仅接受固定生产路径的 `--apply` 执行器。无 resume、自动重放、主机重启、数据库写入、网关事务改写或旧业务包部署。
 - `carpool-config-transaction-draft.py`：冻结依赖，SHA256 `8c954109ddae2e08417b0cec4f95bcf43dc4555ffa318f88790224a9da050ddf`，保持原文件字节不动。新执行器在私有导入实例替换为带运行中 stdout/stderr 双限额和读前/后 fstat 的加强原语。
-- `carpool-config-activation.test.py`：25 个本地测试函数，另含 15 个持久化步骤中断、错误停机/后代、篡改身份、模糊 rename/fsync 等子场景。真实子进程测试只运行本机 Python fixture。
+- `carpool-config-activation.test.py`：28 个本地测试函数，另含 15 个持久化步骤中断、错误停机/后代、篡改身份、模糊 rename/fsync 等子场景。真实子进程测试只运行本机 Python fixture。
 - `carpool-config-systemd-fixture.py`：仅允许 GitHub-hosted 临时 Linux，拒绝 `/etc/otto-enterprise` 或 `/var/lib/otto-ci-deploy` 存在的机器。随机 nonce systemd 服务和 `/run` 内配置，不使用生产凭据。
 - `carpool-config-systemd-workflow.yml`：待审核独立诊断分支工作流，不是正式发布流程，不应合入冻结的 1.9.15 业务代码。
 
@@ -49,4 +49,8 @@
 
 该工作流不引用任何 secrets 或发布环境，权限只有 contents:read；actions 固定提交。`unshare --net` 只隔离测试控制器，不代表 systemd 启动的新服务继承该 namespace；因此每个测试 unit 自身另设 `PrivateNetwork=yes` 和 `NoNewPrivileges=yes`。系统服务 fixture 自身也不使用网络。真实 Linux 计划覆盖成功、候选 health 拒绝、exit7、rename 前/后不确定性、旧 stop 实际超时、真实后代清理、所有正常/恢复阶段中断，以及两把独立 flock 争用。
 
-必须先审核再推送，保留真实 CI receipt。若任何 systemd fixture 失败，不把本地 25 项替代为 Linux 验收。无论成功与否，receipt 标识 `productHealthIsFixture=true`、`productionDeploymentAcceptance=false`，不能冒称正式企业全链路。
+必须先审核再推送，保留真实 CI receipt。若任何 systemd fixture 失败，不把本地 28 项替代为 Linux 验收。无论成功与否，receipt 标识 `productHealthIsFixture=true`、`productionDeploymentAcceptance=false`，不能冒称正式企业全链路。
+
+### 第一轮真实 Linux 结果（保留失败）
+
+诊断运行 `34325762552`（源码 `577a0e0a`）完成首条成功事务的全部 8 个阶段，实际停止、原子配置更换、新进程载入及 namespace 验证通过；整体仍失败：测试 finally 无条件调用 `systemctl reset-failed`，对已正常停止的临时 unit 返回非零。该轮不计作 23 场景通过。后续只修 fixture 清理：重新观察已知 unit 和 PID/ControlPID=0，仅 `failed` 状态调用 reset-failed；`inactive` 不做无意义 reset，其他状态拒绝。原来的 stop/cgroup 清空硬检查不变。

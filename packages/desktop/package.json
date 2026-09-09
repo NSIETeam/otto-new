@@ -88,6 +88,7 @@
     ],
     "electronVersion": "43.2.0",
     "afterPack": "scripts/after-pack.cjs",
+    "beforePack": "scripts/before-pack.cjs",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -141,6 +142,9 @@
       "!**/node_modules/better-sqlite3/src/**",
       "!**/node_modules/better-sqlite3/binding.gyp",
       "!**/node_modules/better-sqlite3/build/**",
+      "!**/node_modules/@img/sharp-*/**",
+      "!**/node_modules/sharp/src/**",
+      "!**/node_modules/sharp/install/**",
       "!**/node_modules/pdf-parse/lib/pdf.js/v1.10.88/**",
       "!**/node_modules/pdf-parse/lib/pdf.js/v1.9.426/**",
       "!**/node_modules/pdf-parse/lib/pdf.js/v2.0.550/**",
@@ -182,6 +186,10 @@
       "main": "dist/main/index.js"
     },
     "asar": true,
+    "asarUnpack": [
+      "**/node_modules/sharp/**/*",
+      "**/node_modules/@img/sharp-*/**/*"
+    ],
     "npmRebuild": false,
     "mac": {
       "electronLanguages": [

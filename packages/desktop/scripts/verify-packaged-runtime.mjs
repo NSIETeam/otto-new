@@ -17,6 +17,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import asar from '@electron/asar';
 import { verifyPackagedContent } from './verify-packaged-content.mjs';
+import { verifyPackagedSharp } from './sharp-packaging.mjs';
 import { verifyPackagedOttoNative } from './verify-packaged-otto-native.mjs';
 import {
   assertMachOArchitecture,
@@ -129,6 +130,9 @@ export function verifyPackagedRuntime(
     throw new Error(`app.asar not found: ${archivePath}`);
   }
   verifyPackagedContent(archivePath);
+  // Source bytes were compared before platform signing in afterPack. Final
+  // artifacts must still contain the exact target and unpacked JS/native set.
+  verifyPackagedSharp(archivePath, { target: `${platform}-${arch}` });
 
   const desktopPackage = readJson(path.join(desktopRoot, 'package.json'));
   const serverPackage = readJson(

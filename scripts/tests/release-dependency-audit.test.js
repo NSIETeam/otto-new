@@ -113,7 +113,10 @@ describe('release dependency audit gate', () => {
     expect(() => validateWorkspaceManifests(repoRoot, lock)).not.toThrow();
     expect(() => validateProjectSourceReachability(repoRoot)).not.toThrow();
     expect(() => validateAuditReport(auditReport, exception)).not.toThrow();
-  });
+    // This test reads every tracked source file. A cold Windows worktree took
+    // 13.58s alongside the full suite; preserve the full scan with a bounded
+    // per-case IO allowance, without relaxing any policy or scan assertion.
+  }, 30_000);
 
   it('expires automatically on the review deadline', async () => {
     const policy = await readJson(policyPath);

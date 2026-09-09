@@ -190,6 +190,13 @@ jobs:
             python@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 \
             bash /workspace/scripts/tests/enterprise-ci-linux-integration.sh
 
+  enterprise-upgrade-systemd:
+    name: Verify real systemd compensation and canary isolation
+    needs: validate-source
+    permissions:
+      contents: read
+    uses: ./.github/workflows/enterprise-upgrade-systemd.yml
+
   sqlcipher-native:
     name: Build verified SQLCipher native matrix
     needs: validate-source
@@ -273,6 +280,7 @@ jobs:
     needs:
       - validate-source
       - linux-enterprise-deployment-integration
+      - enterprise-upgrade-systemd
       - sqlcipher-native
       - otto-native
     permissions:

@@ -35,6 +35,24 @@ const heicLicenseSections = [
 ];
 
 export const SERVER_NOTICE_SOURCE = 'packages/server/NOTICE';
+const sharpLicenseSections = [
+  {
+    "title": "SHARP-LICENSE",
+    "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
+  },
+  {
+    "title": "LIBVIPS-LICENSE",
+    "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+  },
+  {
+    "title": "THIRD-PARTY-NOTICES",
+    "sha256": "25ffcfa69e28b1913ced27ec778b90f24911a1bb3021253577e8b0af55db0d49"
+  },
+  {
+    "title": "MOZILLA-MPL-2.0",
+    "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+  }
+];
 export const SERVER_NOTICE_ASAR_PATH = 'node_modules/otto-server/NOTICE';
 
 export function readServerNotice(repoRoot) {
@@ -58,6 +76,10 @@ export function readServerNotice(repoRoot) {
     'libde265 1.0.15',
     'ISC declaration',
     'corresponding-source.tar.gz',
+    'sharp 0.35.4',
+    'libvips 8.18.6',
+    'LGPL-3.0-or-later',
+    'sharp-libvips-corresponding-source-audit-20260909.md',
   ]) {
     if (!text.includes(required)) {
       throw new Error(
@@ -66,9 +88,12 @@ export function readServerNotice(repoRoot) {
     }
   }
   const normalized = text.replaceAll('\r\n', '\n');
-  for (const { title, sha256 } of heicLicenseSections) {
-    const begin = `----- BEGIN HEIC ${title} -----\n`;
-    const end = `----- END HEIC ${title} -----`;
+  for (const { title, sha256, family } of [
+    ...heicLicenseSections.map(section => ({ ...section, family: 'HEIC' })),
+    ...sharpLicenseSections.map(section => ({ ...section, family: 'SHARP' })),
+  ]) {
+    const begin = `----- BEGIN ${family} ${title} -----\n`;
+    const end = `----- END ${family} ${title} -----`;
     const parts = normalized.split(begin);
     const endings = parts[1]?.split(end);
     if (
@@ -77,7 +102,7 @@ export function readServerNotice(repoRoot) {
       createHash('sha256').update(endings[0]).digest('hex') !== sha256
     ) {
       throw new Error(
-        'server NOTICE is missing or changed a complete HEIC license text',
+        'server NOTICE is missing or changed a complete third-party license text',
       );
     }
   }

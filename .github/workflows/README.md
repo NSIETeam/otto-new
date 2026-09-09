@@ -16,7 +16,7 @@ GitHub Release 草稿，最后预提交企业服务器事务，并依次公开�
 - 根目录与桌面端版本号必须一致，企业运行时 schema、清单、构建信息均从同一提交生成。
 - 默认 macOS 必须通过 Developer ID 签名、公证和 stapler 验证；Windows 必须通过 Authenticode 验证。1.9.15 的产品所有者已明确授权无平台签名桌面发布，必须手动显式选择 `unsigned_desktop_stable=true`（stable、非 prerelease，且 `unsigned_mac_transition=false`）。该开关只豁免平台分发签名；macOS ad-hoc 封印、DMG 完整性、Windows 实际安装与运行时探针、企业包与发布清单 Ed25519 签名及所有事务门禁仍然执行。
 - 企业一键部署包必须带外置可信公钥可验证的 Ed25519 `.sig`，只有 SHA-256 不允许发布。
-- 独立的 `prepare-release-creation-intent` 作业会在任何 tag/Release 写入前连续读取并锁定双仓状态，把 run id、tag、两仓、完整源码 commit、兼容仓 `main` commit、两仓 tag 是否预先存在、Release 不存在、名称/正文/预发布标志、完整 14 资产向量和发布前 `latest` 写入创建意图。`creation-intent.json` 与 `pre-public-latest.json` 的 SHA-256 在第一次写入前作为不可变 workflow artifact 上传；`create-release-drafts` 必须下载、验摘要并连续两次复核远端状态后才可创建草稿。
+- 独立的 `prepare-release-creation-intent` 作业会在任何 tag/Release 写入前连续读取并锁定双仓状态，把 run id、tag、两仓、完整源码 commit、兼容仓 `main` commit、两仓 tag 是否预先存在、Release 不存在、名称/正文/预发布标志、完整 16 资产向量和发布前 `latest` 写入创建意图。`creation-intent.json` 与 `pre-public-latest.json` 的 SHA-256 在第一次写入前作为不可变 workflow artifact 上传；`create-release-drafts` 必须下载、验摘要并连续两次复核远端状态后才可创建草稿。
 - 若 `create-release-drafts` 失败或取消，`cleanup-partial-release-drafts` 会在同一 DAG 中以 `always()` 运行。只有 Release 仍是身份、正文、target、预发布标志完全一致的 draft，已有资产是锁定向量的严格子集（含名称锁定且 size=0、digest 为空的 `starter` 上传），tag commit 未漂移且两仓 `latest` 仍等于发布前值时，才删除本 run 的部分草稿和本 run 新建的 tag。正式 tag push 触发前已经存在的正式仓源码 tag 永远保留；任何公开 Release 或歧义状态都停止并交由人工事故处理。清理算法可幂等续跑。
 - 正式发布顺序是：构建并验签草稿 -> 预提交企业服务事务（延迟最终确认） -> 公开 `NSIETeam/otto-new` 并复核 -> 事务性更新国内镜像并复核 -> 最后公开旧客户端兼容仓并复核 -> 最终确认企业服务事务。兼容仓是 Release 公开阶段的最后一次公共变更，不能先于正式仓或镜像暴露。任一后续步骤失败时，必须先完成镜像与 Release 指针补偿，成功后才允许回滚企业服务事务。
 - 任何已公开并可能被客户端观察到的 Release 都绝不改回 draft，也不删除或覆盖资产。补偿后目标 Release 保持原公开/预发布可见性，只是不再是 `latest`；该版本号视为永久烧毁，事故闭环后必须使用新的 patch 版本重新发布。
@@ -61,6 +61,13 @@ GitHub Release 草稿，最后预提交企业服务器事务，并依次公开�
 - `otto-enterprise-oneclick-v<version>-<build>.tar.gz`
 - `.sha256`
 - `.sig`
+- `otto-<version>-corresponding-source.tar.gz` 及同名 `.sha256`
+
+对应源码旁车从最终干净 HEAD 在 checkout 外构造；固定上游输入与实际 WASM 重组
+探针通过后，与安装包一起证明来源并纳入生产签名 `SHA256SUMS`。正式双仓各有
+16 件资产，隔离 transition 测试草稿为 10 件。创建、公开、补偿均锁定完整集合，
+并在公开后匿名下载双仓源码旁车验字节。源码不增加安装包体积，固定镜像仍为 7 件；
+镜像更新清单的已有 `notes` 与双仓正文链接免费 GitHub 对应源码，不更改更新 schema。
 
 规则：
 
@@ -193,7 +200,7 @@ git push origin "v${VERSION}"
 5. 读取 root-only 的 `/opt/otto-website/transactions/<transaction_id>/UPDATE-MIRROR-SHA256SUMS`、同目录签名 envelope 和 `published-latest.json`，以前者逐项记录全部六个版本化资产（包括三个 blockmap）的名称和 SHA-256，并与 `/opt/otto-website/downloads/` 中已出现的同名普通文件核对。发布器会在第一个版本化资产公开前先持久化这三份审计材料和 `claiming`；从该标记出现起版本即永久烧毁，服务端也会拒绝其他 run-id 再用同一版本。中断时已出现的已验证资产会永久保留：它们可能已被客户端缓存，不能安全删除；恢复后的公开 `latest.json` 不得再引用它们，后续发布也不得复用该版本或覆盖同名文件。文件缺失、hash 不同、路径越界或无法证明是否曾公开时，立即升级为人工事故处理。
 6. 从公网 HTTPS 更新入口重新下载 `latest.json`，禁止重定向，并确认其 SHA-256 精确等于第 4 步的 digest；若返回 `absent`，公网必须为 404。同时确认它不引用第 5 步记录的孤立资产。公网尚未收敛时不得修改 GitHub Release 的可见性或 `latest` 指针。
 7. 下载本次 run 在第一次 GitHub 写入前由 `prepare-release-creation-intent` 上传的 `otto-release-creation-intent-<tag>` artifact，并将 `creation-intent.json` 与 `pre-public-latest.json` 的 SHA-256 分别与该 job 输出的摘要精确比较；嵌入创建意图的 `prePublicLatest` 还必须与独立快照逐字段一致。禁止根据当前 `/releases/latest` 猜测“上一个版本”。
-8. 公网镜像恢复且第 7 步校验通过后，使用锁定提交中的补偿工具让目标 Release `make_latest=false`，并按快照中的 Release id + tag 分别精确恢复两个仓此前的 `latest`（此前为 `null` 时仍须验证为 `null`）。补偿前后都要核对 Release 身份、14 个资产、正文摘要和目标提交。已经公开的 Release 绝不改回 draft，资产不得删除或覆盖；不能证明精确恢复时停止操作并升级为人工事故处理。
+8. 公网镜像恢复且第 7 步校验通过后，使用锁定提交中的补偿工具让目标 Release `make_latest=false`，并按快照中的 Release id + tag 分别精确恢复两个仓此前的 `latest`（此前为 `null` 时仍须验证为 `null`）。补偿前后都要核对 Release 身份、16 个资产（包括两个对应源码旁车）、正文摘要和目标提交。已经公开的 Release 绝不改回 draft，资产不得删除或覆盖；不能证明精确恢复时停止操作并升级为人工事故处理。
 9. 核对公网 `/enterprise/health.appVersion`，再通过管理员令牌核对 `/enterprise/deployment/status.runtime.version` 与 `runtime.buildCommit` 的精确身份、数据库写入与备份状态。不得对原运行点击 **Re-run jobs**；只要任一端点曾公开或镜像进入 `claiming`，同版本永久烧毁。事故处理完成后应修订为新的 patch 版本，从届时最新且完全锁定的 `origin/internal` 提交启动全新发布。
 
 自动恢复 job 使用无人工等待的 `production-automation`；若该 Environment 被错误配置为需要审批，应先视为发布阻断项修正配置，不能在故障后临时绕过保护规则。

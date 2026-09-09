@@ -219,7 +219,7 @@ describe('release visibility compensation', () => {
     ).toThrow('arguments are invalid');
   });
 
-  it('derives the exact 14-asset publication identity from the immutable artifact', async () => {
+  it('derives the exact 16-asset publication identity including corresponding source from the immutable artifact', async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), 'otto-release-compensation-'),
     );
@@ -235,6 +235,8 @@ describe('release visibility compensation', () => {
         'Otto-Setup-1.9.14-win-x64.exe.blockmap',
         'latest.json',
         'SHA256SUMS',
+        'otto-1.9.14-corresponding-source.tar.gz',
+        'otto-1.9.14-corresponding-source.tar.gz.sha256',
         'SHA256SUMS.sig',
         'UPDATE-MIRROR-SHA256SUMS',
         'UPDATE-MIRROR-SHA256SUMS.sig',
@@ -261,7 +263,7 @@ describe('release visibility compensation', () => {
 
       expect(expectedPublication.releaseName).toBe('Otto v1.9.14');
       expect(expectedPublication.prerelease).toBe(false);
-      expect(expectedPublication.assets).toHaveLength(14);
+      expect(expectedPublication.assets).toHaveLength(16);
       expect(expectedPublication.assets.map(({ name }) => name).sort()).toEqual(
         [...names].sort(),
       );

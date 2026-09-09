@@ -397,6 +397,18 @@ jobs:
           npm run validate:boundaries
           npm run size:source:check
 
+      - name: Build and verify corresponding source
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_ROOT="$RUNNER_TEMP/otto-corresponding-source"
+          test ! -e "$SOURCE_ROOT"
+          install -d -m 0700 "$SOURCE_ROOT"
+          node scripts/build-heic-corresponding-source.mjs \
+            --output-dir "$SOURCE_ROOT/output" --cache-dir "$SOURCE_ROOT/cache" \
+            > "$SOURCE_ROOT/receipt.json"
+          node scripts/test-heic-recombination.mjs --cache-dir "$SOURCE_ROOT/cache"
+
       - name: Download verified SQLCipher native matrix
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -634,6 +646,11 @@ jobs:
           VERSION="${{ needs.validate-source.outputs.version }}"
           SOURCE_COMMIT="${{ needs.validate-source.outputs.source_commit }}"
           DESKTOP_RELEASE="packages/desktop/release"
+          SOURCE_ROOT="$RUNNER_TEMP/otto-corresponding-source"
+          SOURCE_ARCHIVE="$SOURCE_ROOT/output/otto-${VERSION}-corresponding-source.tar.gz"
+          node scripts/release-corresponding-source.mjs \
+            "$SOURCE_ROOT/output" "$SOURCE_ROOT/receipt.json" \
+            "$DESKTOP_RELEASE" "$VERSION" "$SOURCE_COMMIT"
           test -f "$DESKTOP_RELEASE/Otto-${VERSION}-arm64.dmg"
           test -f "$DESKTOP_RELEASE/Otto-${VERSION}-x64.dmg"
           test -f "$DESKTOP_RELEASE/Otto-Setup-${VERSION}-win-x64.exe"
@@ -652,6 +669,7 @@ jobs:
             "$DESKTOP_RELEASE/latest.json"
           )
           FILES=("${DESKTOP_FILES[@]}")
+          FILES+=("$SOURCE_ARCHIVE" "${SOURCE_ARCHIVE}.sha256")
           PACKAGE_ID=""
           if [ "$DESKTOP_TEST_BUILD" != "1" ]; then
             mapfile -d '' ENTERPRISE_ARCHIVES < <(
@@ -752,6 +770,13 @@ jobs:
             packages/desktop/release/latest.mirror.json
             packages/desktop/release/SHA256SUMS
 
+      - name: Attest corresponding source provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/otto-corresponding-source/output/otto-${{ needs.validate-source.outputs.version }}-corresponding-source.tar.gz
+            ${{ runner.temp }}/otto-corresponding-source/output/otto-${{ needs.validate-source.outputs.version }}-corresponding-source.tar.gz.sha256
+
       - name: Attest enterprise release candidate provenance
         if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -831,6 +856,11 @@ jobs:
               echo "Desktop installers, update manifest, and enterprise one-click package are attached to this release."
             } > "$NOTES_FILE"
           fi
+          node --input-type=module - "$VERSION" "$NOTES_FILE" <<'NODE'
+          import { appendFile } from 'node:fs/promises';
+          import { correspondingSourceNotes } from './scripts/release-corresponding-source.mjs';
+          await appendFile(process.argv[3], correspondingSourceNotes(process.argv[2]));
+          NODE
           echo "path=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifacts
@@ -839,6 +869,7 @@ jobs:
           name: otto-release-v${{ needs.validate-source.outputs.version }}
           path: |
             packages/desktop/release/*
+            ${{ runner.temp }}/otto-corresponding-source/output/*
             deliverables/otto-enterprise-oneclick-v${{ needs.validate-source.outputs.version }}-*.tar.gz
             deliverables/otto-enterprise-oneclick-v${{ needs.validate-source.outputs.version }}-*.tar.gz.sha256
             deliverables/otto-enterprise-oneclick-v${{ needs.validate-source.outputs.version }}-*.tar.gz.sig
@@ -1252,13 +1283,15 @@ jobs:
           copy_one "Otto-Setup-${VERSION}-win-x64.exe.blockmap"
           copy_one latest.json
           copy_one SHA256SUMS
+          copy_one "otto-${VERSION}-corresponding-source.tar.gz"
+          copy_one "otto-${VERSION}-corresponding-source.tar.gz.sha256"
           if [ "$DESKTOP_TEST_BUILD" = "1" ]; then
             mapfile -d '' enterprise_assets < <(find release-download -type f -name 'otto-enterprise-oneclick-*' -print0)
             if [ "${#enterprise_assets[@]}" -ne 0 ]; then
               echo "Unsigned transition artifact unexpectedly contains an enterprise package." >&2
               exit 1
             fi
-            EXPECTED_ASSET_COUNT=8
+            EXPECTED_ASSET_COUNT=10
           else
             copy_one SHA256SUMS.sig
             copy_one UPDATE-MIRROR-SHA256SUMS
@@ -1266,7 +1299,7 @@ jobs:
             copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz"
             copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sha256"
             copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sig"
-            EXPECTED_ASSET_COUNT=14
+            EXPECTED_ASSET_COUNT=16
           fi
           ACTUAL_ASSET_COUNT="$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')"
           test "$ACTUAL_ASSET_COUNT" = "$EXPECTED_ASSET_COUNT"
@@ -2277,13 +2310,15 @@ jobs:
           copy_one "Otto-Setup-${VERSION}-win-x64.exe.blockmap"
           copy_one latest.json
           copy_one SHA256SUMS
+          copy_one "otto-${VERSION}-corresponding-source.tar.gz"
+          copy_one "otto-${VERSION}-corresponding-source.tar.gz.sha256"
           copy_one SHA256SUMS.sig
           copy_one UPDATE-MIRROR-SHA256SUMS
           copy_one UPDATE-MIRROR-SHA256SUMS.sig
           copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz"
           copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sha256"
           copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sig"
-          test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = 14
+          test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = 16
           (
             cd release-assets
             sha256sum -c SHA256SUMS
@@ -2625,13 +2660,15 @@ jobs:
           copy_one "Otto-Setup-${VERSION}-win-x64.exe.blockmap"
           copy_one latest.json
           copy_one SHA256SUMS
+          copy_one "otto-${VERSION}-corresponding-source.tar.gz"
+          copy_one "otto-${VERSION}-corresponding-source.tar.gz.sha256"
           copy_one SHA256SUMS.sig
           copy_one UPDATE-MIRROR-SHA256SUMS
           copy_one UPDATE-MIRROR-SHA256SUMS.sig
           copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz"
           copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sha256"
           copy_one "otto-enterprise-oneclick-v${VERSION}-*.tar.gz.sig"
-          test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = 14
+          test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = 16
           (
             cd release-assets
             sha256sum -c SHA256SUMS

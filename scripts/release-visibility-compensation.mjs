@@ -7,6 +7,7 @@ import { lstat, readdir, readFile, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { correspondingSourceAssetNames } from './release-corresponding-source.mjs';
 
 const execFile = promisify(execFileCallback);
 
@@ -145,6 +146,7 @@ export async function buildExpectedPublication({
     `Otto-Setup-${version}-win-x64.exe.blockmap`,
     'latest.json',
     'SHA256SUMS',
+    ...correspondingSourceAssetNames(version),
     'SHA256SUMS.sig',
     'UPDATE-MIRROR-SHA256SUMS',
     'UPDATE-MIRROR-SHA256SUMS.sig',

@@ -7,6 +7,7 @@ import { lstat, readdir, readFile, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { correspondingSourceAssetNames } from './release-corresponding-source.mjs';
 
 const execFile = promisify(execFileCallback);
 
@@ -100,6 +101,7 @@ function expectedAssetNames({ version, packageIdentity, assetProfile }) {
     `Otto-Setup-${version}-win-x64.exe.blockmap`,
     'latest.json',
     'SHA256SUMS',
+    ...correspondingSourceAssetNames(version),
   ];
   if (assetProfile === 'unsigned-transition') return desktop;
   return [

@@ -199,7 +199,7 @@ gh run list --limit 8
 `prepare-release-creation-intent` 必须在创建任一 tag/Release 前连续读取两个仓库的精确
 远端状态，并确认两次结果完全相同。`otto-release-creation-intent-v1` 记录必须绑定本次
 run id、tag、两仓、完整锁定源码 commit、兼容仓 `main` commit、两仓 tag 预存在状态、
-Release 不存在、名称、正文摘要、预发布标志、完整 14 资产向量和
+Release 不存在、名称、正文摘要、预发布标志、完整 16 资产向量和
 `otto-pre-public-latest-v1` 快照；每个 latest 指针保存 Release id + tag，此前没有 latest 时
 保存 `null`。两个文件及各自 SHA-256 必须作为
 `otto-release-creation-intent-<tag>` artifact 在第一次 GitHub 写入前上传；
@@ -217,6 +217,18 @@ Release 不存在、名称、正文摘要、预发布标志、完整 14 资产�
 移除 `latest` 并按快照中的 Release id + tag 精确恢复两个仓此前的 `latest`。已经公开且
 可能被客户端观察到的 Release 绝不改回 draft，资产不得删除、覆盖或让既有下载 URL
 失效；从首次公开起该版本号永久烧毁，恢复闭环后只能使用新的 patch 版本。
+
+新增 `otto-<version>-corresponding-source.tar.gz` 及同名 `.sha256` 必须来自最终干净的
+锁定提交，包含固定上游源码、许可文本和重组说明。它们都须进入双仓精确资产向量、
+来源证明与企业 Ed25519 签名的 `SHA256SUMS`；任一文件缺失、重复或摘要漂移均阻断发布和补偿。
+双仓公开验收必须匿名下载这两个文件并核对全部字节，不能只证明带令牌 API 可见。
+隔离 transition 测试草稿共 10 件资产，不具备生产 Ed25519 摘要签名，不得冒充正式包。
+
+镜像合同仍严格为 7 件：六个桌面文件和 `latest.json`。对应源码不塞入安装包或镜像
+固定载荷；双仓 Release 正文及两个更新清单已有的 `notes` 字段均提供同版本、免费
+GitHub 源码链接。镜像下载的二进制使用相同源码旁车；这不表示镜像本身托管了源码。
+源码内容范围和尚未完成的上游重建证明必须按旁车 README 如实记录，不能仅凭上传
+旁车就宣称全部 LGPL 对应源义务或平台实际运行已验收。
 
 从创建草稿前到工作流完全结束，冻结 `internal`、immutable releases 设置、tag、Release 资产和镜像人工操作；批准后禁止人工取消工作流。
 

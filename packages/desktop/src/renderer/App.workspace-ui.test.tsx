@@ -105,7 +105,7 @@ vi.mock('./state/useOttoStore.js', () => ({
       pendingCreateRequestId: null,
       unreadSessions: [],
     },
-    actions: harness.storeActions,
+    actions: { ...harness.storeActions },
   }),
   selectSortedSessions: () => [],
 }));
@@ -544,6 +544,17 @@ afterEach(() => {
 });
 
 describe('App workspace UI integration', () => {
+  it('does not restart ticket polling when the store actions object is recreated', async () => {
+    harness.centralIdentity.current = { edition: 'enterprise', role: 'member', profiles: [] };
+    const listTickets = vi.fn(async () => []);
+    window.otto.enterpriseTicketList = listTickets;
+    const view = render(<App />);
+    await waitFor(() => expect(listTickets).toHaveBeenCalledTimes(1));
+    view.rerender(<App />);
+    view.rerender(<App />);
+    expect(listTickets).toHaveBeenCalledTimes(1);
+  });
+
   it('shows boot and login states without entering the workspace', () => {
     harness.auth.current = authFor(null, 'loading');
     const view = render(<App />);

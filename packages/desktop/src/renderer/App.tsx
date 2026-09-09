@@ -1306,6 +1306,9 @@ function WorkspaceContent({
     ? state.messages[state.activeSessionId] ?? []
     : [];
 
+  // The actions container is recreated on render; depend on its stable callback.
+  const { postLocalChatMessage } = actions;
+
   useEffect(() => {
     if (!effectiveParkService) return;
     let cancelled = false;
@@ -1315,7 +1318,7 @@ function WorkspaceContent({
       if (!sessionId) return;
       const pending = conversationTicketLinksRef.current.pendingForSession(sessionId);
       for (const update of pending) {
-        actions.postLocalChatMessage('assistant', update.message);
+        postLocalChatMessage('assistant', update.message);
         conversationTicketLinksRef.current.markDelivered(update.ticketId, sessionId);
       }
       if (pending.length > 0) setConversationDraftRevision((revision) => revision + 1);
@@ -1350,7 +1353,7 @@ function WorkspaceContent({
       cancelled = true;
       stopPolling();
     };
-  }, [actions, activeSession?.sessionId, effectiveParkService]);
+  }, [postLocalChatMessage, activeSession?.sessionId, effectiveParkService]);
 
   // Composer 也可把当前会话切换到新目录；会话路径变化后同步最近项目，
   // 这样即使随后删掉该项目最后一个会话，项目入口仍会保留在侧栏。

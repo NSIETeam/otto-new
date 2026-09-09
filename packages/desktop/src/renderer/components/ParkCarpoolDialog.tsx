@@ -1,3 +1,4 @@
+import { CarpoolExamples } from './CarpoolExamples.js';
 import type { CarpoolMeetingPoint } from 'otto-server';
 import { useModuleReadCache } from '../state/ModuleReadProvider.js';
 import { CarpoolConfirmation } from './CarpoolConfirmation.js';
@@ -1098,11 +1099,12 @@ export function ParkCarpoolDialog({
           </button>
         ) : null}
         {active && !loading && !sortedMatches.length ? (
-          <div className="otto-carpool__empty">
-            <strong>暂时没有合适的同行伙伴</strong>
-            <p>你的意向已经发布。稍后可刷新结果或修改时间范围。</p>
-          </div>
+          <>
+            <p className="otto-carpool__empty">暂时没有合适的同行伙伴</p>
+            <CarpoolExamples />
+          </>
         ) : null}
+        {sortedMatches.length > 0 ? <details><summary>体验同行示例</summary><CarpoolExamples /></details> : null}
       </section> : null}
     </DialogFrame>
   );

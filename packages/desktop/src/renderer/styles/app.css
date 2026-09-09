@@ -14635,3 +14635,15 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-carpool__suggestions button[aria-selected="true"], .otto-carpool__suggestions button[role="option"]:hover { background: var(--otto-bg); }
 .otto-carpool__suggestions span { color: var(--otto-text-secondary); font-size: 12px; }
 .otto-carpool__suggestions > span, .otto-carpool__suggestions > div[role="status"] { display: block; padding: 10px 12px; }
+
+.otto-carpool-examples > header, .otto-carpool-examples__card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.otto-carpool-examples > header > span, .otto-carpool-examples__card p, .otto-carpool-examples__score > span { color: var(--otto-text-secondary); font-size: 12px; }
+.otto-carpool-examples__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.otto-carpool-examples__card { min-width: 0; border: 1px solid var(--otto-border); border-radius: 14px; padding: 14px; }
+.otto-carpool-examples__badge { background: var(--otto-bg); color: var(--otto-text-secondary); border-radius: 6px; padding: 3px 6px; font-size: 11px; }
+.otto-carpool-examples__score { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-top: 16px; }
+.otto-carpool-examples__score > strong { font-size: 28px; color: var(--otto-accent); }
+.otto-carpool-examples__card progress { width: 100%; height: 5px; accent-color: var(--otto-accent); }
+.otto-carpool-examples__card summary { font-size: 12px; cursor: pointer; margin: 12px 0; }
+.otto-carpool-examples__card > button { margin-top: 8px; width: 100%; }
+@media (max-width: 640px) { .otto-carpool-examples__grid { grid-template-columns: 1fr; } }

@@ -119,7 +119,6 @@ function PlacePicker({
     setResults([]);
     setSearching(false);
     setLocating(false);
-    setShowMap(false);
     setQuery(value);
     setSelected(null);
   };
@@ -131,7 +130,6 @@ function PlacePicker({
     setSelected(place);
     setQuery(place.label);
   };
-  const [showMap, setShowMap] = useState(false);
   const [locating, setLocating] = useState(false);
   const [results, setResults] = useState<
     EnterpriseParkCarpoolPlaceSuggestion[]
@@ -180,7 +178,6 @@ function PlacePicker({
       );
       if (request !== revision.current) return;
       choosePlace(place);
-      setShowMap(true);
     } catch {
       if (request === revision.current)
         setError('无法取得当前位置。你仍可搜索并选择标准地点。');
@@ -237,17 +234,12 @@ function PlacePicker({
       <button type="button" disabled={locating} onClick={() => void locate()}>
         {locating ? '正在定位…' : '使用当前位置'}
       </button>
-      {selected ? (
-        <button type="button" onClick={() => setShowMap(true)}>
-          在地图上调整选点
-        </button>
-      ) : null}
       </div>
-      {showMap && selected ? (
+      {selected ? (
         <CarpoolPointPicker
           place={selected}
           onSelect={choosePlace}
-          onClose={() => setShowMap(false)}
+          onClose={() => undefined}
         />
       ) : null}
       {error || validationError ? (

@@ -22,39 +22,60 @@ export function mapPixelCoordinate(
       Math.PI,
   };
 }
+function createMapCache() {
+  const entries = new Map<string, { image?: string; pending: Promise<string> }>();
+  const key = (point: EnterpriseParkCarpoolCoordinate, zoom: number) => `${point.longitude},${point.latitude},${zoom}`;
+  return {
+    peek: (point: EnterpriseParkCarpoolCoordinate, zoom: number) => entries.get(key(point, zoom))?.image ?? '',
+    read(point: EnterpriseParkCarpoolCoordinate, zoom: number): Promise<string> {
+      const id = key(point, zoom);
+      const existing = entries.get(id);
+      if (existing) return existing.pending;
+      const pending = Promise.resolve().then(() => window.otto.enterpriseParkCarpoolMap(point, zoom)).then(image => {
+        const entry = entries.get(id);
+        if (entry) entry.image = image;
+        return image;
+      }).catch(error => { entries.delete(id); throw error; });
+      entries.set(id, { pending });
+      if (entries.size > 12) entries.delete(entries.keys().next().value!);
+      return pending;
+    },
+  };
+}
 export function CarpoolPointPicker({ place, onSelect, onClose }: {
   place: EnterpriseParkCarpoolPlaceSuggestion;
   onSelect(place: EnterpriseParkCarpoolPlaceSuggestion): void;
   onClose(): void;
 }): React.JSX.Element {
+  const [cache] = useState(createMapCache);
   const [expanded, setExpanded] = useState(false);
   const [preview, setPreview] = useState('');
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let current = true;
     setPreview(''); setFailed(false);
-    void window.otto.enterpriseParkCarpoolMap(place.coordinate, 15)
+    void cache.read(place.coordinate, 15)
       .then(value => { if (current) setPreview(value); })
       .catch(() => { if (current) setFailed(true); });
     return () => { current = false; };
-  }, [place.coordinate]);
+  }, [cache, place.coordinate]);
   return (
     <section className="otto-carpool__map-preview" aria-label="地点地图预览">
       {preview ? <img src={preview} alt="所选地点地图" width={600} height={400} />
         : <span role="status">{failed ? '预览暂不可用，可展开重试' : '正在加载地图…'}</span>}
       <div>
-        <button type="button" onClick={() => setExpanded(true)}>展开地图</button>
-        <button type="button" onClick={onClose}>关闭地图</button>
+        <button type="button" onClick={() => setExpanded(true)}>地图选点</button>
       </div>
       {expanded ? (
         <CarpoolConfirmation label="地图选点" role="dialog" className="otto-carpool-map-dialog" onCancel={() => setExpanded(false)}>
-          <MapEditor place={place} onSelect={onSelect} onClose={() => { setExpanded(false); onClose(); }} onCancel={() => setExpanded(false)} />
+          <MapEditor cache={cache} place={place} onSelect={onSelect} onClose={() => { setExpanded(false); onClose(); }} onCancel={() => setExpanded(false)} />
         </CarpoolConfirmation>
       ) : null}
     </section>
   );
 }
 function MapEditor({
+  cache,
   place,
   onSelect,
   onClose,
@@ -64,21 +85,24 @@ function MapEditor({
   onSelect(place: EnterpriseParkCarpoolPlaceSuggestion): void;
   onClose(): void;
   onCancel(): void;
+  cache: ReturnType<typeof createMapCache>;
 }): React.JSX.Element {
   const [center, setCenter] = useState(place.coordinate);
   const [selected, setSelected] = useState(place.coordinate);
   const [zoom, setZoom] = useState(15);
-  const [image, setImage] = useState('');
+  const [image, setImage] = useState(() => cache.peek(place.coordinate, 15));
+  const [mapLoading, setMapLoading] = useState(!image);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let current = true;
-    setImage('');
+    setMapLoading(true);
     setError('');
-    void window.otto
-      .enterpriseParkCarpoolMap(center, zoom)
+    void cache.read(center, zoom)
       .then((value) => {
-        if (current) setImage(value);
+        if (current) { setImage(value); setMapLoading(false); }
       })
       .catch((cause) => {
         if (current)
@@ -87,12 +111,12 @@ function MapEditor({
     return () => {
       current = false;
     };
-  }, [center, zoom]);
+  }, [cache, center, zoom, retry]);
   const mounted = useRef(true);
   const choosing = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const choose = async () => {
-    if (choosing.current) return;
+    if (choosing.current || mapLoading || !image) return;
     choosing.current = true;
     setBusy(true);
     setError('');
@@ -109,15 +133,21 @@ function MapEditor({
     }
   };
   const move = (dx: number, dy: number) => {
-    if (choosing.current) return;
-    const next = mapPixelCoordinate(center, zoom, dx, dy);
-    setCenter(next);
-    setSelected(next);
+    if (choosing.current || mapLoading || !image) return;
+    const next = { x: Math.max(-300, Math.min(300, dx)), y: Math.max(-200, Math.min(200, dy)) };
+    setOffset(next);
+    setSelected(mapPixelCoordinate(center, zoom, next.x, next.y));
+  };
+  const changeZoom = (value: number) => {
+    setCenter(selected);
+    setOffset({ x: 0, y: 0 });
+    setMapLoading(true);
+    setZoom(value);
   };
   return (
     <section className="otto-carpool__map-picker" aria-label="地图选点">
       <p>点击地图选点</p>
-      {error ? <p role="alert">{error}</p> : null}
+      {error ? <p role="alert">{error} <button type="button" onClick={() => setRetry(value => value + 1)}>重试地图</button></p> : null}
       {image ? (
         <div
           role="button"
@@ -133,7 +163,8 @@ function MapEditor({
             };
             if (directions[event.key]) {
               event.preventDefault();
-              move(...directions[event.key]!);
+              const [dx, dy] = directions[event.key]!;
+              move(offset.x + dx, offset.y + dy);
             } else if (event.key === 'Enter') {
               event.preventDefault();
               void choose();
@@ -158,8 +189,9 @@ function MapEditor({
             aria-hidden="true"
             style={{
               position: 'absolute',
-              left: '50%',
-              top: '50%',
+              left: `${50 + offset.x / 6}%`,
+              top: `${50 + offset.y / 4}%`,
+              visibility: mapLoading ? 'hidden' : 'visible',
               color: '#bc2d34',
               fontSize: 28,
               transform: 'translate(-50%,-50%)',
@@ -171,21 +203,22 @@ function MapEditor({
       ) : !error ? (
         <p role="status">正在加载地图…</p>
       ) : null}
+      {image && mapLoading && !error ? <p role="status">正在更新地图…</p> : null}
       <div className="otto-carpool__map-toolbar">
         <div className="otto-carpool__map-zoom" role="group" aria-label="地图缩放">
         <button
           type="button"
           aria-label="放大地图" title="放大地图"
-          disabled={busy || zoom >= 17}
-          onClick={() => setZoom((value) => value + 1)}
+          disabled={busy || mapLoading || zoom >= 17}
+          onClick={() => changeZoom(zoom + 1)}
         >
           ＋
         </button>
         <button
           type="button"
           aria-label="缩小地图" title="缩小地图"
-          disabled={busy || zoom <= 3}
-          onClick={() => setZoom((value) => value - 1)}
+          disabled={busy || mapLoading || zoom <= 3}
+          onClick={() => changeZoom(zoom - 1)}
         >
           −
         </button>
@@ -193,7 +226,7 @@ function MapEditor({
         <button
           type="button"
           className="otto-park-demo__primary"
-          disabled={busy || !image}
+          disabled={busy || mapLoading || !image}
           onClick={() => void choose()}
         >
           确认此地点

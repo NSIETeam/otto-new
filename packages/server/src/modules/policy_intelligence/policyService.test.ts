@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EnterprisePolicyService } from './policyService.js';
 import { MemoryPolicyStore } from './policyStore.js';
+import { initialPolicyCollection } from './policyCollection.js';
+import { policyCollectionSlot } from './policyCollectionCycle.js';
+import { policyHash } from './policyDomain.js';
 import type {
   OfficialPolicyDocument,
   PolicyActor,
@@ -103,7 +106,136 @@ async function enabled(h: ReturnType<typeof harness>) {
     consent: true,
   });
 }
+async function finishCollection(
+  service: EnterprisePolicyService,
+  store: MemoryPolicyStore,
+) {
+  for (let tick = 0; tick < 100; tick++) {
+    await service.collect();
+    const progress = await store.get<{ status: string }>('collection:progress');
+    if (progress?.status === 'complete') return;
+    if (progress?.status === 'needs-review')
+      throw new Error('Collection unexpectedly needs review');
+  }
+  throw new Error('Bounded collection did not complete');
+}
 describe('policy reminders use the persistent account-scoped inbox', () => {
+  it('shows source failure immediately before its bounded document reconciliation finishes', async () => {
+    const h = harness();
+    await enabled(h);
+    await h.store.update('source-status:national', () => ({
+      status: 'unavailable',
+      documentCount: 0,
+      checkedAt: h.clock.date.toISOString(),
+    }));
+    expect((await h.service.state('a')).policies[0].sourceStatus).toBe(
+      'unavailable',
+    );
+    expect(
+      (await h.store.get<OfficialPolicyDocument>('document:p1'))?.sourceStatus,
+    ).toBe('verified');
+  });
+  it('does not dispatch a background extraction after enablement is withdrawn during quota reservation', async () => {
+    const h = harness();
+    await enabled(h);
+    const key = `workspace:${policyHash(actor.organizationId)}`;
+    await h.store.update('document:p1', () => ({
+      ...document,
+      interpretationStatus: 'pending',
+    }));
+    await h.store.update('collection:progress', () => ({
+      version: 1,
+      cycle: 'saved-cycle',
+      configuration: policyHash([]),
+      slot: policyCollectionSlot(h.clock.date),
+      revision: 1,
+      spentMs: 0,
+      status: 'pending',
+      data: {
+        ...initialPolicyCollection(),
+        stage: 'extract',
+        analyzeEnabled: true,
+        pendingExtraction: ['p1'],
+        extractionWorkspace: key,
+      },
+    }));
+    const original = h.store.update.bind(h.store);
+    vi.spyOn(h.store, 'update').mockImplementation(
+      async (recordKey, change, options) => {
+        const result = await original(recordKey, change, options);
+        if (recordKey.startsWith('extraction-usage:'))
+          await original<{ enabled: boolean }>(key, (workspace) => ({
+            ...workspace!,
+            enabled: false,
+          }));
+        return result;
+      },
+    );
+    await h.service.collect();
+    expect(h.model.extract).not.toHaveBeenCalled();
+  });
+  it('does not use legacy whole-store lists in a collection tick', async () => {
+    const h = harness();
+    vi.spyOn(h.store, 'list').mockRejectedValue(
+      new Error('unbounded background list'),
+    );
+    await h.service.collect();
+    expect(await h.store.get('collection:progress')).toMatchObject({
+      status: 'pending',
+    });
+  });
+  it('reads only watched document IDs from a large cache, not every public body', async () => {
+    const h = harness();
+    await enabled(h);
+    await h.service.act('a', {
+      action: 'watch',
+      policyId: 'p1',
+      enabled: true,
+    });
+    for (let i = 0; i < 2000; i++)
+      await h.store.update(`document:unwatched-${i}`, () => ({
+        ...document,
+        id: `unwatched-${i}`,
+        bodyText: '未关注的公开政策正文'.repeat(512),
+      }));
+    h.clock.date = new Date('2026-09-30T00:00:00Z');
+    const originalList = h.store.list.bind(h.store);
+    vi.spyOn(h.store, 'list').mockImplementation((prefix) => {
+      if (prefix === 'document:' || prefix === 'policy-inbox:')
+        throw new Error('Unbounded background list');
+      return originalList(prefix);
+    });
+    const get = vi.spyOn(h.store, 'getBounded');
+    const page = vi.spyOn(h.store, 'keysPage');
+    await h.service.refreshNotifications();
+    expect(
+      get.mock.calls
+        .filter(([key]) => key.startsWith('document:'))
+        .map(([key]) => key),
+    ).toEqual(['document:p1']);
+    expect(page).toHaveBeenCalled();
+    expect(
+      page.mock.calls.every(([, options]) => (options?.limit ?? 32) <= 32),
+    ).toBe(true);
+    expect((await h.service.inbox('a')).notices).toHaveLength(1);
+  });
+  it('checks the enterprise enablement before loading watched document bodies', async () => {
+    const h = harness();
+    await enabled(h);
+    await h.service.act('a', {
+      action: 'watch',
+      policyId: 'p1',
+      enabled: true,
+    });
+    await h.service.act('a', { action: 'configure', enabled: false });
+    const get = vi.spyOn(h.store, 'getBounded');
+    const list = vi.spyOn(h.store, 'list');
+    await h.service.refreshNotifications();
+    expect(get.mock.calls.some(([key]) => key.startsWith('document:'))).toBe(
+      false,
+    );
+    expect(list).not.toHaveBeenCalledWith('document:');
+  });
   it('does not create duplicate change messages while the same source revision is being interpreted', async () => {
     const h = harness();
     await enabled(h);
@@ -668,6 +800,7 @@ describe('enterprise policy workspace isolation and diagnostics', () => {
       store: h.store,
       sources: [source],
       getActor: async () => actor,
+      now: () => h.clock.date,
       fetchImpl: async (url) =>
         new Response(
           String(url).endsWith('/list/')
@@ -675,10 +808,11 @@ describe('enterprise policy workspace isolation and diagnostics', () => {
             : `<h1>企业项目支持申报通知</h1><article>${body}</article>`,
         ),
     });
-    await service.collect();
+    await finishCollection(service, h.store);
     const old = (await service.state('a')).policies[0];
     body = '第二版正文：本文件自2026年9月1日起废止，不再受理新的申报。';
-    await service.collect();
+    h.clock.date = new Date(h.clock.date.getTime() + 12 * 3600_000);
+    await finishCollection(service, h.store);
     const current = (await service.state('a')).policies[0];
     expect(current.version).toBe(old.version + 1);
     expect(current.contentHash).not.toBe(old.contentHash);
@@ -698,6 +832,23 @@ describe('enterprise policy workspace isolation and diagnostics', () => {
     );
     expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
     expect(h.model.analyze).toHaveBeenCalledTimes(1);
+  });
+  it('does not pay twice when a background recommendation overlaps the existing manual recommendation lease', async () => {
+    const h = harness();
+    await enabled(h);
+    let finish!: (value: Awaited<ReturnType<PolicyModel['analyze']>>) => void;
+    vi.mocked(h.model.analyze).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const manual = h.service.act('a', { action: 'sync' });
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    await finishCollection(h.service, h.store);
+    expect(h.model.analyze).toHaveBeenCalledTimes(1);
+    finish({ relevant: true, summary: '', conditions: [] });
+    await manual;
   });
   it('limits source warnings to the enterprise region while preserving partial results', async () => {
     const h = harness();
@@ -734,7 +885,7 @@ describe('enterprise policy workspace isolation and diagnostics', () => {
       },
     });
     await service.act('a', { action: 'profile', profile, consent: true });
-    await service.collect();
+    await finishCollection(service, h.store);
     const state = await service.state('a');
     expect(state.policies).toHaveLength(1);
     expect(state.lastError).toContain('国家政策');

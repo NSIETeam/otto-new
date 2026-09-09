@@ -2,7 +2,6 @@
 import { randomUUID } from 'node:crypto';
 import { annotatePolicyBatches } from './policyLineage.js';
 import {
-  advancePolicyMailbox,
   emptyPolicyMailbox,
   policyInboxView,
   policyMailboxKey,
@@ -10,7 +9,17 @@ import {
   type PolicyMailbox,
 } from './policyNotifications.js';
 import type { PolicyInbox } from './contracts.js';
-import type { PolicyStore } from './policyStore.js';
+import {
+  POLICY_BACKGROUND_RECORD_BYTES,
+  PolicyRecordTooLargeError,
+  type PolicyStore,
+} from './policyStore.js';
+import {
+  refreshPolicyNotifications,
+  policyNotificationHealthKey,
+  POLICY_NOTIFICATION_MAINTENANCE_MESSAGE,
+  type PolicyNotificationHealth,
+} from './policyNotificationRuntime.js';
 import type {
   OfficialPolicyDocument,
   PolicyAction,
@@ -38,7 +47,26 @@ import {
   sourceMatchesRegion,
   validatePolicyEvidence,
 } from './policyDomain.js';
-import { collectPolicySource } from './policySources.js';
+import {
+  collectPolicySource,
+  type PolicyRecheckDocument,
+} from './policySources.js';
+import {
+  initialPolicyCollection,
+  nextPolicyCollectionStep,
+  type PolicyCollectionData,
+  type PolicyCollectionPorts,
+} from './policyCollection.js';
+import {
+  runPolicyCollectionTick,
+  POLICY_COLLECTION_PROGRESS_KEY,
+  type PolicyCollectionProgress,
+} from './policyCollectionCycle.js';
+import {
+  policyDocumentSourceStatus,
+  policyDocumentSourceHealth,
+  type SourceCollectionStatus,
+} from './policySourceStatus.js';
 import { PolicyOperationError } from './policyErrors.js';
 import { knownPolicyFact } from './policyDomain.js';
 import {
@@ -63,11 +91,6 @@ interface Workspace {
 interface CollectionStatus {
   at: string;
   errors: Array<{ sourceId: string; message: string }>;
-}
-interface SourceCollectionStatus {
-  checkedAt: string;
-  status: 'unverified' | 'available' | 'partial' | 'unavailable';
-  documentCount: number;
 }
 const blank = (): Workspace => ({
   enabled: false,
@@ -138,6 +161,8 @@ export function sanitizePolicyProfile(
 
 export class EnterprisePolicyService {
   private readonly controllers = new Map<string, Set<AbortController>>();
+  private notificationFlight?: Promise<void>;
+  private collectionFlight?: Promise<void>;
   constructor(
     private readonly options: {
       store: PolicyStore;
@@ -162,9 +187,17 @@ export class EnterprisePolicyService {
       throw new PolicyOperationError('企业账号不可用');
     return actor;
   }
-  private async workspace(actor: PolicyActor): Promise<Workspace> {
+  private async workspace(
+    actor: PolicyActor,
+    bounded = false,
+  ): Promise<Workspace> {
     const workspace =
-      (await this.store.get<Workspace>(orgKey(actor))) ?? blank();
+      (await (bounded
+        ? this.store.getBounded<Workspace>(
+            orgKey(actor),
+            POLICY_BACKGROUND_RECORD_BYTES,
+          )
+        : this.store.get<Workspace>(orgKey(actor)))) ?? blank();
     const base =
       (await this.options.getBaseProfile?.(actor.organizationId)) ?? {};
     return {
@@ -183,11 +216,20 @@ export class EnterprisePolicyService {
   private usageKey(actor: PolicyActor): string {
     return `usage:${orgKey(actor)}:${this.day()}`;
   }
-  private async document(id?: string): Promise<OfficialPolicyDocument> {
+  private async document(
+    id?: string,
+    bounded = false,
+  ): Promise<OfficialPolicyDocument> {
     const doc =
-      id && (await this.store.get<OfficialPolicyDocument>(`document:${id}`));
+      id &&
+      (await (bounded
+        ? this.store.getBounded<OfficialPolicyDocument>(
+            `document:${id}`,
+            POLICY_BACKGROUND_RECORD_BYTES,
+          )
+        : this.store.get<OfficialPolicyDocument>(`document:${id}`)));
     if (!doc) throw new PolicyOperationError('政策不存在');
-    return doc;
+    return policyDocumentSourceStatus(this.store, doc);
   }
   private stale(
     d: PolicyDiagnosis,
@@ -217,6 +259,22 @@ export class EnterprisePolicyService {
     )
       .map((row) => row.value)
       .filter((doc) => sourceMatchesRegion(doc, region));
+    const sourceHealth = new Map<string, SourceCollectionStatus | null>();
+    for (let index = 0; index < policies.length; index++) {
+      const doc = policies[index];
+      if (!sourceHealth.has(doc.sourceId))
+        sourceHealth.set(
+          doc.sourceId,
+          await this.store.getBounded<SourceCollectionStatus>(
+            `source-status:${doc.sourceId}`,
+            POLICY_BACKGROUND_RECORD_BYTES,
+          ),
+        );
+      policies[index] = policyDocumentSourceHealth(
+        doc,
+        sourceHealth.get(doc.sourceId) ?? null,
+      );
+    }
     policies.sort((a, b) =>
       (b.publishedAt ?? b.fetchedAt).localeCompare(
         a.publishedAt ?? a.fetchedAt,
@@ -236,6 +294,14 @@ export class EnterprisePolicyService {
       : [];
     const collection =
       await this.store.get<CollectionStatus>('collection:status');
+    const collectionProgress = await this.store.getBounded<
+      PolicyCollectionProgress<PolicyCollectionData>
+    >(POLICY_COLLECTION_PROGRESS_KEY, POLICY_BACKGROUND_RECORD_BYTES);
+    const notificationHealth =
+      await this.store.getBounded<PolicyNotificationHealth>(
+        policyNotificationHealthKey(policyMailboxKey(actor)),
+        POLICY_BACKGROUND_RECORD_BYTES,
+      );
     const relevantSources = new Set(
       this.options.sources
         .filter((source) => sourceMatchesRegion(source, region))
@@ -247,6 +313,21 @@ export class EnterprisePolicyService {
           .filter((error) => relevantSources.has(error.sourceId))
           .map((error) => error.message),
         ...(workspace.analysisError ? [workspace.analysisError] : []),
+        ...(collectionProgress?.status === 'needs-review'
+          ? [
+              collectionProgress.reviewReason ??
+                '政策后台轮次待核查，原有记录已保留。',
+            ]
+          : collectionProgress?.status === 'awaiting-next-slot'
+            ? [
+                '政策后台本时段工作预算已用完，将在下一时段继续未完成轮次；当前更新时间仍为上次完整轮次。',
+              ]
+            : collectionProgress?.status === 'pending'
+              ? ['政策后台正在分页续扫，当前更新时间仍为上次完整轮次。']
+              : []),
+        ...(notificationHealth?.status === 'needs-maintenance'
+          ? [POLICY_NOTIFICATION_MAINTENANCE_MESSAGE]
+          : []),
       ].join('；') || undefined;
     const levels = ['district', 'city', 'province', 'national'] as const;
     const feedbackRows = actor.isAdmin
@@ -711,46 +792,29 @@ export class EnterprisePolicyService {
     );
     return policyInboxView(mailbox);
   }
-  async refreshNotifications(): Promise<void> {
-    const mailboxes = (
-      await this.store.list<PolicyMailbox>('policy-inbox:')
-    ).filter((row) => Object.keys(row.value.watches).length > 0);
-    if (!mailboxes.length) return;
-    const documents = (
-      await this.store.list<OfficialPolicyDocument>('document:')
-    ).map((row) => row.value);
-    for (const { key, value } of mailboxes) {
-      // A removed account, changed tenant or disabled organization must not
-      // continue receiving enterprise information through an old subscription.
-      const actor = await this.options.getActor(value.accountId);
-      if (
-        !actor?.active ||
-        actor.organizationId !== value.organizationId ||
-        key !== policyMailboxKey(actor)
-      )
-        continue;
-      const workspace = await this.workspace(actor);
-      if (!workspace.enabled) continue;
-      const region = normalizePolicyRegion(
-        workspace.profile.region ?? workspace.profile.registeredRegion,
-      );
-      const relevant = documents.filter(
-        (doc) => value.watches[doc.id] && sourceMatchesRegion(doc, region),
-      );
-      // Avoid rewriting an encrypted mailbox every minute when nothing changed.
-      if (
-        JSON.stringify(
-          advancePolicyMailbox(structuredClone(value), relevant, this.now()),
-        ) === JSON.stringify(value)
-      )
-        continue;
-      await this.store.update<PolicyMailbox>(key, (current) =>
-        advancePolicyMailbox(
-          current ?? emptyPolicyMailbox(actor),
-          relevant,
-          this.now(),
-        ),
-      );
+  async refreshNotifications(signal?: AbortSignal): Promise<void> {
+    if (this.notificationFlight) return this.notificationFlight;
+    const flight = refreshPolicyNotifications({
+      store: this.store,
+      now: () => this.now(),
+      signal,
+      getActor: this.options.getActor,
+      workspace: async (actor) => {
+        const workspace = await this.workspace(actor, true);
+        return {
+          enabled: workspace.enabled,
+          region: normalizePolicyRegion(
+            workspace.profile.region ?? workspace.profile.registeredRegion,
+          ),
+        };
+      },
+    });
+    this.notificationFlight = flight;
+    try {
+      await flight;
+    } finally {
+      if (this.notificationFlight === flight)
+        this.notificationFlight = undefined;
     }
   }
   private async assess(
@@ -759,9 +823,11 @@ export class EnterprisePolicyService {
     doc: OfficialPolicyDocument,
     profile: PolicyEnterpriseProfile,
     parentSignal: AbortSignal = new AbortController().signal,
+    boundedReads = false,
+    onModelDispatch?: () => void,
   ): Promise<PolicyAssessment> {
     parentSignal.throwIfAborted();
-    const before = await this.workspace(actor);
+    const before = await this.workspace(actor, boundedReads);
     const beforeActor = await this.actor(actor.id);
     if (
       !before.enabled ||
@@ -816,6 +882,7 @@ export class EnterprisePolicyService {
         AbortSignal.timeout(90_000),
       ]);
       signal.throwIfAborted();
+      if (!skipModel) onModelDispatch?.();
       const result: Awaited<ReturnType<PolicyModel['analyze']>> = skipModel
         ? { relevant: true, summary: '', conditions: preconditions }
         : await this.options.model!.analyze(
@@ -827,7 +894,7 @@ export class EnterprisePolicyService {
         throw new PolicyOperationError(
           '企业资料或服务开关已更新、分析超时或服务器停止，本次分析已取消',
         );
-      const latest = await this.workspace(actor);
+      const latest = await this.workspace(actor, boundedReads);
       const currentActor = await this.actor(actor.id);
       if (
         !currentActor.isAdmin ||
@@ -841,7 +908,7 @@ export class EnterprisePolicyService {
         throw new PolicyOperationError(
           '企业资料或服务开关已更新，本次分析已取消',
         );
-      const currentDoc = await this.document(doc.id);
+      const currentDoc = await this.document(doc.id, boundedReads);
       if (
         currentDoc.contentHash !== doc.contentHash ||
         policyRulesHash(currentDoc) !== policyRulesHash(doc) ||
@@ -1079,6 +1146,8 @@ export class EnterprisePolicyService {
   private async interpret(
     doc: OfficialPolicyDocument,
     signal: AbortSignal,
+    boundedReads = false,
+    authorize?: () => Promise<boolean>,
   ): Promise<OfficialPolicyDocument> {
     if (!this.options.model) return doc;
     const leaseKey = `extract-lease:${doc.id}`;
@@ -1092,9 +1161,9 @@ export class EnterprisePolicyService {
         return { token, until: this.now().getTime() + 180000 };
       },
     );
-    if (!accepted) return this.document(doc.id);
+    if (!accepted) return this.document(doc.id, boundedReads);
     try {
-      const cached = await this.document(doc.id);
+      const cached = await this.document(doc.id, boundedReads);
       if (
         cached.contentHash === doc.contentHash &&
         cached.interpretationStatus === 'ready' &&
@@ -1111,6 +1180,8 @@ export class EnterprisePolicyService {
         },
       );
       if (!permitted) return doc;
+      if (authorize && !(await authorize())) return doc;
+      signal.throwIfAborted();
       let next = doc;
       try {
         next = {
@@ -1162,6 +1233,9 @@ export class EnterprisePolicyService {
             current.sourceStatus !== 'verified')
             ? current
             : next,
+        boundedReads
+          ? { maxPayloadBytes: POLICY_BACKGROUND_RECORD_BYTES }
+          : undefined,
       );
     } finally {
       await this.store.update<{ token: string; until: number }>(
@@ -1184,170 +1258,357 @@ export class EnterprisePolicyService {
         bodyText: doc.bodyText,
       }),
     );
-    const rows = await this.store.list<{ version: number }>(prefix);
+    // The normal retained history fits in one key-only page. Legacy excess is
+    // pruned only when twenty observed newer versions prove an entry obsolete;
+    // never decrypt an unbounded history just to retain the newest snapshots.
+    const rows = (await this.store.keysPage(prefix, { limit: 32 })).rows.map(
+      (row) => ({
+        ...row,
+        version: Number(row.key.slice(prefix.length).split(':')[0]),
+      }),
+    );
     for (const row of rows
-      .sort((a, b) => b.value.version - a.value.version)
+      .filter((row) => Number.isSafeInteger(row.version))
+      .sort((a, b) => b.version - a.version)
       .slice(20))
       await this.store.remove(row.key);
   }
-  async collect(
-    signal: AbortSignal = AbortSignal.timeout(300_000),
-  ): Promise<void> {
-    // Shared public cache: no enterprise profile is sent during collection/extraction.
-    const errors: CollectionStatus['errors'] = [];
-    const workspaces = await this.store.list<Workspace>('workspace:');
-    const analyzeEnabled = workspaces.some(({ value }) => value.enabled);
-    const knownDocuments = (
-      await this.store.list<OfficialPolicyDocument>('document:')
-    ).map(({ value }) => value);
-    const priorityIds = new Set(
-      (await this.store.list<PolicyDiagnosis>('diagnosis:')).map(
-        ({ value }) => value.policyId,
-      ),
+  private async collectSource(
+    source: PolicySource,
+    known: readonly PolicyRecheckDocument[],
+    priorityIds: ReadonlySet<string>,
+    extractionSlots: number,
+    signal: AbortSignal,
+  ): Promise<{ pendingIds: string[]; error?: string }> {
+    const checkedAt = this.now().toISOString();
+    const bounded = { maxPayloadBytes: POLICY_BACKGROUND_RECORD_BYTES };
+    const pendingIds: string[] = [];
+    await this.store.update<SourceCollectionStatus>(
+      `source-status:${source.id}`,
+      () => ({ checkedAt, status: 'unverified', documentCount: 0 }),
+      bounded,
     );
-    const health = new Map(
-      (await this.store.list<SourceCollectionStatus>('source-status:')).map(
-        (row) => [row.key.slice('source-status:'.length), row.value],
-      ),
-    );
-    const sources = [...this.options.sources].sort((a, b) =>
-      (health.get(a.id)?.checkedAt ?? '').localeCompare(
-        health.get(b.id)?.checkedAt ?? '',
-      ),
-    );
-    const pendingExtraction: OfficialPolicyDocument[] = [];
-    for (const source of sources) {
-      if (signal.aborted) break;
-      const checkedAt = this.now().toISOString();
+    try {
+      const failedUrls: string[] = [];
+      const documents = await collectPolicySource(
+        source,
+        this.options.fetchImpl ?? fetch,
+        signal,
+        this.now(),
+        (url) => failedUrls.push(url),
+        known,
+        priorityIds,
+      );
+      signal.throwIfAborted();
       await this.store.update<SourceCollectionStatus>(
         `source-status:${source.id}`,
-        () => ({ checkedAt, status: 'unverified', documentCount: 0 }),
+        () => ({
+          checkedAt,
+          failedUrls,
+          status:
+            failedUrls.length ||
+            documents.some((doc) => doc.sourceStatus !== 'verified')
+              ? 'partial'
+              : documents.length
+                ? 'available'
+                : 'unavailable',
+          documentCount: documents.length,
+        }),
+        bounded,
       );
-      try {
-        const failedUrls: string[] = [];
-        const documents = await collectPolicySource(
-          source,
-          this.options.fetchImpl ?? fetch,
-          AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
-          this.now(),
-          (url) => failedUrls.push(url),
-          knownDocuments,
-          priorityIds,
+      for (const doc of documents) {
+        signal.throwIfAborted();
+        const old = await this.store.getBounded<OfficialPolicyDocument>(
+          `document:${doc.id}`,
+          POLICY_BACKGROUND_RECORD_BYTES,
         );
-        await this.store.update<SourceCollectionStatus>(
-          `source-status:${source.id}`,
-          () => ({
-            checkedAt,
-            status:
-              failedUrls.length ||
-              documents.some((d) => d.sourceStatus !== 'verified')
-                ? 'partial'
-                : documents.length
-                  ? 'available'
-                  : 'unavailable',
-            documentCount: documents.length,
-          }),
-        );
-        if (failedUrls.length) {
-          errors.push({
-            sourceId: source.id,
-            message: `${source.name}部分条目暂不可用（${failedUrls.length}条），其余政策已保留`,
-          });
-          for (const {
-            key,
-            value,
-          } of await this.store.list<OfficialPolicyDocument>('document:'))
-            if (value.sourceId === source.id && failedUrls.includes(value.url))
-              await this.store.update(key, () => ({
-                ...value,
-                sourceStatus: 'unavailable',
-              }));
-        }
-        for (const doc of documents) {
-          const old = await this.store.get<OfficialPolicyDocument>(
+        if (
+          old?.contentHash === doc.contentHash &&
+          old.interpretationStatus === 'ready' &&
+          old.interpretationVersion === POLICY_INTERPRETATION_VERSION
+        ) {
+          await this.store.update(
             `document:${doc.id}`,
-          );
-          if (
-            old?.contentHash === doc.contentHash &&
-            old.interpretationStatus === 'ready' &&
-            old.interpretationVersion === POLICY_INTERPRETATION_VERSION
-          ) {
-            await this.store.update(`document:${doc.id}`, () => ({
+            () => ({
               ...old,
               fetchedAt: doc.fetchedAt,
               sourceStatus: 'verified',
-            }));
-            continue;
-          }
-          const next = {
-            ...doc,
-            version:
-              old?.contentHash === doc.contentHash
-                ? old.version
-                : (old?.version ?? 0) + 1,
-          };
-          if (old && old.contentHash !== doc.contentHash)
-            await this.snapshot(old);
-          await this.snapshot(next);
-          await this.store.update(`document:${doc.id}`, () => next);
-          if (analyzeEnabled && !doc.attachments.some((item) => !item.parsed))
-            pendingExtraction.push(next);
-        }
-      } catch {
-        if (signal.aborted) break;
-        errors.push({ sourceId: source.id, message: `${source.name}暂不可用` });
-        await this.store.update<SourceCollectionStatus>(
-          `source-status:${source.id}`,
-          () => ({ checkedAt, status: 'unavailable', documentCount: 0 }),
-        );
-        for (const {
-          key,
-          value,
-        } of await this.store.list<OfficialPolicyDocument>('document:'))
-          if (value.sourceId === source.id)
-            await this.store.update(key, () => ({
-              ...value,
-              sourceStatus: 'unavailable',
-            }));
-      }
-    }
-    await this.refreshNotifications();
-    if (signal.aborted) return;
-    await this.store.update('collection:status', () => ({
-      at: this.now().toISOString(),
-      errors,
-    }));
-    // Network coverage must not wait for paid interpretation of earlier regions.
-    for (const doc of pendingExtraction.slice(0, 8)) {
-      if (signal.aborted) break;
-      try {
-        await this.interpret(doc, signal);
-      } catch {
-        /* Per-document status retains the failure; continue other regions. */
-      }
-    }
-    await this.refreshNotifications();
-    for (const { value } of workspaces) {
-      if (signal.aborted) break;
-      if (!value.enabled || !value.enabledBy) continue;
-      try {
-        const actor = await this.actor(value.enabledBy);
-        const current = await this.workspace(actor);
-        if (current.enabled) await this.recommend(actor, current, signal);
-      } catch {
-        // Isolate one tenant's provider/budget failure, but make it visible to that tenant.
-        if (signal.aborted) break;
-        const currentActor = await this.options.getActor(value.enabledBy);
-        if (currentActor)
-          await this.store.update<Workspace>(
-            orgKey(currentActor),
-            (current) => ({
-              ...(current ?? blank()),
-              analysisError:
-                '后台推荐暂未完成，请检查模型配置、分析额度后重试；已有政策原文仍可查看。',
             }),
+            bounded,
           );
+          continue;
+        }
+        const next = {
+          ...doc,
+          version:
+            old?.contentHash === doc.contentHash
+              ? old.version
+              : (old?.version ?? 0) + 1,
+        };
+        if (old && old.contentHash !== doc.contentHash)
+          await this.snapshot(old);
+        await this.snapshot(next);
+        await this.store.update(`document:${doc.id}`, () => next, bounded);
+        // Check the allowance before retaining even an ID. No full document is
+        // retained across sources, and restarting a tick cannot reset this cap.
+        if (
+          pendingIds.length < extractionSlots &&
+          !doc.attachments.some((item) => !item.parsed)
+        )
+          pendingIds.push(next.id);
       }
+      return {
+        pendingIds,
+        ...(failedUrls.length
+          ? {
+              error: `${source.name}部分条目暂不可用（${failedUrls.length}条），其余政策已保留`,
+            }
+          : {}),
+      };
+    } catch (error) {
+      signal.throwIfAborted();
+      if (error instanceof PolicyRecordTooLargeError) throw error;
+      await this.store.update<SourceCollectionStatus>(
+        `source-status:${source.id}`,
+        () => ({ checkedAt, status: 'unavailable', documentCount: 0 }),
+        bounded,
+      );
+      return { pendingIds: [], error: `${source.name}暂不可用` };
+    }
+  }
+  private async recommendationContext(key: string, generation?: number) {
+    const saved = await this.store.getBounded<Workspace>(
+      key,
+      POLICY_BACKGROUND_RECORD_BYTES,
+    );
+    if (
+      !saved?.enabled ||
+      !saved.enabledBy ||
+      (generation !== undefined && saved.generation !== generation)
+    )
+      return null;
+    const actor = await this.options.getActor(saved.enabledBy);
+    if (
+      !actor?.active ||
+      !actor.isAdmin ||
+      actor.id !== saved.enabledBy ||
+      orgKey(actor) !== key
+    )
+      return null;
+    const workspace = await this.workspace(actor, true);
+    if (
+      !workspace.enabled ||
+      (generation !== undefined && workspace.generation !== generation) ||
+      missingPolicyProfileFields(corePolicyProfile(workspace.profile)).length
+    )
+      return null;
+    return { actor, workspace };
+  }
+  private async recommendationCandidate(
+    key: string,
+    generation: number,
+    id: string,
+  ): Promise<boolean> {
+    const context = await this.recommendationContext(key, generation);
+    if (!context) return false;
+    const cached = await this.store.getBounded<OfficialPolicyDocument>(
+      `document:${id}`,
+      POLICY_BACKGROUND_RECORD_BYTES,
+    );
+    if (!cached) return false;
+    const doc = await policyDocumentSourceStatus(this.store, cached);
+    return (
+      doc.sourceStatus === 'verified' &&
+      !doc.attachments.some((item) => !item.parsed) &&
+      doc.interpretationStatus === 'ready' &&
+      doc.interpretationVersion === POLICY_INTERPRETATION_VERSION &&
+      !!doc.exclusionsReviewed &&
+      ['open', 'upcoming', 'evergreen'].includes(
+        policyApplicationStatus(doc, this.now()),
+      ) &&
+      sourceMatchesRegion(
+        doc,
+        normalizePolicyRegion(
+          context.workspace.profile.region ??
+            context.workspace.profile.registeredRegion,
+        ),
+      ) &&
+      !context.workspace.assessments.some(
+        (item) =>
+          item.policyId === id &&
+          item.policyContentHash === doc.contentHash &&
+          item.policyRulesHash === policyRulesHash(doc) &&
+          item.profileFingerprint ===
+            policyProfileVersion(corePolicyProfile(context.workspace.profile)),
+      )
+    );
+  }
+  private async recommendOne(
+    key: string,
+    generation: number,
+    id: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const token = randomUUID();
+    const leaseKey = `recommend-lease:${key}`;
+    let accepted = false;
+    await this.store.update<{ token: string; until: number }>(
+      leaseKey,
+      (lease) => {
+        if (lease && lease.until > this.now().getTime()) return lease;
+        accepted = true;
+        return { token, until: this.now().getTime() + 180_000 };
+      },
+    );
+    if (!accepted) return;
+    let dispatched = false;
+    try {
+      if (!(await this.recommendationCandidate(key, generation, id))) return;
+      const context = await this.recommendationContext(key, generation);
+      if (!context) return;
+      const doc = await this.document(id, true);
+      const assessment = await this.assess(
+        context.actor,
+        context.workspace,
+        doc,
+        corePolicyProfile(context.workspace.profile),
+        signal,
+        true,
+        () => {
+          dispatched = true;
+        },
+      );
+      signal.throwIfAborted();
+      await this.store.update<Workspace>(
+        key,
+        (value) => {
+          if (!value?.enabled || value.generation !== generation)
+            throw new PolicyOperationError('企业资料已更新');
+          return {
+            ...value,
+            analysisError: undefined,
+            assessments: [
+              ...value.assessments.filter((item) => item.policyId !== id),
+              assessment,
+            ].slice(-500),
+          };
+        },
+        { maxPayloadBytes: POLICY_BACKGROUND_RECORD_BYTES },
+      );
+    } catch (error) {
+      if (dispatched || !(error instanceof PolicyOperationError)) throw error;
+      // A known pre-dispatch permission/quota failure cannot spend a provider
+      // call and must not starve unrelated enterprises. Unknown paid outcomes
+      // still propagate to the durable cycle's needs-review reservation.
+      await this.store.update<Workspace>(
+        key,
+        (value) => {
+          if (!value) throw error;
+          return {
+            ...value,
+            analysisError:
+              '后台推荐未调用模型：企业权限、资料或今日额度暂不满足要求；已有原文仍可查看。',
+          };
+        },
+        { maxPayloadBytes: POLICY_BACKGROUND_RECORD_BYTES },
+      );
+    } finally {
+      await this.store.update<{ token: string; until: number }>(
+        leaseKey,
+        (lease) => (lease?.token === token ? { token, until: 0 } : lease!),
+      );
+    }
+  }
+  async collect(signal?: AbortSignal): Promise<void> {
+    if (this.collectionFlight) return this.collectionFlight;
+    const ports: PolicyCollectionPorts = {
+      store: this.store,
+      sources: this.options.sources,
+      now: () => this.now(),
+      collectSource: (source, known, priority, slots, unitSignal) =>
+        this.collectSource(source, known, priority, slots, unitSignal),
+      reconcile: async (doc) => {
+        const effective = await policyDocumentSourceStatus(this.store, doc);
+        if (effective.sourceStatus !== doc.sourceStatus)
+          await this.store.update<OfficialPolicyDocument>(
+            `document:${doc.id}`,
+            (current) =>
+              current && current.contentHash !== doc.contentHash
+                ? current
+                : effective,
+            { maxPayloadBytes: POLICY_BACKGROUND_RECORD_BYTES },
+          );
+      },
+      interpret: async (id, unitSignal, workspaceKey) => {
+        if (
+          !(
+            await this.store.getBounded<Workspace>(
+              workspaceKey,
+              POLICY_BACKGROUND_RECORD_BYTES,
+            )
+          )?.enabled
+        )
+          return;
+        const cached = await this.store.getBounded<OfficialPolicyDocument>(
+          `document:${id}`,
+          POLICY_BACKGROUND_RECORD_BYTES,
+        );
+        if (!cached) return;
+        const doc = await policyDocumentSourceStatus(this.store, cached);
+        if (
+          doc.sourceStatus === 'verified' &&
+          !doc.attachments.some((item) => !item.parsed)
+        )
+          await this.interpret(
+            doc,
+            unitSignal,
+            true,
+            async () =>
+              !!(
+                await this.store.getBounded<Workspace>(
+                  workspaceKey,
+                  POLICY_BACKGROUND_RECORD_BYTES,
+                )
+              )?.enabled,
+          );
+      },
+      recommendationTarget: async (key) => {
+        const context = await this.recommendationContext(key);
+        return context
+          ? {
+              generation: context.workspace.generation,
+              region: normalizePolicyRegion(
+                context.workspace.profile.region ??
+                  context.workspace.profile.registeredRegion,
+              ),
+            }
+          : null;
+      },
+      recommendationCandidate: (key, generation, id) =>
+        this.recommendationCandidate(key, generation, id),
+      recommend: (key, generation, id, unitSignal) =>
+        this.recommendOne(key, generation, id, unitSignal),
+    };
+    const flight = runPolicyCollectionTick({
+      store: this.store,
+      configuration: policyHash(this.options.sources),
+      now: () => this.now(),
+      signal,
+      initial: () => initialPolicyCollection(this.options.sources),
+      next: (data) => nextPolicyCollectionStep(ports, data),
+      complete: async (data) => {
+        await this.store.update<CollectionStatus>(
+          'collection:status',
+          () => ({ at: this.now().toISOString(), errors: data.errors }),
+          { maxPayloadBytes: POLICY_BACKGROUND_RECORD_BYTES },
+        );
+      },
+    });
+    this.collectionFlight = flight;
+    try {
+      await flight;
+    } finally {
+      if (this.collectionFlight === flight) this.collectionFlight = undefined;
     }
   }
 }

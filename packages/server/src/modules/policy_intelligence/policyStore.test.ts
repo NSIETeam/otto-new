@@ -53,6 +53,13 @@ describe('policy persistence and schedule', () => {
           key: 'policy-inbox:large',
           limitBytes: 1024 * 1024,
         });
+        const change = vi.fn(() => ({ notices: [] }));
+        await expect(
+          store.update('policy-inbox:large', change, {
+            maxPayloadBytes: 1024 * 1024,
+          }),
+        ).rejects.toMatchObject({ key: 'policy-inbox:large' });
+        expect(change).not.toHaveBeenCalled();
         expect(decrypt).not.toHaveBeenCalled();
         expect(
           await store.getBounded('policy-inbox:small', 1024 * 1024),
@@ -61,6 +68,15 @@ describe('policy persistence and schedule', () => {
           await store.getBounded('policy-inbox:missing', 1024 * 1024),
         ).toBeNull();
         expect(await store.get('policy-inbox:large')).toEqual(legacy);
+        await expect(
+          store.update('policy-inbox:small', () => legacy, {
+            maxPayloadBytes: 1024 * 1024,
+          }),
+        ).rejects.toMatchObject({ key: 'policy-inbox:small' });
+        expect(await store.get('policy-inbox:small')).toEqual({
+          watches: {},
+          notices: [],
+        });
       } finally {
         db.close();
       }

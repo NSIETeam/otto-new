@@ -1,0 +1,124 @@
+name: Enterprise upgrade real systemd acceptance
+
+on:
+  pull_request:
+    branches: [internal, main]
+  push:
+    branches: [internal]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  compensation-systemd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout this repository revision only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+          lfs: false
+
+      - name: Real systemd and cgroup v2 compensation acceptance
+        shell: bash
+        env:
+          TEST_RUN_ID: ${{ github.run_id }}
+          TEST_RUN_ATTEMPT: ${{ github.run_attempt }}
+          TEST_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          test "$(git rev-parse HEAD)" = "$TEST_COMMIT"
+          evidence="$RUNNER_TEMP/otto-systemd-evidence-$TEST_RUN_ID-$TEST_RUN_ATTEMPT"
+          mkdir -m 700 -- "$evidence"
+          printf '%s\n' '{"passed":false,"phase":"preflight-not-completed"}' > "$evidence/receipt.json"
+          # No package install, remote code, deploy credentials, or network in
+          # the harness. systemctl talks only to the local system bus socket.
+          sudo -n unshare --net -- /usr/bin/env -i \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C HOME=/root \
+            GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted RUNNER_OS=Linux \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_RUN_ID="$TEST_RUN_ID" GITHUB_RUN_ATTEMPT="$TEST_RUN_ATTEMPT" \
+            GITHUB_SHA="$TEST_COMMIT" OTTO_DISPOSABLE_SYSTEMD_ACCEPTANCE=1 \
+            /usr/bin/python3 -I -S \
+            "$GITHUB_WORKSPACE/scripts/tests/enterprise-upgrade-systemd-integration.py"
+
+      - name: Preserve acceptance receipt even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: enterprise-systemd-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/otto-systemd-evidence-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 14
+
+  canary-worker-systemd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout this repository revision only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+          lfs: false
+
+      - name: Set up the locked official Node runtime without dependencies
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.1'
+
+      - name: Real canary worker isolation and lifecycle acceptance
+        shell: bash
+        env:
+          TEST_RUN_ID: ${{ github.run_id }}
+          TEST_RUN_ATTEMPT: ${{ github.run_attempt }}
+          TEST_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          test "$(git rev-parse HEAD)" = "$TEST_COMMIT"
+          node_path="$(command -v node)"
+          test "$("$node_path" --version)" = v22.23.1
+          evidence="$RUNNER_TEMP/otto-canary-evidence-$TEST_RUN_ID-$TEST_RUN_ATTEMPT"
+          mkdir -m 700 -- "$evidence"
+          printf '%s\n' '{"passed":false,"phase":"preflight-not-completed"}' > "$evidence/receipt.json"
+          # Only the locked runtime path and CI identity enter root execution.
+          # Synthetic DB/HTTP adapters exercise the real controller, namespaces
+          # and cgroup limits; this is not a production database migration.
+          sudo -n unshare --net -- /usr/bin/env -i \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C HOME=/root \
+            GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted RUNNER_OS=Linux \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_RUN_ID="$TEST_RUN_ID" GITHUB_RUN_ATTEMPT="$TEST_RUN_ATTEMPT" \
+            GITHUB_SHA="$TEST_COMMIT" OTTO_DISPOSABLE_SYSTEMD_ACCEPTANCE=1 \
+            OTTO_CANARY_TEST_NODE="$node_path" \
+            /usr/bin/python3 -I -S \
+            "$GITHUB_WORKSPACE/scripts/tests/enterprise-canary-systemd-integration.py" \
+            --work-dir "$RUNNER_TEMP/otto-canary-$TEST_RUN_ID-$TEST_RUN_ATTEMPT" \
+            --evidence-dir "$evidence"
+
+      - name: Preserve worker acceptance receipt even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: enterprise-canary-systemd-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/otto-canary-evidence-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 14

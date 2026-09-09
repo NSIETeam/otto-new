@@ -289,3 +289,32 @@ otto_random_secret() {
   "$node_path" --input-type=module -e \
     "import { randomBytes } from 'node:crypto'; console.log(randomBytes(32).toString('base64url'))"
 }
+
+otto_prepare_canary_identity() {
+  [ "$(id -u)" -eq 0 ] && [ "$(uname -s)" = Linux ] \
+    || otto_die "隔离升级 canary（含 dry-run）需要 Linux sudo/root" 3
+  local tool identity uid gid members shell user_home
+  for tool in systemctl systemd-run getent useradd groupadd id cut awk; do otto_require_command "$tool"; done
+  if ! getent passwd otto-upgrade-canary >/dev/null; then
+    getent group otto-upgrade-canary >/dev/null \
+      || groupadd --system otto-upgrade-canary
+    useradd --system --gid otto-upgrade-canary --no-create-home \
+      --home-dir /nonexistent --shell /usr/sbin/nologin otto-upgrade-canary
+  fi
+  identity="$(getent passwd otto-upgrade-canary)"
+  IFS=: read -r _ _ uid gid _ user_home shell <<< "$identity"
+  [[ "$uid" =~ ^[0-9]+$ ]] && [ "$uid" -gt 0 ] \
+    && [ "$(id -G otto-upgrade-canary)" = "$gid" ] \
+    && [ "$(getent group "$gid" | cut -d: -f1)" = otto-upgrade-canary ] \
+    || otto_die "canary 专用账号或组身份不安全" 3
+  case "$shell" in /usr/sbin/nologin|/sbin/nologin|/bin/false) ;; *) otto_die "canary 账号必须禁止登录" 3 ;; esac
+  [ "$user_home" = /nonexistent ] || otto_die "canary 账号不得拥有可写 home" 3
+  members="$(getent group "$gid" | cut -d: -f4)"
+  [ -z "$members" ] || [ "$members" = otto-upgrade-canary ] \
+    || otto_die "canary 专用组包含其他用户" 3
+  getent passwd | awk -F: -v uid="$uid" -v gid="$gid" \
+    '$1 != "otto-upgrade-canary" && ($3 == uid || $4 == gid) { bad=1 } END { exit bad }' \
+    || otto_die "canary UID/GID 被其他用户共享" 3
+  [ "$uid" != "$(id -u otto-enterprise 2>/dev/null || printf absent)" ] \
+    || otto_die "canary 不得复用生产服务 UID" 3
+}

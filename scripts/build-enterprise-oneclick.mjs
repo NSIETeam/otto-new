@@ -24,6 +24,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { supportedEnterpriseSchemaVersions } from './enterprise-release-contract.mjs';
 import { copyEnterpriseRuntimeDependencies } from './enterprise-runtime-dependencies.mjs';
+import { materializeSharpRuntimeAssets } from './sharp-runtime-assets.mjs';
 import { copyEnterpriseServerNotice } from './server-notice.mjs';
 import { copyEnterpriseWorkflowRuntime } from './enterprise-workflow-runtime.mjs';
 import {
@@ -339,6 +340,7 @@ const sourceScope = [
   'deployment/enterprise-oneclick',
   'scripts/build-enterprise-oneclick.mjs',
   'scripts/enterprise-runtime-dependencies.mjs',
+  'scripts/sharp-runtime-assets.mjs',
   'scripts/server-notice.mjs',
   'scripts/verify-enterprise-package-signature.mjs',
   'scripts/verify-sqlcipher-native-assets.mjs',
@@ -377,6 +379,7 @@ const sourceInputFiles = [
   ),
   'scripts/build-enterprise-oneclick.mjs',
   'scripts/enterprise-runtime-dependencies.mjs',
+  'scripts/sharp-runtime-assets.mjs',
   'scripts/server-notice.mjs',
   'scripts/verify-enterprise-package-signature.mjs',
   'scripts/verify-sqlcipher-native-assets.mjs',
@@ -586,9 +589,14 @@ export class FeatureFlagManager {
     path.join(betterSqliteSource, 'package.json'),
     path.join(betterSqliteTarget, 'package.json'),
   );
+  const sharpAssets = await materializeSharpRuntimeAssets({
+    repoRoot,
+    destination: path.join(temporaryRoot, 'sharp-runtime-assets'),
+  });
   const runtimeDependencies = copyEnterpriseRuntimeDependencies({
     repoRoot,
     releaseRoot,
+    sharpAssetRoot: sharpAssets.root,
   });
   writeFileSync(
     path.join(releaseRoot, 'package.json'),

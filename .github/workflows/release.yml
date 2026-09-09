@@ -190,6 +190,13 @@ jobs:
             python@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 \
             bash /workspace/scripts/tests/enterprise-ci-linux-integration.sh
 
+  enterprise-upgrade-systemd:
+    name: Verify real systemd compensation and canary isolation
+    needs: validate-source
+    permissions:
+      contents: read
+    uses: ./.github/workflows/enterprise-upgrade-systemd.yml
+
   sqlcipher-native:
     name: Build verified SQLCipher native matrix
     needs: validate-source
@@ -273,6 +280,7 @@ jobs:
     needs:
       - validate-source
       - linux-enterprise-deployment-integration
+      - enterprise-upgrade-systemd
       - sqlcipher-native
       - otto-native
     permissions:
@@ -309,6 +317,34 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.11'
+
+      # Official versioned formula; test helpers create their own loopback-only
+      # temporary clusters. Never start Homebrew's shared database service.
+      - name: Prepare PostgreSQL 17 isolated-test binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_OS" = macOS
+          command -v brew >/dev/null
+          if ! brew list --versions postgresql@17 >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install postgresql@17
+          fi
+          pg_bin="$(brew --prefix postgresql@17)/bin"
+          [[ "$pg_bin" = /* && "$pg_bin" != *$'\n'* && "$pg_bin" != *$'\r'* ]]
+          for pg_tool in initdb postgres pg_ctl; do
+            test -x "$pg_bin/$pg_tool"
+            pg_version="$("$pg_bin/$pg_tool" --version)"
+            [[ "$pg_version" =~ ^${pg_tool}\ \(PostgreSQL\)\ 17\.[0-9]+($|\ ) ]]
+            printf '%s\n' "$pg_version"
+          done
+          {
+            printf 'OTTO_TEST_POSTGRES_BIN=%s\n' "$pg_bin"
+            printf 'OTTO_FLEA_MARKET_POSTGRES_BIN=%s\n' "$pg_bin"
+            printf 'OTTO_CARPOOL_POSTGRES_BIN=%s\n' "$pg_bin"
+            printf 'OTTO_CARPOOL_POSTGRES_TEST=1\n'
+          } >> "$GITHUB_ENV"
+          printf 'PostgreSQL isolated-cluster tests: %s; bin=%s; runner image=%s\n' \
+            "$("$pg_bin/postgres" --version)" "$pg_bin" "${ImageVersion:-unknown}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prime reviewed ripgrep postinstall cache
         run: node packages/desktop/scripts/prime-vscode-ripgrep-cache.mjs

@@ -647,13 +647,13 @@ describe('enterprise one-click schema contract', () => {
       'deploymentStatus.database?.schemaVersion !== expectedSchema',
     );
     expect(healthCheck).toContain("redirect: 'error'");
-    expect(healthCheck).toContain('const exactUrl = expectedUrl ?? url');
+    expect(healthCheck).toContain(
+      'new URL(response.url).href !== new URL(url).href',
+    );
     expect(healthCheck).toContain(
       'publicHealth.appVersion !== expectedVersion',
     );
-    expect(healthCheck).toContain(
-      'expectedUrl: `${baseUrl}/enterprise/deployment/status`',
-    );
+    expect(healthCheck).toContain('`${baseUrl}/enterprise/deployment/status`');
     expect(healthCheck).toContain('/enterprise/legal');
     expect(healthCheck).toContain("'x-otto-admin-token': adminToken");
     expect(healthCheck).toContain(
@@ -1209,7 +1209,16 @@ describe('enterprise one-click runtime configuration contract', () => {
 
     expect(upgrade).toContain('export OTTO_DATABASE_ENCRYPTION="required"');
     expect(upgrade).toContain('--snapshot "$OLD_DATA_BACKUP"');
-    expect(upgrade).toContain('--baseline "$BASELINE_INSPECTION"');
+    const worker = readFileSync(
+      path.join(path.dirname(HEALTH_CHECK), 'canary-worker.mjs'),
+      'utf8',
+    );
+    expect(worker).toMatch(
+      /'--baseline',\s*`\$\{VIEW\}\/control\/baseline\.json`/,
+    );
+    expect(worker).toContain(
+      '`${transaction}/database-inspection.before.json`',
+    );
     expect(upgrade).toContain(
       '"${TARGET_RELEASE}/native/sqlcipher/linux-${RUNTIME_ARCH}/better_sqlite3.node"',
     );
@@ -1304,18 +1313,25 @@ false
     const common = readFileSync(COMMON_SH, 'utf8');
     const installer = readFileSync(INSTALL_SH, 'utf8');
     const readme = readFileSync(README, 'utf8');
-    const allowlist = common.match(/case "\$key" in([\s\S]*?)\n\s*\*\)/)?.[1] ?? '';
-    const runtimeEnv = installer.match(
-      /write_env "\$ENV_TEMP" \\\n([\s\S]*?)\ninstall -o root/,
-    )?.[1] ?? '';
+    const allowlist =
+      common.match(/case "\$key" in([\s\S]*?)\n\s*\*\)/)?.[1] ?? '';
+    const runtimeEnv =
+      installer.match(
+        /write_env "\$ENV_TEMP" \\\n([\s\S]*?)\ninstall -o root/,
+      )?.[1] ?? '';
 
-    for (const key of ['OTTO_AMAP_WEB_SERVICE_KEY', 'OTTO_PARK_CARPOOL_MINIMUM_OVERLAP']) {
+    for (const key of [
+      'OTTO_AMAP_WEB_SERVICE_KEY',
+      'OTTO_PARK_CARPOOL_MINIMUM_OVERLAP',
+    ]) {
       expect(envExample).toMatch(new RegExp(`^${key}=`, 'm'));
       expect(allowlist).toContain(key);
       expect(runtimeEnv).toContain(`  ${key} `);
       expect(readme).toContain(`\`${key}\``);
     }
-    expect(installer).toContain('OTTO_PARK_CARPOOL_MINIMUM_OVERLAP 必须是 0 到 1 之间的数字');
+    expect(installer).toContain(
+      'OTTO_PARK_CARPOOL_MINIMUM_OVERLAP 必须是 0 到 1 之间的数字',
+    );
   });
 });
 
@@ -1324,20 +1340,22 @@ describe('enterprise one-click health contract', () => {
     const upgrader = readFileSync(UPGRADE_SH, 'utf8');
     const runtime = readFileSync(RUNTIME_ENTRY, 'utf8');
 
-    expect(upgrader).toContain(
-      'CANARY_READY_FILE="${CANARY_DIR}/canary-ready.json"',
+    const worker = readFileSync(
+      path.join(path.dirname(HEALTH_CHECK), 'canary-worker.mjs'),
+      'utf8',
     );
-    expect(upgrader).toContain('export OTTO_ENTERPRISE_PORT="0"');
     expect(upgrader).toContain(
-      'export OTTO_ENTERPRISE_READY_FILE="$CANARY_READY_FILE"',
+      '"${SCRIPT_DIR}/tools/canary-worker.mjs" launch --transaction "$TXN_DIR"',
     );
-    expect(upgrader).toContain('export OTTO_ENTERPRISE_CANARY_MODE="1"');
-    expect(upgrader).toContain(
-      'unset OTTO_ENTERPRISE_CANARY_MODE OTTO_ENTERPRISE_READY_FILE',
+    expect(worker).toContain("OTTO_ENTERPRISE_PORT: '0'");
+    expect(worker).toContain(
+      'OTTO_ENTERPRISE_READY_FILE: `${VIEW}/work/canary-ready.json`',
     );
-    expect(upgrader).toContain('升级 canary 启动后提前退出');
-    expect(upgrader).toContain('升级 canary 就绪文件无效');
-    expect(upgrader).toContain('"http://127.0.0.1:${CANARY_PORT}"');
+    expect(worker).toContain("OTTO_ENTERPRISE_CANARY_MODE: '1'");
+    expect(worker).toContain("reject('canary-readiness-failed')");
+    expect(worker).toContain("reject('canary-readiness-identity-mismatch')");
+    expect(worker).toContain('`http://127.0.0.1:${ready.port}`');
+    expect(upgrader).not.toContain('export OTTO_ENTERPRISE_CANARY_MODE=');
     expect(upgrader).not.toContain('server.listen(0, "127.0.0.1"');
     expect(upgrader).not.toContain('OTTO_ENTERPRISE_PORT="17777"');
     expect(runtime).toContain('OTTO_ENTERPRISE_READY_FILE');
@@ -1633,15 +1651,19 @@ describe('enterprise CI deployment gateway contract', () => {
     const upgrade = readFileSync(UPGRADE_SH, 'utf8');
     const installer = readFileSync(INSTALL_SH, 'utf8');
 
-    for (const canaryScript of [installer, upgrade]) {
-      expect(canaryScript).toContain('export OTTO_ENTERPRISE_CANARY_MODE="1"');
-      expect(canaryScript).toContain(
+    {
+      expect(installer).toContain('export OTTO_ENTERPRISE_CANARY_MODE="1"');
+      expect(installer).toContain(
         'unset OTTO_ENTERPRISE_CANARY_MODE OTTO_ENTERPRISE_READY_FILE',
       );
-      expect(canaryScript).toContain(
+      expect(installer).toContain(
         'CANARY_READY_FILE="${CANARY_DIR}/canary-ready.json"',
       );
     }
+    expect(upgrade).toContain(
+      '"${SCRIPT_DIR}/tools/canary-worker.mjs" verify-deliverable --transaction "$TXN_DIR"',
+    );
+    expect(upgrade).not.toContain('export OTTO_ENTERPRISE_CANARY_MODE=');
     expect(installer).not.toMatch(
       /write_env "\$ENV_TEMP"[\s\S]*?OTTO_ENTERPRISE_CANARY_MODE/,
     );

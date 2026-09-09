@@ -5,11 +5,13 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { ENTERPRISE_SHARP_TARGETS, resolveSharpRuntimePackages, verifySharpRuntimeAssets } from './sharp-runtime-assets.mjs';
 
-// Native SQLite and source-built workspace runtimes are explicitly vendored
-// by build-enterprise-oneclick.mjs, never silently fetched through npm links.
+// These workspace/native packages are explicitly vendored by the one-click
+// builder; exclusion from registry traversal is not exclusion from delivery.
 const DEFAULT_EXCLUDED_PACKAGES = new Set(['better-sqlite3', 'otto-core', 'otto-workflow']);
 
 function normalizeLockLocation(value) {
@@ -70,6 +72,7 @@ function packageNameForLocation(location) {
 export function collectEnterpriseRuntimeDependencies({
   repoRoot,
   excludedPackages = DEFAULT_EXCLUDED_PACKAGES,
+  sharpTargets = ENTERPRISE_SHARP_TARGETS,
 }) {
   const lock = JSON.parse(
     readFileSync(path.join(repoRoot, 'package-lock.json'), 'utf8'),
@@ -77,6 +80,11 @@ export function collectEnterpriseRuntimeDependencies({
   if (lock.lockfileVersion !== 3 || !lock.packages) {
     throw new Error('enterprise runtime packaging requires npm lockfile v3');
   }
+  // Native optionals are optional only for other platforms. Every supported
+  // enterprise target must carry both its addon and libvips, independent of
+  // the macOS/Windows build host's npm install inventory.
+  const sharpPackages = resolveSharpRuntimePackages(lock, sharpTargets);
+  const sharpNames = new Set(sharpPackages.map(item => item.name));
   const packages = Object.fromEntries(
     Object.entries(lock.packages).map(([location, entry]) => [
       normalizeLockLocation(location),
@@ -130,6 +138,7 @@ export function collectEnterpriseRuntimeDependencies({
       ...required,
       ...optional,
     }).sort()) {
+      if (name === 'sharp' && dependencyName.startsWith('@img/sharp-') && !sharpNames.has(dependencyName)) continue;
       const childLocation = resolveLockedDependency(
         packages,
         location,
@@ -187,6 +196,7 @@ export function collectEnterpriseRuntimeDependencies({
   );
   return {
     directVersions,
+    sharpPackages,
     dependencies: [...byTarget.values()].sort((left, right) =>
       left.target.localeCompare(right.target),
     ),
@@ -204,11 +214,18 @@ function assertPortablePackageTree(root, current = root) {
   }
 }
 
-export function copyEnterpriseRuntimeDependencies({ repoRoot, releaseRoot }) {
-  const collected = collectEnterpriseRuntimeDependencies({ repoRoot });
+export function copyEnterpriseRuntimeDependencies({ repoRoot, releaseRoot, sharpAssetRoot, sharpTargets = ENTERPRISE_SHARP_TARGETS }) {
+  const collected = collectEnterpriseRuntimeDependencies({ repoRoot, sharpTargets });
+  let sharpAssets;
+  if (collected.sharpPackages.length) {
+    if (!sharpAssetRoot) throw new Error('verified target-specific sharp assets are required');
+    sharpAssets = verifySharpRuntimeAssets({ repoRoot, destination: sharpAssetRoot, targets: sharpTargets });
+  }
+  const sharpNames = new Set(collected.sharpPackages.map(item => item.name));
   for (const dependency of collected.dependencies) {
-    const source = path.resolve(repoRoot, dependency.location);
-    const sourceRelative = path.relative(repoRoot, source);
+    const sourceRoot = sharpNames.has(dependency.name) ? sharpAssets.root : repoRoot;
+    const source = path.resolve(sourceRoot, dependency.location);
+    const sourceRelative = path.relative(sourceRoot, source);
     if (
       sourceRelative.startsWith(`..${path.sep}`) ||
       path.isAbsolute(sourceRelative)
@@ -222,6 +239,7 @@ export function copyEnterpriseRuntimeDependencies({ repoRoot, releaseRoot }) {
         `runtime dependency source is missing from npm ci: ${dependency.location}`,
       );
     }
+    if (!lstatSync(source).isDirectory() || lstatSync(source).isSymbolicLink()) throw new Error('runtime package must be an ordinary directory');
     assertPortablePackageTree(source);
     const target = path.join(
       releaseRoot,
@@ -238,6 +256,10 @@ export function copyEnterpriseRuntimeDependencies({ repoRoot, releaseRoot }) {
         );
       },
     });
+  }
+  if (sharpAssets) {
+    const { root: _root, ...provenance } = sharpAssets;
+    writeFileSync(path.join(releaseRoot, 'sharp-runtime-provenance.json'), `${JSON.stringify(provenance, null, 2)}\n`, { flag: 'wx' });
   }
   return collected;
 }

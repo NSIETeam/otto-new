@@ -138,6 +138,23 @@ maps identified no other newly uncovered baseline sites; this is not a guarantee
 against all future timing variation. Neither baseline nor gate was relaxed.
 Another complete Windows run and the final-source Mac CI are still required.
 
+The third Windows run `5ccdcde5-5e5a-44c4-bae9-809266a87b0d`, source `ab37d5b3`,
+completed with native exit 0, all 2,078 assertions passing, and the mandatory
+gate passing for all 281 business files. Raw coverage SHA-256:
+`bf71b24dc8f33a43939aea8e2736b4f45ae04d450bb591f917dc6037cf7d5009`.
+Receipt SHA-256: `674d4d37950d501976a655df5dd34a0d0d92ad7569c14741e37b25ff4596e7de`.
+
+Separately, the older `2701c9f0` Mac CI `34340203305` failed one assertion:
+the test's `protected:`-prefixed Base64 double happened to contain the short
+substring `Bob`. It had 2,076 passing tests and one failure; native exit 1 and
+missing coverage output are preserved, not represented as complete coverage.
+A small fixed JSON fixture reproduces the false rejection without private
+material. The test now checks that the complete expected trust record reached
+the protection callback and that exactly its protected result, not plaintext,
+was persisted. All 14 focused E2EE cases pass. This double is not a proof of OS
+encryption, and the observed substring was not proof of a production leak.
+The final source containing this assertion repair still requires its own CI.
+
 The runner/wiring and reviewed baseline import are implemented. Resolve the
 actual `ParkServicesPlugin` site rejection without hiding the missed observation
 or weakening the gate, rerun the full Windows suite, obtain clean Mac CI for the

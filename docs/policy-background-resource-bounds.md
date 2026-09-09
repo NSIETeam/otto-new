@@ -109,3 +109,16 @@ read-acknowledgement replay, lease contention, source failure and disablement
 races, byte-limit rollback, and unknown-call non-replay. No production data or
 live policy/model calls are used. Query-contract tests are not a substitute for
 the separate real PostgreSQL CI lane.
+
+An independent service-level extraction regression caught a missing connection:
+the legacy manual extraction fallback swallowed provider rejection, so the
+background cycle advanced its extraction cursor and refunded a 90-second
+reservation despite an unknown paid outcome. Background provider rejection now
+propagates to the existing durable `needs-review` path; manual fallback remains
+compatible. A separate negative case confirms that a returned extraction value
+failing service-level structure validation remains a known
+`interpretationStatus=failed` result, not an unknown call. An arbitrary adapter
+rejection is not evidence of a safe-to-retry provider outcome. Old-slot unknown
+source/model reservations are also
+checked before any slot reset. These use deterministic provider stubs, not live
+model calls or production spending evidence.

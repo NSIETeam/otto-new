@@ -17,7 +17,6 @@ import React, {
 import { EnterprisePublicProfilePanel } from './EnterprisePublicProfilePanel.js';
 import {
   accessDenied,
-  demoMap,
   graphIndex,
   safeWebsite,
   searchEnterprises,
@@ -69,7 +68,6 @@ export function EnterpriseStarMapView({
 }): React.JSX.Element {
   const cache = useModuleReadCache();
   const [source, setSource] = useState(initialSource);
-  const [demoKind, setDemoKind] = useState<'beikong' | 'supply'>('beikong');
   const [relation, setRelation] = useState<RelationMode>('same_industry');
   const relationRef = useRef(relation);
   relationRef.current = relation;
@@ -171,7 +169,7 @@ export function EnterpriseStarMapView({
       }
       const next: StarMapData =
         source === 'demo'
-          ? structuredClone(demoKind === 'supply' ? supplyDemo : demoMap)
+          ? structuredClone(supplyDemo)
           : await cache.read(
               'star-map',
               () => window.otto.enterpriseParkStarMap(),
@@ -228,7 +226,7 @@ export function EnterpriseStarMapView({
     } finally {
       if (active.current && id === requestId.current) setLoading(false);
     }
-  }, [cache, source, demoKind, resetExploration]);
+  }, [cache, source, resetExploration]);
   useEffect(() => {
     active.current = true;
     void load();
@@ -329,7 +327,7 @@ export function EnterpriseStarMapView({
             ...data,
             nodes: data.nodes.map((node) => ({
               ...node,
-              cooperationNeeds: node.cooperationNeeds.filter(
+              demoCooperationNeeds: (node.demoCooperationNeeds ?? []).filter(
                 (need) =>
                   !closedNeeds.has(JSON.stringify([node.organizationId, need])),
               ),
@@ -429,7 +427,6 @@ export function EnterpriseStarMapView({
     resetExploration();
     setEditor(false);
     setNotice('');
-    setDemoKind('beikong');
     setClosedNeeds(new Set());
     setSource(source === 'real' ? 'demo' : 'real');
   };
@@ -589,28 +586,10 @@ export function EnterpriseStarMapView({
         </button>
         <div className="star-toolbar-spacer" />
         {source === 'demo' ? (
-          <span className="star-demo-badge">
-            {isSupplyDemo ? '虚拟供需演示 · 非真实采购' : '公开资料演示数据'}
-          </span>
+          <span className="star-demo-badge">公开资料演示数据 · 供需为模拟</span>
         ) : null}
-        <button
-          onClick={() => {
-            ++requestId.current;
-            setData(null);
-            resetExploration();
-            setEditor(false);
-            setClosedNeeds(new Set());
-            setDemoKind('supply');
-            setSource('demo');
-            setRelation('supply_demand');
-            if (source === 'demo' && demoKind === 'supply')
-              setData(structuredClone(supplyDemo));
-          }}
-        >
-          供需虚拟演示
-        </button>
         <button onClick={switchSource}>
-          {source === 'real' ? '北控宏创演示' : '返回真实园区'}
+          {source === 'real' ? '体验演示' : '返回真实园区'}
         </button>
         <button
           aria-expanded={settings}
@@ -686,7 +665,10 @@ export function EnterpriseStarMapView({
       ) : null}
       {relation === 'supply_demand' ? (
         <div className="star-own-notice">
-          按公开产品与有效需求的词条匹配，箭头从提供方指向需求方，表示潜在机会，不代表已合作。点击企业查看供需方向与具体条目。
+          {isSupplyDemo
+            ? '按模拟供给与需求匹配，仅用于体验。'
+            : '按公开产品与有效需求的词条匹配。'}
+          箭头从提供方指向需求方，表示潜在机会，不代表已合作。点击企业查看供需方向与具体条目。
           {isSupplyDemo
             ? ' 可在详情中演示完成或恢复需求。'
             : ' 在企业资料中维护产品与服务、合作需求；已完成需求请移除并保存。'}
@@ -891,13 +873,19 @@ export function EnterpriseStarMapView({
             )}
             {isSupplyDemo ? (
               <section>
-                <h4>需求状态演示</h4>
+                <h4>模拟供给与需求</h4>
+                <p>
+                  以下供需条目仅为演示设定，不代表该企业真实业务或采购意向。
+                </p>
+                <p>
+                  模拟供给：{detail.demoProductsServices?.join('、') || '无'}
+                </p>
                 <p className="star-muted">
                   仅影响本次虚拟演示，重新进入演示恢复初始需求。
                 </p>
                 {data?.nodes
                   .find((node) => node.organizationId === detail.organizationId)
-                  ?.cooperationNeeds.map((need) => {
+                  ?.demoCooperationNeeds?.map((need) => {
                     const key = JSON.stringify([detail.organizationId, need]);
                     const closed = closedNeeds.has(key);
                     return (
@@ -1035,7 +1023,7 @@ export function EnterpriseStarMapView({
                 完善主营行业与企业资料
               </button>
             ) : null}
-            {source === 'demo' && !isSupplyDemo ? (
+            {source === 'demo' ? (
               <details className="star-provenance">
                 <summary>资料来源与核查说明</summary>
                 <p>核查日期：{detail.retrievedAt || '未提供'}</p>

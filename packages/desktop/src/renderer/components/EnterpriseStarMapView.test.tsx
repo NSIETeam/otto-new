@@ -81,7 +81,7 @@ describe('enterprise star map exploration', () => {
     render(
       <EnterpriseStarMapView onBack={() => undefined} initialSource="demo" />,
     );
-    expect(await screen.findByText('公开资料演示数据')).toBeTruthy();
+    expect(await screen.findByText(/公开资料演示数据/)).toBeTruthy();
     expect(await screen.findByTestId('graph')).toBeTruthy();
     expect(window.otto.enterpriseParkStarMap).not.toHaveBeenCalled();
     expect(
@@ -195,11 +195,11 @@ describe('enterprise star map exploration', () => {
         }),
     );
     render(<EnterpriseStarMapView onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole('button', { name: '北控宏创演示' }));
+    fireEvent.click(screen.getByRole('button', { name: '体验演示' }));
     await screen.findByTestId('graph');
     await act(async () => resolve({ ...real(), parkName: '旧请求' }));
     expect(screen.queryByText('旧请求')).toBeNull();
-    expect(screen.getByText('公开资料演示数据')).toBeTruthy();
+    expect(screen.getByText(/公开资料演示数据/)).toBeTruthy();
   });
   it('supports keyboard search selection and clears all visible data on session invalidation', async () => {
     render(<EnterpriseStarMapView onBack={() => undefined} />);
@@ -257,21 +257,27 @@ it('explores fictional supply relationships and closes a demo need without calli
     <EnterpriseStarMapView onBack={() => undefined} initialSource="demo" />,
   );
   await screen.findByTestId('graph');
-  fireEvent.click(screen.getByRole('button', { name: '供需虚拟演示' }));
-  await screen.findByText('供需体验园区（虚拟）');
+  expect(screen.queryByRole('button', { name: '供需虚拟演示' })).toBeNull();
+  expect(
+    within(screen.getByTestId('graph')).getAllByRole('button'),
+  ).toHaveLength(17);
+  fireEvent.change(screen.getByRole('combobox', { name: '连接方式' }), {
+    target: { value: 'supply_demand' },
+  });
+  await screen.findByText('北控宏创科技园');
   expect(
     (screen.getByRole('combobox', { name: '连接方式' }) as HTMLSelectElement)
       .value,
   ).toBe('supply_demand');
   fireEvent.click(
-    screen.getByRole('button', { name: '节点 精工制造（虚拟）' }),
+    screen.getByRole('button', { name: '节点 盈科视控（北京）科技有限公司' }),
   );
   expect(await screen.findByText('谁能满足我的需求')).toBeTruthy();
   fireEvent.click(
-    screen.getByRole('button', { name: '演示完成需求：工业检测设备' }),
+    screen.getByRole('button', { name: '演示完成需求：自动化设备' }),
   );
   expect(
-    await screen.findByRole('button', { name: '演示恢复需求：工业检测设备' }),
+    await screen.findByRole('button', { name: '演示恢复需求：自动化设备' }),
   ).toBeTruthy();
   fireEvent.change(screen.getByRole('combobox', { name: '连接方式' }), {
     target: { value: 'same_industry' },

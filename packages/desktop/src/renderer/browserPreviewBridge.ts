@@ -1,4 +1,4 @@
-import { demoMap } from './starMap/model.js';
+import { supplyDemo } from './starMap/supplyDemo.js';
 /**
  * 浏览器静态预览桥。
  *
@@ -635,7 +635,7 @@ if (!previewWindow.otto) {
       } as typeof previewPublicProfile;
       return Promise.resolve({ ...previewPublicProfile });
     },
-    enterpriseParkStarMap: () => Promise.resolve(structuredClone(demoMap)),
+    enterpriseParkStarMap: () => Promise.resolve(structuredClone(supplyDemo)),
     enterpriseMessagesList: (peerAccountId: string) => {
       // 与真实后端一致：拉取会话消息即标记该 peer 已读，下轮轮询未读清零
       previewUnread.delete(peerAccountId);

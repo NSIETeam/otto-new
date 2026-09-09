@@ -9,6 +9,8 @@ export type EnterpriseNode = Omit<
   'industryClassificationBasis'
 > & {
   industryClassificationBasis?: string | null;
+  demoProductsServices?: string[];
+  demoCooperationNeeds?: string[];
   displayName?: string;
   officeAddress?: string;
   addressType?: string;
@@ -85,7 +87,11 @@ export function graphIndex(
         .trim();
     const supplies = new Map<string, Array<{ id: string; product: string }>>();
     for (const node of nodes)
-      for (const product of new Set(node.productsServices)) {
+      for (const product of new Set(
+        data.dataSource === 'demo'
+          ? (node.demoProductsServices ?? node.productsServices)
+          : node.productsServices,
+      )) {
         const key = normalize(product);
         if (key)
           supplies.set(key, [
@@ -94,7 +100,11 @@ export function graphIndex(
           ]);
       }
     for (const consumer of nodes)
-      for (const need of new Set(consumer.cooperationNeeds)) {
+      for (const need of new Set(
+        data.dataSource === 'demo'
+          ? (consumer.demoCooperationNeeds ?? consumer.cooperationNeeds)
+          : consumer.cooperationNeeds,
+      )) {
         for (const provider of supplies.get(normalize(need)) ?? []) {
           if (provider.id === consumer.organizationId) continue;
           matches.push({

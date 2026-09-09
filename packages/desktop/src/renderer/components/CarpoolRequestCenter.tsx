@@ -26,11 +26,13 @@ export function CarpoolRequestCenter({
   showCurrentIntent = true,
   stopRequest = 0,
   mode = 'all',
+  showDataManagement = true,
 }: {
   onOpenCarpool?: () => void;
   showCurrentIntent?: boolean;
   stopRequest?: number;
   mode?: 'all' | 'personal' | 'admin';
+  showDataManagement?: boolean;
 }): React.JSX.Element {
   const [state, setState] = useState<CarpoolWorkflowView | null>(null);
   const [intent, setIntent] = useState<EnterpriseParkCarpoolIntent | null>(
@@ -626,9 +628,9 @@ export function CarpoolRequestCenter({
           onClose={() => setConversationId(null)}
         />
       ) : null}
-      <button type="button" onClick={() => setDeleteConfirmation(true)}>
+      {showDataManagement ? <button type="button" onClick={() => setDeleteConfirmation(true)}>
         删除我的同行数据
-      </button>
+      </button> : null}
       {deleteConfirmation ? (
         <CarpoolConfirmation
           label="删除同行数据"

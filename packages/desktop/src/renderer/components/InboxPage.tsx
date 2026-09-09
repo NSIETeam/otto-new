@@ -1,4 +1,4 @@
-import { MarketContactCenter, MarketPrivateConversation } from './MarketContactCenter.js';
+import { MarketContactCenter } from './MarketContactCenter.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -249,6 +249,15 @@ export function InboxPage({
   onBack,
 }: InboxPageProps): React.JSX.Element {
   const [filter, setFilter] = useState<InboxFilter>('all');
+  const [category, setCategory] = useState<'conversations' | 'market' | 'carpool'>('conversations');
+  const [openedCategories, setOpenedCategories] = useState({ market: false, carpool: false });
+  useEffect(() => {
+    setCategory('conversations');
+    setOpenedCategories({ market: false, carpool: false });
+  }, [enterpriseAccount?.id, enterpriseAccount?.organizationId]);
+  useEffect(() => {
+    if (category === 'carpool' && !effectiveParkService) setCategory('conversations');
+  }, [category, effectiveParkService]);
   const [notifications, setNotifications] = useState<EnterpriseUnreadMessageNotification[]>([]);
   const [orgMembers, setOrgMembers] = useState<EnterpriseOrganizationView['members']>([]);
   const [loading, setLoading] = useState(false);
@@ -503,7 +512,7 @@ export function InboxPage({
 
   // —— 加载选中会话的消息，并标记该 peer 已读 ——
   useEffect(() => {
-    if (!canUseBaselineMessages || !selectedPeer || selectedFederationContactId) return;
+    if (category !== 'conversations' || !canUseBaselineMessages || !selectedPeer || selectedFederationContactId) return;
     let cancelled = false;
     setMessagesLoading(true);
     void window.otto.enterpriseMessagesList(selectedPeer).then((msgs) => {
@@ -529,10 +538,10 @@ export function InboxPage({
       if (!cancelled) setMessagesLoading(false);
     });
     return () => { cancelled = true; };
-  }, [canUseBaselineMessages, selectedFederationContactId, selectedPeer, onMessageRead]);
+  }, [category, canUseBaselineMessages, selectedFederationContactId, selectedPeer, onMessageRead]);
 
   useEffect(() => {
-    if (!canUseFederationMessages || !selectedFederationContactId) return;
+    if (category !== 'conversations' || !canUseFederationMessages || !selectedFederationContactId) return;
     let cancelled = false;
     setMessagesLoading(true);
     setFederationError('');
@@ -560,7 +569,7 @@ export function InboxPage({
       if (!cancelled) setFederationVerification(null);
     });
     return () => { cancelled = true; };
-  }, [canUseFederationMessages, onFederationMessageRead, selectedFederationContactId]);
+  }, [category, canUseFederationMessages, onFederationMessageRead, selectedFederationContactId]);
 
   const selectedMember = useMemo(
     () => orgMembers.find((m) => m.id === selectedPeer) ?? null,
@@ -581,7 +590,7 @@ export function InboxPage({
 
   // 打开客服会话才回执已读；已读后工单仍保留在持久化会话列表。
   useEffect(() => {
-    if (!selectedParkTicket || !isCreatorUpdateUnread(selectedParkTicket)) return;
+    if (category !== 'conversations' || !selectedParkTicket || !isCreatorUpdateUnread(selectedParkTicket)) return;
     let cancelled = false;
     void window.otto.enterpriseTicketRead(selectedParkTicket.id)
       .then((updated) => {
@@ -598,7 +607,7 @@ export function InboxPage({
         }
       });
     return () => { cancelled = true; };
-  }, [onParkTicketRead, selectedParkTicket]);
+  }, [category, onParkTicketRead, selectedParkTicket]);
 
   useEffect(() => {
     setFederationAttachments([]);
@@ -615,6 +624,7 @@ export function InboxPage({
     }
     setSelectedPeer(null);
     setSelectedParkTicketId(null);
+    setCategory('conversations');
     setSelectedFederationContactId(contactId);
     setReplyInput('');
   }, [canUseFederationMessages, federationContactOpenRequest, federationContacts]);
@@ -717,7 +727,7 @@ export function InboxPage({
     messageId: string,
     attachment: NonNullable<EnterpriseDirectMessage['attachments']>[number],
   ): Promise<void> => {
-    if (!canUseFederationMessages || !selectedFederationContactId) return;
+    if (category !== 'conversations' || !canUseFederationMessages || !selectedFederationContactId) return;
     try {
       await window.otto.enterpriseFederationAttachmentSave(
         selectedFederationContactId,
@@ -761,7 +771,7 @@ export function InboxPage({
   };
 
   const confirmFederationVerification = async (): Promise<void> => {
-    if (!canUseFederationMessages || !selectedFederationContactId) return;
+    if (category !== 'conversations' || !canUseFederationMessages || !selectedFederationContactId) return;
     try {
       const verification = await window.otto.enterpriseFederationContactVerify(
         selectedFederationContactId,
@@ -1039,15 +1049,26 @@ export function InboxPage({
       <header className="otto-inbox-page__header">
         <div>
           <h1>我的消息</h1>
-          <p>{totalConversationCount} 个会话{totalUnread > 0 ? ` · ${totalUnread} 条未读` : ''}</p>
+          <p>{category === 'conversations' ? `${totalConversationCount} 个会话${totalUnread > 0 ? ` · ${totalUnread} 条未读` : ''}` : category === 'market' ? '商品消息' : '同行消息'}</p>
         </div>
         <button type="button" onClick={onBack}>返回对话</button>
       </header>
 
-      {marketNotifications}
-      {enterpriseAccount?.id && <MarketContactCenter key={enterpriseAccount.id} accountId={enterpriseAccount.id} onOpenPrivate={peer => { setSelectedPeer(peer); setSelectedFederationContactId(null); setSelectedParkTicketId(null); }} />}
-      {effectiveParkService ? <CarpoolRequestCenter onOpenCarpool={onOpenCarpool} /> : null}
-
+      <nav className="otto-inbox-page__categories" aria-label="消息分类">
+        <button type="button" aria-pressed={category === 'conversations'} onClick={() => setCategory('conversations')}>会话</button>
+        <button type="button" aria-pressed={category === 'market'} onClick={() => { setOpenedCategories(value => ({ ...value, market: true })); setCategory('market'); }}>商品消息</button>
+        {effectiveParkService ? <button type="button" aria-pressed={category === 'carpool'} onClick={() => { setOpenedCategories(value => ({ ...value, carpool: true })); setCategory('carpool'); }}>同行消息</button> : null}
+      </nav>
+      <div className="otto-inbox-page__business" hidden={category !== 'market'} aria-label="商品消息内容">
+        {openedCategories.market ? <>
+          {marketNotifications}
+          {enterpriseAccount?.id ? <MarketContactCenter key={enterpriseAccount.id} accountId={enterpriseAccount.id} /> : null}
+        </> : null}
+      </div>
+      <div className="otto-inbox-page__business" hidden={category !== 'carpool'} aria-label="同行消息内容">
+        {openedCategories.carpool && effectiveParkService ? <CarpoolRequestCenter mode="personal" showCurrentIntent={false} showDataManagement={false} onOpenCarpool={onOpenCarpool} /> : null}
+      </div>
+      <div className="otto-inbox-page__conversations" hidden={category !== 'conversations'}>
       <div className="otto-inbox-page__filters" role="tablist" aria-label="消息过滤">
         {([
           ['all', `全部 ${totalConversationCount}`],
@@ -1318,7 +1339,6 @@ export function InboxPage({
               </header>
               {renderMessages(`开始与 ${selectedMember.name} 对话`)}
               {renderReply(`回复 ${selectedMember.name}…`)}
-              {enterpriseAccount?.id && <MarketPrivateConversation key={selectedPeer} accountId={enterpriseAccount.id} peerId={selectedPeer} />}
             </>
           ) : (
             <div className="otto-inbox-page__empty otto-inbox-page__empty--detail">
@@ -1326,6 +1346,7 @@ export function InboxPage({
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

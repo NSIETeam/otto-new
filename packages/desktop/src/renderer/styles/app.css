@@ -14618,3 +14618,19 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-carpool__map-toolbar { margin-top: 10px; flex-wrap: wrap; }
 .otto-carpool__map-zoom { margin-right: auto; }
 .otto-carpool__map-zoom > button { min-width: 36px; min-height: 36px; }
+
+.otto-carpool__map-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.otto-carpool__map-preview > img {
+  width: min(240px, 55%);
+  height: auto;
+  border-radius: 10px;
+}
+.otto-carpool__map-preview > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.otto-carpool-map-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 20px; }
+.otto-carpool-map-dialog > h2 { margin: 0; font-size: 18px; }
+.otto-carpool-map-dialog .otto-carpool__map-picker { border: 0; padding: 0; }

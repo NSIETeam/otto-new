@@ -6,8 +6,12 @@ export function CarpoolConfirmation({
   label,
   onCancel,
   children,
+  role = 'alertdialog',
+  className = '',
 }: {
   label: string;
+  role?: 'dialog' | 'alertdialog';
+  className?: string;
   onCancel(): void;
   children: React.ReactNode;
 }): React.JSX.Element {
@@ -70,8 +74,8 @@ export function CarpoolConfirmation({
       <section
         ref={ref}
         tabIndex={-1}
-        className="otto-workspace-dialog"
-        role="alertdialog"
+        className={`otto-workspace-dialog ${className}`}
+        role={role}
         aria-modal="true"
         aria-label={label}
       >

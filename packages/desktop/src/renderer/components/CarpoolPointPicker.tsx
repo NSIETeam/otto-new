@@ -1,5 +1,6 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { CarpoolConfirmation } from './CarpoolConfirmation.js';
 import type {
   EnterpriseParkCarpoolCoordinate,
   EnterpriseParkCarpoolPlaceSuggestion,
@@ -21,14 +22,48 @@ export function mapPixelCoordinate(
       Math.PI,
   };
 }
-export function CarpoolPointPicker({
+export function CarpoolPointPicker({ place, onSelect, onClose }: {
+  place: EnterpriseParkCarpoolPlaceSuggestion;
+  onSelect(place: EnterpriseParkCarpoolPlaceSuggestion): void;
+  onClose(): void;
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const [preview, setPreview] = useState('');
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let current = true;
+    setPreview(''); setFailed(false);
+    void window.otto.enterpriseParkCarpoolMap(place.coordinate, 15)
+      .then(value => { if (current) setPreview(value); })
+      .catch(() => { if (current) setFailed(true); });
+    return () => { current = false; };
+  }, [place.coordinate]);
+  return (
+    <section className="otto-carpool__map-preview" aria-label="地点地图预览">
+      {preview ? <img src={preview} alt="所选地点地图" width={600} height={400} />
+        : <span role="status">{failed ? '预览暂不可用，可展开重试' : '正在加载地图…'}</span>}
+      <div>
+        <button type="button" onClick={() => setExpanded(true)}>展开地图</button>
+        <button type="button" onClick={onClose}>关闭地图</button>
+      </div>
+      {expanded ? (
+        <CarpoolConfirmation label="地图选点" role="dialog" className="otto-carpool-map-dialog" onCancel={() => setExpanded(false)}>
+          <MapEditor place={place} onSelect={onSelect} onClose={() => { setExpanded(false); onClose(); }} onCancel={() => setExpanded(false)} />
+        </CarpoolConfirmation>
+      ) : null}
+    </section>
+  );
+}
+function MapEditor({
   place,
   onSelect,
   onClose,
+  onCancel,
 }: {
   place: EnterpriseParkCarpoolPlaceSuggestion;
   onSelect(place: EnterpriseParkCarpoolPlaceSuggestion): void;
   onClose(): void;
+  onCancel(): void;
 }): React.JSX.Element {
   const [center, setCenter] = useState(place.coordinate);
   const [selected, setSelected] = useState(place.coordinate);
@@ -53,19 +88,28 @@ export function CarpoolPointPicker({
       current = false;
     };
   }, [center, zoom]);
+  const mounted = useRef(true);
+  const choosing = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const choose = async () => {
+    if (choosing.current) return;
+    choosing.current = true;
     setBusy(true);
     setError('');
     try {
-      onSelect(await window.otto.enterpriseParkCarpoolReverse(selected));
+      const result = await window.otto.enterpriseParkCarpoolReverse(selected);
+      if (!mounted.current) return;
+      onSelect(result);
       onClose();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setBusy(false);
+      choosing.current = false;
+      if (mounted.current) setBusy(false);
     }
   };
   const move = (dx: number, dy: number) => {
+    if (choosing.current) return;
     const next = mapPixelCoordinate(center, zoom, dx, dy);
     setCenter(next);
     setSelected(next);
@@ -132,7 +176,7 @@ export function CarpoolPointPicker({
         <button
           type="button"
           aria-label="放大地图" title="放大地图"
-          disabled={zoom >= 17}
+          disabled={busy || zoom >= 17}
           onClick={() => setZoom((value) => value + 1)}
         >
           ＋
@@ -140,7 +184,7 @@ export function CarpoolPointPicker({
         <button
           type="button"
           aria-label="缩小地图" title="缩小地图"
-          disabled={zoom <= 3}
+          disabled={busy || zoom <= 3}
           onClick={() => setZoom((value) => value - 1)}
         >
           −
@@ -154,8 +198,8 @@ export function CarpoolPointPicker({
         >
           确认此地点
         </button>
-        <button type="button" onClick={onClose}>
-          关闭地图
+        <button type="button" onClick={onCancel}>
+          取消
         </button>
       </div>
     </section>

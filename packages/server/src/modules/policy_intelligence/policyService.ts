@@ -2,7 +2,6 @@
 import { randomUUID } from 'node:crypto';
 import { annotatePolicyBatches } from './policyLineage.js';
 import {
-  advancePolicyMailbox,
   emptyPolicyMailbox,
   policyInboxView,
   policyMailboxKey,
@@ -10,7 +9,16 @@ import {
   type PolicyMailbox,
 } from './policyNotifications.js';
 import type { PolicyInbox } from './contracts.js';
-import type { PolicyStore } from './policyStore.js';
+import {
+  POLICY_BACKGROUND_RECORD_BYTES,
+  type PolicyStore,
+} from './policyStore.js';
+import {
+  refreshPolicyNotifications,
+  policyNotificationHealthKey,
+  POLICY_NOTIFICATION_MAINTENANCE_MESSAGE,
+  type PolicyNotificationHealth,
+} from './policyNotificationRuntime.js';
 import type {
   OfficialPolicyDocument,
   PolicyAction,
@@ -138,6 +146,7 @@ export function sanitizePolicyProfile(
 
 export class EnterprisePolicyService {
   private readonly controllers = new Map<string, Set<AbortController>>();
+  private notificationFlight?: Promise<void>;
   constructor(
     private readonly options: {
       store: PolicyStore;
@@ -162,9 +171,17 @@ export class EnterprisePolicyService {
       throw new PolicyOperationError('企业账号不可用');
     return actor;
   }
-  private async workspace(actor: PolicyActor): Promise<Workspace> {
+  private async workspace(
+    actor: PolicyActor,
+    bounded = false,
+  ): Promise<Workspace> {
     const workspace =
-      (await this.store.get<Workspace>(orgKey(actor))) ?? blank();
+      (await (bounded
+        ? this.store.getBounded<Workspace>(
+            orgKey(actor),
+            POLICY_BACKGROUND_RECORD_BYTES,
+          )
+        : this.store.get<Workspace>(orgKey(actor)))) ?? blank();
     const base =
       (await this.options.getBaseProfile?.(actor.organizationId)) ?? {};
     return {
@@ -236,6 +253,11 @@ export class EnterprisePolicyService {
       : [];
     const collection =
       await this.store.get<CollectionStatus>('collection:status');
+    const notificationHealth =
+      await this.store.getBounded<PolicyNotificationHealth>(
+        policyNotificationHealthKey(policyMailboxKey(actor)),
+        POLICY_BACKGROUND_RECORD_BYTES,
+      );
     const relevantSources = new Set(
       this.options.sources
         .filter((source) => sourceMatchesRegion(source, region))
@@ -247,6 +269,9 @@ export class EnterprisePolicyService {
           .filter((error) => relevantSources.has(error.sourceId))
           .map((error) => error.message),
         ...(workspace.analysisError ? [workspace.analysisError] : []),
+        ...(notificationHealth?.status === 'needs-maintenance'
+          ? [POLICY_NOTIFICATION_MAINTENANCE_MESSAGE]
+          : []),
       ].join('；') || undefined;
     const levels = ['district', 'city', 'province', 'national'] as const;
     const feedbackRows = actor.isAdmin
@@ -711,46 +736,29 @@ export class EnterprisePolicyService {
     );
     return policyInboxView(mailbox);
   }
-  async refreshNotifications(): Promise<void> {
-    const mailboxes = (
-      await this.store.list<PolicyMailbox>('policy-inbox:')
-    ).filter((row) => Object.keys(row.value.watches).length > 0);
-    if (!mailboxes.length) return;
-    const documents = (
-      await this.store.list<OfficialPolicyDocument>('document:')
-    ).map((row) => row.value);
-    for (const { key, value } of mailboxes) {
-      // A removed account, changed tenant or disabled organization must not
-      // continue receiving enterprise information through an old subscription.
-      const actor = await this.options.getActor(value.accountId);
-      if (
-        !actor?.active ||
-        actor.organizationId !== value.organizationId ||
-        key !== policyMailboxKey(actor)
-      )
-        continue;
-      const workspace = await this.workspace(actor);
-      if (!workspace.enabled) continue;
-      const region = normalizePolicyRegion(
-        workspace.profile.region ?? workspace.profile.registeredRegion,
-      );
-      const relevant = documents.filter(
-        (doc) => value.watches[doc.id] && sourceMatchesRegion(doc, region),
-      );
-      // Avoid rewriting an encrypted mailbox every minute when nothing changed.
-      if (
-        JSON.stringify(
-          advancePolicyMailbox(structuredClone(value), relevant, this.now()),
-        ) === JSON.stringify(value)
-      )
-        continue;
-      await this.store.update<PolicyMailbox>(key, (current) =>
-        advancePolicyMailbox(
-          current ?? emptyPolicyMailbox(actor),
-          relevant,
-          this.now(),
-        ),
-      );
+  async refreshNotifications(signal?: AbortSignal): Promise<void> {
+    if (this.notificationFlight) return this.notificationFlight;
+    const flight = refreshPolicyNotifications({
+      store: this.store,
+      now: () => this.now(),
+      signal,
+      getActor: this.options.getActor,
+      workspace: async (actor) => {
+        const workspace = await this.workspace(actor, true);
+        return {
+          enabled: workspace.enabled,
+          region: normalizePolicyRegion(
+            workspace.profile.region ?? workspace.profile.registeredRegion,
+          ),
+        };
+      },
+    });
+    this.notificationFlight = flight;
+    try {
+      await flight;
+    } finally {
+      if (this.notificationFlight === flight)
+        this.notificationFlight = undefined;
     }
   }
   private async assess(

@@ -104,6 +104,58 @@ async function enabled(h: ReturnType<typeof harness>) {
   });
 }
 describe('policy reminders use the persistent account-scoped inbox', () => {
+  it('reads only watched document IDs from a large cache, not every public body', async () => {
+    const h = harness();
+    await enabled(h);
+    await h.service.act('a', {
+      action: 'watch',
+      policyId: 'p1',
+      enabled: true,
+    });
+    for (let i = 0; i < 2000; i++)
+      await h.store.update(`document:unwatched-${i}`, () => ({
+        ...document,
+        id: `unwatched-${i}`,
+        bodyText: '未关注的公开政策正文'.repeat(512),
+      }));
+    h.clock.date = new Date('2026-09-30T00:00:00Z');
+    const originalList = h.store.list.bind(h.store);
+    vi.spyOn(h.store, 'list').mockImplementation((prefix) => {
+      if (prefix === 'document:' || prefix === 'policy-inbox:')
+        throw new Error('Unbounded background list');
+      return originalList(prefix);
+    });
+    const get = vi.spyOn(h.store, 'getBounded');
+    const page = vi.spyOn(h.store, 'keysPage');
+    await h.service.refreshNotifications();
+    expect(
+      get.mock.calls
+        .filter(([key]) => key.startsWith('document:'))
+        .map(([key]) => key),
+    ).toEqual(['document:p1']);
+    expect(page).toHaveBeenCalled();
+    expect(
+      page.mock.calls.every(([, options]) => (options?.limit ?? 32) <= 32),
+    ).toBe(true);
+    expect((await h.service.inbox('a')).notices).toHaveLength(1);
+  });
+  it('checks the enterprise enablement before loading watched document bodies', async () => {
+    const h = harness();
+    await enabled(h);
+    await h.service.act('a', {
+      action: 'watch',
+      policyId: 'p1',
+      enabled: true,
+    });
+    await h.service.act('a', { action: 'configure', enabled: false });
+    const get = vi.spyOn(h.store, 'getBounded');
+    const list = vi.spyOn(h.store, 'list');
+    await h.service.refreshNotifications();
+    expect(get.mock.calls.some(([key]) => key.startsWith('document:'))).toBe(
+      false,
+    );
+    expect(list).not.toHaveBeenCalledWith('document:');
+  });
   it('does not create duplicate change messages while the same source revision is being interpreted', async () => {
     const h = harness();
     await enabled(h);

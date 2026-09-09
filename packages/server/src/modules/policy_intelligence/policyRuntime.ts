@@ -32,7 +32,8 @@ export function startPolicyRuntime(
     estimatedCostUsdPerRun: 0,
     getInputVersion: () => String(Math.floor(Date.now() / 60_000)),
     run: async () => {
-      if (!controller.signal.aborted) await service.refreshNotifications();
+      if (!controller.signal.aborted)
+        await service.refreshNotifications(controller.signal);
     },
   });
   const stop = collectionEnabled

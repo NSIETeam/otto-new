@@ -9,6 +9,9 @@ export interface PolicyPageOptions {
   after?: string;
   limit?: number;
 }
+export interface PolicyUpdateOptions {
+  maxPayloadBytes?: number;
+}
 export interface PolicyPage<T> {
   rows: Array<{ key: string; value: T }>;
   nextCursor?: string;
@@ -71,7 +74,11 @@ function pageResult<T extends { key: string }>(
 export interface PolicyStore {
   get<T>(key: string): Promise<T | null>;
   getBounded<T>(key: string, limitBytes: number): Promise<T | null>;
-  update<T>(key: string, change: (current: T | null) => T): Promise<T>;
+  update<T>(
+    key: string,
+    change: (current: T | null) => T,
+    options?: PolicyUpdateOptions,
+  ): Promise<T>;
   list<T>(prefix: string): Promise<Array<{ key: string; value: T }>>;
   page<T>(prefix: string, options?: PolicyPageOptions): Promise<PolicyPage<T>>;
   keysPage(prefix: string, options?: PolicyPageOptions): Promise<PolicyKeyPage>;
@@ -90,11 +97,23 @@ export class MemoryPolicyStore implements PolicyStore {
       throw new PolicyRecordTooLargeError(key, size, limitBytes);
     return this.get<T>(key);
   }
-  async update<T>(key: string, change: (current: T | null) => T): Promise<T> {
+  async update<T>(
+    key: string,
+    change: (current: T | null) => T,
+    options: PolicyUpdateOptions = {},
+  ): Promise<T> {
+    const limit = options.maxPayloadBytes;
+    if (limit !== undefined) {
+      byteLimit(limit);
+      const size = this.payloadBytes.get(key) ?? 0;
+      if (size > limit) throw new PolicyRecordTooLargeError(key, size, limit);
+    }
     const value = change(
       structuredClone(this.values.get(key) ?? null) as T | null,
     );
     const size = Buffer.byteLength(JSON.stringify(value), 'utf8');
+    if (limit !== undefined && size > limit)
+      throw new PolicyRecordTooLargeError(key, size, limit);
     this.values.set(key, structuredClone(value));
     this.payloadBytes.set(key, size);
     return structuredClone(value);
@@ -218,21 +237,50 @@ export function createSqlitePolicyStore(
         { payload: string | null; payload_bytes: number } | undefined;
       return decodeBounded<T>(cipher, key, row, limitBytes);
     },
-    async update<T>(key: string, change: (current: T | null) => T) {
+    async update<T>(
+      key: string,
+      change: (current: T | null) => T,
+      options: PolicyUpdateOptions = {},
+    ) {
+      const limit = options.maxPayloadBytes;
+      if (limit !== undefined) byteLimit(limit);
       const database = ready();
       database.exec('BEGIN IMMEDIATE');
       try {
-        const row = database
-          .prepare(
-            'SELECT payload FROM enterprise_policy_records_v1 WHERE record_key = ?',
-          )
-          .get(key) as { payload: string } | undefined;
-        const value = change(decode<T>(cipher, key, row?.payload));
+        const current =
+          limit !== undefined
+            ? decodeBounded<T>(
+                cipher,
+                key,
+                database
+                  .prepare(
+                    'SELECT CASE WHEN length(CAST(payload AS BLOB)) <= ? THEN payload END AS payload, length(CAST(payload AS BLOB)) AS payload_bytes FROM enterprise_policy_records_v1 WHERE record_key = ?',
+                  )
+                  .get(limit, key) as
+                  { payload: string | null; payload_bytes: number } | undefined,
+                limit,
+              )
+            : decode<T>(
+                cipher,
+                key,
+                (
+                  database
+                    .prepare(
+                      'SELECT payload FROM enterprise_policy_records_v1 WHERE record_key = ?',
+                    )
+                    .get(key) as { payload: string } | undefined
+                )?.payload,
+              );
+        const value = change(current);
+        const payload = encode(cipher, key, value);
+        const size = Buffer.byteLength(payload, 'utf8');
+        if (limit !== undefined && size > limit)
+          throw new PolicyRecordTooLargeError(key, size, limit);
         database
           .prepare(
             'INSERT INTO enterprise_policy_records_v1(record_key,payload) VALUES(?,?) ON CONFLICT(record_key) DO UPDATE SET payload=excluded.payload',
           )
-          .run(key, encode(cipher, key, value));
+          .run(key, payload);
         database.exec('COMMIT');
         return structuredClone(value);
       } catch (error) {
@@ -330,7 +378,13 @@ export function createPostgresPolicyStore(
       );
       return decodeBounded<T>(cipher, key, result.rows[0], limitBytes);
     },
-    async update<T>(key: string, change: (current: T | null) => T) {
+    async update<T>(
+      key: string,
+      change: (current: T | null) => T,
+      options: PolicyUpdateOptions = {},
+    ) {
+      const limit = options.maxPayloadBytes;
+      if (limit !== undefined) byteLimit(limit);
       await ready();
       const client = await pool.connect();
       try {
@@ -339,14 +393,40 @@ export function createPostgresPolicyStore(
           'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
           [context(key)],
         );
-        const result = await client.query<{ payload: string }>(
-          'SELECT payload FROM enterprise_policy_records_v1 WHERE record_key=$1 FOR UPDATE',
-          [key],
-        );
-        const value = change(decode<T>(cipher, key, result.rows[0]?.payload));
+        const current =
+          limit !== undefined
+            ? decodeBounded<T>(
+                cipher,
+                key,
+                (
+                  await client.query<{
+                    payload: string | null;
+                    payload_bytes: number;
+                  }>(
+                    'SELECT CASE WHEN octet_length(payload) <= $2 THEN payload END AS payload, octet_length(payload) AS payload_bytes FROM enterprise_policy_records_v1 WHERE record_key=$1 FOR UPDATE',
+                    [key, limit],
+                  )
+                ).rows[0],
+                limit,
+              )
+            : decode<T>(
+                cipher,
+                key,
+                (
+                  await client.query<{ payload: string }>(
+                    'SELECT payload FROM enterprise_policy_records_v1 WHERE record_key=$1 FOR UPDATE',
+                    [key],
+                  )
+                ).rows[0]?.payload,
+              );
+        const value = change(current);
+        const payload = encode(cipher, key, value);
+        const size = Buffer.byteLength(payload, 'utf8');
+        if (limit !== undefined && size > limit)
+          throw new PolicyRecordTooLargeError(key, size, limit);
         await client.query(
           'INSERT INTO enterprise_policy_records_v1(record_key,payload) VALUES($1,$2) ON CONFLICT(record_key) DO UPDATE SET payload=excluded.payload',
-          [key, encode(cipher, key, value)],
+          [key, payload],
         );
         await client.query('COMMIT');
         return structuredClone(value);

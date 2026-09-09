@@ -184,7 +184,7 @@ it('real UI publishes, previews, requests, chats, groups, admits and leaves thro
         within(group).getByPlaceholderText('搜索小区、地标或地址'),
         { target: { value: query } },
       );
-      fireEvent.click(within(group).getByRole('button', { name: '搜索' }));
+
       fireEvent.click(
         await screen.findByRole('option', { name: new RegExp(label!) }),
       );

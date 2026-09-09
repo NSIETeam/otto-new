@@ -3,6 +3,7 @@ import { ModuleReadProvider, useModuleReadCache } from '../state/ModuleReadProvi
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -38,6 +39,26 @@ describe('拼车助手界面', () => {
     fireEvent.click(screen.getByRole('button', { name: '返回行程' }));
     expect((screen.getByLabelText('从哪里出发搜索') as HTMLInputElement).value).toBe('未提交的地点');
   });
+  it('waits for Chinese composition and confirms a suggestion with the keyboard', async () => {
+    const search = vi.fn(async () => [{ id: 'park', label: '北控宏创科技园', address: '园区地址', district: '昌平', coordinate: { longitude: 116, latitude: 40 } }]);
+    Object.assign(window.otto, { enterpriseParkCarpoolGet: async () => emptyState, enterpriseParkCarpoolSearchPlaces: search, enterpriseParkCarpoolMap: async () => 'data:image/png;base64,AA==' });
+    render(<ParkCarpoolDialog open onClose={() => undefined} />);
+    const input = await screen.findByRole('combobox', { name: '从哪里出发搜索' });
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: '北控' } });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
+    expect(search).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(input);
+    await screen.findByRole('option', { name: /北控宏创科技园/ });
+    expect(search).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await screen.findByAltText('所选地点地图');
+    expect((input as HTMLInputElement).value).toBe('北控宏创科技园');
+    expect(screen.queryByRole('option', { name: /北控宏创科技园/ })).toBeNull();
+    fireEvent.change(input, { target: { value: '北控新' } });
+    expect(screen.queryByAltText('所选地点地图')).toBeNull();
+  });
   it('focuses the first missing standard place and associates its validation error', async () => {
     Object.assign(window.otto, {
       enterpriseParkCarpoolGet: async () => emptyState,
@@ -72,7 +93,7 @@ describe('拼车助手界面', () => {
     const group = screen.getByRole('group', { name: '从哪里出发' });
     const input = within(group).getByPlaceholderText('搜索小区、地标或地址');
     fireEvent.change(input, { target: { value: '旧地点' } });
-    fireEvent.click(within(group).getByRole('button', { name: '搜索' }));
+    await waitFor(() => expect(resolve).toBeTypeOf('function'));
     fireEvent.change(input, { target: { value: '新地点' } });
     resolve([
       {
@@ -84,7 +105,7 @@ describe('拼车助手界面', () => {
       },
     ]);
     await waitFor(() =>
-      expect(within(group).getByRole('button', { name: '搜索' })).toBeTruthy(),
+      expect(within(group).queryByRole('button', { name: '搜索' })).toBeNull(),
     );
     expect(screen.queryByRole('option', { name: /旧地点结果/ })).toBeNull();
   });
@@ -166,7 +187,7 @@ describe('拼车助手界面', () => {
       within(origin).getByPlaceholderText('搜索小区、地标或地址'),
       { target: { value: '宏创园区' } },
     );
-    fireEvent.click(within(origin).getByRole('button', { name: '搜索' }));
+
     fireEvent.click(
       await screen.findByRole('option', { name: /宏创园区南门/u }),
     );
@@ -176,7 +197,7 @@ describe('拼车助手界面', () => {
       within(destination).getByPlaceholderText('搜索小区、地标或地址'),
       { target: { value: '回龙观' } },
     );
-    fireEvent.click(within(destination).getByRole('button', { name: '搜索' }));
+
     fireEvent.click(
       await screen.findByRole('option', { name: /回龙观地铁站/u }),
     );

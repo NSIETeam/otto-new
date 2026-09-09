@@ -114,12 +114,24 @@ function PlacePicker({
     },
     [],
   );
+  const [expanded, setExpanded] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const [highlight, setHighlight] = useState(-1);
+  const [lookupError, setLookupError] = useState('');
+  const [queried, setQueried] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const suggestions = useRef(new Map<string, { time: number; places: EnterpriseParkCarpoolPlaceSuggestion[] }>());
   const changeQuery = (value: string) => {
     revision.current += 1;
     setResults([]);
     setSearching(false);
     setLocating(false);
     setQuery(value);
+    setExpanded(true);
+    setHighlight(-1);
+    setQueried(false);
+    setLookupError('');
+    setError('');
     setSelected(null);
   };
   const choosePlace = (place: EnterpriseParkCarpoolPlaceSuggestion) => {
@@ -127,6 +139,9 @@ function PlacePicker({
     setSearching(false);
     setLocating(false);
     setResults([]);
+    setExpanded(false);
+    setLookupError('');
+    setError('');
     setSelected(place);
     setQuery(place.label);
   };
@@ -136,25 +151,32 @@ function PlacePicker({
   >([]);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
-  const search = async (): Promise<void> => {
+  useEffect(() => {
+    const term = query.trim();
+    if (disabled || composing || selected || !expanded || term.length < 2) return;
     const request = ++revision.current;
-    setSearching(true);
-    setError('');
-    setSelected(null);
-    try {
-      const next = await window.otto.enterpriseParkCarpoolSearchPlaces(query);
-      if (request !== revision.current) return;
-      setResults(next);
-      if (!next.length)
-        setError('没有找到标准地点，请换一个更明确的地标或地址。');
-    } catch (cause) {
-      if (request !== revision.current) return;
-      setResults([]);
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      if (request === revision.current) setSearching(false);
+    const cached = suggestions.current.get(term);
+    if (cached && Date.now() - cached.time < 30000) {
+      setResults(cached.places); setQueried(true); setSearching(false);
+      return;
     }
-  };
+    const timer = window.setTimeout(() => {
+      setSearching(true); setLookupError('');
+      void window.otto.enterpriseParkCarpoolSearchPlaces(term).then(next => {
+        if (request !== revision.current) return;
+        suggestions.current.set(term, { time: Date.now(), places: next });
+        if (suggestions.current.size > 20) suggestions.current.delete(suggestions.current.keys().next().value!);
+        setResults(next); setQueried(true); setHighlight(-1);
+      }).catch(cause => {
+        if (request !== revision.current) return;
+        setResults([]); setLookupError(cause instanceof Error ? cause.message : String(cause));
+      }).finally(() => { if (request === revision.current) setSearching(false); });
+    }, 300);
+    return () => { window.clearTimeout(timer); revision.current += 1; };
+  }, [query, composing, selected, expanded, disabled, retry]);
+  useEffect(() => {
+    if (highlight >= 0 && expanded) document.getElementById(`${inputId}-option-${highlight}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [highlight, expanded, inputId]);
   const locate = async () => {
     const request = ++revision.current;
     setLocating(true);
@@ -209,10 +231,33 @@ function PlacePicker({
           ))}
         </div>
       ) : null}
-      <div className="otto-carpool__search">
+      <div className="otto-carpool__search" onBlur={event => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setExpanded(false);
+      }}>
         <label className="otto-carpool__search-label" htmlFor={inputId}>{label}搜索</label>
         <input
           id={inputId}
+          role="combobox"
+          autoComplete="off"
+          aria-autocomplete="list"
+          aria-expanded={expanded && !selected && query.trim().length >= 2}
+          aria-controls={`${inputId}-suggestions`}
+          aria-activedescendant={highlight >= 0 && expanded && results[highlight] ? `${inputId}-option-${highlight}` : undefined}
+          onFocus={() => { if (!selected) setExpanded(true); }}
+          onCompositionStart={() => { setComposing(true); revision.current += 1; }}
+          onCompositionEnd={() => setComposing(false)}
+          onKeyDown={event => {
+            if (composing || event.nativeEvent.isComposing) return;
+            if (event.key === 'Escape' && expanded) { event.preventDefault(); event.stopPropagation(); setExpanded(false); }
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              event.preventDefault(); setExpanded(true);
+              setHighlight(index => results.length ? (index < 0 ? (event.key === 'ArrowDown' ? 0 : results.length - 1) : (index + (event.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length) : -1);
+            }
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              if (expanded && highlight >= 0 && results[highlight]) choosePlace(results[highlight]!);
+            }
+          }}
           aria-label={`${label}搜索`}
           aria-describedby={error || validationError ? `${inputId}-error` : undefined}
           aria-invalid={Boolean(error || validationError)}
@@ -222,13 +267,24 @@ function PlacePicker({
             changeQuery(event.target.value);
           }}
         />
-        <button
-          type="button"
-          disabled={searching || query.trim().length < 2}
-          onClick={() => void search()}
-        >
-          {searching ? '搜索中…' : '搜索'}
-        </button>
+        {expanded && !selected && query.trim().length >= 2 ? (
+          <div className="otto-carpool__suggestions">
+            {searching ? <span role="status">正在查找…</span> : null}
+            {lookupError ? <div role="status">地点加载失败 <button type="button" onClick={() => setRetry(value => value + 1)}>重试</button></div> : null}
+            {!searching && !lookupError && queried && !results.length ? <span role="status">未找到相关地点</span> : null}
+            <div id={`${inputId}-suggestions`} role="listbox" aria-label={`${label}候选地点`}>
+              {results.map((place, index) => (
+                <button id={`${inputId}-option-${index}`} key={place.id} type="button" role="option" tabIndex={-1}
+                  aria-selected={highlight === index}
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={() => choosePlace(place)}>
+                  <strong>{place.label}</strong>
+                  <span>{[place.district, place.address].filter(Boolean).join(' · ') || '标准地点'}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
       <div className="otto-carpool__place-tools">
       <button type="button" disabled={locating} onClick={() => void locate()}>
@@ -246,30 +302,6 @@ function PlacePicker({
         <small id={`${inputId}-error`} role="alert">
           {error || validationError}
         </small>
-      ) : null}
-      {results.length ? (
-        <div
-          className="otto-carpool__places"
-          role="listbox"
-          aria-label={`${label}候选地点`}
-        >
-          {results.map((place) => (
-            <button
-              key={place.id}
-              type="button"
-              role="option"
-              aria-selected={selected?.id === place.id}
-              className={selected?.id === place.id ? 'is-selected' : ''}
-              onClick={() => choosePlace(place)}
-            >
-              <strong>{place.label}</strong>
-              <span>
-                {[place.district, place.address].filter(Boolean).join(' · ') ||
-                  '标准地点'}
-              </span>
-            </button>
-          ))}
-        </div>
       ) : null}
     </fieldset>
   );

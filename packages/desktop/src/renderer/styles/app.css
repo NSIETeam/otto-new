@@ -13772,7 +13772,7 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-carpool__hero { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 12px; padding: 18px; border: 1px solid color-mix(in srgb, var(--otto-accent) 42%, var(--otto-border)); border-radius: 16px; background: linear-gradient(135deg, color-mix(in srgb, var(--otto-accent) 13%, var(--otto-bg)), var(--otto-surface)); }
 .otto-carpool__hero > strong { flex: 1; }
 .otto-carpool__hero strong { font-size: 18px; }
-.otto-carpool__place p, .otto-carpool__modes p, .otto-carpool__privacy { margin: 5px 0 0; color: var(--otto-text-secondary); font-size: 12px; line-height: 1.6; }
+.otto-carpool__place p, .otto-carpool__modes p { margin: 5px 0 0; color: var(--otto-text-secondary); font-size: 12px; line-height: 1.6; }
 .otto-carpool__hero > span { padding: 6px 10px; border-radius: 999px; color: var(--otto-accent); background: color-mix(in srgb, var(--otto-accent) 12%, transparent); font-size: 12px; font-weight: 700; }
 .otto-carpool__form { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--otto-border); border-radius: 16px; background: var(--otto-surface); }
 .otto-carpool__place, .otto-carpool__modes { min-width: 0; margin: 0; padding: 0; border: 0; }
@@ -13791,7 +13791,6 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-carpool__modes > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
 .otto-carpool__modes label { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; align-items: start; padding: 11px; border: 1px solid var(--otto-border); border-radius: 12px; }
 .otto-carpool__modes label span { grid-column: 2; color: var(--otto-text-secondary); font-size: 11px; line-height: 1.45; }
-.otto-carpool__privacy { padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--otto-accent) 7%, var(--otto-bg)); }
 .otto-carpool__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .otto-carpool__actions .is-secondary, .otto-carpool__confirm .is-secondary { color: var(--otto-text); background: transparent; }
 .otto-carpool__confirm { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--otto-danger) 45%, var(--otto-border)); border-radius: 12px; }
@@ -14589,20 +14588,10 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-carpool-dialog :is(button, input, select):focus-visible { outline: 2px solid var(--otto-accent); outline-offset: 2px; }
 .otto-carpool-dialog .otto-carpool__modes label { background: var(--otto-bg); border-radius: var(--otto-radius-sm); }
 .otto-carpool-dialog .otto-carpool__modes label:has(input:checked) { border-color: var(--otto-accent); }
-.otto-carpool-dialog .otto-carpool__privacy { padding: 0; background: none; }
 .otto-carpool-dialog .otto-carpool__actions > button[type="submit"] { width: 100%; min-height: 42px; border-color: var(--otto-accent); background: var(--otto-accent); color: var(--otto-bg); font-weight: 600; }
 .otto-carpool-dialog .otto-carpool__actions > button[type="submit"]:hover:not(:disabled) { background: var(--otto-accent-hover); }
 @media (max-width: 560px) { .otto-carpool-dialog .otto-carpool__search { grid-template-columns: minmax(0, 1fr) auto; } .otto-carpool-dialog .otto-carpool__hero > span { white-space: normal; } }
 
-.otto-carpool__help {
-  font-size: 12px;
-  color: var(--otto-text-secondary);
-}
-.otto-carpool__help > summary {
-  cursor: pointer;
-  padding: 8px 0;
-}
-.otto-carpool__help p { margin: 6px 0; line-height: 1.6; }
 .otto-carpool__map-picker {
   margin-top: 12px;
   padding: 12px;

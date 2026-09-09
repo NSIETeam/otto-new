@@ -125,7 +125,7 @@ describe('拼车助手界面', () => {
     expect(screen.queryByText(/约 \d+% 同路/u)).toBeNull();
   });
 
-  it('用标准地点发布意向，并在提交前保留明确的隐私提示', async () => {
+  it('用标准地点发布意向，精简说明不影响提交和编辑', async () => {
     const places = [
       {
         id: 'origin',
@@ -182,12 +182,8 @@ describe('拼车助手界面', () => {
     );
     fireEvent.click(screen.getByRole('checkbox', { name: /搭车/u }));
 
-    expect(
-      screen.getByText(/仅对同园区的匹配用户可见/u),
-    ).toBeTruthy();
-    const help = screen.getByText('使用说明').closest('details')!;
-    expect(help.open).toBe(false);
-    expect(help.textContent).toContain('不展示住宅门牌');
+    expect(screen.queryByText('使用说明')).toBeNull();
+    expect(screen.queryByText('搜索后选择地点')).toBeNull();
     window.otto.enterpriseParkCarpoolRefresh = vi.fn(async () => {
       throw new Error('刷新离线');
     });

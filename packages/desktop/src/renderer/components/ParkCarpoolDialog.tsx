@@ -89,7 +89,6 @@ const COMPATIBLE_LABEL: Record<string, string> = {
 
 function PlacePicker({
   label,
-  hint,
   query,
   setQuery,
   selected,
@@ -100,7 +99,6 @@ function PlacePicker({
 }: {
   validationError?: string;
   label: string;
-  hint: string;
   query: string;
   setQuery(value: string): void;
   selected: EnterpriseParkCarpoolPlaceSuggestion | null;
@@ -193,7 +191,6 @@ function PlacePicker({
   return (
     <fieldset className="otto-carpool__place" disabled={disabled}>
       <legend>{label}</legend>
-      <p id={`${inputId}-hint`}>{hint}</p>
       {meetingPoints.length ? (
         <div className="otto-carpool__meeting-points" aria-label={`${label}公共集合点`}>
           {meetingPoints.map((point) => (
@@ -220,7 +217,7 @@ function PlacePicker({
         <input
           id={inputId}
           aria-label={`${label}搜索`}
-          aria-describedby={`${inputId}-hint${error || validationError ? ` ${inputId}-error` : ''}`}
+          aria-describedby={error || validationError ? `${inputId}-error` : undefined}
           aria-invalid={Boolean(error || validationError)}
           value={query}
           placeholder="搜索小区、地标或地址"
@@ -604,7 +601,6 @@ export function ParkCarpoolDialog({
       title="拼车助手" size="standard"
       className="otto-carpool-dialog"
       icon={<IconCar size={22} />}
-      subtitle="寻找同园区的同路伙伴"
       onClose={() => {
         if (dirty) setConfirmClose(true);
         else onClose();
@@ -638,12 +634,6 @@ export function ParkCarpoolDialog({
                 : '尚未发布'}
         </span>
       </section>
-      <details className="otto-carpool__help">
-        <summary>使用说明</summary>
-        <p>Otto 提供同行匹配，不代叫车、不收费，也不处理费用分摊。</p>
-        <p>也可在对话中告诉 Otto 出发地、目的地和时间，确认后发布。</p>
-        <p>候选人仅看到路线区域；精确地点用于你的路线规划，不展示住宅门牌。</p>
-      </details>
       {state.availability?.reason && <p role="status">{state.availability.reason}</p>}
       {state !== EMPTY_STATE && !state.mapConfigured && !loading && !error ? (
         <p role="alert" className="otto-workspace-dialog__error">
@@ -677,7 +667,6 @@ export function ParkCarpoolDialog({
           }
           meetingPoints={state.meetingPoints}
           label="从哪里出发"
-          hint="建议选择园区出口或公共集合点"
           query={originQuery}
           setQuery={setOriginQuery}
           selected={origin}
@@ -692,7 +681,6 @@ export function ParkCarpoolDialog({
           }
           meetingPoints={state.meetingPoints}
           label="要去哪里"
-          hint="搜索后选择地点"
           query={destinationQuery}
           setQuery={setDestinationQuery}
           selected={destination}
@@ -763,9 +751,6 @@ export function ParkCarpoolDialog({
             ))}
           </div>
         </fieldset>
-        <p className="otto-carpool__privacy">
-          仅对同园区的匹配用户可见 · 随时停止寻找
-        </p>
         <div className="otto-carpool__actions">
           <button type="submit" className="otto-park-demo__primary" disabled={!state.mapConfigured || state.availability?.canPublish === false || loading}>
             {loading
@@ -809,7 +794,7 @@ export function ParkCarpoolDialog({
       {state.parkAdmin && page === 'admin' ? (
         <section aria-label="管理园区公共集合点">
           <h3>公共集合点</h3>
-          <PlacePicker label="公共地点" hint="选择园区出口或公共集合点" query={adminQuery} setQuery={setAdminQuery} selected={adminPlace} setSelected={setAdminPlace} disabled={!state.mapConfigured} />
+          <PlacePicker label="公共地点" query={adminQuery} setQuery={setAdminQuery} selected={adminPlace} setSelected={setAdminPlace} disabled={!state.mapConfigured} />
           <p>
             将所选地点设为公共集合点，地点及坐标全园区可见。请勿添加私人地点。
           </p>

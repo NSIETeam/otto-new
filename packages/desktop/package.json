@@ -278,6 +278,7 @@
       ]
     },
     "nsis": {
+      "include": "build/installer-safety.nsh",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "Otto",

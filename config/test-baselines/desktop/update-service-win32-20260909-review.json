@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "status": "reviewed-single-file-measurement-update",
+  "reference": "https://github.com/NSIETeam/otto-new/pull/63",
+  "recordedAt": "2026-09-09T13:10:10Z",
+  "reviewer": "Otto release owner (root agent), within the user-authorized 1.9.15 release",
+  "decision": "Adopt only the actual Windows update-service.ts file observations and require its new test file; preserve all other file entries and previous provenance.",
+  "file": "src/main/update-service.ts",
+  "test": "src/main/update-service.test.ts",
+  "platform": "win32",
+  "arch": "x64",
+  "runId": "6e9df4f5-e6ee-48e2-8989-a36319eada21",
+  "parentBaselineSha256": "2276acef9d12a444b42dc6a43218e1164866c7a1e61e393d8758461ec5168fdf",
+  "parentFileEntrySha256": "4dfa113c9bab6d734a57e03180382e058c3d0cd772fdebb830ef8c4d96bcdf85",
+  "newFileEntrySha256": "ce98aaca4f2257b1edad88ccadadc689ac7534a9fde74c6e2218f69618a507d5",
+  "sourceSha256": "e4b58632879dc2b7b32f452f640e162ebb8288a94266e3d74046a152b4db7806",
+  "testSha256": "fe2e4418f5b351931af8cd7bfa061957b5ecbf155a64394cb0599059751a2ef6",
+  "sourceHashesBeforeSha256": "0d9411b9e4a1542eab497d9347343717b2d1bc4a50119e050c1d305a01b4f2c3",
+  "sourceHashesAfterSha256": "0d9411b9e4a1542eab497d9347343717b2d1bc4a50119e050c1d305a01b4f2c3",
+  "coverageSha256": "23c19c1a4a746b07ccde4bb273d6b57e36ef0050785d40a158092f44d7e41474",
+  "testResultsSha256": "df9ec0e258fa1aa4ed279da4e315dd7a967001404411ea8e8a92c4bfed35dd90",
+  "receiptSha256": "df6d0318bc219e067af4825f18e01cc13295572f3abfe632d31e392b785ef7db",
+  "originalNativeExitCode": 0,
+  "originalGate": {
+    "status": "failed",
+    "reason": "[desktop-coverage-ratchet] source structure changed; explicit baseline review required: src/main/update-service.ts"
+  },
+  "environment": {
+    "platform": "win32",
+    "arch": "x64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "9bf3ec93187c192686e30fdea62e62a769734405085d6e49d675c5efc2723600"
+  },
+  "sourceIdentityKind": "actual-before-after-source-test-hashes-not-clean-HEAD",
+  "tests": {
+    "completeRunPassed": 2100,
+    "filePassed": 22,
+    "failures": 0,
+    "skipped": 0
+  },
+  "previousUncovered": { "lines": 160, "statements": 169, "functions": 17, "branches": 102 },
+  "reviewedUncovered": { "lines": 131, "statements": 139, "functions": 14, "branches": 90 },
+  "addedMappedUncovered": { "statements": 0, "functions": 0, "branches": 0 },
+  "previousReviewPreserved": true,
+  "otherFileEntriesUnchanged": 280,
+  "boundaries": [
+    "This records a release-owner measurement review, not independent human release approval.",
+    "The actual run receipt remains native exit 0 and gate failed; subsequent read-only revalidation does not rewrite that receipt.",
+    "The original 280 file entries, prior review evidence, environment, thresholds and original 264 required test paths remain unchanged; the new test path is appended.",
+    "The added-range observation check supports source review; hits alone do not prove every business assertion or all historical Windows installer upgrades.",
+    "Pre-existing network, download and macOS paths remain coverage debt.",
+    "This is Windows evidence only. The macOS baseline requires its own new actual report."
+  ]
+}

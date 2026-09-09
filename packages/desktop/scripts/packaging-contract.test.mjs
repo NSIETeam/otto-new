@@ -728,13 +728,16 @@ describe('desktop packaging contract', () => {
     });
     expect(desktop.build.nsis.deleteAppDataOnUninstall).not.toBe(true);
     expect(desktop.build.protocols[0].schemes).toContain('otto');
-    expect(updater).toContain("spawn(ready.filePath, ['/S', '--force-run']");
+    expect(updater).toContain("spawn(filePath, ['/S', '--force-run']");
+    expect(updater).toContain('shell: false');
+    const checkedLaunch = 'await startWindowsInstaller(ready.filePath)';
+    expect(updater.split(checkedLaunch)).toHaveLength(2);
     const verifyBeforeInstallIndex = updater.indexOf(
       'await verifyBeforeInstall(ready.filePath, ready.sha256)',
     );
     expect(verifyBeforeInstallIndex).toBeGreaterThanOrEqual(0);
     expect(verifyBeforeInstallIndex).toBeLessThan(
-      updater.indexOf("spawn(ready.filePath, ['/S', '--force-run']"),
+      updater.indexOf(checkedLaunch),
     );
   });
 

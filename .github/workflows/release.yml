@@ -1020,6 +1020,16 @@ jobs:
             }
           }
 
+          $upgradeProbeArguments = @(
+            '-NoProfile', '-NonInteractive', '-File',
+            './scripts/verify-windows-installer-upgrade.ps1',
+            '-Installer', $installer.FullName, '-InstallRoot', $installRoot
+          )
+          $upgradeProbeExitCode = Invoke-NativeProcess `
+            -FilePath (Get-Command pwsh -CommandType Application).Source `
+            -ArgumentList $upgradeProbeArguments
+          if ($upgradeProbeExitCode -ne 0) { throw 'Windows candidate upgrade safety verification failed' }
+
           $sqlCipherProbeArguments = @(
             'packages/desktop/scripts/probe-packaged-sqlcipher.mjs',
             '--binding', $binding
@@ -1048,6 +1058,15 @@ jobs:
           if ($runtimeVerificationExitCode -ne 0) {
             throw "Packaged desktop runtime verification failed: $runtimeVerificationExitCode"
           }
+
+      - name: Preserve Windows candidate upgrade evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-upgrade-acceptance-${{ needs.build.outputs.version }}
+          path: ${{ runner.temp }}/otto-upgrade-acceptance-*/*.json
+          if-no-files-found: warn
+          retention-days: 30
 
   prepare-release-creation-intent:
     name: Lock release creation intent before mutation

@@ -991,24 +991,7 @@ export function ParkCarpoolDialog({
             <option value="shared_taxi">一起叫车</option>
           </select>
         </label>
-        <header>
-          <div>
-            <h3>同行结果</h3>
-            <p>
-              {active
-                ? `找到 ${state.resultPage?.total ?? sortedMatches.length} 个候选，已显示 ${sortedMatches.length} 个`
-                : '发布同行意向后显示结果'}
-            </p>
-          </div>
-          {state.currentIntent ? (
-            <span>
-              {state.currentIntent.travelDate}{' '}
-              {timeLabel(state.currentIntent.departureTime)} ·{' '}
-              {state.currentIntent.origin.label} →{' '}
-              {state.currentIntent.destination.label}
-            </span>
-          ) : null}
-        </header>
+        {sortedMatches.length > 0 ? <h3>同行结果</h3> : null}
         {sortedMatches.map((match) => (
           <article key={match.intentId}>
             <div className="otto-carpool__score">
@@ -1102,9 +1085,6 @@ export function ParkCarpoolDialog({
           >
             加载更多同行结果
           </button>
-        ) : null}
-        {active && !loading && !sortedMatches.length ? (
-          <p className="otto-carpool__empty">暂时没有合适的同行伙伴</p>
         ) : null}
       </section> : null}
     </DialogFrame>

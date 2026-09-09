@@ -33,6 +33,8 @@ describe('拼车助手界面', () => {
     expect(screen.queryByRole('region', { name: '同行请求与状态' })).toBeNull();
     expect(screen.queryByText('公共集合点名称')).toBeNull();
     expect(screen.queryByRole('region', { name: '同行示例体验' })).toBeNull();
+    expect(screen.queryByText(/找到 .* 个候选/)).toBeNull();
+    expect(screen.queryByText('暂时没有合适的同行伙伴')).toBeNull();
     fireEvent.change(screen.getByLabelText('从哪里出发搜索'), { target: { value: '未提交的地点' } });
     fireEvent.click(screen.getByRole('button', { name: '园区管理' }));
     expect(await screen.findByText('公共集合点名称')).toBeTruthy();
@@ -223,6 +225,8 @@ describe('拼车助手界面', () => {
     expect(screen.queryByLabelText('从哪里出发搜索')).toBeNull();
     expect(screen.getByRole('region', { name: '当前行程' })).toBeTruthy();
     expect(screen.queryByRole('region', { name: '同行示例体验' })).toBeNull();
+    expect(screen.queryByText(/找到 .* 个候选/)).toBeNull();
+    expect(screen.queryByText('暂时没有合适的同行伙伴')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '修改行程' }));
     expect((screen.getByLabelText('从哪里出发搜索') as HTMLInputElement).value).toBe('宏创园区南门');
     fireEvent.click(screen.getByRole('button', { name: '已发布行程' }));

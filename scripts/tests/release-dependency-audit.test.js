@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  createAuditDiagnostic,
   findDirectImageSizeReferences,
   validateAuditReport,
   validateExceptionPolicy,
@@ -171,6 +172,84 @@ describe('release dependency audit gate', () => {
     );
   });
 
+  it('keeps public audit metadata but excludes arbitrary secrets and raw endpoint diagnostics', async () => {
+    const report = await readJson(auditSnapshotPath);
+    const sentinel = 'do-not-publish-fixture-secret';
+    const input = clone(report);
+    input.env = { TOKEN: sentinel };
+    input.stderr = sentinel;
+    input.error = { code: 'EAUDIT', summary: sentinel, detail: sentinel };
+    input.metadata.environment = { TOKEN: sentinel };
+    input.vulnerabilities['image-size'].credentials = sentinel;
+    input.vulnerabilities['image-size'].via[0].env = { TOKEN: sentinel };
+    const diagnostic = createAuditDiagnostic(input);
+    expect(diagnostic.vulnerabilities).toEqual(report.vulnerabilities);
+    expect(diagnostic.metadata).toEqual(report.metadata);
+    expect(diagnostic.error).toEqual({ code: 'EAUDIT' });
+    expect(JSON.stringify(diagnostic)).not.toContain(sentinel);
+
+    input.vulnerabilities['image-size'].via[0].url =
+      `https://user:${sentinel}@github.com/advisories/GHSA-w3rx-r6r6-pgpr?token=${sentinel}`;
+    expect(JSON.stringify(createAuditDiagnostic(input))).not.toContain(
+      sentinel,
+    );
+  });
+
+  it('preserves the actual live report before rejecting newly discovered advisories', async () => {
+    const report = await readJson(auditSnapshotPath);
+    report.metadata.vulnerabilities.high += 1;
+    report.metadata.vulnerabilities.total += 1;
+    report.vulnerabilities['newly-vulnerable'] = {
+      name: 'newly-vulnerable',
+      severity: 'high',
+      isDirect: true,
+      via: [
+        {
+          source: 1234567,
+          name: 'newly-vulnerable',
+          dependency: 'newly-vulnerable',
+          title: 'New public advisory',
+          url: 'https://github.com/advisories/GHSA-aaaa-bbbb-cccc',
+          severity: 'high',
+          range: '<2.0.0',
+        },
+      ],
+      effects: [],
+      range: '<2.0.0',
+      nodes: ['node_modules/newly-vulnerable'],
+      fixAvailable: true,
+    };
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'otto-audit-diagnostic-'),
+    );
+    temporaryDirectories.push(root);
+    const npmFixture = path.join(root, 'npm-fixture.mjs');
+    const diagnosticPath = path.join(root, 'evidence', 'npm-audit.json');
+    await writeFile(
+      npmFixture,
+      `process.stdout.write(${JSON.stringify(JSON.stringify(report))}); process.exitCode = 1;`,
+    );
+    const result = spawnSync(
+      process.execPath,
+      [verifierPath, '--diagnostic-json', diagnosticPath],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CI: 'true',
+          npm_execpath: npmFixture,
+          npm_node_execpath: process.execPath,
+        },
+      },
+    );
+    expect(result.status).toBe(1);
+    expect(await readJson(diagnosticPath)).toEqual(report);
+    expect(result.stderr).toContain('newly-vulnerable');
+    expect(result.stderr).toContain('GHSA-aaaa-bbbb-cccc');
+    expect(result.stderr).not.toContain('verified');
+  }, 30_000);
+
   it('reports an audit endpoint failure before treating it as a format change', async () => {
     const policy = await readJson(policyPath);
     expect(() =>
@@ -179,6 +258,87 @@ describe('release dependency audit gate', () => {
         policy.exception,
       ),
     ).toThrow('npm audit endpoint returned an error');
+  });
+
+  it('does not overwrite prior diagnostic evidence', async () => {
+    const report = await readJson(auditSnapshotPath);
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-audit-existing-'));
+    temporaryDirectories.push(root);
+    const npmFixture = path.join(root, 'npm-fixture.mjs');
+    const diagnosticPath = path.join(root, 'npm-audit.json');
+    await writeFile(
+      npmFixture,
+      `process.stdout.write(${JSON.stringify(JSON.stringify(report))}); process.exitCode = 1;`,
+    );
+    await writeFile(diagnosticPath, 'previous evidence');
+    const result = spawnSync(
+      process.execPath,
+      [verifierPath, '--diagnostic-json', diagnosticPath],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CI: 'true',
+          npm_execpath: npmFixture,
+          npm_node_execpath: process.execPath,
+        },
+      },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('EEXIST');
+    expect(await readFile(diagnosticPath, 'utf8')).toBe('previous evidence');
+  });
+
+  it('does not publish process stderr or malformed JSON fragments', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-audit-errors-'));
+    temporaryDirectories.push(root);
+    const sentinel = 'do-not-publish-fixture-secret';
+    const npmFixture = path.join(root, 'npm-fixture.mjs');
+    for (const [kind, script] of [
+      [
+        'stderr',
+        `process.stderr.write(${JSON.stringify(sentinel)}); process.exitCode = 2;`,
+      ],
+      ['invalid-json', `process.stdout.write(${JSON.stringify(sentinel)});`],
+    ]) {
+      await writeFile(npmFixture, script);
+      const diagnosticPath = path.join(root, `${kind}.json`);
+      const result = spawnSync(
+        process.execPath,
+        [verifierPath, '--diagnostic-json', diagnosticPath],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            CI: 'true',
+            npm_execpath: npmFixture,
+            npm_node_execpath: process.execPath,
+          },
+        },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stderr).not.toContain(sentinel);
+      expect(result.stdout).not.toContain(sentinel);
+      await expect(readFile(diagnosticPath)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    }
+  });
+
+  it('requires a diagnostic path before attempting a network audit', () => {
+    const result = spawnSync(
+      process.execPath,
+      [verifierPath, '--diagnostic-json'],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: { ...process.env, CI: 'true' },
+      },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('--diagnostic-json requires a path');
   });
 
   it('rejects advisory identity or remediation changes', async () => {

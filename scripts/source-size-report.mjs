@@ -11,7 +11,7 @@ import path from 'node:path';
 
 const ROOT = process.cwd();
 const CHECK = process.argv.includes('--check');
-const ROOTS = ['packages', 'docs', 'scripts', '.otto', 'otto-native'];
+const ROOTS = ['packages', 'docs', 'scripts', 'config', '.otto', 'otto-native'];
 const ROOT_FILES = [
   'package.json',
   'package-lock.json',
@@ -58,13 +58,14 @@ const SOURCE_EXTENSIONS = new Set([
   '.icns',
   '.wav',
   '.svg',
+  '.gz',
 ]);
 const TEXT_HARD_EXTENSIONS = new Set(['.ts', '.tsx', '.css', '.md']);
 
 const BUDGETS = {
   // Reviewed feature/evidence growth, not an installer allowance. See
   // docs/release-1.9.15-source-budget.md; all evidence stays counted.
-  totalBytes: 44 * 1024 * 1024,
+  totalBytes: 47 * 1024 * 1024,
   textWarnBytes: 150 * 1024,
   textHardBytes: 300 * 1024,
   duplicateBytes: 100 * 1024,

@@ -12,14 +12,11 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const repo = path.resolve(import.meta.dirname, '../..');
-function runSize(bytes) {
+function runSize(bytes, payload = 'packages/payload.json') {
   const fixture = mkdtempSync(path.join(os.tmpdir(), 'otto-source-budget-'));
   try {
-    mkdirSync(path.join(fixture, 'packages'));
-    writeFileSync(
-      path.join(fixture, 'packages/payload.json'),
-      Buffer.alloc(bytes, 32),
-    );
+    mkdirSync(path.dirname(path.join(fixture, payload)), { recursive: true });
+    writeFileSync(path.join(fixture, payload), Buffer.alloc(bytes, 32));
     return spawnSync(
       process.execPath,
       [path.join(repo, 'scripts/source-size-report.mjs'), '--check'],
@@ -35,19 +32,27 @@ function runSize(bytes) {
 }
 
 describe('reviewed 1.9.15 source budget (not installer size)', () => {
-  it('retains the new feature sources and audit evidence within 44 MiB', () => {
-    const result = runSize(44 * 1024 * 1024);
+  it('retains the new feature sources and reviewed measurement evidence within 47 MiB', () => {
+    const result = runSize(47 * 1024 * 1024);
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain('budget: 44.00 MB');
+    expect(result.stdout).toContain('budget: 47.00 MB');
   });
   it('still rejects one byte beyond the documented ceiling', () => {
-    const result = runSize(44 * 1024 * 1024 + 1);
+    const result = runSize(47 * 1024 * 1024 + 1);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('exceeds 44.00 MB');
+    expect(result.stderr).toContain('exceeds 47.00 MB');
+  });
+  it('counts compressed reviewed coverage evidence rather than hiding it as generated output', () => {
+    const result = runSize(
+      47 * 1024 * 1024 + 1,
+      'config/test-baselines/desktop/evidence.json.gz',
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('exceeds 47.00 MB');
   });
   it('keeps an explicit independent whole-checkout budget for doctor', () => {
     const doctor = readFileSync(path.join(repo, 'scripts/doctor.cjs'), 'utf8');
-    expect(doctor).toContain('OTTO_DOCTOR_SOURCE_SIZE_BUDGET_MB || 52');
+    expect(doctor).toContain('OTTO_DOCTOR_SOURCE_SIZE_BUDGET_MB || 55');
     const report = readFileSync(
       path.join(repo, 'scripts/source-size-report.mjs'),
       'utf8',

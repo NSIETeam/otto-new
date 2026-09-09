@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "kind": "reviewed-measurement-baseline-adoption",
+  "sourceCommit": "fd7ef0d2f29437538d2edd80d2c43d9a213a88fe",
+  "originalMeasurementsNativeExitCode": 1,
+  "newNativeRunReceiptCreated": false,
+  "sourceManifestSha256": "4e146521ad6e18a974d85a28ff43d9b1f74a0e0080df090bd2770849c4165754",
+  "outputs": [
+    {
+      "file": "win32-x64-node22-vitest4.json.gz",
+      "sha256": "2276acef9d12a444b42dc6a43218e1164866c7a1e61e393d8758461ec5168fdf",
+      "bytes": 1323532,
+      "uncompressedSha256": "6ed9359990206026974e3f1bfe6d3c39121f53c9f3631cf22bca048f1d2af9d6",
+      "originalDraftSha256": "c0ae5449cffb04796afafb0929f97486be230fec77445ae9cb5ce5e97ae7272d"
+    },
+    {
+      "file": "darwin-arm64-node22-vitest4.json.gz",
+      "sha256": "1e3ebef18e41c74c49364cc28e05279d54ec688f33038f017a297424a6b25daf",
+      "bytes": 1323709,
+      "uncompressedSha256": "5040ab33eadf13882779d826e5f7dabea743593cd48ac172b73321ee60c0412d",
+      "originalDraftSha256": "0b4da4aa25bbc4700878f155f39343187d8077c76a6690d72aec4b7fbee809be"
+    }
+  ]
+}

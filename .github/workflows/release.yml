@@ -372,16 +372,27 @@ jobs:
           "$RIPGREP" --version | grep -F 'ripgrep 15.0.0'
 
       - name: Enforce release dependency audit
-        run: npm run security:dependencies:release
+        id: release_dependency_audit
+        run: npm run security:dependencies:release -- --diagnostic-json artifacts/security/release-dependency-audit.json
+
+      - name: Preserve release dependency audit diagnostics
+        if: ${{ always() && (steps.release_dependency_audit.outcome == 'success' || steps.release_dependency_audit.outcome == 'failure') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-dependency-audit-diagnostics
+          path: artifacts/security/release-dependency-audit.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Verify hostile-server defenses and E2EE release authorization
+        id: e2ee_release_verification
         run: |
           npm run security:e2ee:adversarial
           npm run security:e2ee:release:verify
           npm run security:e2ee:policy:check
 
       - name: Preserve E2EE adversarial evidence
-        if: always()
+        if: ${{ always() && (steps.e2ee_release_verification.outcome == 'success' || steps.e2ee_release_verification.outcome == 'failure') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2ee-adversarial-release-evidence
@@ -547,6 +558,7 @@ jobs:
           git diff --exit-code -- otto-native/Cargo.lock
 
       - name: Release quality gates
+        id: release_quality
         run: |
           npm run lint:ci
           npm run build
@@ -556,6 +568,21 @@ jobs:
             scripts/tests/enterprise-runtime-dependencies.test.js \
             scripts/tests/release-mode.test.js \
             scripts/tests/legacy-release-mutability.test.js
+
+      - name: Preserve release desktop coverage evidence
+        if: ${{ always() && (steps.release_quality.outcome == 'success' || steps.release_quality.outcome == 'failure') && hashFiles('packages/desktop/coverage/desktop-coverage-latest.json') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-desktop-coverage-${{ github.sha }}
+          path: |
+            packages/desktop/coverage/desktop-coverage-latest.json
+            packages/desktop/coverage/desktop-runs/*/coverage/coverage-final.json
+            packages/desktop/coverage/desktop-runs/*/test-results.json
+            packages/desktop/coverage/desktop-runs/*/receipt.json
+            packages/desktop/coverage/desktop-runs/*/stdout.txt
+            packages/desktop/coverage/desktop-runs/*/stderr.txt
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Focused regression tests
         run: |
@@ -686,7 +713,7 @@ jobs:
           FILES+=("$SOURCE_ARCHIVE" "${SOURCE_ARCHIVE}.sha256")
           PACKAGE_ID=""
           if [ "$DESKTOP_TEST_BUILD" != "1" ]; then
-            # macOS /bin/bash is 3.2: preserve NUL-delimited paths without mapfile.
+            # macOS ships Bash 3.2: preserve NUL-delimited paths without mapfile.
             ENTERPRISE_ARCHIVE=''
             ENTERPRISE_ARCHIVE_COUNT=0
             while IFS= read -r -d '' archive; do

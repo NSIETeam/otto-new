@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   EnterpriseE2eeCrypto,
@@ -38,18 +38,20 @@ afterEach(() => {
 function createEndpoint(deviceName: string) {
   const root = mkdtempSync(join(tmpdir(), 'otto-e2ee-test-'));
   roots.push(root);
+  const protect = vi.fn((plaintext: string) =>
+    `protected:${Buffer.from(plaintext).toString('base64')}`,
+  );
   const vault = new EnterpriseE2eeKeyVault({
     directory: root,
     deviceName: () => deviceName,
     now: () => new Date('2026-07-31T00:00:00.000Z'),
-    protect: (plaintext) =>
-      `protected:${Buffer.from(plaintext).toString('base64')}`,
+    protect,
     unprotect: (protectedValue) =>
       Buffer.from(protectedValue.slice('protected:'.length), 'base64').toString(
         'utf8',
       ),
   });
-  return { root, vault, crypto: new EnterpriseE2eeCrypto(vault) };
+  return { root, vault, protect, crypto: new EnterpriseE2eeCrypto(vault) };
 }
 
 function wire(
@@ -220,8 +222,22 @@ describe('enterprise private-chat E2EE', () => {
     );
     expect(trustFile).toBeTruthy();
     const stored = readFileSync(join(alice.root, trustFile!), 'utf8');
-    expect(stored).toMatch(/^protected:/);
-    expect(stored).not.toContain('Bob');
+    // This protector is a test double, not OS encryption. Random encoded bytes
+    // may contain a short name such as "Bob" by coincidence. Verify the actual
+    // protection boundary and exact persisted result instead of a substring.
+    const protectionCall = alice.protect.mock.calls.at(-1);
+    expect(protectionCall).toBeDefined();
+    const protectedRecord = protectionCall![0];
+    expect(JSON.parse(protectedRecord)).toEqual({
+      v: 1,
+      ...scope,
+      card: bobCard,
+      pinnedAt: '2026-07-31T00:00:00.000Z',
+      verifiedAt: '2026-07-31T00:00:00.000Z',
+    });
+    expect(stored).toBe(alice.protect.mock.results.at(-1)?.value);
+    expect(stored).toBe(`protected:${Buffer.from(protectedRecord).toString('base64')}`);
+    expect(stored).not.toBe(protectedRecord);
 
     expect(() => alice.crypto.verifyFederationIdentityCard({
       ...bobCard,

@@ -21,7 +21,8 @@ describe('ListSkillsTool', () => {
       listSkills: vi.fn(),
     };
 
-    (SkillsCompatAdapter as unknown as { mockImplementation: (factory: () => unknown) => unknown }).mockImplementation(() => mockCompatAdapter);
+    // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+    (SkillsCompatAdapter as unknown as { mockImplementation: (factory: () => unknown) => unknown }).mockImplementation(function () { return mockCompatAdapter; });
 
     tool = new ListSkillsTool(mockConfig);
   });

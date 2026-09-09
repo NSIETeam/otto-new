@@ -68,7 +68,7 @@
     "@types/qrcode-terminal": "^0.12.2",
     "@types/ws": "^8.5.12",
     "typescript": "5.9.3",
-    "vitest": "^3.2.7"
+    "vitest": "4.1.11"
   },
   "engines": {
     "node": ">=22.16.0"

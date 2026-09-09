@@ -63,7 +63,8 @@ describe('MCPOAuthProvider', () => {
   };
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Clear queued one-shot responses and automock implementations between flows.
+    vi.resetAllMocks();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});

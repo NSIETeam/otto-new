@@ -4,7 +4,14 @@
 
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -433,6 +440,149 @@ function advisoryId(via) {
   return match?.[1] ?? null;
 }
 
+// Diagnostics are a projection of the real registry response, never a dump of
+// npm's environment, stderr, raw error text or unknown nested fields. The gate
+// below still validates the original report and its exact reviewed exception.
+export function createAuditDiagnostic(report) {
+  const defined = (object) =>
+    Object.fromEntries(
+      Object.entries(object).filter(([, value]) => value !== undefined),
+    );
+  const text = (value) =>
+    typeof value === 'string' && value.length <= 4096 ? value : undefined;
+  const count = (value) =>
+    Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  const bool = (value) => (typeof value === 'boolean' ? value : undefined);
+  const name = (value) =>
+    typeof value === 'string' &&
+    /^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*$/iu.test(value)
+      ? text(value)
+      : undefined;
+  const severity = (value) =>
+    ['info', 'low', 'moderate', 'high', 'critical'].includes(value)
+      ? value
+      : undefined;
+  const list = (value, convert) =>
+    Array.isArray(value)
+      ? value.map(convert).filter((item) => item !== undefined)
+      : undefined;
+  const counters = (value, keys) =>
+    value && typeof value === 'object'
+      ? defined(Object.fromEntries(keys.map((key) => [key, count(value[key])])))
+      : undefined;
+  const advisory = (value) => {
+    if (typeof value === 'string') return name(value);
+    if (!value || typeof value !== 'object') return undefined;
+    return defined({
+      source: count(value.source),
+      name: name(value.name),
+      dependency: name(value.dependency),
+      title: text(value.title),
+      url:
+        typeof value.url === 'string' &&
+        /^https:\/\/github\.com\/advisories\/GHSA-[a-z0-9-]+$/iu.test(value.url)
+          ? value.url
+          : undefined,
+      severity: severity(value.severity),
+      range: text(value.range),
+      cwe: list(value.cwe, (item) =>
+        typeof item === 'string' && /^CWE-[0-9]+$/u.test(item)
+          ? item
+          : undefined,
+      ),
+      cvss:
+        value.cvss && typeof value.cvss === 'object'
+          ? defined({
+              score:
+                typeof value.cvss.score === 'number' &&
+                Number.isFinite(value.cvss.score) &&
+                value.cvss.score >= 0 &&
+                value.cvss.score <= 10
+                  ? value.cvss.score
+                  : undefined,
+              vectorString:
+                value.cvss.vectorString === null
+                  ? null
+                  : typeof value.cvss.vectorString === 'string' &&
+                      /^CVSS:[0-9.]+\/[A-Za-z0-9:/.]+$/u.test(
+                        value.cvss.vectorString,
+                      )
+                    ? value.cvss.vectorString
+                    : undefined,
+            })
+          : undefined,
+    });
+  };
+  const vulnerabilities = Object.fromEntries(
+    Object.entries(report?.vulnerabilities ?? {})
+      .filter(([key, value]) => name(key) && value && typeof value === 'object')
+      .map(([key, value]) => [
+        key,
+        defined({
+          name: name(value.name),
+          severity: severity(value.severity),
+          isDirect: bool(value.isDirect),
+          via: list(value.via, advisory),
+          effects: list(value.effects, name),
+          range: text(value.range),
+          nodes: list(value.nodes, (node) =>
+            typeof node === 'string' &&
+            node.length <= 4096 &&
+            node.includes('node_modules/') &&
+            !path.isAbsolute(node) &&
+            !node.includes('\\') &&
+            node.split('/').every((part) => part !== '..' && part !== '.')
+              ? node
+              : undefined,
+          ),
+          fixAvailable:
+            typeof value.fixAvailable === 'boolean'
+              ? value.fixAvailable
+              : value.fixAvailable && typeof value.fixAvailable === 'object'
+                ? defined({
+                    name: name(value.fixAvailable.name),
+                    version: text(value.fixAvailable.version),
+                    isSemVerMajor: bool(value.fixAvailable.isSemVerMajor),
+                  })
+                : undefined,
+        }),
+      ]),
+  );
+  return defined({
+    auditReportVersion: count(report?.auditReportVersion),
+    vulnerabilities,
+    metadata: defined({
+      vulnerabilities: counters(report?.metadata?.vulnerabilities, [
+        'info',
+        'low',
+        'moderate',
+        'high',
+        'critical',
+        'total',
+      ]),
+      dependencies: counters(report?.metadata?.dependencies, [
+        'prod',
+        'dev',
+        'optional',
+        'peer',
+        'peerOptional',
+        'total',
+      ]),
+    }),
+    ...(report?.error
+      ? {
+          error: {
+            code:
+              typeof report.error.code === 'string' &&
+              /^[A-Z][A-Z0-9_]{1,63}$/u.test(report.error.code)
+                ? report.error.code
+                : 'NPM_AUDIT_ERROR',
+          },
+        }
+      : {}),
+  });
+}
+
 export function validateAuditReport(report, exception) {
   assert(!report.error, 'npm audit endpoint returned an error');
   assert(report?.auditReportVersion === 2, 'npm audit report version changed');
@@ -544,15 +694,18 @@ function runNpmAudit(root) {
     maxBuffer: 20 * 1024 * 1024,
     shell: false,
   });
-  assert(!result.error, `npm audit failed to start: ${result.error}`);
+  assert(
+    !result.error,
+    'npm audit failed to start; raw process diagnostics omitted',
+  );
   assert(
     result.status === 0 || result.status === 1,
-    `npm audit failed with status ${result.status}: ${result.stderr}`,
+    `npm audit failed with status ${result.status}; raw stderr omitted`,
   );
   try {
     return JSON.parse(result.stdout.trim());
-  } catch (error) {
-    fail(`npm audit did not return valid JSON: ${error.message}`);
+  } catch {
+    fail('npm audit did not return valid JSON; raw response omitted');
   }
 }
 
@@ -566,11 +719,43 @@ function main() {
   if (auditJsonPath && process.env.CI === 'true') {
     fail('CI must use a live npm audit report; --audit-json is forbidden');
   }
+  const diagnosticIndex = process.argv.indexOf('--diagnostic-json');
+  const diagnosticPath =
+    diagnosticIndex === -1 ? null : process.argv[diagnosticIndex + 1];
+  if (
+    diagnosticIndex !== -1 &&
+    (!diagnosticPath || diagnosticPath.startsWith('--'))
+  ) {
+    fail('--diagnostic-json requires a path');
+  }
   const auditReport = auditJsonPath
     ? readJson(path.resolve(process.cwd(), auditJsonPath))
     : runNpmAudit(repoRoot);
-  const result = verifyReleaseDependencyAudit({ auditReport });
-  console.log(`[dependency-audit] verified ${JSON.stringify(result)}`);
+  const diagnostic = createAuditDiagnostic(auditReport);
+  if (diagnosticPath) {
+    const destination = path.resolve(process.cwd(), diagnosticPath);
+    mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+    writeFileSync(destination, `${JSON.stringify(diagnostic, null, 2)}\n`, {
+      flag: 'wx',
+      mode: 0o600,
+    });
+  }
+  try {
+    const result = verifyReleaseDependencyAudit({ auditReport });
+    console.log(`[dependency-audit] verified ${JSON.stringify(result)}`);
+  } catch (error) {
+    const details = Object.entries(diagnostic.vulnerabilities).map(
+      ([name, vulnerability]) => ({
+        name,
+        severity: vulnerability.severity,
+        advisories: (vulnerability.via ?? []).map(advisoryId).filter(Boolean),
+      }),
+    );
+    console.error(
+      `[dependency-audit] reported vulnerability details: ${JSON.stringify(details)}`,
+    );
+    throw error;
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {

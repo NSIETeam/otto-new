@@ -279,6 +279,38 @@ describe('ParkServicesPlugin', () => {
     expect(isActionableStaffTicket({ ...ticket, deliveryStatus: 'delivered' })).toBe(true);
   });
 
+  it.each([
+    ['上次已读早于客服回复', '2026-07-20 00:59:59', 1],
+    ['上次已读等于客服回复', '2026-07-20 01:00:00', 0],
+    ['上次已读晚于客服回复', '2026-07-20 01:00:01', 0],
+  ])('申请历史加载后按回复时间判断未读：%s', async (_label, creatorUpdateReadAt, expectedUnread) => {
+    const bridge = installRepairBridge('worker');
+    bridge.setTickets([{
+      ...bridge.getTickets()[0]!,
+      status: '待验收',
+      isCreator: true,
+      isRecipient: false,
+      deliveryStatus: undefined,
+      responseAt: '2026-07-20T01:00:00Z',
+      creatorUpdateAt: '2026-07-20T01:00:00Z',
+      creatorUpdateReadAt,
+      responseType: '预约已收到',
+      responseText: '工程部已确认预约',
+    }]);
+    const onUnreadCountsChange = vi.fn();
+    render(<ParkServicesPlugin onUnreadCountsChange={onUnreadCountsChange} />);
+    openDialog();
+
+    // Wait for actual rendered ticket data, not a previous or in-flight IPC call.
+    const history = await screen.findByLabelText('我的园区申请历史记录');
+    expect(await within(history).findByText(/20260720001/)).toBeTruthy();
+    await waitFor(() => expect(onUnreadCountsChange).toHaveBeenLastCalledWith({
+      actionableCount: 0, creatorUpdateCount: expectedUnread,
+    }));
+    expect(screen.queryAllByLabelText(/打开园区服务通知/)).toHaveLength(expectedUnread);
+    expect(bridge.read).not.toHaveBeenCalled();
+  });
+
   it('默认不渲染任何可见节点（无悬浮小钮，弹窗关闭）', () => {
     const { container } = render(<ParkServicesPlugin />);
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -1035,8 +1067,14 @@ describe('ParkServicesPlugin', () => {
 
     cleanup();
     const notificationsBeforeRemount = vi.mocked(window.otto.notificationShow).mock.calls.length;
-    render(<ParkServicesPlugin />);
-    await waitFor(() => expect(window.otto.enterpriseTicketList).toHaveBeenCalled());
+    const countsAfterRemount = vi.fn();
+    render(<ParkServicesPlugin onUnreadCountsChange={countsAfterRemount} />);
+    openDialog();
+    const reloadedHistory = await screen.findByLabelText('我的园区申请历史记录');
+    expect(await within(reloadedHistory).findByText(/20260720001/)).toBeTruthy();
+    await waitFor(() => expect(countsAfterRemount).toHaveBeenLastCalledWith({
+      actionableCount: 0, creatorUpdateCount: 0,
+    }));
     expect(window.otto.notificationShow).toHaveBeenCalledTimes(notificationsBeforeRemount);
   });
 

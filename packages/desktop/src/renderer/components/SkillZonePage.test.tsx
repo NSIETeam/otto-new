@@ -3,7 +3,7 @@ import { ModuleReadProvider } from '../state/ModuleReadProvider.js';
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EnterpriseSkillMarketItem } from '../../preload/index.js';
 import { SkillZonePage } from './SkillZonePage.js';
@@ -144,4 +144,33 @@ it('本机 Skill 已返回时不等待远端投稿记录再显示', async () => 
   fireEvent.click(screen.getByRole('button', { name: '我的 Skill' }));
   expect(await screen.findByText('local-budget')).toBeTruthy();
   expect(screen.queryByText('暂无投稿记录')).toBeNull();
+});
+
+it('切走审核页后到达的旧审核结果不能覆盖当前市场，再次进入能加载新审核结果', async () => {
+  let resolveOldReview!: (items: EnterpriseSkillMarketItem[]) => void;
+  const oldReview = new Promise<EnterpriseSkillMarketItem[]>(resolve => {
+    resolveOldReview = resolve;
+  });
+  let reviewRequests = 0;
+  const list = vi.fn(async (input: { scope?: string }) => {
+    if (input.scope !== 'review') return [skill({ name: '当前市场技能' })];
+    reviewRequests++;
+    return reviewRequests === 1 ? oldReview : [skill({ name: '新审核技能', status: 'pending_review' })];
+  });
+  Object.assign(window, { otto: installBridge({ enterpriseSkillList: list }) });
+  render(<SkillZonePage accountId="review-stale-response" isAdmin onBack={vi.fn()} />);
+  await screen.findByRole('heading', { name: '当前市场技能' });
+  fireEvent.click(screen.getByRole('button', { name: '审核' }));
+  await waitFor(() => expect(reviewRequests).toBe(1));
+  fireEvent.click(screen.getByRole('button', { name: '市场' }));
+  await screen.findByRole('heading', { name: '当前市场技能' });
+  await act(async () => {
+    resolveOldReview([skill({ name: '过期审核技能', status: 'pending_review' })]);
+    await oldReview;
+  });
+  expect(screen.queryByText('过期审核技能')).toBeNull();
+  expect(screen.getByRole('heading', { name: '当前市场技能' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '审核' }));
+  await screen.findByRole('heading', { name: '新审核技能' });
+  expect(reviewRequests).toBe(2);
 });

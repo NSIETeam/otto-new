@@ -22,14 +22,30 @@ import { dirname } from 'node:path';
  * 因此从 Testing Library 自身的解析上下文定位 React / ReactDOM，确保组件和渲染器共用
  * 同一个 hooks dispatcher。该配置只影响测试，生产 webpack 构建不受影响。
  */
-const rootRequire = createRequire(new URL('../../package.json', import.meta.url));
+const rootRequire = createRequire(
+  new URL('../../package.json', import.meta.url),
+);
 const testingLibraryRequire = createRequire(
   rootRequire.resolve('@testing-library/react/package.json'),
 );
 const reactDir = dirname(testingLibraryRequire.resolve('react/package.json'));
-const reactDomDir = dirname(testingLibraryRequire.resolve('react-dom/package.json'));
+const reactDomDir = dirname(
+  testingLibraryRequire.resolve('react-dom/package.json'),
+);
 
 export default defineConfig({
+  plugins: [
+    {
+      name: 'otto-desktop-native-sqlite-test-runtime',
+      enforce: 'pre',
+      // Vitest 4 derives Vite's client externals from builtinModules, which omits
+      // Node 22's prefix-only SQLite module. Resolve this one real builtin before
+      // client import-analysis; dependency external rules run too late here.
+      resolveId(id) {
+        return id === 'node:sqlite' ? { id, external: true } : null;
+      },
+    },
+  ],
   resolve: {
     alias: {
       // 顺序敏感：先精确子路径，后裸包，避免裸包前缀吞掉子路径。
@@ -63,8 +79,10 @@ export default defineConfig({
       thresholds: {
         lines: 62,
         statements: 62,
-        functions: 65,
-        branches: 74,
+        // V4 AST maps expose previously synthetic function/branch counts.
+        // Mandatory test:coverage runner applies the reviewed per-file gate in
+        // scripts/verify-desktop-coverage-ratchet.mjs; no replacement percentage.
+        // See docs/release-1.9.15-coverage-migration-20260909.md.
       },
     },
     // 把 RTL 强制内联，让上面的 alias 对其内部 `react-dom/client` import 也生效，

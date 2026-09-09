@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -10,6 +11,8 @@ import {
   runtimeEnvironment,
   validateMounts,
   parseConfiguration,
+  publishControlHandshake,
+  readinessPublicationComplete,
 } from '../../deployment/enterprise-oneclick/tools/canary-worker.mjs';
 import {
   fetchHealthJson,
@@ -17,6 +20,154 @@ import {
 } from '../../deployment/enterprise-oneclick/tools/health-check.mjs';
 
 describe('signed upgrade canary isolation contract', () => {
+  it.each(['writeFileSync', 'fchmodSync', 'fsyncSync', 'linkSync'])(
+    'never publishes partial control bytes after %s fails and removes only its own staging file',
+    (operation) => {
+      const directory = mkdtempSync(
+        path.join(os.tmpdir(), 'otto-canary-fault-'),
+      );
+      const target = path.join(directory, 'go.json');
+      const originalWrite = fs.writeFileSync.bind(fs);
+      const unrelated = path.join(directory, 'unrelated.pending');
+      originalWrite(unrelated, 'preserve');
+      vi.spyOn(fs, 'fchmodSync').mockImplementation(() => {});
+      vi.spyOn(fs, 'fsyncSync').mockImplementation(() => {});
+      vi.spyOn(fs, operation).mockImplementation(() => {
+        throw Object.assign(new Error('injected publication fault'), {
+          code: 'EIO',
+        });
+      });
+      try {
+        expect(() => publishControlHandshake(target, 'a'.repeat(32))).toThrow(
+          'injected publication fault',
+        );
+        expect(fs.existsSync(target)).toBe(false);
+        expect(fs.readdirSync(directory)).toEqual(['unrelated.pending']);
+        expect(readFileSync(unrelated, 'utf8')).toBe('preserve');
+      } finally {
+        vi.restoreAllMocks();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+  it.runIf(process.platform !== 'win32')(
+    'does not replace existing or dangling control symlinks or modify their targets',
+    () => {
+      const directory = mkdtempSync(
+        path.join(os.tmpdir(), 'otto-canary-links-'),
+      );
+      try {
+        for (const exists of [true, false]) {
+          const destination = path.join(directory, `destination-${exists}`);
+          const target = path.join(directory, `go-${exists}.json`);
+          if (exists) writeFileSync(destination, 'original');
+          fs.symlinkSync(destination, target);
+          expect(() =>
+            publishControlHandshake(target, 'a'.repeat(32)),
+          ).toThrow();
+          expect(fs.lstatSync(target).isSymbolicLink()).toBe(true);
+          expect(fs.readlinkSync(target)).toBe(destination);
+          expect(fs.existsSync(destination)).toBe(exists);
+          if (exists)
+            expect(readFileSync(destination, 'utf8')).toBe('original');
+          expect(
+            fs.readdirSync(directory).some((name) => name.endsWith('.pending')),
+          ).toBe(false);
+        }
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+  it('waits for exclusive readiness publication without accepting unsafe or multiply-linked receipts', () => {
+    const metadata = {
+      isSymbolicLink: () => false,
+      isFile: () => true,
+      uid: 71,
+      mode: 0o600,
+      nlink: 2,
+      size: 128,
+    };
+    const observed = vi.spyOn(fs, 'lstatSync').mockReturnValue(metadata);
+    try {
+      expect(readinessPublicationComplete('/fixture/ready.json', 71)).toBe(
+        false,
+      );
+      observed.mockReturnValue({ ...metadata, nlink: 1 });
+      expect(readinessPublicationComplete('/fixture/ready.json', 71)).toBe(
+        true,
+      );
+      for (const changed of [
+        { nlink: 0 },
+        { nlink: 3 },
+        { uid: 72 },
+        { mode: 0o622 },
+        { isSymbolicLink: () => true },
+        { isFile: () => false },
+      ]) {
+        observed.mockReturnValue({ ...metadata, ...changed });
+        expect(() =>
+          readinessPublicationComplete('/fixture/ready.json', 71),
+        ).toThrow('canary-path-custody-invalid');
+      }
+      observed.mockReturnValue({ ...metadata, size: 1024 * 1024 + 1 });
+      expect(() =>
+        readinessPublicationComplete('/fixture/ready.json', 71),
+      ).toThrow('canary-receipt-too-large');
+      observed.mockImplementation(() => {
+        throw Object.assign(new Error('not present'), { code: 'ENOENT' });
+      });
+      expect(readinessPublicationComplete('/fixture/ready.json', 71)).toBe(
+        false,
+      );
+      observed.mockImplementation(() => {
+        throw Object.assign(new Error('access denied'), { code: 'EACCES' });
+      });
+      expect(() =>
+        readinessPublicationComplete('/fixture/ready.json', 71),
+      ).toThrow('access denied');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+  it('does not expose a control handshake until its complete bytes and readable mode are ready', () => {
+    const directory = mkdtempSync(
+      path.join(os.tmpdir(), 'otto-canary-publish-'),
+    );
+    const target = path.join(directory, 'go.json');
+    const syncProbe = path.join(directory, 'sync-probe');
+    const originalOpen = fs.openSync.bind(fs);
+    const permissions = [];
+    writeFileSync(syncProbe, 'fixture');
+    // Portable scheduling test. Actual POSIX permissions/directory fsync are
+    // additionally exercised by the disposable Linux systemd acceptance.
+    vi.spyOn(fs, 'openSync').mockImplementation((file, ...args) =>
+      originalOpen(file === directory ? syncProbe : file, ...args),
+    );
+    vi.spyOn(fs, 'fsyncSync').mockImplementation(() => {});
+    vi.spyOn(fs, 'fchmodSync').mockImplementation((_fd, mode) => {
+      permissions.push({ mode, targetVisible: fs.existsSync(target) });
+    });
+    vi.spyOn(fs, 'chmodSync').mockImplementation((_file, mode) => {
+      permissions.push({ mode, targetVisible: fs.existsSync(target) });
+    });
+    try {
+      const nonce = 'a'.repeat(32);
+      publishControlHandshake(target, nonce);
+      expect(permissions).toEqual([{ mode: 0o444, targetVisible: false }]);
+      expect(JSON.parse(readFileSync(target, 'utf8'))).toEqual({ nonce });
+      expect(fs.statSync(target).nlink).toBe(1);
+      expect(() => publishControlHandshake(target, 'b'.repeat(32))).toThrow();
+      expect(JSON.parse(readFileSync(target, 'utf8'))).toEqual({ nonce });
+      expect(fs.readdirSync(directory).sort()).toEqual([
+        'go.json',
+        'sync-probe',
+      ]);
+    } finally {
+      vi.restoreAllMocks();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it.each([false, true])(
     'does not restore or restart anything after an unknown worker stop (existing evidence=%s)',
     (existing) => {

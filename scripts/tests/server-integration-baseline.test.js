@@ -116,7 +116,7 @@ describe('server integration baseline', () => {
         remoteBranchTips,
       }),
     ).toEqual([]);
-  });
+  }, 15_000); // Real Git subprocesses, not a five-second pure unit test.
 
   it('fails when an integration commit is absent from the release candidate', () => {
     const changed = structuredClone(ledger);
@@ -135,7 +135,7 @@ describe('server integration baseline', () => {
     ).toContain(
       `integration commit ${'f'.repeat(40)} for ${changed.authority.integratedSources[0].name} is not an ancestor of candidate HEAD`,
     );
-  });
+  }, 15_000);
 
   it('fails when the candidate does not contain the authoritative internal baseline', () => {
     // A source list can legitimately gain newer descendants at any position.
@@ -145,27 +145,21 @@ describe('server integration baseline', () => {
       encoding: 'utf8',
     }).trim();
 
-    expect(
-      validateServerIntegrationBaseline({
-        rootDir,
-        verifyGitRefs: true,
-        remoteBranchTips,
-        candidateHead: candidate,
-      }),
-    ).toContain(
+    // Reuse one actual ancestry observation for both assertions. Repeating the
+    // full Git walk doubled the work and could exceed the default test timeout.
+    const errors = validateServerIntegrationBaseline({
+      rootDir,
+      verifyGitRefs: true,
+      remoteBranchTips,
+      candidateHead: candidate,
+    });
+    expect(errors).toContain(
       `candidate ${candidate} does not contain authority baseline ${ledger.authority.baselineCommit}`,
     );
-    expect(
-      validateServerIntegrationBaseline({
-        rootDir,
-        verifyGitRefs: true,
-        remoteBranchTips,
-        candidateHead: candidate,
-      }),
-    ).toContain(
+    expect(errors).toContain(
       `candidate ${candidate} does not contain latest origin/internal ${fetchedInternalTip}`,
     );
-  });
+  }, 15_000);
 
   it('fails when the release workflow no longer enforces reviewed descendants of internal', () => {
     expect(

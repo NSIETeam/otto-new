@@ -8,8 +8,10 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -241,9 +243,9 @@ describe('enterprise one-click service layout', () => {
     ).toBeGreaterThan(serviceInstall);
   });
 
-  it.skipIf(process.platform === 'win32')(
-    'handles a real SIGTERM by waiting for server drain before closing SQLite',
-    async () => {
+  it.each(['SIGTERM', 'SIGINT'])(
+    'keeps draining after repeated %s (native POSIX signals, Windows event dispatch)',
+    async (shutdownSignal) => {
       const sandbox = mkdtempSync(path.join(tmpdir(), 'otto-runtime-signal-'));
       const eventFile = path.join(sandbox, 'events.log');
       const trustFile = path.join(sandbox, 'license-public-keys.json');
@@ -271,13 +273,30 @@ export function closeEnterpriseDatabase() {
 export const ENTERPRISE_TASK_DRAIN_TIMEOUT_MS = 30_000;
 export function startEnterpriseServer() {
   const keepAlive = setInterval(() => {}, 60_000);
+  let releaseDrain = false;
+  let drainElapsed = false;
+  let finishDrain;
+  // Windows cannot deliver POSIX signals. Exercise the same actual listener in
+  // that child via IPC; Linux/macOS below always use child.kill instead.
+  process.on('message', (message) => {
+    if (message === process.env.TEST_SHUTDOWN_SIGNAL) process.emit(message);
+    if (message === 'release-drain') {
+      releaseDrain = true;
+      if (drainElapsed) finishDrain();
+    }
+  });
   const server = {
     close(callback) {
       clearInterval(keepAlive);
       fs.appendFileSync(process.env.EVENT_FILE, 'close-start\\n');
-      setTimeout(() => {
+      fs.appendFileSync(process.env.EVENT_FILE, 'listeners:' + process.listenerCount(process.env.TEST_SHUTDOWN_SIGNAL) + '\\n');
+      finishDrain = () => {
         fs.appendFileSync(process.env.EVENT_FILE, 'close-callback\\n');
         callback();
+      };
+      setTimeout(() => {
+        drainElapsed = true;
+        if (releaseDrain) finishDrain();
       }, 250);
       return server;
     },
@@ -300,6 +319,7 @@ export function startEnterpriseServer() {
         env: {
           ...process.env,
           EVENT_FILE: eventFile,
+          TEST_SHUTDOWN_SIGNAL: shutdownSignal,
           OTTO_ENTERPRISE_HOST: '127.0.0.1',
           OTTO_ENTERPRISE_PORT: '17777',
           OTTO_ENTERPRISE_PUBLIC_URL: 'https://otto.example.test',
@@ -310,7 +330,7 @@ export function startEnterpriseServer() {
           OTTO_ENTERPRISE_TRUST_PROXY_HOPS: '1',
           OTTO_LICENSE_TRUST_FILE: trustFile,
         },
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       });
       let stderr = '';
       child.stderr.on('data', (chunk) => {
@@ -327,10 +347,10 @@ export function startEnterpriseServer() {
         }
         expect(readFileSync(eventFile, 'utf8')).toContain('started');
         const signalAt = Date.now();
-        expect(child.kill('SIGTERM')).toBe(true);
-        const { code, signal } = await new Promise((resolve, reject) => {
+        const exited = new Promise((resolve, reject) => {
           const timeout = setTimeout(
-            () => reject(new Error('runtime did not exit after SIGTERM')),
+            () =>
+              reject(new Error('runtime did not exit after repeated signal')),
             5_000,
           );
           child.once('exit', (code, signal) => {
@@ -338,18 +358,37 @@ export function startEnterpriseServer() {
             resolve({ code, signal });
           });
         });
+        const sendSignal = () => {
+          if (process.platform === 'win32') child.send(shutdownSignal);
+          else expect(child.kill(shutdownSignal)).toBe(true);
+        };
+        sendSignal();
+        const drainingDeadline = Date.now() + 2_000;
+        while (
+          !readFileSync(eventFile, 'utf8').includes('close-start') &&
+          Date.now() < drainingDeadline
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(readFileSync(eventFile, 'utf8')).toContain('close-start');
+        sendSignal();
+        if (child.connected) child.send('release-drain', () => {});
+        const { code, signal } = await exited;
         expect(code, stderr).toBe(0);
         expect(signal).toBeNull();
         expect(Date.now() - signalAt).toBeGreaterThanOrEqual(200);
         expect(readFileSync(eventFile, 'utf8').trim().split('\n')).toEqual([
           'started',
           'close-start',
+          'listeners:1',
           'close-callback',
           'db-close',
         ]);
       } finally {
         if (child.exitCode === null && child.signalCode === null) {
+          const closed = new Promise((resolve) => child.once('close', resolve));
           child.kill('SIGKILL');
+          await closed;
         }
         rmSync(sandbox, { recursive: true, force: true });
       }
@@ -357,34 +396,32 @@ export function startEnterpriseServer() {
     10_000,
   );
 
-  it.skipIf(process.platform === 'win32')(
-    'does not close SQLite when readiness failure shutdown reports an in-flight error',
-    async () => {
-      const sandbox = mkdtempSync(path.join(tmpdir(), 'otto-runtime-ready-'));
-      const eventFile = path.join(sandbox, 'events.log');
-      const trustFile = path.join(sandbox, 'license-public-keys.json');
-      const readinessFile = path.join(sandbox, 'ready.json');
-      const runtimeEntry = path.join(sandbox, 'run.mjs');
-      mkdirSync(path.join(sandbox, 'src', 'enterprise'), { recursive: true });
-      writeFileSync(path.join(sandbox, 'package.json'), '{"type":"module"}\n');
-      writeFileSync(
-        trustFile,
-        JSON.stringify([
-          '-----BEGIN PUBLIC KEY-----\nfixture\n-----END PUBLIC KEY-----\n',
-        ]),
-      );
-      writeFileSync(runtimeEntry, readFileSync(RUNTIME_ENTRY, 'utf8'));
-      writeFileSync(
-        path.join(sandbox, 'src', 'enterprise', 'db.js'),
-        `import fs from 'node:fs';
+  it('does not close SQLite when readiness failure shutdown reports an in-flight error', async () => {
+    const sandbox = mkdtempSync(path.join(tmpdir(), 'otto-runtime-ready-'));
+    const eventFile = path.join(sandbox, 'events.log');
+    const trustFile = path.join(sandbox, 'license-public-keys.json');
+    const readinessFile = path.join(sandbox, 'ready.json');
+    const runtimeEntry = path.join(sandbox, 'run.mjs');
+    mkdirSync(path.join(sandbox, 'src', 'enterprise'), { recursive: true });
+    writeFileSync(path.join(sandbox, 'package.json'), '{"type":"module"}\n');
+    writeFileSync(
+      trustFile,
+      JSON.stringify([
+        '-----BEGIN PUBLIC KEY-----\nfixture\n-----END PUBLIC KEY-----\n',
+      ]),
+    );
+    writeFileSync(runtimeEntry, readFileSync(RUNTIME_ENTRY, 'utf8'));
+    writeFileSync(
+      path.join(sandbox, 'src', 'enterprise', 'db.js'),
+      `import fs from 'node:fs';
 export function closeEnterpriseDatabase() {
   fs.appendFileSync(process.env.EVENT_FILE, 'db-close\\n');
 }
 `,
-      );
-      writeFileSync(
-        path.join(sandbox, 'src', 'enterprise', 'server.js'),
-        `import fs from 'node:fs';
+    );
+    writeFileSync(
+      path.join(sandbox, 'src', 'enterprise', 'server.js'),
+      `import fs from 'node:fs';
 export const ENTERPRISE_TASK_DRAIN_TIMEOUT_MS = 30_000;
 export function startEnterpriseServer() {
   fs.appendFileSync(process.env.EVENT_FILE, 'started\\n');
@@ -409,55 +446,444 @@ export function startEnterpriseServer() {
   return server;
 }
 `,
+    );
+    const child = spawn(process.execPath, [runtimeEntry], {
+      cwd: sandbox,
+      env: {
+        ...process.env,
+        EVENT_FILE: eventFile,
+        OTTO_ENTERPRISE_HOST: '127.0.0.1',
+        OTTO_ENTERPRISE_PORT: '17777',
+        OTTO_ENTERPRISE_READY_FILE: readinessFile,
+        OTTO_ENTERPRISE_PUBLIC_URL: 'https://otto.example.test',
+        OTTO_APP_VERSION: '1.9.14',
+        OTTO_BUILD_COMMIT: 'b'.repeat(40),
+        OTTO_ENTERPRISE_ADMIN_TOKEN:
+          'runtime-readiness-admin-token-at-least-32-chars',
+        OTTO_ENTERPRISE_TRUST_PROXY_HOPS: '1',
+        OTTO_LICENSE_TRUST_FILE: trustFile,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+    try {
+      const deadline = Date.now() + 5_000;
+      while (
+        (!existsSync(eventFile) ||
+          !readFileSync(eventFile, 'utf8').includes('close-error')) &&
+        Date.now() < deadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(child.exitCode).toBeNull();
+      expect(stderr).toContain('cannot publish canary readiness');
+      expect(stderr).toContain('completion checkpoint still pending');
+      expect(readFileSync(eventFile, 'utf8').trim().split('\n')).toEqual([
+        'started',
+        'close-start',
+        'close-error',
+      ]);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        const closed = new Promise((resolve) => child.once('close', resolve));
+        child.kill('SIGKILL');
+        await closed;
+      }
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it.each(['SIGTERM', 'SIGINT'])(
+    'keeps the original watchdog after close(error) and repeated %s (explicit fixture clock)',
+    async (shutdownSignal) => {
+      const sandbox = mkdtempSync(
+        path.join(tmpdir(), 'otto-runtime-watchdog-'),
       );
-      const child = spawn(process.execPath, [runtimeEntry], {
+      const eventFile = path.join(sandbox, 'events.log');
+      const trustFile = path.join(sandbox, 'license-public-keys.json');
+      mkdirSync(path.join(sandbox, 'src', 'enterprise'), { recursive: true });
+      writeFileSync(path.join(sandbox, 'package.json'), '{"type":"module"}\n');
+      writeFileSync(
+        trustFile,
+        JSON.stringify(['-----BEGIN PUBLIC KEY-----\nfixture']),
+      );
+      writeFileSync(
+        path.join(sandbox, 'run.mjs'),
+        readFileSync(RUNTIME_ENTRY, 'utf8'),
+      );
+      writeFileSync(
+        path.join(sandbox, 'src', 'enterprise', 'db.js'),
+        `import fs from 'node:fs';
+export function closeEnterpriseDatabase() { fs.appendFileSync(process.env.EVENT_FILE, 'db-close\\n'); }
+`,
+      );
+      writeFileSync(
+        path.join(sandbox, 'src', 'enterprise', 'server.js'),
+        `import fs from 'node:fs';
+export const ENTERPRISE_TASK_DRAIN_TIMEOUT_MS = 30_000;
+export function startEnterpriseServer() {
+  const event = text => fs.appendFileSync(process.env.EVENT_FILE, text + '\\n');
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const timers = [];
+  let now = 0;
+  // Explicit facility clock only: retain and check the actual requested delay.
+  // No product timeout constant or runtime source is replaced. Signals below
+  // are IPC-dispatched on all platforms; native POSIX signals have separate tests.
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    const timer = { callback: () => callback(...args), deadline: now + delay, cancelled: false };
+    timer.handle = realSetTimeout(() => event('facility-clock-not-advanced'), 60_000);
+    timers.push(timer);
+    event('watchdog:' + delay + ':at:' + now);
+    return timer.handle;
+  };
+  globalThis.clearTimeout = handle => {
+    const timer = timers.find(item => item.handle === handle);
+    if (timer) { timer.cancelled = true; event('watchdog-cleared'); }
+    return realClearTimeout(handle);
+  };
+  process.on('message', message => {
+    if (message === 'SIGTERM' || message === 'SIGINT') {
+      process.emit(message);
+      event('signal:' + message + ':listeners:' + process.listenerCount(message));
+    } else if (message && Number.isInteger(message.advanceTo)) {
+      now = message.advanceTo;
+      event('clock:' + now);
+      for (const timer of timers) {
+        if (!timer.cancelled && now >= timer.deadline) {
+          event('watchdog-fired:referenced:' + timer.handle.hasRef());
+          realClearTimeout(timer.handle);
+          timer.callback();
+        }
+      }
+    }
+  });
+  event('started');
+  return {
+    once(name, callback) { if (name === 'listening') setImmediate(callback); return this; },
+    address() { return { address: '0.0.0.0', port: 17777 }; },
+    close(callback) {
+      event('close-start');
+      realSetTimeout(() => { event('close-error'); callback(new Error('completion checkpoint still pending')); }, 0);
+      return this;
+    },
+    closeAllConnections() { event('forced'); },
+  };
+}
+`,
+      );
+      const child = spawn(process.execPath, [path.join(sandbox, 'run.mjs')], {
         cwd: sandbox,
         env: {
           ...process.env,
           EVENT_FILE: eventFile,
           OTTO_ENTERPRISE_HOST: '127.0.0.1',
           OTTO_ENTERPRISE_PORT: '17777',
-          OTTO_ENTERPRISE_READY_FILE: readinessFile,
+          OTTO_ENTERPRISE_READY_FILE: path.join(sandbox, 'ready.json'),
           OTTO_ENTERPRISE_PUBLIC_URL: 'https://otto.example.test',
-          OTTO_APP_VERSION: '1.9.14',
-          OTTO_BUILD_COMMIT: 'b'.repeat(40),
+          OTTO_APP_VERSION: '1.9.15',
+          OTTO_BUILD_COMMIT: 'c'.repeat(40),
           OTTO_ENTERPRISE_ADMIN_TOKEN:
-            'runtime-readiness-admin-token-at-least-32-chars',
+            'runtime-watchdog-admin-token-at-least-32-chars',
           OTTO_ENTERPRISE_TRUST_PROXY_HOPS: '1',
           OTTO_LICENSE_TRUST_FILE: trustFile,
         },
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       });
       let stderr = '';
       child.stderr.on('data', (chunk) => {
         stderr += String(chunk);
       });
-      try {
-        const deadline = Date.now() + 5_000;
+      const exited = new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve({ timedOut: true }), 5_000);
+        child.once('exit', (code, signal) => {
+          clearTimeout(timeout);
+          resolve({ code, signal });
+        });
+      });
+      const waitFor = async (text) => {
+        const deadline = Date.now() + 2_000;
         while (
           (!existsSync(eventFile) ||
-            !readFileSync(eventFile, 'utf8').includes('close-error')) &&
+            !readFileSync(eventFile, 'utf8').includes(text)) &&
           Date.now() < deadline
         ) {
-          await new Promise((resolve) => setTimeout(resolve, 20));
+          await new Promise((resolve) => setTimeout(resolve, 10));
         }
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(readFileSync(eventFile, 'utf8'), stderr).toContain(text);
+      };
+      try {
+        await waitFor('close-error');
+        child.send({ advanceTo: 10_000 });
+        child.send(shutdownSignal);
+        child.send(shutdownSignal);
+        child.send({ advanceTo: 44_999 });
+        await waitFor('clock:44999');
         expect(child.exitCode).toBeNull();
-        expect(stderr).toContain('cannot publish canary readiness');
+        expect(readFileSync(eventFile, 'utf8')).not.toContain('db-close');
+        child.send({ advanceTo: 45_000 });
+        expect(await exited, stderr).toEqual({ code: 1, signal: null });
         expect(stderr).toContain('completion checkpoint still pending');
+        expect(stderr).toContain('graceful shutdown timed out');
         expect(readFileSync(eventFile, 'utf8').trim().split('\n')).toEqual([
           'started',
+          'watchdog:45000:at:0',
           'close-start',
           'close-error',
+          'clock:10000',
+          `signal:${shutdownSignal}:listeners:1`,
+          `signal:${shutdownSignal}:listeners:1`,
+          'clock:44999',
+          'clock:45000',
+          'watchdog-fired:referenced:true',
+          'forced',
         ]);
       } finally {
         if (child.exitCode === null && child.signalCode === null) {
+          const closed = new Promise((resolve) => child.once('close', resolve));
           child.kill('SIGKILL');
+          await closed;
         }
         rmSync(sandbox, { recursive: true, force: true });
       }
     },
     10_000,
+  );
+
+  it.each([
+    'success',
+    'late-file',
+    'late-directory',
+    'late-link',
+    'write-failure',
+    'sync-failure',
+    'chmod-failure',
+    'directory-sync-failure',
+    'unlink-failure',
+  ])(
+    'publishes complete readiness without replacing an existing target: %s',
+    (publicationMode) => {
+      const sandbox = mkdtempSync(
+        path.join(tmpdir(), 'otto-runtime-publication-'),
+      );
+      const readinessFile = path.join(sandbox, 'ready.json');
+      const auditFile = path.join(sandbox, 'audit.json');
+      const eventFile = path.join(sandbox, 'events.log');
+      const trustFile = path.join(sandbox, 'license-public-keys.json');
+      mkdirSync(path.join(sandbox, 'src', 'enterprise'), { recursive: true });
+      writeFileSync(path.join(sandbox, 'package.json'), '{"type":"module"}\n');
+      writeFileSync(
+        trustFile,
+        JSON.stringify([
+          '-----BEGIN PUBLIC KEY-----\nfixture\n-----END PUBLIC KEY-----',
+        ]),
+      );
+      writeFileSync(
+        path.join(sandbox, 'run.mjs'),
+        readFileSync(RUNTIME_ENTRY, 'utf8'),
+      );
+      writeFileSync(
+        path.join(sandbox, 'src', 'enterprise', 'db.js'),
+        `import fs from 'node:fs';
+export function closeEnterpriseDatabase() { fs.appendFileSync(process.env.EVENT_FILE, 'db-close\\n'); }
+`,
+      );
+      writeFileSync(
+        path.join(sandbox, 'src', 'enterprise', 'server.js'),
+        `import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+export const ENTERPRISE_TASK_DRAIN_TIMEOUT_MS = 30_000;
+export function startEnterpriseServer() {
+  const destination = process.env.OTTO_ENTERPRISE_READY_FILE;
+  const mode = process.env.PUBLICATION_MODE;
+  const audit = { writes: [], links: [], probes: [], chmods: [], unlinks: [], directorySyncs: 0, directorySyncEmulated: process.platform === 'win32' };
+  const original = Object.fromEntries(['openSync','closeSync','writeFileSync','fsyncSync','linkSync','fchmodSync','unlinkSync'].map(name => [name, fs[name]]));
+  const directoryFd = -12345;
+  // Windows cannot fsync a directory. Only that operation is emulated here;
+  // the POSIX CI cases below use the real native open/fsync/close operations.
+  const directoryFds = new Set();
+  fs.openSync = (file, ...args) => {
+    if (file === path.dirname(destination)) {
+      if (process.platform === 'win32') return directoryFd;
+      const fd = original.openSync(file, ...args); directoryFds.add(fd); return fd;
+    }
+    return original.openSync(file, ...args);
+  };
+  fs.closeSync = (fd) => { if (fd !== directoryFd) { directoryFds.delete(fd); return original.closeSync(fd); } };
+  fs.fchmodSync = (fd, permission) => {
+    audit.chmods.push({ permission, finalVisible: fs.existsSync(destination) });
+    if (mode === 'chmod-failure') throw new Error('synthetic readiness chmod failure');
+    return original.fchmodSync(fd, permission);
+  };
+  fs.unlinkSync = file => {
+    audit.unlinks.push({ name: path.basename(file), target: file === destination });
+    if (mode === 'unlink-failure') throw new Error('synthetic readiness unlink failure');
+    return original.unlinkSync(file);
+  };
+  fs.writeFileSync = (file, ...args) => {
+    if (file === process.env.EVENT_FILE || file === process.env.AUDIT_FILE) return original.writeFileSync(file, ...args);
+    audit.writes.push({ destinationFinal: file === destination, finalVisible: fs.existsSync(destination) });
+    if (mode === 'write-failure') throw new Error('synthetic readiness write failure');
+    return original.writeFileSync(file, ...args);
+  };
+  fs.fsyncSync = (fd) => {
+    if (fd === directoryFd || directoryFds.has(fd)) {
+      audit.directorySyncs++;
+      if (mode === 'directory-sync-failure') throw new Error('synthetic readiness directory sync failure');
+      if (fd === directoryFd) return;
+    } else {
+      const probe = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(require("node:fs").existsSync(process.argv[1])))', destination], { encoding: 'utf8', timeout: 5000 });
+      audit.probes.push({ exit: probe.status, visible: probe.stdout === 'true' });
+      if (mode === 'sync-failure') throw new Error('synthetic readiness sync failure');
+    }
+    return original.fsyncSync(fd);
+  };
+  fs.linkSync = (source, target) => {
+    if (mode === 'late-file') original.writeFileSync(destination, 'existing readiness marker', { flag: 'wx' });
+    if (mode === 'late-directory') fs.mkdirSync(destination);
+    if (mode === 'late-link') fs.symlinkSync(destination + '.missing', destination, process.platform === 'win32' ? 'junction' : 'file');
+    audit.links.push({ source: JSON.parse(fs.readFileSync(source, 'utf8')), mode: fs.statSync(source).mode & 0o777, targetExisted: fs.existsSync(target) });
+    return original.linkSync(source, target);
+  };
+  const server = {
+    once(event, callback) {
+      if (event === 'listening') setImmediate(() => {
+        callback();
+        setTimeout(() => process.emit('SIGTERM'), 10);
+      });
+      return server;
+    },
+    address() { return { address: '127.0.0.1', port: 17777 }; },
+    close(callback) {
+      original.writeFileSync(process.env.AUDIT_FILE, JSON.stringify(audit));
+      fs.appendFileSync(process.env.EVENT_FILE, 'close-start\\n');
+      callback(); return server;
+    },
+    closeAllConnections() { throw new Error('unexpected forced close'); },
+  };
+  return server;
+}
+`,
+      );
+      try {
+        const result = spawnSync(
+          process.execPath,
+          [path.join(sandbox, 'run.mjs')],
+          {
+            cwd: sandbox,
+            timeout: 10_000,
+            encoding: 'utf8',
+            env: {
+              ...process.env,
+              EVENT_FILE: eventFile,
+              AUDIT_FILE: auditFile,
+              PUBLICATION_MODE: publicationMode,
+              OTTO_ENTERPRISE_HOST: '127.0.0.1',
+              OTTO_ENTERPRISE_PORT: '0',
+              OTTO_ENTERPRISE_READY_FILE: readinessFile,
+              OTTO_ENTERPRISE_PUBLIC_URL: 'https://otto.example.test',
+              OTTO_APP_VERSION: '1.9.15',
+              OTTO_BUILD_COMMIT: 'c'.repeat(40),
+              OTTO_ENTERPRISE_ADMIN_TOKEN:
+                'runtime-readiness-admin-token-at-least-32-chars',
+              OTTO_ENTERPRISE_TRUST_PROXY_HOPS: '1',
+              OTTO_LICENSE_TRUST_FILE: trustFile,
+            },
+          },
+        );
+        expect(result.error, result.stderr).toBeUndefined();
+        expect(result.signal, result.stderr).toBeNull();
+        expect(result.status, result.stderr).toBe(
+          publicationMode === 'success' ? 0 : 1,
+        );
+        const audit = JSON.parse(readFileSync(auditFile, 'utf8'));
+        expect(audit.writes.every((write) => !write.destinationFinal)).toBe(
+          true,
+        );
+        expect(audit.unlinks.every((unlink) => !unlink.target)).toBe(true);
+        if (publicationMode !== 'success') {
+          expect(result.stderr).toContain('cannot publish canary readiness');
+        }
+        if (publicationMode === 'success') {
+          expect(audit.probes).toEqual([{ exit: 0, visible: false }]);
+          expect(audit.directorySyncs).toBe(1);
+          expect(audit.directorySyncEmulated).toBe(
+            process.platform === 'win32',
+          );
+          expect(audit.links).toHaveLength(1);
+          expect(audit.links[0].targetExisted).toBe(false);
+          expect(audit.links[0].source).toEqual({
+            host: '127.0.0.1',
+            port: 17777,
+            version: '1.9.15',
+            buildCommit: 'c'.repeat(40),
+          });
+          expect(JSON.parse(readFileSync(readinessFile, 'utf8'))).toEqual(
+            audit.links[0].source,
+          );
+          expect(statSync(readinessFile).nlink).toBe(1);
+          if (process.platform !== 'win32')
+            expect(mode(readinessFile)).toBe(0o600);
+        } else if (publicationMode === 'late-file') {
+          expect(readFileSync(readinessFile, 'utf8')).toBe(
+            'existing readiness marker',
+          );
+        } else if (publicationMode === 'late-directory') {
+          expect(statSync(readinessFile).isDirectory()).toBe(true);
+        } else if (publicationMode === 'late-link') {
+          expect(lstatSync(readinessFile).isSymbolicLink()).toBe(true);
+          expect(existsSync(readinessFile)).toBe(false);
+          expect(existsSync(`${readinessFile}.missing`)).toBe(false);
+        } else if (
+          publicationMode === 'directory-sync-failure' ||
+          publicationMode === 'unlink-failure'
+        ) {
+          expect(audit.links).toHaveLength(1);
+          expect(JSON.parse(readFileSync(readinessFile, 'utf8'))).toEqual(
+            audit.links[0].source,
+          );
+          expect(statSync(readinessFile).nlink).toBe(
+            publicationMode === 'unlink-failure' ? 2 : 1,
+          );
+          expect(audit.directorySyncs).toBe(
+            publicationMode === 'directory-sync-failure' ? 1 : 0,
+          );
+        } else {
+          expect(existsSync(readinessFile)).toBe(false);
+          expect(audit.links).toHaveLength(0);
+          if (publicationMode === 'chmod-failure') {
+            expect(audit.chmods).toEqual([
+              { permission: 0o600, finalVisible: false },
+            ]);
+          }
+        }
+        expect(readFileSync(eventFile, 'utf8').trim().split('\n')).toEqual([
+          'close-start',
+          'db-close',
+        ]);
+        const staging = readdirSync(sandbox).filter((name) =>
+          name.startsWith('.otto-readiness-'),
+        );
+        if (publicationMode === 'unlink-failure') {
+          // A real unlink failure cannot be pretended away: retain the owned
+          // temporary link as evidence, but never claim readiness success.
+          expect(staging).toHaveLength(1);
+          expect(readFileSync(path.join(sandbox, staging[0]), 'utf8')).toBe(
+            readFileSync(readinessFile, 'utf8'),
+          );
+        } else {
+          expect(staging).toEqual([]);
+        }
+      } finally {
+        rmSync(sandbox, { recursive: true, force: true });
+      }
+    },
+    15_000,
   );
 });
 
@@ -1360,7 +1786,7 @@ describe('enterprise one-click health contract', () => {
     expect(upgrader).not.toContain('OTTO_ENTERPRISE_PORT="17777"');
     expect(runtime).toContain('OTTO_ENTERPRISE_READY_FILE');
     expect(runtime).toContain("server.once('listening'");
-    expect(runtime).toContain("flag: 'wx'");
+    expect(runtime).toContain("fs.openSync(temporary, 'wx', 0o600)");
   });
 
   it('requires upgrade, A2A, repair and carpool capabilities in canary and acceptance docs', () => {

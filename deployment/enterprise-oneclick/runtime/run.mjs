@@ -2,6 +2,35 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+function publishReadiness(file, value) {
+  const directory = path.dirname(file);
+  const temporary = path.join(directory, `.otto-readiness-${randomUUID()}.tmp`);
+  // Open exclusively before taking cleanup ownership. A pre-existing file,
+  // including a dangling symlink, must never be replaced or removed.
+  const descriptor = fs.openSync(temporary, 'wx', 0o600);
+  try {
+    try {
+      fs.writeFileSync(descriptor, `${JSON.stringify(value)}\n`, 'utf8');
+      fs.fchmodSync(descriptor, 0o600);
+      fs.fsyncSync(descriptor);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    // link is atomic and no-clobber; rename could replace a concurrently
+    // created target. The worker waits for the temporary second link to go.
+    fs.linkSync(temporary, file);
+  } finally {
+    fs.unlinkSync(temporary);
+  }
+  const directoryDescriptor = fs.openSync(directory, 'r');
+  try {
+    fs.fsyncSync(directoryDescriptor);
+  } finally {
+    fs.closeSync(directoryDescriptor);
+  }
+}
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -130,16 +159,12 @@ if (readinessFile) {
       ) {
         throw new Error('server did not bind a valid loopback TCP address');
       }
-      fs.writeFileSync(
-        readinessFile,
-        `${JSON.stringify({
-          host: address.address,
-          port: address.port,
-          version: appVersion,
-          buildCommit,
-        })}\n`,
-        { encoding: 'utf8', mode: 0o600, flag: 'wx' },
-      );
+      publishReadiness(readinessFile, {
+        host: address.address,
+        port: address.port,
+        version: appVersion,
+        buildCommit,
+      });
     } catch (error) {
       process.stderr.write(
         `[Otto Enterprise] cannot publish canary readiness: ${error.message}\n`,
@@ -180,5 +205,8 @@ function shutdown(signal, successExitCode = 0) {
   });
 }
 
-process.once('SIGTERM', () => shutdown('SIGTERM'));
-process.once('SIGINT', () => shutdown('SIGINT'));
+// Keep the listeners installed throughout the drain. Removing a once-listener
+// restores Node's default termination on a second signal before accepted work
+// has settled; shutdown() itself is already idempotent.
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

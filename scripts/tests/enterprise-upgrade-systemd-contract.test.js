@@ -120,6 +120,41 @@ print(module.service_unit(pathlib.PurePosixPath('/home/runner/work/_temp/private
     expect(workflow).toContain('retention-days: 14');
   });
 
+  it('requires real atomic publication and single-signal drain evidence without relaxing the worker budget', () => {
+    for (const mode of [
+      'success',
+      'drain45',
+      'ready-link-delay',
+      'ready-link-stuck',
+      'migration-exit7',
+      'runtime-exit7',
+      'oom',
+      'residual',
+      'hang-stop',
+    ]) {
+      expect(workerHarness).toContain(`'${mode}'`);
+    }
+    expect(workerHarness).toContain("fs.openSync(temporary, 'wx', 0o600)");
+    expect(workerHarness).toContain('fs.linkSync(temporary, ready)');
+    expect(workerHarness).toContain('setTimeout(finish, 400)');
+    expect(workerHarness).toContain("process.once('SIGTERM', onStop)");
+    expect(workerHarness).toContain("publication['signalCount'] == 1");
+    expect(workerHarness).toContain(
+      "publication['drainCompleteAtMs'] - publication['signalAtMs'] >= 45_000",
+    );
+    expect(workerHarness).toContain('29 <= elapsed < 45');
+    expect(workerHarness).toContain(
+      "not (work / 'health-complete.json').exists()",
+    );
+    expect(workerHarness).toContain(
+      "not (work / 'worker-result.json').exists()",
+    );
+    expect(workerHarness).toContain(
+      "'verify-deliverable','--transaction',str(txn)",
+    );
+    expect(workerHarness).not.toContain("'kill','--signal=KILL'");
+  });
+
   it('makes real systemd acceptance mandatory before signing/build/publication', () => {
     const gate = release.slice(release.indexOf('\n  enterprise-upgrade-systemd:'), release.indexOf('\n  sqlcipher-native:'));
     expect(gate).toContain('needs: validate-source');

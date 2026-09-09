@@ -20,7 +20,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:http';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 it('seals the actual dirty evaluator and empty slots; rejects slot/identity drift and overwrites', async () => {
   // Sibling of the checkout stays outside source inputs without asking esbuild
@@ -182,6 +182,91 @@ it('rejects relative destinations without executing or creating a campaign', asy
     preparePair('relative', 'another', 'output', {}),
   ).rejects.toThrow('Absolute paths');
 });
+it('refuses missing budget before initializing either heavy evaluation module', () => {
+  const fixture = mkdtempSync(
+    path.join(path.dirname(process.cwd()), 'otto-live-entry-admission-'),
+  );
+  const source = path.join(fixture, 'packages/evals/src');
+  const marker = path.join(fixture, 'heavy-module-initialized');
+  mkdirSync(source, { recursive: true });
+  writeFileSync(path.join(fixture, 'package.json'), '{"type":"module"}');
+  for (const file of ['live-runtime.live.test.ts', 'liveEvalGate.ts']) {
+    writeFileSync(
+      path.join(source, file),
+      readFileSync(path.join('packages/evals/src', file)),
+    );
+  }
+  // Keep the actual admission entry/gate. Both expensive modules become
+  // initialization tripwires, not substitute implementations of real tasks.
+  const poisoned = `import { writeFileSync } from 'node:fs';
+writeFileSync(${JSON.stringify(marker)}, 'unexpected heavy initialization');
+throw new Error('heavy evaluation module initialized before admission');
+export const LIVE_CASES = [], FEEDBACK_BASELINE = [];
+export function executeLiveCase() {}
+export function baselineFingerprint() {}
+export function summarizeBaseline() {}
+export function compareBaselines() {}
+`;
+  for (const file of ['liveRuntimeEval.ts', 'feedbackBaseline.ts']) {
+    writeFileSync(path.join(source, file), poisoned);
+  }
+  const config = path.join(fixture, 'vitest.config.mjs');
+  writeFileSync(
+    config,
+    `export default ${JSON.stringify({
+      root: fixture,
+      resolve: {
+        alias: { vitest: path.resolve('node_modules/vitest/dist/index.js') },
+      },
+      test: {
+        include: ['packages/evals/src/live-runtime.live.test.ts'],
+        maxWorkers: 1,
+        fileParallelism: false,
+      },
+    })};`,
+  );
+  const env = { OTTO_LIVE_EVAL: '1', CI: '1', NO_COLOR: '1' };
+  for (const key of [
+    'SystemRoot',
+    'WINDIR',
+    'PATH',
+    'Path',
+    'TEMP',
+    'TMP',
+    'PATHEXT',
+  ]) {
+    if (process.env[key]) env[key] = process.env[key];
+  }
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.resolve('node_modules/vitest/vitest.mjs'),
+        'run',
+        '--config',
+        config,
+      ],
+      {
+        cwd: process.cwd(),
+        env,
+        shell: false,
+        windowsHide: true,
+        timeout: 30000,
+        encoding: 'utf8',
+      },
+    );
+    const output = result.stdout + result.stderr;
+    expect(result.error).toBeUndefined();
+    expect(result.status).not.toBe(0);
+    expect(() => readFileSync(marker)).toThrow(/ENOENT/);
+    expect(output).toContain('Live evaluation refused before provider access');
+    expect(output).not.toContain(
+      'heavy evaluation module initialized before admission',
+    );
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+}, 40000);
 it('the actual live entry refuses missing budget before contacting a provider and does not print a key', async () => {
   let requests = 0;
   const server = createServer((_req, res) => {

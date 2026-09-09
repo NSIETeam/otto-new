@@ -71,10 +71,8 @@ export function CarpoolPointPicker({
     setSelected(next);
   };
   return (
-    <section aria-label="地图选点">
-      <p>
-        点击地图移动中心，再确认选点；键盘方向键可微调。精确地点仅用于本人的路线规划。
-      </p>
+    <section className="otto-carpool__map-picker" aria-label="地图选点">
+      <p>点击地图选点</p>
       {error ? <p role="alert">{error}</p> : null}
       {image ? (
         <div
@@ -126,35 +124,40 @@ export function CarpoolPointPicker({
             ＋
           </span>
         </div>
-      ) : (
-        <p role="status">
-          {error ? '地图暂时不可用，可关闭后继续搜索地点。' : '正在加载地图…'}
-        </p>
-      )}
-      <button
-        type="button"
-        disabled={zoom >= 17}
-        onClick={() => setZoom((value) => value + 1)}
-      >
-        放大地图
-      </button>
-      <button
-        type="button"
-        disabled={zoom <= 3}
-        onClick={() => setZoom((value) => value - 1)}
-      >
-        缩小地图
-      </button>
-      <button
-        type="button"
-        disabled={busy || !image}
-        onClick={() => void choose()}
-      >
-        确认此地点
-      </button>
-      <button type="button" onClick={onClose}>
-        关闭地图
-      </button>
+      ) : !error ? (
+        <p role="status">正在加载地图…</p>
+      ) : null}
+      <div className="otto-carpool__map-toolbar">
+        <div className="otto-carpool__map-zoom" role="group" aria-label="地图缩放">
+        <button
+          type="button"
+          aria-label="放大地图" title="放大地图"
+          disabled={zoom >= 17}
+          onClick={() => setZoom((value) => value + 1)}
+        >
+          ＋
+        </button>
+        <button
+          type="button"
+          aria-label="缩小地图" title="缩小地图"
+          disabled={zoom <= 3}
+          onClick={() => setZoom((value) => value - 1)}
+        >
+          −
+        </button>
+        </div>
+        <button
+          type="button"
+          className="otto-park-demo__primary"
+          disabled={busy || !image}
+          onClick={() => void choose()}
+        >
+          确认此地点
+        </button>
+        <button type="button" onClick={onClose}>
+          关闭地图
+        </button>
+      </div>
     </section>
   );
 }

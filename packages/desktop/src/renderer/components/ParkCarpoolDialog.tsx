@@ -599,20 +599,14 @@ export function ParkCarpoolDialog({
       title="拼车助手" size="standard"
       className="otto-carpool-dialog"
       icon={<IconCar size={22} />}
-      subtitle="发布通勤意向，寻找同园区的同路伙伴。"
+      subtitle="寻找同园区的同路伙伴"
       onClose={() => {
         if (dirty) setConfirmClose(true);
         else onClose();
       }}
     >
       <section className="otto-carpool__hero">
-        <div>
-          <strong>找到与你方向相近的园区伙伴</strong>
-          <p>
-            Otto
-            只提供信息发布、路线匹配和连接提示，不叫车、不收费，也不处理费用分摊。
-          </p>
-        </div>
+        <strong>本次同行</strong>
         <span>
           {active
             ? state.searchStatus === 'needs_confirmation'
@@ -627,15 +621,16 @@ export function ParkCarpoolDialog({
                 : '尚未发布'}
         </span>
       </section>
-      <p className="otto-carpool__chat-hint">
-        也可以直接在对话框说：“今天 18:30 从宏创园区南门到回龙观，想搭车，前后
-        30 分钟都可以”。Otto 会补问缺失信息并在发布前确认。
-      </p>
+      <details className="otto-carpool__help">
+        <summary>使用说明</summary>
+        <p>Otto 提供同行匹配，不代叫车、不收费，也不处理费用分摊。</p>
+        <p>也可在对话中告诉 Otto 出发地、目的地和时间，确认后发布。</p>
+        <p>候选人仅看到路线区域；精确地点用于你的路线规划，不展示住宅门牌。</p>
+      </details>
       {state.availability?.reason && <p role="status">{state.availability.reason}</p>}
       {state !== EMPTY_STATE && !state.mapConfigured && !loading && !error ? (
         <p role="alert" className="otto-workspace-dialog__error">
-          服务器尚未配置高德 Web
-          服务密钥，地点搜索与路线匹配暂不可用；系统不会生成虚构路线或百分比。
+          地图服务未配置，暂时无法搜索地点或匹配路线。
         </p>
       ) : null}
       {error ? (
@@ -657,7 +652,7 @@ export function ParkCarpoolDialog({
           }
           meetingPoints={state.meetingPoints}
           label="从哪里出发"
-          hint="优先选择园区出口或公共集合点，不建议填写办公室或地下车库。"
+          hint="建议选择园区出口或公共集合点"
           query={originQuery}
           setQuery={setOriginQuery}
           selected={origin}
@@ -672,7 +667,7 @@ export function ParkCarpoolDialog({
           }
           meetingPoints={state.meetingPoints}
           label="要去哪里"
-          hint="请选择标准地点；候选阶段不会展示精确坐标或住宅门牌。"
+          hint="搜索后选择地点"
           query={destinationQuery}
           setQuery={setDestinationQuery}
           selected={destination}
@@ -734,20 +729,17 @@ export function ParkCarpoolDialog({
                 <strong>{MODE_LABEL[option]}</strong>
                 <span>
                   {option === 'driver'
-                    ? '可以由我开车并顺路带人'
+                    ? '顺路带人'
                     : option === 'rider'
-                      ? '搭乘同行伙伴的车'
-                      : '匹配后自行协商第三方叫车'}
+                      ? '搭乘伙伴的车'
+                      : '自行协商叫车'}
                 </span>
               </label>
             ))}
           </div>
-          <p>
-            多选表示本次这几种方式都可以。“一起叫车”不会由 Otto 下单或计费。
-          </p>
         </fieldset>
         <p className="otto-carpool__privacy">
-          提交后，你的通勤意向将对同园区且路线、时间符合条件的用户可见。你可以随时修改或停止寻找。
+          仅对同园区的匹配用户可见 · 随时停止寻找
         </p>
         <div className="otto-carpool__actions">
           <button type="submit" className="otto-park-demo__primary" disabled={!state.mapConfigured || state.availability?.canPublish === false || loading}>
@@ -789,10 +781,10 @@ export function ParkCarpoolDialog({
         </div>
       </form>
       {state.parkAdmin ? (
-        <section aria-label="管理园区公共集合点">
-          <h3>园区公共集合点</h3>
+        <details className="otto-carpool__help" aria-label="管理园区公共集合点">
+          <summary>管理公共集合点</summary>
           <p>
-            请先在出发地选好园区出口或公共集合点。添加后，全园区可见该地点及坐标，请勿添加住宅或私人办公室。
+            将所选出发地设为公共集合点，地点及坐标全园区可见。请勿添加私人地点。
           </p>
           <label>
             公共集合点名称
@@ -873,7 +865,7 @@ export function ParkCarpoolDialog({
               </button>
             </p>
           ))}
-        </section>
+        </details>
       ) : null}
       {confirmClose ? (
         <CarpoolConfirmation

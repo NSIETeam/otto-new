@@ -174,7 +174,7 @@ it('real UI publishes, previews, requests, chats, groups, admits and leaves thro
       });
     await service.publishIntent('b', { ...input, requestKey: 'ui-peer-b' });
     show('a', true);
-    await screen.findByText('找到与你方向相近的园区伙伴');
+    await screen.findByText('本次同行');
     for (const [name, query, label] of [
       ['从哪里出发', '园区', '测试园区南门'],
       ['要去哪里', '地铁', '测试地铁站'],

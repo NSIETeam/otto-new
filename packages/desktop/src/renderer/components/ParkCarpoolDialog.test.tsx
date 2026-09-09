@@ -29,7 +29,7 @@ describe('拼车助手界面', () => {
       enterpriseParkCarpoolGet: async () => emptyState,
     });
     render(<ParkCarpoolDialog open onClose={() => undefined} />);
-    await screen.findByText('找到与你方向相近的园区伙伴');
+    await screen.findByText('本次同行');
     fireEvent.click(screen.getByRole('button', { name: '发布并查找同路伙伴' }));
     const input = screen.getByLabelText('从哪里出发搜索');
     expect(document.activeElement).toBe(input);
@@ -54,7 +54,7 @@ describe('拼车助手界面', () => {
         }),
     });
     render(<ParkCarpoolDialog open onClose={() => undefined} />);
-    await screen.findByText('找到与你方向相近的园区伙伴');
+    await screen.findByText('本次同行');
     const group = screen.getByRole('group', { name: '从哪里出发' });
     const input = within(group).getByPlaceholderText('搜索小区、地标或地址');
     fireEvent.change(input, { target: { value: '旧地点' } });
@@ -99,7 +99,7 @@ describe('拼车助手界面', () => {
     render(<ParkCarpoolDialog open onClose={vi.fn()} />);
 
     expect(
-      await screen.findByText(/服务器尚未配置高德 Web 服务密钥/u),
+      await screen.findByText(/地图服务未配置/u),
     ).toBeTruthy();
     expect(
       (
@@ -145,7 +145,7 @@ describe('拼车助手界面', () => {
       enterpriseParkCarpoolStop: vi.fn(),
     });
     render(<ParkCarpoolDialog open onClose={vi.fn()} />);
-    await screen.findByText('找到与你方向相近的园区伙伴');
+    await screen.findByText('本次同行');
 
     const origin = screen.getByRole('group', { name: '从哪里出发' });
     fireEvent.change(
@@ -169,8 +169,11 @@ describe('拼车助手界面', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /搭车/u }));
 
     expect(
-      screen.getByText(/候选阶段不会展示精确坐标或住宅门牌/u),
+      screen.getByText(/仅对同园区的匹配用户可见/u),
     ).toBeTruthy();
+    const help = screen.getByText('使用说明').closest('details')!;
+    expect(help.open).toBe(false);
+    expect(help.textContent).toContain('不展示住宅门牌');
     window.otto.enterpriseParkCarpoolRefresh = vi.fn(async () => {
       throw new Error('刷新离线');
     });

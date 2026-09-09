@@ -13770,11 +13770,10 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 @media (max-width: 720px) { .otto-policy-intelligence__profile { grid-template-columns: 1fr; } }
 
 .otto-carpool__hero { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 12px; padding: 18px; border: 1px solid color-mix(in srgb, var(--otto-accent) 42%, var(--otto-border)); border-radius: 16px; background: linear-gradient(135deg, color-mix(in srgb, var(--otto-accent) 13%, var(--otto-bg)), var(--otto-surface)); }
-.otto-carpool__hero > div { flex: 1; }
+.otto-carpool__hero > strong { flex: 1; }
 .otto-carpool__hero strong { font-size: 18px; }
-.otto-carpool__hero p, .otto-carpool__chat-hint, .otto-carpool__place p, .otto-carpool__modes p, .otto-carpool__privacy { margin: 5px 0 0; color: var(--otto-text-secondary); font-size: 12px; line-height: 1.6; }
+.otto-carpool__place p, .otto-carpool__modes p, .otto-carpool__privacy { margin: 5px 0 0; color: var(--otto-text-secondary); font-size: 12px; line-height: 1.6; }
 .otto-carpool__hero > span { padding: 6px 10px; border-radius: 999px; color: var(--otto-accent); background: color-mix(in srgb, var(--otto-accent) 12%, transparent); font-size: 12px; font-weight: 700; }
-.otto-carpool__chat-hint { margin: 0 0 16px; padding: 10px 12px; border-left: 3px solid var(--otto-accent); background: color-mix(in srgb, var(--otto-accent) 6%, transparent); }
 .otto-carpool__form { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--otto-border); border-radius: 16px; background: var(--otto-surface); }
 .otto-carpool__place, .otto-carpool__modes { min-width: 0; margin: 0; padding: 0; border: 0; }
 .otto-carpool__place legend, .otto-carpool__modes legend { padding: 0; font-weight: 700; }
@@ -14582,7 +14581,6 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-carpool-dialog .otto-carpool__hero { padding: 0; border: 0; border-radius: 0; background: none; align-items: center; }
 .otto-carpool-dialog .otto-carpool__hero strong { font-size: 14px; }
 .otto-carpool-dialog .otto-carpool__hero > span { flex-shrink: 0; background: var(--otto-bg); color: var(--otto-text-secondary); }
-.otto-carpool-dialog .otto-carpool__chat-hint { border: 0; border-radius: var(--otto-radius-sm); background: var(--otto-bg); }
 .otto-carpool-dialog .otto-carpool__form { gap: 20px; border-radius: 14px; }
 .otto-carpool-dialog .otto-carpool__place legend, .otto-carpool-dialog .otto-carpool__modes legend, .otto-carpool-dialog .otto-carpool__row label > span { color: var(--otto-text); font-size: 14px; font-weight: 700; }
 .otto-carpool-dialog .otto-carpool__search input, .otto-carpool-dialog .otto-carpool__row input, .otto-carpool-dialog .otto-carpool__row select { box-sizing: border-box; width: 100%; min-height: 42px; border-radius: var(--otto-radius-sm); font-size: 14px; }
@@ -14595,3 +14593,28 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-carpool-dialog .otto-carpool__actions > button[type="submit"] { width: 100%; min-height: 42px; border-color: var(--otto-accent); background: var(--otto-accent); color: var(--otto-bg); font-weight: 600; }
 .otto-carpool-dialog .otto-carpool__actions > button[type="submit"]:hover:not(:disabled) { background: var(--otto-accent-hover); }
 @media (max-width: 560px) { .otto-carpool-dialog .otto-carpool__search { grid-template-columns: minmax(0, 1fr) auto; } .otto-carpool-dialog .otto-carpool__hero > span { white-space: normal; } }
+
+.otto-carpool__help {
+  font-size: 12px;
+  color: var(--otto-text-secondary);
+}
+.otto-carpool__help > summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.otto-carpool__help p { margin: 6px 0; line-height: 1.6; }
+.otto-carpool__map-picker {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--otto-border);
+  border-radius: 12px;
+}
+.otto-carpool__map-picker > p { margin: 0 0 8px; }
+.otto-carpool__map-toolbar, .otto-carpool__map-zoom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.otto-carpool__map-toolbar { margin-top: 10px; flex-wrap: wrap; }
+.otto-carpool__map-zoom { margin-right: auto; }
+.otto-carpool__map-zoom > button { min-width: 36px; min-height: 36px; }

@@ -3,6 +3,8 @@
 export function readCarpoolConfig(env: NodeJS.ProcessEnv = process.env) {
   const number = (key: string, fallback: number, min: number, max: number) => {
     const raw = env[key];
+    if (raw !== undefined && raw.trim() === '')
+      throw new Error(`${key} 配置无效`);
     const value = raw === undefined ? fallback : Number(raw);
     if (!Number.isFinite(value) || value < min || value > max)
       throw new Error(`${key} 配置无效`);

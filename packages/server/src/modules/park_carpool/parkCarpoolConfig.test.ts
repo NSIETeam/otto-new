@@ -94,3 +94,22 @@ it('limits pilot capabilities to configured parks without conflating map readine
   expect(carpoolCommunicationCapabilities(pilot, 'park-b')).toEqual([]);
   expect(() => readCarpoolConfig({OTTO_PARK_CARPOOL_PILOT_PARK_IDS: 'park-a,,park-b'})).toThrow(/配置无效/);
 });
+
+const zeroAllowedSettings = [
+  ['OTTO_PARK_CARPOOL_DRIVER_MINIMUM_OVERLAP', 'minimumDriverOverlap'],
+  ['OTTO_PARK_CARPOOL_TAXI_MINIMUM_OVERLAP', 'minimumMemberOverlap'],
+  ['OTTO_PARK_CARPOOL_MAXIMUM_DETOUR_SECONDS', 'maximumDetourSeconds'],
+] as const;
+
+it.each(zeroAllowedSettings)('rejects empty or whitespace-only numeric configuration: %s', (key) => {
+  for (const value of ['', ' ', '\t\r\n']) {
+    expect(() => readCarpoolConfig({ [key]: value }), `${key}=${JSON.stringify(value)}`)
+      .toThrow(`${key} 配置无效`);
+  }
+});
+
+it.each(zeroAllowedSettings)('keeps an explicit valid zero distinct from absent or blank: %s', (key, property) => {
+  expect(readCarpoolConfig({ [key]: '0' })[property]).toBe(0);
+  expect(readCarpoolConfig({ [key]: ' 0 ' })[property]).toBe(0);
+  expect(readCarpoolConfig({})[property]).toBe(property === 'maximumDetourSeconds' ? 600 : 0.35);
+});

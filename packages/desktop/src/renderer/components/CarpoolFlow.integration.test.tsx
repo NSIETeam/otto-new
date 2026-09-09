@@ -24,6 +24,9 @@ import { ParkCarpoolDialog } from './ParkCarpoolDialog.js';
 import { CarpoolRequestCenter } from './CarpoolRequestCenter.js';
 
 it('real UI publishes, previews, requests, chats, groups, admits and leaves through SQLite and native MLS', async () => {
+  // Keep domain freshness and the UI's local day independent of the CI wall
+  // clock, without faking timers used by real SQLite/native MLS/UI operations.
+  const fixedNow = new Date('2026-09-09T04:00:00Z');
   const directory = await mkdtemp(path.join(tmpdir(), 'otto-carpool-flow-'));
   const db = new Database(':memory:');
   db.exec(
@@ -56,7 +59,7 @@ it('real UI publishes, previews, requests, chats, groups, admits and leaves thro
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date());
+  }).format(fixedNow);
   const places = [
     {
       id: 'origin',
@@ -75,6 +78,7 @@ it('real UI publishes, previews, requests, chats, groups, admits and leaves thro
   ];
   const service = createParkCarpoolService({ config: carpoolTestConfig,
     store,
+    now: () => new Date(fixedNow),
     createId: (id) => `intent-${id}`,
     mapProvider: {
       configured: true,
@@ -164,6 +168,8 @@ it('real UI publishes, previews, requests, chats, groups, admits and leaves thro
     await waitFor(() => expect(screen.queryByLabelText('首条消息')).toBeNull());
   };
   try {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(fixedNow);
     for (const [id, chat] of chats)
       await chat.activate({
         serverUrl: 'http://127.0.0.1:54321',
@@ -317,10 +323,14 @@ it('real UI publishes, previews, requests, chats, groups, admits and leaves thro
       ),
     ).toBe(false);
   } finally {
-    vi.unstubAllEnvs();
-    cleanup();
-    await Promise.all([...chats.values()].map((chat) => chat.close()));
-    db.close();
-    await rm(directory, { recursive: true, force: true });
+    try {
+      vi.unstubAllEnvs();
+      cleanup();
+      await Promise.all([...chats.values()].map((chat) => chat.close()));
+      db.close();
+      await rm(directory, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
   }
 }, 60_000);

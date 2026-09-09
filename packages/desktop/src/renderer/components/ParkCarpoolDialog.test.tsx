@@ -74,6 +74,17 @@ describe('拼车助手界面', () => {
     );
     expect(screen.queryByRole('option', { name: /旧地点结果/ })).toBeNull();
   });
+  it('does not report a missing map key when the initial state request fails, and can retry', async () => {
+    const get = vi.fn().mockRejectedValueOnce(new Error('无法连接企业服务器')).mockResolvedValue(emptyState);
+    Object.assign(window.otto, { enterpriseParkCarpoolGet: get });
+    render(<ParkCarpoolDialog open onClose={() => undefined} />);
+    expect(await screen.findByText('无法连接企业服务器')).toBeTruthy();
+    expect(screen.queryByText(/服务器尚未配置高德/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '重新读取拼车状态' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: '发布并查找同路伙伴' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByText('无法连接企业服务器')).toBeNull();
+  });
+
   it('地图能力缺失时如实禁用发布，不展示虚构匹配', async () => {
     Object.assign(window.otto, {
       enterpriseParkCarpoolGet: vi.fn(async () => ({

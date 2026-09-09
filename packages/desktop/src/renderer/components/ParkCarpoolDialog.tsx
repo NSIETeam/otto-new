@@ -632,7 +632,7 @@ export function ParkCarpoolDialog({
         30 分钟都可以”。Otto 会补问缺失信息并在发布前确认。
       </p>
       {state.availability?.reason && <p role="status">{state.availability.reason}</p>}
-      {!state.mapConfigured && !loading ? (
+      {state !== EMPTY_STATE && !state.mapConfigured && !loading && !error ? (
         <p role="alert" className="otto-workspace-dialog__error">
           服务器尚未配置高德 Web
           服务密钥，地点搜索与路线匹配暂不可用；系统不会生成虚构路线或百分比。
@@ -641,6 +641,7 @@ export function ParkCarpoolDialog({
       {error ? (
         <p role="alert" className="otto-workspace-dialog__error">
           {error}
+          {state === EMPTY_STATE ? <button type="button" disabled={loading} onClick={() => void load()}>重新读取拼车状态</button> : null}
         </p>
       ) : null}
       <form

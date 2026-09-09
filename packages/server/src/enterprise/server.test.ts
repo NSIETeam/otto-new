@@ -882,10 +882,41 @@ describe('企业常驻任务注册', () => {
       'enterprise.recruitment-material-intake',
       'enterprise.recruitment-auto-archive',
       'enterprise.recruitment-background-analysis',
+      'enterprise.park-carpool-maintenance',
+      'enterprise.park-flea-market.maintenance',
     ]);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     servers = servers.filter((item) => item !== server);
     expect(registry.list()).toEqual([]);
+  });
+
+  it('waits for market readiness IO before handing a stopped server back to database cleanup', async () => {
+    process.env.OTTO_ENTERPRISE_DIR = tmpDir;
+    vi.resetModules();
+    const mod: ServerModule = await import('./server.js');
+    const database: DatabaseModule = await import('./db.js');
+    closeDatabases.push(database.closeEnterpriseDatabase);
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const app = database.getFleaMarketApplication();
+    const initialization = vi.spyOn(app, 'initialize').mockReturnValue(pending);
+    const server = mod.startEnterpriseServer({ host: '127.0.0.1', port: 0,
+      adminToken: ADMIN_TOKEN, smsSender: null, repairSmsSender: null, repairFeishuSender: null,
+      taskRegistry: new RecurringTaskRegistry({ allowPaidBackground: true }) });
+    servers.push(server);
+    let closed = false;
+    const closing = new Promise<void>((resolve, reject) => server.close(error => {
+      closed = true;
+      if (error) reject(error); else resolve();
+    }));
+    try {
+      await new Promise(resolve => setTimeout(resolve, 25));
+      expect(initialization).toHaveBeenCalledOnce();
+      expect(closed).toBe(false);
+    } finally {
+      finish(); await closing; initialization.mockRestore();
+      servers = servers.filter(item => item !== server);
+    }
   });
 
   it('waits for an accepted external write to be marked before close resolves', async () => {

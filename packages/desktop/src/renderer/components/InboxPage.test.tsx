@@ -211,8 +211,20 @@ describe('InboxPage response hardening', () => {
     await waitFor(() => expect(enterpriseMessagesList).toHaveBeenCalledWith('member-2'));
     expect(onMessageRead).not.toHaveBeenCalled();
 
+    fireEvent.click(screen.getByRole('button', { name: '商品消息' }));
+    resolveMessages([]);
+    await waitFor(() => expect(screen.getByRole('button', { name: '商品消息' }).getAttribute('aria-pressed')).toBe('true'));
+    expect(onMessageRead).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '会话' }));
     resolveMessages([]);
     await waitFor(() => expect(onMessageRead).toHaveBeenCalledWith('member-2'));
+    const reply = screen.getByPlaceholderText('回复 同事二…');
+    fireEvent.change(reply, { target: { value: '未发送的私聊草稿' } });
+    fireEvent.click(screen.getByRole('button', { name: '商品消息' }));
+    expect(screen.queryByRole('tablist', { name: '消息过滤' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '会话' }));
+    expect((screen.getByPlaceholderText('回复 同事二…') as HTMLTextAreaElement).value).toBe('未发送的私聊草稿');
+    expect(screen.queryByText('商品会话')).toBeNull();
   });
 
   it('opens a federated E2EE conversation from the same contact list', async () => {

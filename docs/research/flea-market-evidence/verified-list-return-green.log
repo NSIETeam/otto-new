@@ -1,0 +1,10 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ✓ src/renderer/components/ParkMarketDialog.test.tsx (8 tests) 1330ms
+   ✓ closes directly after the current form is durably saved  1043ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  13:30:54
+   Duration  2.02s (transform 111ms, setup 70ms, collect 133ms, tests 1.33s, environment 298ms, prepare 54ms)

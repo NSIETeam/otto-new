@@ -1,0 +1,44 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ ✓ packages/server/src/modules/data_platform/enterpriseSharedCache.test.ts (4 tests) 4ms
+(node:18900) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts (4 tests) 6ms
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts (5 tests | 1 failed) 1983ms
+   ✓ SQLite: expires without user reads, cleans precise positions and deletes own workflow facts 18ms
+   ✓ PostgreSQL: expires without user reads, cleans precise positions and deletes own workflow facts  1000ms
+   ✓ SQLite: moving parks prunes old scope without deleting new valid intent 5ms
+   ✓ PostgreSQL: moving parks prunes old scope without deleting new valid intent  952ms
+   × cancels maintenance before candidate effects after ownership is lost during a database read 8ms
+     → expected 1 to deeply equal +0
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts > cancels maintenance before candidate effects after ownership is lost during a database read
+AssertionError: expected 1 to deeply equal +0
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts:189:36
+    187|   expect(await running).toBeInstanceOf(Error);
+    188|   const after=(await service.getWorkflow('a')).metrics;
+    189|   expect(after?.averageCandidates).toEqual(before?.averageCandidates);
+       |                                    ^
+    190|   expect((await service.getWorkflow('a')).notices.filter(n=>n.type==='…
+    191|   pause=false;await service.maintain();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 12 passed (13)
+   Start at  20:22:53
+   Duration  4.72s (transform 1.36s, setup 0ms, collect 4.74s, tests 1.99s, environment 0ms, prepare 114ms)
+
+
+EXIT_CODE=1

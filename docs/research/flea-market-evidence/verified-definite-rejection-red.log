@@ -1,0 +1,29 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ❯ src/main/park-market-messaging.test.ts (2 tests | 1 failed) 17ms
+   ✓ retains both ciphertext receipts across concurrent timeouts and retries identical bytes 12ms
+   × discards retry ciphertext only when the server explicitly rejects the transaction 4ms
+     → expected [Function] to throw error matching /明确未发送/ but got 'CONFLICT'
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-market-messaging.test.ts > discards retry ciphertext only when the server explicitly rejects the transaction
+AssertionError: expected [Function] to throw error matching /明确未发送/ but got 'CONFLICT'
+
+- Expected:
+/明确未发送/
+
++ Received:
+"CONFLICT"
+
+ ❯ src/main/park-market-messaging.test.ts:82:3
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  12:46:54
+   Duration  652ms (transform 33ms, setup 78ms, collect 18ms, tests 17ms, environment 316ms, prepare 32ms)

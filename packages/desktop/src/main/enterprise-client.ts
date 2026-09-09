@@ -1,3 +1,4 @@
+import { validateMarketRequest } from './park-market.js';
 /**
  * @license Copyright 2026 Felix SPDX-License-Identifier: Apache-2.0
  *
@@ -5,6 +6,7 @@
  * 企业服务器，也永远拿不到会话令牌。
  */
 
+import type { ParkTransportCommand, ParkTransportResult, CarpoolWorkflowView, CarpoolWorkflowCommand } from 'otto-server';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -829,6 +831,7 @@ export interface EnterpriseParkCarpoolPlaceSuggestion
 }
 
 export interface EnterpriseParkCarpoolIntent {
+  version?: number;
   id: string;
   accountId: string;
   organizationId: string;
@@ -855,6 +858,10 @@ export interface EnterpriseParkCarpoolIntent {
 }
 
 export interface EnterpriseParkCarpoolMatch {
+  pendingRequest?: 'sent' | 'received';
+  sharedDepartureStart?: string;
+  sharedDepartureEnd?: string;
+  confirmedAgoMinutes?: number;
   intentId: string;
   displayName: string;
   organizationName: string;
@@ -866,12 +873,17 @@ export interface EnterpriseParkCarpoolMatch {
   compatibleModes: EnterpriseParkCarpoolCompatibleMode[];
   originArea: string;
   destinationArea: string;
-  freshness: 'just_updated' | 'recent' | 'departing_soon';
+  freshness: 'just_updated' | 'recent' | 'departing_soon' | 'needs_confirmation';
   explanation: string;
 }
 
 export interface EnterpriseParkCarpoolState {
+  searchStatus?: 'searching' | 'needs_confirmation' | 'not_accepting' | 'inactive';
+  resultPage?:{total:number;nextCursor?:string};
+  capabilities?:string[];
+  failedCandidateCount?: number;
   capability: 'park_carpool_v1';
+  availability?: { parkEnabled: boolean; canPublish: boolean; reason?: string };
   mapConfigured: boolean;
   parkId: string;
   currentIntent: EnterpriseParkCarpoolIntent | null;
@@ -880,6 +892,8 @@ export interface EnterpriseParkCarpoolState {
 }
 
 export interface EnterpriseParkCarpoolPublishInput {
+  requestKey?: string;
+  expectedVersion?: number | null;
   travelDate: string;
   origin: EnterpriseParkCarpoolPlace;
   destination: EnterpriseParkCarpoolPlace;
@@ -889,6 +903,10 @@ export interface EnterpriseParkCarpoolPublishInput {
 }
 
 export interface EnterprisePublicProfileInput {
+  primaryIndustryCode?: string | null;
+  primaryIndustryName?: string | null;
+  industryClassificationBasis?: 'company_selected' | 'researcher_classified_from_public_business' | 'migrated_suggestion' | null;
+  industryConfirmedByCompany?: boolean;
   summary: string;
   website: string;
   industryTags: string[];
@@ -916,6 +934,14 @@ export interface EnterpriseParkPartnershipEdge {
 }
 
 export interface EnterpriseParkStarMap {
+  capacityStatus?: 'ready' | 'list_only';
+  totalNodeCount?: number;
+  relationType?: 'same_industry';
+  dataSource?: 'real' | 'demo';
+  taxonomyVersion?: string;
+  industryGroups?: Array<{ code: string; name: string; memberOrganizationIds: string[] }>;
+  unclassifiedNodeIds?: string[];
+  relationshipCount?: number;
   parkId: string;
   parkName: string;
   currentOrganizationId: string;
@@ -2446,7 +2472,7 @@ export class EnterpriseClient {
         ...init,
         method: init.method ?? 'GET',
         headers,
-        signal: controller.signal,
+        signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
       });
       const body = (await response.json().catch(() => ({}))) as {
         error?: string;
@@ -2469,6 +2495,7 @@ export class EnterpriseClient {
       return body;
     } catch (error) {
       if (error instanceof EnterpriseRequestError) throw error;
+      if (init.signal?.aborted) throw new Error('请求已取消');
       if (error instanceof Error && error.name === 'AbortError')
         throw new Error('连接企业服务器超时');
       const message = error instanceof Error ? error.message : String(error);
@@ -3482,6 +3509,54 @@ export class EnterpriseClient {
     ).park;
   }
 
+  async deleteParkCarpoolData():Promise<void> {await this.request('/enterprise/park-carpool/data',{method:'DELETE'});}
+  async getParkCarpoolRoutePreview(intentId:string,groupId?:string):Promise<import('otto-server').CarpoolRoutePreview> {
+    return (await this.request<{preview:import('otto-server').CarpoolRoutePreview}>('/enterprise/park-carpool/route-preview',{method:'POST',body:JSON.stringify({intentId,groupId})})).preview;
+  }
+  async reverseParkCarpoolPlace(coordinate: {longitude:number;latitude:number}, system: 'gps' | 'autonavi' = 'autonavi'): Promise<EnterpriseParkCarpoolPlaceSuggestion> {
+    return (await this.request<{place:EnterpriseParkCarpoolPlaceSuggestion}>('/enterprise/park-carpool/reverse',{method:'POST',body:JSON.stringify({coordinate,system})})).place;
+  }
+  async getParkCarpoolMap(coordinate: {longitude:number;latitude:number}, zoom: number): Promise<string> {
+    return (await this.request<{image:string}>('/enterprise/park-carpool/map',{method:'POST',body:JSON.stringify({coordinate,zoom})})).image;
+  }
+  async executeParkCarpoolTransport(command: ParkTransportCommand): Promise<ParkTransportResult> {
+    const {crypto,account,serverScope}=this.requireE2eeContext();
+    const proof=crypto.signParkCarpoolCommand({serverScope,accountId:account.id,command});
+    return (await this.request<{ result: ParkTransportResult }>('/enterprise/park-carpool/transport', { method: 'POST', body: JSON.stringify({...command,proof}) })).result;
+  }
+  async getParkCarpoolWorkflow(): Promise<CarpoolWorkflowView> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    return (await this.request<{ workflow: CarpoolWorkflowView }>('/enterprise/park-carpool/workflow')).workflow;
+  }
+  async executeParkCarpoolWorkflow(command: CarpoolWorkflowCommand): Promise<CarpoolWorkflowView> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    return (await this.request<{ workflow: CarpoolWorkflowView }>('/enterprise/park-carpool/workflow', { method: 'POST', body: JSON.stringify(command) })).workflow;
+  }
+
+  marketMessagingContext() {
+    const { crypto, account, serverScope } = this.requireE2eeContext();
+    return { crypto, accountId: account.id, organizationId: account.organizationId, serverScope, serverUrl: this.serverUrl, requiresMls: this.supportsMlsPrivateMessages() };
+  }
+  async requestParkMarket(value: unknown, upload: {signal?: AbortSignal; onProgress?: (loaded: number, total: number) => void} = {}): Promise<unknown> {
+    const input = validateMarketRequest(value);
+    const uploadBase64=input.imageBase64 ?? input.attachmentBase64;
+    if (uploadBase64 !== undefined) {
+      const bytes = Buffer.from(uploadBase64, 'base64');
+      if (!bytes.length || bytes.length > 20 * 1024 * 1024 || bytes.toString('base64') !== uploadBase64) throw new Error('图片内容无效');
+      if (upload.signal?.aborted) throw new Error('图片上传已取消');
+      let offset = 0;
+      const body = new ReadableStream<Uint8Array>({pull(controller) {
+        if (offset === bytes.length) {controller.close();return;}
+        const end = Math.min(offset + 64 * 1024, bytes.length);
+        controller.enqueue(new Uint8Array(bytes.subarray(offset,end)));
+        offset = end;
+        upload.onProgress?.(offset,bytes.length);
+      }});
+      return this.request(`/enterprise/park-market${input.path}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'content-length':String(bytes.length), ...(input.attachmentProof ? {'x-otto-attachment-proof':Buffer.from(JSON.stringify(input.attachmentProof)).toString('base64url')} : {}) }, body, duplex:'half', signal:upload.signal } as RequestInit & {duplex:'half'}, { timeoutMs: 30_000 });
+    }
+    return this.request(`/enterprise/park-market${input.path}`, { method: input.method, body: input.body === undefined ? undefined : JSON.stringify(input.body) });
+  }
+
   async getParkCarpoolState(): Promise<EnterpriseParkCarpoolState> {
     if (!this.token) throw new Error('登录已失效，请重新登录');
     await this.assertCompatibleServer(this.serverUrl, ['park_carpool_v1']);
@@ -3520,12 +3595,12 @@ export class EnterpriseClient {
     ).intent;
   }
 
-  async refreshParkCarpoolMatches(): Promise<EnterpriseParkCarpoolState> {
+  async refreshParkCarpoolMatches(query:{cursor?:string;filter?:string}={}): Promise<EnterpriseParkCarpoolState> {
     if (!this.token) throw new Error('登录已失效，请重新登录');
     await this.assertCompatibleServer(this.serverUrl, ['park_carpool_v1']);
     return (
       await this.request<{ state: EnterpriseParkCarpoolState }>(
-        '/enterprise/park-carpool/matches',
+        `/enterprise/park-carpool/matches?${new URLSearchParams(Object.entries(query).filter((entry):entry is [string,string]=>typeof entry[1]==='string'))}`,
       )
     ).state;
   }
@@ -3536,6 +3611,17 @@ export class EnterpriseClient {
     return (
       await this.request<{ intent: EnterpriseParkCarpoolIntent }>(
         '/enterprise/park-carpool/intents/stop',
+        { method: 'POST', body: JSON.stringify({ intentId }) },
+      )
+    ).intent;
+  }
+
+  async confirmParkCarpoolIntent(intentId: string): Promise<EnterpriseParkCarpoolIntent> {
+    if (!this.token) throw new Error('登录已失效，请重新登录');
+    await this.assertCompatibleServer(this.serverUrl, ['park_carpool_v1']);
+    return (
+      await this.request<{ intent: EnterpriseParkCarpoolIntent }>(
+        '/enterprise/park-carpool/intents/confirm',
         { method: 'POST', body: JSON.stringify({ intentId }) },
       )
     ).intent;
@@ -3752,11 +3838,18 @@ export class EnterpriseClient {
   }
 
   async getEnterpriseParkStarMap(): Promise<EnterpriseParkStarMap> {
+    try {
     return (
       await this.request<{ starMap: EnterpriseParkStarMap }>(
         '/enterprise/park/star-map',
       )
     ).starMap;
+    } catch (error) {
+      if (error instanceof EnterpriseRequestError && (error.status === 401 || error.status === 403)) {
+        throw new Error(`[STAR_MAP_ACCESS_DENIED] ${error.message}`);
+      }
+      throw error;
+    }
   }
 
   async getParkStatistics(): Promise<EnterpriseParkStatistics> {

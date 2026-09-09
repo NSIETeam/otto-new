@@ -1,0 +1,12 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new-carpool
+
+(node:15952) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ integration/park-market/capacity.test.ts (1 test) 13963ms
+   ✓ measures 100 concurrent reads against 100k persisted records / 10k active listings  13963ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  11:56:37
+   Duration  16.15s (transform 989ms, setup 0ms, collect 1.97s, tests 13.96s, environment 0ms, prepare 45ms)

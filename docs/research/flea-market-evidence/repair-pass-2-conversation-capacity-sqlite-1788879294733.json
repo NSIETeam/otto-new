@@ -1,0 +1,10 @@
+{
+  "backend": "sqlite",
+  "conversations": 100,
+  "concurrentWrites": 100,
+  "concurrentReads": 100,
+  "maintenanceWorkers": 2,
+  "writeP95Ms": 73.46629200000007,
+  "readP95Ms": 77.37825000000021,
+  "scope": "Real database business operations with injected transport; no network or encryption throughput claim"
+}

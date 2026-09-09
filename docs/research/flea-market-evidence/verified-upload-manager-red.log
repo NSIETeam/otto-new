@@ -1,0 +1,30 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-market-uploads.test.ts [ src/main/park-market-uploads.test.ts ]
+Error: Failed to resolve import "./park-market-uploads.js" from "src/main/park-market-uploads.test.ts". Does the file exist?
+  Plugin: vite:import-analysis
+  File: /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop/src/main/park-market-uploads.test.ts:2:34
+  1  |  import { it, expect } from "vitest";
+  2  |  import { MarketUploadManager } from "./park-market-uploads.js";
+     |                                       ^
+  3  |  it("cancels only the chosen upload and prevents progress or results crossing account scope", async () => {
+  4  |    let scope = "first";
+ ❯ TransformPluginContext._formatLog ../../node_modules/vite/dist/node/chunks/config.js:29079:43
+ ❯ TransformPluginContext.error ../../node_modules/vite/dist/node/chunks/config.js:29076:14
+ ❯ normalizeUrl ../../node_modules/vite/dist/node/chunks/config.js:27199:18
+ ❯ ../../node_modules/vite/dist/node/chunks/config.js:27257:32
+ ❯ TransformPluginContext.transform ../../node_modules/vite/dist/node/chunks/config.js:27225:4
+ ❯ EnvironmentPluginContainer.transform ../../node_modules/vite/dist/node/chunks/config.js:28877:14
+ ❯ loadAndTransform ../../node_modules/vite/dist/node/chunks/config.js:22746:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  13:13:07
+   Duration  596ms (transform 34ms, setup 81ms, collect 0ms, tests 0ms, environment 288ms, prepare 45ms)

@@ -76,6 +76,7 @@ export async function handleGeneralizedParkRoute({
         actorAccountId: account.id,
         summary: typeof body.summary === 'string' ? body.summary : '',
         website: typeof body.website === 'string' ? body.website : '',
+        primaryIndustryCode: body.primaryIndustryCode as string | null | undefined,
         industryTags: stringList(body.industryTags),
         productsServices: stringList(body.productsServices),
         capabilities: stringList(body.capabilities),

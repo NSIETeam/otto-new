@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ModuleDefinition } from '../moduleCatalog.js';
+import { buildModuleCatalog, type ModuleDefinition } from '../moduleCatalog.js';
 import type { ModuleWorkspaceLayout } from '../moduleWorkspace.js';
+import { ModuleWorkspace } from './ModuleWorkspace.js';
 import { ModuleMarketplaceDialog } from './ModuleMarketplaceDialog.js';
 
 const modules: readonly ModuleDefinition[] = [
@@ -63,8 +64,8 @@ describe('ModuleMarketplaceDialog', () => {
   it('adds and removes modules in one draft, applying it only on confirmation', () => {
     const { onConfirm } = renderDialog();
     expect(screen.getByRole('heading', { name: '常用' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: '园区服务' })).toBeNull();
-    expect(screen.queryByRole('checkbox', { name: '园区公告' })).toBeNull();
+    expect(screen.getByRole('heading', { name: '园区服务' })).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: '园区公告' })).toBeTruthy();
 
     const current = screen.getByRole('checkbox', { name: 'PPT 创作专家' }) as HTMLInputElement;
     expect(current.checked).toBe(true);
@@ -171,4 +172,22 @@ describe('ModuleMarketplaceDialog', () => {
     );
     expect(document.activeElement).toBe(trigger);
   });
+});
+
+it('finds, adds and retains the flea market module without a market service readiness flag', () => {
+  const catalog = buildModuleCatalog({ edition: 'enterprise', profiles: [], customAgents: [], organizationFeatures: { park_service: true, enterprise_tree: true, feishu_auto_reply: false, direct_messages: true, atoa: false, knowledge: false, skill_market: false }, parkAuthorization: { hasParkContext: true, canViewStatistics: false, canViewStaffTasks: false } });
+  const { onConfirm, rerender } = renderDialog({ modules: catalog });
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜索模块' }), { target: { value: '跳蚤市场' } });
+  const checkbox = screen.getByRole('checkbox', { name: '跳蚤市场' }) as HTMLInputElement;
+  expect(checkbox.disabled).toBe(false);
+  fireEvent.click(checkbox);
+  fireEvent.click(screen.getByRole('button', { name: /保存更改/ }));
+  const saved = onConfirm.mock.calls[0][0] as ModuleWorkspaceLayout;
+  expect(saved.groups.find(group => group.id === 'park-services')?.moduleIds).toContain('park-flea-market');
+  rerender(<ModuleMarketplaceDialog open targetGroupId="park-services" layout={saved} modules={catalog} onConfirm={onConfirm} onClose={vi.fn()} onManageExperts={vi.fn()} onDeleteExpert={vi.fn()} />);
+  expect((screen.getByRole('checkbox', { name: '跳蚤市场' }) as HTMLInputElement).checked).toBe(true);
+  const onActivate = vi.fn();
+  rerender(<ModuleWorkspace presentation="panel" layout={saved} modules={catalog} onActivate={onActivate} onOpenMarketplace={vi.fn()} onLayoutChange={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '打开 跳蚤市场' }));
+  expect(onActivate).toHaveBeenCalledWith(expect.objectContaining({ id: 'park-flea-market', activation: { kind: 'dialog', dialog: 'park-flea-market' } }));
 });

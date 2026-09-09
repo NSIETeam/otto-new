@@ -30,6 +30,7 @@ function dependencies() {
     set: vi.fn(),
     delete: vi.fn(),
     acquireLease: vi.fn(),
+    renewLease: vi.fn(),
     releaseLease: vi.fn(),
     close: vi.fn(async () => undefined),
   };

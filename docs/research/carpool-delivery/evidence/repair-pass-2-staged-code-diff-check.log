@@ -1,0 +1,2 @@
+COMMAND=["git", "diff", "--cached", "--check", "--", "packages"]
+EXIT_CODE=0

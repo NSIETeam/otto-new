@@ -1,0 +1,36 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ❯ src/main/park-market-messaging.test.ts (2 tests | 1 failed) 48ms
+   ✓ retains both ciphertext receipts across concurrent timeouts and retries identical bytes 31ms
+   × discards retry ciphertext only when the server explicitly rejects the transaction 16ms
+     → expected [ 'file' ] to deeply equal []
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-market-messaging.test.ts > discards retry ciphertext only when the server explicitly rejects the transaction
+AssertionError: expected [ 'file' ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "file",
++ ]
+
+ ❯ src/main/park-market-messaging.test.ts:129:61
+    127|     ).rejects.toThrow(/明确未发送/);
+    128|     expect(pending.load(scope)).toEqual([]);
+    129|     expect(readdirSync(pending.attachmentDirectory(scope))).toEqual([]…
+       |                                                             ^
+    130|   } finally {
+    131|     rmSync(root, { recursive: true, force: true });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  23:10:20
+   Duration  1.58s (transform 119ms, setup 188ms, collect 84ms, tests 48ms, environment 707ms, prepare 118ms)

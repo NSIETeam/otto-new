@@ -42,6 +42,8 @@ export interface ModuleGroupLayout {
 export interface ModuleWorkspaceLayout {
   version: typeof MODULE_WORKSPACE_SCHEMA_VERSION;
   groups: ModuleGroupLayout[];
+  carpoolMigrationApplied?: true;
+  parkServicesMigrationIds?: string[];
 }
 
 export interface ModuleWorkspaceStorageScope {
@@ -142,7 +144,7 @@ export function createDefaultModuleWorkspace(
 
 export function normalizeModuleWorkspace(value: unknown): ModuleWorkspaceLayout {
   const record = value && typeof value === 'object'
-    ? value as { groups?: unknown }
+    ? value as { groups?: unknown; carpoolMigrationApplied?: unknown; parkServicesMigrationIds?: unknown }
     : {};
   const rawGroups = Array.isArray(record.groups) ? record.groups : [];
   const usedGroupIds = new Set<string>();
@@ -169,38 +171,28 @@ export function normalizeModuleWorkspace(value: unknown): ModuleWorkspaceLayout 
     });
   });
 
-  return { version: MODULE_WORKSPACE_SCHEMA_VERSION, groups };
-}
-
-function reconcileParkServicesGroup(
-  layout: ModuleWorkspaceLayout,
-  capabilities: ModuleWorkspaceCapabilities,
-): ModuleWorkspaceLayout {
-  const parkGroup = layout.groups.find((group) => group.id === PARK_SERVICES_GROUP_ID);
-  if (!parkGroup) return layout;
-
-  const available = new Set(capabilities.availableModuleIds);
-  const existing = new Set(layout.groups.flatMap((group) => group.moduleIds));
-  const packagedModuleIds = PARK_SERVICES_GROUP_MODULE_IDS.filter(
-    (moduleId) => available.has(moduleId) || existing.has(moduleId),
-  );
-  const packagedSet = new Set<string>(PARK_SERVICES_GROUP_MODULE_IDS);
-  const groups = layout.groups.map((group) => {
-    if (group.id === PARK_SERVICES_GROUP_ID) {
-      return {
-        ...group,
-        moduleIds: [
-          ...packagedModuleIds,
-          ...group.moduleIds.filter((moduleId) => !packagedSet.has(moduleId)),
-        ],
-      };
-    }
-    return {
-      ...group,
-      moduleIds: group.moduleIds.filter((moduleId) => !packagedSet.has(moduleId)),
-    };
-  });
-  return normalizeModuleWorkspace({ ...layout, groups });
+  return {
+    version: MODULE_WORKSPACE_SCHEMA_VERSION,
+    groups,
+    ...(Array.isArray(record.parkServicesMigrationIds)
+      ? {
+          parkServicesMigrationIds: [
+            ...new Set(
+              record.parkServicesMigrationIds.filter(
+                (id): id is string =>
+                  typeof id === 'string' &&
+                  (
+                    PARK_SERVICES_GROUP_MODULE_IDS as readonly string[]
+                  ).includes(id),
+              ),
+            ),
+          ],
+        }
+      : {}),
+    ...(record.carpoolMigrationApplied === true
+      ? { carpoolMigrationApplied: true as const }
+      : {}),
+  };
 }
 
 function reconcileDailyOfficePolicyIntelligence(
@@ -241,25 +233,63 @@ function reconcileDailyOfficeMemoryIntelligence(
   return normalizeModuleWorkspace({ ...layout, groups });
 }
 
-function reconcileHongchuangCarpool(
+function reconcileLegacyParkModules(
   layout: ModuleWorkspaceLayout,
   capabilities: ModuleWorkspaceCapabilities,
 ): ModuleWorkspaceLayout {
-  if (!capabilities.availableModuleIds.includes('park-carpool')) return layout;
-  const groups = layout.groups.map((group) => {
-    if (
-      group.package?.packageId !== 'otto.group.hongchuang-park-services'
-      || group.package.version !== '1.1.0'
-    ) return group;
-    return {
-      ...group,
-      moduleIds: group.moduleIds.includes('park-carpool')
-        ? group.moduleIds
-        : [...group.moduleIds, 'park-carpool'],
-      package: { ...group.package, version: '1.2.0' },
-    };
+  if (capabilities.edition !== 'enterprise') return layout;
+  const target = layout.groups.find(
+    (group) =>
+      group.id === PARK_SERVICES_GROUP_ID ||
+      group.name === PARK_SERVICES_GROUP_NAME ||
+      group.package?.packageId === 'otto.group.hongchuang-park-services',
+  );
+  if (!target) return layout;
+  const considered = new Set(layout.parkServicesMigrationIds ?? []);
+  const installed = new Set(layout.groups.flatMap((group) => group.moduleIds));
+  const additions: string[] = [];
+  for (const id of PARK_SERVICES_GROUP_MODULE_IDS) {
+    if (installed.has(id)) {
+      considered.add(id);
+      continue;
+    }
+    if (!considered.has(id) && capabilities.availableModuleIds.includes(id)) {
+      additions.push(id);
+      considered.add(id);
+    }
+  }
+  return {
+    ...layout,
+    parkServicesMigrationIds: [...considered],
+    groups: layout.groups.map((group) =>
+      group === target
+        ? { ...group, moduleIds: [...group.moduleIds, ...additions] }
+        : group,
+    ),
+  };
+}
+
+function reconcileParkCarpool(
+  layout: ModuleWorkspaceLayout,
+  capabilities: ModuleWorkspaceCapabilities,
+): ModuleWorkspaceLayout {
+  if (layout.carpoolMigrationApplied || capabilities.edition !== 'enterprise'
+    || !capabilities.availableModuleIds.includes('park-carpool')) return layout;
+  const target = layout.groups.find(group => group.id === PARK_SERVICES_GROUP_ID
+    || group.name === PARK_SERVICES_GROUP_NAME
+    || group.package?.packageId === 'otto.group.hongchuang-park-services');
+  if (!target) return layout;
+  const installed = layout.groups.some(group => group.moduleIds.includes('park-carpool'));
+  // A newer official package already performed its migration: absence means removal.
+  const previouslyMigrated = target.package?.packageId === 'otto.group.hongchuang-park-services'
+    && target.package.version !== '1.0.0' && target.package.version !== '1.1.0';
+  return normalizeModuleWorkspace({...layout, carpoolMigrationApplied: true,
+    groups: layout.groups.map(group => group !== target ? group : {...group,
+      moduleIds: installed || previouslyMigrated ? group.moduleIds : [...group.moduleIds, 'park-carpool'],
+      package: group.package?.packageId === 'otto.group.hongchuang-park-services' && group.package.version === '1.1.0'
+        ? {...group.package, version: '1.2.0'} : group.package,
+    }),
   });
-  return normalizeModuleWorkspace({ ...layout, groups });
 }
 
 export function parseModuleWorkspace(
@@ -274,8 +304,8 @@ export function parseModuleWorkspace(
     }
     const normalized = reconcileDailyOfficeMemoryIntelligence(
       reconcileDailyOfficePolicyIntelligence(
-        reconcileHongchuangCarpool(
-          reconcileParkServicesGroup(normalizeModuleWorkspace(parsed), capabilities),
+        reconcileParkCarpool(
+          reconcileLegacyParkModules(normalizeModuleWorkspace(parsed), capabilities),
           capabilities,
         ),
         capabilities,

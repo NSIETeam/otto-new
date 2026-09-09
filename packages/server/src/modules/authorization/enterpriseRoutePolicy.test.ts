@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { isAdminRoute, isMemberRoute, isLicenseMaintenanceRoute } from './enterpriseRoutePolicy.js';
 
+it('supplies authenticated membership to startup carpool requests without matching unrelated prefixes', () => {
+  for (const route of ['/enterprise/park-carpool', '/enterprise/park-carpool/workflow']) expect(isMemberRoute(route)).toBe(true);
+  expect(isMemberRoute('/enterprise/park-carpooling')).toBe(false);
+});
+
 describe('customer module route authorization', () => {
   it('keeps authoring and installation on member sessions', () => {
     expect(isMemberRoute('/enterprise/customer-modules')).toBe(true);
@@ -43,4 +48,9 @@ describe('recruitment source route authorization', () => {
     expect(isMemberRoute('/enterprise/recruitment/sources/material-evil')).toBe(false);
     expect(isMemberRoute('/enterprise/recruitment/source-runs-evil/run_123')).toBe(false);
   });
+});
+
+it('authenticates every market route as an account before market-scoped authorization', () => {
+  for (const path of ['/enterprise/park-market','/enterprise/park-market/settings/P','/enterprise/park-market/listings/L/contact','/enterprise/park-market/mine']) expect(isMemberRoute(path)).toBe(true);
+  expect(isMemberRoute('/enterprise/park-marketplace')).toBe(false);
 });

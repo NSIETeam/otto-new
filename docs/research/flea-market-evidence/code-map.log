@@ -1,0 +1,5 @@
+
+> otto-ai@1.18.0 code-map
+> node scripts/generate-code-map.mjs
+
+Updated docs/code-map.md.

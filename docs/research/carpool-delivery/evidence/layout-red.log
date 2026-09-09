@@ -1,0 +1,86 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-validation-7f3a9c/packages/desktop
+
+ ❯ src/renderer/moduleWorkspace.test.ts (22 tests | 2 failed) 15ms
+   ✓ module workspace defaults > auto-installs only the official daily-office group for a new enterprise workspace 2ms
+   ✓ module workspace defaults > does not synthesize enterprise or park modules for personal edition 1ms
+   ✓ module workspace defaults > recomputes restored defaults from the current capability snapshot 0ms
+   ✓ module workspace parsing and normalization > falls back for corrupt or unsupported records 0ms
+   × module workspace parsing and normalization > migrates ordinary park services without rearranging existing modules 4ms
+     → expected [ 'park-announcement', …(6) ] to deeply equal [ 'park-announcement', …(3) ]
+   ✓ module workspace parsing and normalization > migrates the official daily-office group once to add policy intelligence 0ms
+   ✓ module workspace parsing and normalization > upgrades an installed enterprise-memory experience without restoring a removed module 0ms
+   ✓ module workspace parsing and normalization > migrates an installed Hongchuang group once to add carpool without restoring it after removal 0ms
+   × module workspace parsing and normalization > adds carpool once to custom park groups while preserving other groups and manual removal 1ms
+     → expected [ 'park-repair', 'park-announcement' ] to deeply equal [ 'park-repair', …(2) ]
+   ✓ module workspace parsing and normalization > deduplicates module IDs globally, repairs group IDs, clamps rows, and keeps unknown modules 1ms
+   ✓ module workspace parsing and normalization > truncates long names and supplies a safe name for blank groups 0ms
+   ✓ module workspace layout operations > resolves two columns only for a genuinely narrow side panel 0ms
+   ✓ module workspace layout operations > creates groups with stable unique default names and IDs 0ms
+   ✓ module workspace layout operations > adds park services as one complete function group and removes duplicate park entries 0ms
+   ✓ module workspace layout operations > rejects blank and duplicate group names without mutating layout 0ms
+   ✓ module workspace layout operations > moves modules between groups without duplicates 0ms
+   ✓ module workspace layout operations > applies additions and removals for one group as a single selection 0ms
+   ✓ module workspace layout operations > ignores a group selection update when the target group does not exist 0ms
+   ✓ module workspace layout operations > removes only the requested module from layout 0ms
+   ✓ module workspace layout operations > protects the last group and removes deleted group modules from the workspace 0ms
+   ✓ module workspace layout operations > renames, updates row count, and reorders groups and modules 0ms
+   ✓ module workspace storage scope > normalizes server URL and separates edition, organization, and account 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/moduleWorkspace.test.ts > module workspace parsing and normalization > migrates ordinary park services without rearranging existing modules
+AssertionError: expected [ 'park-announcement', …(6) ] to deeply equal [ 'park-announcement', …(3) ]
+
+- Expected
++ Received
+
+  [
+    "park-announcement",
+-   "park-repair",
++   "park-satisfaction",
++   "park-renovation",
++   "park-parking",
++   "park-network-phone",
+    "park-meeting-room",
+-   "park-carpool",
++   "park-repair",
+  ]
+
+ ❯ src/renderer/moduleWorkspace.test.ts:135:40
+    133|     }), enterpriseCapabilities);
+    134|
+    135|     expect(parsed.groups[0].moduleIds).toEqual(['park-announcement', '…
+       |                                        ^
+    136|   });
+    137|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/renderer/moduleWorkspace.test.ts > module workspace parsing and normalization > adds carpool once to custom park groups while preserving other groups and manual removal
+AssertionError: expected [ 'park-repair', 'park-announcement' ] to deeply equal [ 'park-repair', …(2) ]
+
+- Expected
++ Received
+
+  [
+    "park-repair",
+    "park-announcement",
+-   "park-carpool",
+  ]
+
+ ❯ src/renderer/moduleWorkspace.test.ts:212:42
+    210|     ]};
+    211|     const migrated = parseModuleWorkspace(JSON.stringify(original), en…
+    212|     expect(migrated.groups[0].moduleIds).toEqual(['park-repair', 'park…
+       |                                          ^
+    213|     expect(migrated.groups[1]).toMatchObject(original.groups[1]);
+    214|     const removed = {...migrated, groups: migrated.groups.map(g => ({.…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 20 passed (22)
+   Start at  12:05:35
+   Duration  437ms (transform 47ms, setup 45ms, collect 36ms, tests 15ms, environment 162ms, prepare 33ms)

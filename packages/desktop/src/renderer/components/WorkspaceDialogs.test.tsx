@@ -82,6 +82,19 @@ describe('WorkspaceDialogs', () => {
     expect(await screen.findByText(/已恢复为 v3，待管理员重新确认/)).toBeTruthy();
   });
 
+  it('重开立即保留已读记忆，不被后台刷新清空', async () => {
+    Object.assign(window.otto, { enterpriseKnowledgeList: vi.fn().mockResolvedValueOnce([{
+      id: 'kept', title: '保留的制度', category: '制度', content: '已有内容',
+      confidence: 0.9, createdAt: '2026-08-27', status: 'active',
+    }]).mockImplementation(() => new Promise(() => {})) });
+    const props = { role: 'company_admin' as const, onClose: vi.fn() };
+    const view = render(<EnterpriseMemoryDialog open {...props} />);
+    await screen.findByText('保留的制度');
+    view.rerender(<EnterpriseMemoryDialog open={false} {...props} />);
+    view.rerender(<EnterpriseMemoryDialog open {...props} />);
+    expect(screen.getByText('保留的制度')).toBeTruthy();
+  });
+
   it('关闭再打开后，旧范围的企业记忆响应不能覆盖新结果', async () => {
     const oldRequest = deferred<Awaited<ReturnType<typeof window.otto.enterpriseKnowledgeList>>>();
     const newRequest = deferred<Awaited<ReturnType<typeof window.otto.enterpriseKnowledgeList>>>();
@@ -285,7 +298,8 @@ describe('WorkspaceDialogs', () => {
         createdAt: '2026-08-20T00:00:00.000Z',
       }]),
     });
-    render(<EnterpriseMemoryDialog open role="company_admin" onClose={vi.fn()} />);
+    const props = { role: 'company_admin' as const, onClose: vi.fn() };
+    const view = render(<EnterpriseMemoryDialog open {...props} />);
 
     await screen.findByText('已废止制度');
     fireEvent.click(screen.getByRole('tab', { name: '已掌握与待确认' }));
@@ -294,6 +308,11 @@ describe('WorkspaceDialogs', () => {
     await waitFor(() => expect(window.otto.enterpriseKnowledgeDelete).toHaveBeenCalledWith('knowledge-delete'));
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('无法撤销'));
     await waitFor(() => expect(screen.queryByText('已废止制度')).toBeNull());
+    view.rerender(<EnterpriseMemoryDialog open={false} {...props} />);
+    vi.mocked(window.otto.enterpriseKnowledgeList).mockRejectedValue(new Error('offline'));
+    view.rerender(<EnterpriseMemoryDialog open {...props} />);
+    await screen.findByText('offline');
+    expect(screen.queryByText('已废止制度')).toBeNull();
   });
 
   it('冲突知识必须在新版界面完成证据取舍后才可形成裁决版本', async () => {

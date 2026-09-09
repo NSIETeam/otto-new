@@ -1,0 +1,66 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ ❯ packages/server/src/modules/park_carpool/amapParkCarpoolProvider.test.ts (11 tests | 2 failed) 16ms
+   ✓ createAmapParkCarpoolProvider > keeps the key on the server and normalizes place and route responses 7ms
+   ✓ createAmapParkCarpoolProvider > is unavailable without a key and does not invent data on provider errors 1ms
+   ✓ converts clicked GPS only when requested, derives district-only public areas and proxies actual map bytes 1ms
+   × maps malformed provider envelopes to a controlled map failure: null 4ms
+     → expected [Function] to throw error matching /地图服务/ but got 'Cannot read properties of null (readi…'
+   ✓ maps malformed provider envelopes to a controlled map failure: %j 0ms
+   ✓ maps malformed provider envelopes to a controlled map failure: "bad" 0ms
+   × rejects invalid converted coordinates and hides network details for static maps 1ms
+     → expected [Function] to throw error matching /坐标转换失败/ but got '地图服务未返回标准行政区域，请重新选点'
+   ✓ fails explicitly for rate limit without inventing a route 0ms
+   ✓ fails explicitly for bad JSON without inventing a route 0ms
+   ✓ fails explicitly for no route without inventing a route 0ms
+   ✓ uses an eight second abort deadline and returns a controlled timeout 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/amapParkCarpoolProvider.test.ts > maps malformed provider envelopes to a controlled map failure: null
+AssertionError: expected [Function] to throw error matching /地图服务/ but got 'Cannot read properties of null (readi…'
+
+- Expected: 
+/地图服务/
+
++ Received: 
+"Cannot read properties of null (reading 'status')"
+
+ ❯ packages/server/src/modules/park_carpool/amapParkCarpoolProvider.test.ts:162:3
+    160| it.each([null, [], 'bad'])('maps malformed provider envelopes to a con…
+    161|   const provider = createAmapParkCarpoolProvider({key:'test-only',fetc…
+    162|   await expect(provider.searchPlaces('公共站点','杭州')).rejects.toThrow(/地图…
+       |   ^
+    163| });
+    164| it('rejects invalid converted coordinates and hides network details fo…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  packages/server/src/modules/park_carpool/amapParkCarpoolProvider.test.ts > rejects invalid converted coordinates and hides network details for static maps
+AssertionError: expected [Function] to throw error matching /坐标转换失败/ but got '地图服务未返回标准行政区域，请重新选点'
+
+- Expected: 
+/坐标转换失败/
+
++ Received: 
+"地图服务未返回标准行政区域，请重新选点"
+
+ ❯ packages/server/src/modules/park_carpool/amapParkCarpoolProvider.test.ts:166:3
+    164| it('rejects invalid converted coordinates and hides network details fo…
+    165|   const provider=createAmapParkCarpoolProvider({key:'test-only',fetchI…
+    166|   await expect(provider.reverseGeocode!({longitude:120,latitude:30},'g…
+       |   ^
+    167|   const offline=createAmapParkCarpoolProvider({key:'test-only',fetchIm…
+    168|   await expect(offline.staticMap!({longitude:120,latitude:30},12)).rej…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 9 passed (11)
+   Start at  20:18:38
+   Duration  236ms (transform 43ms, setup 0ms, collect 42ms, tests 16ms, environment 0ms, prepare 44ms)
+
+
+EXIT_CODE=1

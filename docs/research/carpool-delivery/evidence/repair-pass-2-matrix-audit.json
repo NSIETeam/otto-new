@@ -1,0 +1,14 @@
+{
+  "prdRows": 367,
+  "additionalRows": 17,
+  "duplicateIds": 0,
+  "originalLineMismatches": 0,
+  "orderedSteps": 51,
+  "tableLinesIncludingHeader": 32,
+  "statusCounts": {
+    "已实现未验证": 315,
+    "外部阻塞": 26,
+    "已实现且验证通过": 43
+  },
+  "note": "Counts are source lines, not atomized requirements. Tests linked on non-green rows are related evidence only."
+}

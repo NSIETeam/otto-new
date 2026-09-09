@@ -1,3 +1,5 @@
+import { carpoolCommunicationCapabilities } from '../modules/park_carpool/parkCarpoolConfig.js';
+import { startCarpoolMaintenance } from '../modules/park_carpool/parkCarpoolRuntime.js';
 /**
  * @license Copyright 2026 Felix SPDX-License-Identifier: Apache-2.0
  *
@@ -218,6 +220,7 @@ export const ENTERPRISE_CAPABILITIES = [
   'policy_intelligence_v2',
   'policy_intelligence_v3',
   'policy_intelligence_inbox_v1',
+  'park_flea_market_protocol_v1',
   'password_auth',
   'sms_login',
   'sms_registration',
@@ -256,6 +259,7 @@ export const ENTERPRISE_CAPABILITIES = [
   'park_tenant_profiles_v1',
   'park_service_statistics_v1',
   'park_carpool_v1',
+  ...carpoolCommunicationCapabilities(),
   'private_deployment_v1',
   'private_deployment_bootstrap_v1',
   'license_enforcement_v1',
@@ -1187,6 +1191,9 @@ export function startEnterpriseServer(
   let stopRecruitmentCacheRuntime: () => void = () => undefined;
   let stopRecruitmentIntakeRuntime: () => void = () => undefined;
   let stopRecruitmentAnalysisRuntime: () => void = () => undefined;
+  let stopFleaMarketRuntime: () => void = () => undefined;
+  let stopCarpoolRuntime: () => void = () => undefined;
+  let initializedFleaMarket = Promise.resolve();
   try {
     stopTicketNotificationRuntime = canaryMode
       ? () => undefined
@@ -1201,6 +1208,12 @@ export function startEnterpriseServer(
     stopRecruitmentCacheRuntime = canaryMode ? () => undefined : db.startRecruitmentCacheRuntime(taskRegistry);
     stopRecruitmentIntakeRuntime = canaryMode ? () => undefined : startRecruitmentIntake(recruitmentIntakeWorker, taskRegistry);
     stopRecruitmentAnalysisRuntime = canaryMode ? () => undefined : startRecruitmentBackgroundAnalysis(db.createRecruitmentBackgroundWorker(), taskRegistry);
+    stopCarpoolRuntime = canaryMode ? () => undefined : startCarpoolMaintenance({run:db.maintainParkCarpool,taskRegistry,onError:error=>console.error('[Otto Enterprise] carpool maintenance failed',error)});
+    if (!canaryMode) {
+      const market = db.getFleaMarketApplication();
+      stopFleaMarketRuntime = market.start(taskRegistry) ?? (() => undefined);
+      initializedFleaMarket = market.initialize();
+    }
   } catch (error) {
     clearInitialMlsCleanup();
     stopMlsCleanup();
@@ -1213,6 +1226,8 @@ export function startEnterpriseServer(
     stopRecruitmentCacheRuntime();
     stopRecruitmentIntakeRuntime();
     stopRecruitmentAnalysisRuntime();
+    stopFleaMarketRuntime();
+    stopCarpoolRuntime();
     server.close();
     throw error;
   }
@@ -1220,6 +1235,14 @@ export function startEnterpriseServer(
   let gracefulClosePromise: Promise<void> | undefined;
   let closeInitiated = false;
   let runtimesCleaned = false;
+  const drainMarketReadiness = () => new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('enterprise market readiness drain timed out')),
+      ENTERPRISE_TASK_DRAIN_TIMEOUT_MS);
+    void initializedFleaMarket.then(
+      () => { clearTimeout(timer); resolve(); },
+      error => { clearTimeout(timer); reject(error); },
+    );
+  });
   const cleanupRuntimes = () => {
     if (runtimesCleaned) return;
     runtimesCleaned = true;
@@ -1227,6 +1250,8 @@ export function startEnterpriseServer(
     stopRecruitmentIntakeRuntime();
     stopRecruitmentCacheRuntime();
     stopPolicyIntelligenceRuntime();
+    stopFleaMarketRuntime();
+    stopCarpoolRuntime();
     stopMlsCleanup();
     stopPrivateDeploymentRuntime();
     stopPrivateDeploymentBootstrapRuntime();
@@ -1260,6 +1285,8 @@ export function startEnterpriseServer(
     if (gracefulClosePromise) return gracefulClosePromise;
     closeInitiated = true;
     stopPolicyIntelligenceRuntime();
+    stopFleaMarketRuntime();
+    stopCarpoolRuntime();
     clearInitialMlsCleanup();
     // Stop accepting requests and stop scheduling resident work at the same
     // time. Keep the database and runtime resources alive until every task has
@@ -1268,7 +1295,7 @@ export function startEnterpriseServer(
     const drained = taskRegistry.shutdown({
       timeoutMs: ENTERPRISE_TASK_DRAIN_TIMEOUT_MS,
     });
-    gracefulClosePromise = Promise.allSettled([httpClosed, drained]).then(
+    gracefulClosePromise = Promise.allSettled([httpClosed, drained, drainMarketReadiness()]).then(
       (results) => {
         const failures = results
           .filter(
@@ -1294,15 +1321,18 @@ export function startEnterpriseServer(
   server.once('close', () => {
     if (closeInitiated) return;
     stopPolicyIntelligenceRuntime();
+    stopFleaMarketRuntime();
+    stopCarpoolRuntime();
     // Defensive path for an unexpected transport close that did not enter the
     // wrapped close method. There is no caller to await, but resident work is
     // still stopped, drained, and cleaned rather than orphaned.
     clearInitialMlsCleanup();
-    gracefulClosePromise = taskRegistry
-      .shutdown({
+    gracefulClosePromise = Promise.all([
+      taskRegistry.shutdown({
         timeoutMs: ENTERPRISE_TASK_DRAIN_TIMEOUT_MS,
-      })
-      .then(cleanupRuntimes);
+      }),
+      drainMarketReadiness(),
+    ]).then(cleanupRuntimes);
     void gracefulClosePromise.catch((error) => {
       console.error(
         '[Otto Enterprise] resident drain after unexpected close failed',

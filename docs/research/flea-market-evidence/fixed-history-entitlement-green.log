@@ -1,0 +1,13 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ ✓ packages/server/src/modules/authorization/commercialRoutePolicy.test.ts (40 tests) 4ms
+(node:49208) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_services/flea_market/fleaMarketHttp.integration.test.ts (2 tests) 1554ms
+   ✓ postgres: HTTP uploads decoded private photos and enforces current permissions through publishing and moderation  1338ms
+
+ Test Files  2 passed (2)
+      Tests  42 passed (42)
+   Start at  16:23:13
+   Duration  6.68s (transform 2.38s, setup 0ms, collect 4.94s, tests 1.56s, environment 0ms, prepare 140ms)

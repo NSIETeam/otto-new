@@ -1,0 +1,15 @@
+
+> otto-desktop@1.9.14 pretypecheck
+> npm run build:native
+
+
+> otto-desktop@1.9.14 build:native
+> npm run build --workspace=@otto/native
+
+
+> @otto/native@0.1.0 build
+> tsc -p tsconfig.json
+
+
+> otto-desktop@1.9.14 typecheck
+> tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit

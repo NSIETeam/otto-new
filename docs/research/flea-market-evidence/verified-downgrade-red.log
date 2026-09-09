@@ -1,0 +1,43 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c
+
+(node:15929) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ integration/park-market/encrypted-flow.test.ts (4 tests | 2 failed) 3814ms
+   ✓ sqlite/envelope: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server 65ms
+   ✓ postgres/envelope: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server  1294ms
+   × sqlite/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server 691ms
+     → promise resolved "{ messageId: 'downgrade-attempt' }" instead of rejecting
+   × postgres/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server 1764ms
+     → promise resolved "{ messageId: 'downgrade-attempt' }" instead of rejecting
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  integration/park-market/encrypted-flow.test.ts > sqlite/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server
+ FAIL  integration/park-market/encrypted-flow.test.ts > postgres/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server
+AssertionError: promise resolved "{ messageId: 'downgrade-attempt' }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "messageId": "downgrade-attempt",
+  }
+
+ ❯ integration/park-market/encrypted-flow.test.ts:257:163
+    255|             .content,
+    256|         ).toBe('可以调节，下午交接方便。');
+    257|         if (nativeMls) await expect(client('buyer', true).send({kind:'…
+       |                                                                                                                                                                   ^
+    258|         await app.market.command('seller', item.id, 'reserve', {
+    259|           requestId: 'reserve',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  12:41:27
+   Duration  6.43s (transform 1.20s, setup 0ms, collect 2.41s, tests 3.81s, environment 0ms, prepare 43ms)

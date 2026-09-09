@@ -1,0 +1,39 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+(node:32040) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/modules/park_services/flea_market/fleaMarketSqliteRepository.test.ts (3 tests | 1 failed) 8ms
+   ✓ migrates twice without changing existing enterprise rows 2ms
+   × commits an idempotent result once and rejects a changed request 4ms
+     → expected { id: 'listing-2' } to deeply equal { id: 'listing-1' }
+   ✓ rolls back quota and events when transaction fails 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketSqliteRepository.test.ts > commits an idempotent result once and rejects a changed request
+AssertionError: expected { id: 'listing-2' } to deeply equal { id: 'listing-1' }
+
+- Expected
++ Received
+
+  {
+-   "id": "listing-1",
++   "id": "listing-2",
+  }
+
+ ❯ src/modules/park_services/flea_market/fleaMarketSqliteRepository.test.ts:26:81
+     24|     const write = async () => ({ id: `listing-${++calls}` });
+     25|     expect(await unit.execute('seller', 'operation-1', { title: '椅子' }…
+     26|     expect(await unit.execute('seller', 'operation-1', { title: '椅子' }…
+       |                                                                                 ^
+     27|     await expect(unit.execute('seller', 'operation-1', { title: '不同物品'…
+     28|     expect(calls).toBe(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  09:31:02
+   Duration  2.62s (transform 1.18s, setup 0ms, collect 2.43s, tests 8ms, environment 0ms, prepare 38ms)

@@ -1,3 +1,4 @@
+import { useModuleReadCache } from './ModuleReadProvider.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -78,6 +79,7 @@ export function useModuleWorkspaceCapabilities(input: {
   parkIdentity: ModuleGroupParkIdentity | null;
   retry(): void;
 } {
+  const cache = useModuleReadCache();
   const key = [
     normalizeServerUrlForStorage(input.serverUrl),
     input.edition,
@@ -134,7 +136,7 @@ export function useModuleWorkspaceCapabilities(input: {
       let parkIdentity: ModuleGroupParkIdentity | null = null;
       if (features.park_service) {
         try {
-          const park = await window.otto.enterpriseParkView();
+          const park = await cache.read('park', () => window.otto.enterpriseParkView());
           const hasParkContext = Boolean(park && park.status === 'active');
           if (park) {
             parkIdentity = {
@@ -147,15 +149,21 @@ export function useModuleWorkspaceCapabilities(input: {
           let canUseCarpool = false;
           if (hasParkContext) {
             const [ticketResult, carpoolResult] = await Promise.allSettled([
-              window.otto.enterpriseTicketList(),
+              cache.read('tickets', () => window.otto.enterpriseTicketList()),
               typeof window.otto.enterpriseParkCarpoolGet === 'function'
-                ? window.otto.enterpriseParkCarpoolGet()
+                ? cache.read('carpool', () => window.otto.enterpriseParkCarpoolGet())
                 : Promise.reject(new Error('park carpool capability unavailable')),
             ]);
             if (ticketResult.status === 'fulfilled') {
               canViewStaffTasks = ticketResult.value.some((ticket) => ticket.isRecipient === true);
             }
-            if (carpoolResult.status === 'fulfilled') canUseCarpool = true;
+            if (carpoolResult.status === 'fulfilled') {
+              const carpool = carpoolResult.value;
+              canUseCarpool = carpool.availability?.canPublish === true
+                || (carpool.availability?.parkEnabled === true
+                  && carpool.capabilities?.includes('park_carpool_requests_v1') === true)
+                || Boolean(carpool.currentIntent || carpool.hasGroup);
+            }
           }
           parkAuthorization = {
             hasParkContext,
@@ -188,7 +196,7 @@ export function useModuleWorkspaceCapabilities(input: {
       if (!cancelled) setState({ key, status: 'failed', featureState: null, park: NO_PARK, parkIdentity: null });
     });
     return () => { cancelled = true; };
-  }, [input.accountIsAdmin, input.accountId, input.edition, input.internalAdminPreview, input.organizationId, input.serverUrl, key, retryRevision]);
+  }, [cache, input.accountIsAdmin, input.accountId, input.edition, input.internalAdminPreview, input.organizationId, input.serverUrl, key, retryRevision]);
 
   const current = state.key === key ? state : {
     key,

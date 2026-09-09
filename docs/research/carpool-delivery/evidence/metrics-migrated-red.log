@@ -1,0 +1,41 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new-carpool
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolMetrics.test.ts (1 test | 1 failed) 6ms
+   × deduplicates user-day conversions while averaging real observations and retaining no positions 5ms
+     → expected { openedUserDays: 2, …(11) } to match object { publicationConversion: 0.5, …(4) }
+(7 matching properties omitted from actual)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolMetrics.test.ts > deduplicates user-day conversions while averaging real observations and retaining no positions
+AssertionError: expected { openedUserDays: 2, …(11) } to match object { publicationConversion: 0.5, …(4) }
+(7 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "averageCandidates": 3,
+    "averageMapMilliseconds": 50,
+    "mapFailureRatio": 0.5,
+-   "matchedPublisherRatio": 1,
++   "matchedPublisherRatio": 2,
+    "publicationConversion": 0.5,
+  }
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolMetrics.test.ts:21:60
+     19|   carpoolMeasurement(state, 'b', '2026-09-08T00:00:00Z').opened = true;
+     20|   carpoolMeasurement(state,'migrated','2026-09-08T00:00:00Z').matched=…
+     21|   expect(summarizeCarpoolMeasurements(state.measurements)).toMatchObje…
+       |                                                            ^
+     22|     publicationConversion: 0.5,
+     23|     matchedPublisherRatio: 1,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  11:53:32
+   Duration  163ms (transform 23ms, setup 0ms, collect 17ms, tests 6ms, environment 0ms, prepare 34ms)

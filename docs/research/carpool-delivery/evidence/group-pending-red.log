@@ -1,0 +1,2086 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-validation-7f3a9c/packages/desktop
+
+(node:75423) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/renderer/components/CarpoolFlow.integration.test.tsx (1 test | 1 failed) 5132ms
+   × real UI publishes, previews, requests, chats, groups, admits and leaves through SQLite and native MLS 5132ms
+     → Unable to find an element with the text: 已发送请求，等待确认. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"otto-workspace-dialog-overlay"[39m
+  [36m>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"拼车助手"[39m
+      [33maria-modal[39m=[32m"true"[39m
+      [33mclass[39m=[32m"otto-workspace-dialog"[39m
+      [33mrole[39m=[32m"dialog"[39m
+    [36m>[39m
+      [36m<header>[39m
+        [36m<h2>[39m
+          [0m拼车助手[0m
+        [36m</h2>[39m
+        [36m<button[39m
+          [33maria-label[39m=[32m"关闭拼车助手"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m×[0m
+        [36m</button>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"otto-workspace-dialog__body"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33mclass[39m=[32m"otto-carpool__hero"[39m
+        [36m>[39m
+          [36m<div>[39m
+            [36m<strong>[39m
+              [0m找到与你方向相近的园区伙伴[0m
+            [36m</strong>[39m
+            [36m<p>[39m
+              [0mOtto 只提供信息发布、路线匹配和连接提示，不叫车、不收费，也不处理费用分摊。[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<span>[39m
+            [0m正在寻找[0m
+          [36m</span>[39m
+        [36m</section>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"otto-carpool__chat-hint"[39m
+        [36m>[39m
+          [0m也可以直接在对话框说：“今天 18:30 从宏创园区南门到回龙观，想搭车，前后 30 分钟都可以”。Otto 会补问缺失信息并在发布前确认。[0m
+        [36m</p>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"otto-carpool__form"[39m
+        [36m>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__place"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m从哪里出发[0m
+            [36m</legend>[39m
+            [36m<p[39m
+              [33mid[39m=[32m"_r_4_-hint"[39m
+            [36m>[39m
+              [0m优先选择园区出口或公共集合点，不建议填写办公室或地下车库。[0m
+            [36m</p>[39m
+            [36m<div>[39m
+              [36m<label[39m
+                [33mfor[39m=[32m"_r_4_"[39m
+              [36m>[39m
+                [0m从哪里出发[0m
+                [0m搜索[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m"_r_4_-hint"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33maria-label[39m=[32m"从哪里出发搜索"[39m
+                [33mid[39m=[32m"_r_4_"[39m
+                [33mplaceholder[39m=[32m"搜索小区、地标或地址"[39m
+                [33mvalue[39m=[32m"测试园区南门"[39m
+              [36m/>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m搜索[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m使用当前位置[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m在地图上调整选点[0m
+            [36m</button>[39m
+          [36m</fieldset>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__place"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m要去哪里[0m
+            [36m</legend>[39m
+            [36m<p[39m
+              [33mid[39m=[32m"_r_5_-hint"[39m
+            [36m>[39m
+              [0m请选择标准地点；候选阶段不会展示精确坐标或住宅门牌。[0m
+            [36m</p>[39m
+            [36m<div>[39m
+              [36m<label[39m
+                [33mfor[39m=[32m"_r_5_"[39m
+              [36m>[39m
+                [0m要去哪里[0m
+                [0m搜索[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m"_r_5_-hint"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33maria-label[39m=[32m"要去哪里搜索"[39m
+                [33mid[39m=[32m"_r_5_"[39m
+                [33mplaceholder[39m=[32m"搜索小区、地标或地址"[39m
+                [33mvalue[39m=[32m"测试地铁站"[39m
+              [36m/>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m搜索[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m使用当前位置[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m在地图上调整选点[0m
+            [36m</button>[39m
+          [36m</fieldset>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"otto-carpool__row"[39m
+          [36m>[39m
+            [36m<label>[39m
+              [36m<span>[39m
+                [0m计划出发时间[0m
+              [36m</span>[39m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mmax[39m=[32m"2026-09-08T23:59"[39m
+                [33mmin[39m=[32m"2026-09-08T00:00"[39m
+                [33mrequired[39m=[32m""[39m
+                [33mtype[39m=[32m"datetime-local"[39m
+                [33mvalue[39m=[32m"2026-09-08T23:00"[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [36m<span>[39m
+                [0m可接受前后[0m
+              [36m</span>[39m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"10"[39m
+                [36m>[39m
+                  [0m10 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"20"[39m
+                [36m>[39m
+                  [0m20 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"30"[39m
+                [36m>[39m
+                  [0m30 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"45"[39m
+                [36m>[39m
+                  [0m45 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"60"[39m
+                [36m>[39m
+                  [0m60 分钟[0m
+                [36m</option>[39m
+              [36m</select>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__modes"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m你愿意怎么同行（可多选）[0m
+            [36m</legend>[39m
+            [36m<div>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m我有车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m可以由我开车并顺路带人[0m
+                [36m</span>[39m
+              [36m</label>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m搭车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m搭乘同行伙伴的车[0m
+                [36m</span>[39m
+              [36m</label>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m一起叫车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m匹配后自行协商第三方叫车[0m
+                [36m</span>[39m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<p>[39m
+              [0m多选表示本次这几种方式都可以。“一起叫车”不会由 Otto 下单或计费。[0m
+            [36m</p>[39m
+          [36m</fieldset>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"otto-carpool__privacy"[39m
+          [36m>[39m
+            [0m提交后，你的通勤意向将对同园区且路线、时间符合条件的用户可见。你可以随时修改或停止寻找。[0m
+          [36m</p>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"otto-carpool__actions"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"submit"[39m
+            [36m>[39m
+              [0m更新并重新匹配[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"is-secondary"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m停止寻找[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m仍在寻找[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"is-secondary"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m刷新结果[0m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</form>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"同行请求与状态"[39m
+          [33mclass[39m=[32m"otto-carpool__requests"[39m
+        [36m>[39m
+          [36m<header>[39m
+            [36m<h2>[39m
+              [0m同行请求与状态[0m
+            [36m</h2>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m刷新同行消息[0m
+            [36m</button>[39m
+          [36m</header>[39m
+          [36m<label>[39m
+            [0m同行请求筛选[0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"pending"[39m
+              [36m>[39m
+                [0m待处理[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"all"[39m
+              [36m>[39m
+                [0m全部请求[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<article[39m
+            [33maria-label[39m=[32m"入组申请：a同事"[39m
+          [36m>[39m
+            [36m<h3>[39m
+              [0m入组申请[0m
+              [0m ·[0m
+              [0m [0m
+              [0ma同事[0m
+            [36m</h3>[39m
+            [36m<p>[39m
+              [0m申请加入这次同行[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m约 [0m
+              [0m100[0m
+              [0m% 同路 · 共同方向约[0m
+              [0m [0m
+              [0m8.5[0m
+              [0m 公里[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m一起叫车[0m
+            [36m</p>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"status"[39m
+            [36m>[39m
+              [0m等待对方接受[0m
+            [36m</p>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m撤回请求[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m屏蔽该用户[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m举报该请求[0m
+            [36m</button>[39m
+          [36m</article>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m删除我的同行数据[0m
+          [36m</button>[39m
+          [36m<section[39m
+            [33maria-label[39m=[32m"同行通知"[39m
+          [36m>[39m
+            [36m<h3>[39m
+              [0m同行通知[0m
+            [36m</h3>[39m
+            [36m<article>[39m
+              [36m<p>[39m
+                [0m发现新的同行结果，请刷新后查看最新路线与时间条件[0m
+              [36m</p>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m标记已读[0m
+              [36m</button>[39m
+            [36m</article>[39m
+          [36m</section>[39m
+        [36m</section>[39m
+        [36m<section[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"otto-carpool__results"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m筛选同行方式[0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"all"[39m
+              [36m>[39m
+                [0m全部[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"current_rides_candidate_vehicle"[39m
+              [36m>[39m
+                [0m可搭车[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"candidate_rides_current_vehicle"[39m
+              [36m>[39m
+                [0m可带人[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"shared_taxi"[39m
+              [36m>[39m
+                [0m一起叫车[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<header>[39m
+            [36m<div>[39m
+              [36m<h3>[39m
+                [0m同行结果[0m
+              [36m</h3>[39m
+              [36m<p>[39m
+                [0m找到 1 个候选，已显示 1 个[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<span>[39m
+              [0m2026-09-08[0m
+              [0m [0m
+              [0m23:00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m测试园区南门[0m
+              [0m →[0m
+              [0m [0m
+              [0m测试地铁站[0m
+            [36m</span>[39m
+          [36m</header>[39m
+          [36m<article>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"otto-carpool__score"[39m
+            [36m>[39m
+              [36m<strong>[39m
+                [0m约 [0m
+                [0m100[0m
+                [0m% 同路[0m
+              [36m</strong>[39m
+              [36m<span>[39m
+                [0m0 分钟前仍在寻找[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<h4>[39m
+              [0m2 人同行组[0m
+              [0m · [0m
+              [0m同园区已认证成员[0m
+            [36m</h4>[39m
+            [36m<p>[39m
+              [0m2[0m
+              [0m [0m
+              [0m人 · 园区身份已认证 · [0m
+              [0m23:00[0m
+              [0m 出发 · 相差[0m
+              [0m [0m
+              [0m0[0m
+              [0m 分钟[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m可共同出发：[0m
+              [0m22:30[0m
+              [0m—[0m
+              [0m23:30[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m一起叫车 · 协调人：a同事 · 剩余 2 个乘客名额[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m你们可以一起叫车[0m
+            [36m</p>[39m
+            [36m<details>[39m
+              [36m<summary>[39m
+                [0m为什么匹配[0m
+              [36m</summary>[39m
+              [36m<p>[39m
+                [0m全组平均 × 75% ＋ 最低成员 × 25%约 100%；按地图规划的上下车顺序，预计最大增加 0 分钟。路线重合为几何近似，绕行是本次规划估算，非实时交通保证。[0m
+              [36m</p>[39m
+              [36m<p>[39m
+                [0m剩余名额 [0m
+                [0m2[0m
+                [0m · 平均重合[0m
+                [0m [0m
+                [0m100[0m
+                [0m% · 最低成员[0m
+                [0m [0m
+                [0m100[0m
+                [0m% · 最大预计增加[0m
+                [0m [0m
+                [0m0[0m
+                [0m 分钟[0m
+              [36m</p>[39m
+              [36m<ul>[39m
+                [36m<li>[39m
+                  [0ma同事[0m
+                  [0m：与你约[0m
+                  [0m [0m
+                  [0m100[0m
+                  [0m% 同路[0m
+                [36m</li>[39m
+                [36m<li>[39m
+                  [0mb同事[0m
+                  [0m：与你约[0m
+                  [0m [0m
+                  [0m100[0m
+                  [0m% 同路[0m
+                [36m</li>[39m
+              [36m</ul>[39m
+              [36m<p>[39m
+                [0m路线区域：[0m
+                [0m出发区域（具体位置已隐藏）[0m
+                [0m → [0m
+                [0m目的地区域（具体位置已隐藏）[0m
+              [36m</p>[39m
+            [36m</details>[39m
+            [36m<section[39m
+              [33maria-label[39m=[32m"脱敏路线对比"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m查看路线对比[0m
+              [36m</button>[39m
+            [36m</section>[39m
+            [36m<div>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m申请加入同行组[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</article>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"otto-workspace-dialog-overlay"[39m
+  [36m>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"拼车助手"[39m
+      [33maria-modal[39m=[32m"true"[39m
+      [33mclass[39m=[32m"otto-workspace-dialog"[39m
+      [33mrole[39m=[32m"dialog"[39m
+    [36m>[39m
+      [36m<header>[39m
+        [36m<h2>[39m
+          [0m拼车助手[0m
+        [36m</h2>[39m
+        [36m<button[39m
+          [33maria-label[39m=[32m"关闭拼车助手"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m×[0m
+        [36m</button>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"otto-workspace-dialog__body"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33mclass[39m=[32m"otto-carpool__hero"[39m
+        [36m>[39m
+          [36m<div>[39m
+            [36m<strong>[39m
+              [0m找到与你方向相近的园区伙伴[0m
+            [36m</strong>[39m
+            [36m<p>[39m
+              [0mOtto 只提供信息发布、路线匹配和连接提示，不叫车、不收费，也不处理费用分摊。[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<span>[39m
+            [0m正在寻找[0m
+          [36m</span>[39m
+        [36m</section>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"otto-carpool__chat-hint"[39m
+        [36m>[39m
+          [0m也可以直接在对话框说：“今天 18:30 从宏创园区南门到回龙观，想搭车，前后 30 分钟都可以”。Otto 会补问缺失信息并在发布前确认。[0m
+        [36m</p>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"otto-carpool__form"[39m
+        [36m>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__place"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m从哪里出发[0m
+            [36m</legend>[39m
+            [36m<p[39m
+              [33mid[39m=[32m"_r_4_-hint"[39m
+            [36m>[39m
+              [0m优先选择园区出口或公共集合点，不建议填写办公室或地下车库。[0m
+            [36m</p>[39m
+            [36m<div>[39m
+              [36m<label[39m
+                [33mfor[39m=[32m"_r_4_"[39m
+              [36m>[39m
+                [0m从哪里出发[0m
+                [0m搜索[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m"_r_4_-hint"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33maria-label[39m=[32m"从哪里出发搜索"[39m
+                [33mid[39m=[32m"_r_4_"[39m
+                [33mplaceholder[39m=[32m"搜索小区、地标或地址"[39m
+                [33mvalue[39m=[32m"测试园区南门"[39m
+              [36m/>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m搜索[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m使用当前位置[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m在地图上调整选点[0m
+            [36m</button>[39m
+          [36m</fieldset>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__place"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m要去哪里[0m
+            [36m</legend>[39m
+            [36m<p[39m
+              [33mid[39m=[32m"_r_5_-hint"[39m
+            [36m>[39m
+              [0m请选择标准地点；候选阶段不会展示精确坐标或住宅门牌。[0m
+            [36m</p>[39m
+            [36m<div>[39m
+              [36m<label[39m
+                [33mfor[39m=[32m"_r_5_"[39m
+              [36m>[39m
+                [0m要去哪里[0m
+                [0m搜索[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m"_r_5_-hint"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33maria-label[39m=[32m"要去哪里搜索"[39m
+                [33mid[39m=[32m"_r_5_"[39m
+                [33mplaceholder[39m=[32m"搜索小区、地标或地址"[39m
+                [33mvalue[39m=[32m"测试地铁站"[39m
+              [36m/>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m搜索[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m使用当前位置[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m在地图上调整选点[0m
+            [36m</button>[39m
+          [36m</fieldset>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"otto-carpool__row"[39m
+          [36m>[39m
+            [36m<label>[39m
+              [36m<span>[39m
+                [0m计划出发时间[0m
+              [36m</span>[39m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mmax[39m=[32m"2026-09-08T23:59"[39m
+                [33mmin[39m=[32m"2026-09-08T00:00"[39m
+                [33mrequired[39m=[32m""[39m
+                [33mtype[39m=[32m"datetime-local"[39m
+                [33mvalue[39m=[32m"2026-09-08T23:00"[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [36m<span>[39m
+                [0m可接受前后[0m
+              [36m</span>[39m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"10"[39m
+                [36m>[39m
+                  [0m10 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"20"[39m
+                [36m>[39m
+                  [0m20 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"30"[39m
+                [36m>[39m
+                  [0m30 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"45"[39m
+                [36m>[39m
+                  [0m45 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"60"[39m
+                [36m>[39m
+                  [0m60 分钟[0m
+                [36m</option>[39m
+              [36m</select>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__modes"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m你愿意怎么同行（可多选）[0m
+            [36m</legend>[39m
+            [36m<div>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m我有车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m可以由我开车并顺路带人[0m
+                [36m</span>[39m
+              [36m</label>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m搭车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m搭乘同行伙伴的车[0m
+                [36m</span>[39m
+              [36m</label>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m一起叫车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m匹配后自行协商第三方叫车[0m
+                [36m</span>[39m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<p>[39m
+              [0m多选表示本次这几种方式都可以。“一起叫车”不会由 Otto 下单或计费。[0m
+            [36m</p>[39m
+          [36m</fieldset>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"otto-carpool__privacy"[39m
+          [36m>[39m
+            [0m提交后，你的通勤意向将对同园区且路线、时间符合条件的用户可见。你可以随时修改或停止寻找。[0m
+          [36m</p>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"otto-carpool__actions"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"submit"[39m
+            [36m>[39m
+              [0m更新并重新匹配[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"is-secondary"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m停止寻找[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m仍在寻找[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"is-secondary"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m刷新结果[0m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</form>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"同行请求与状态"[39m
+          [33mclass[39m=[32m"otto-carpool__requests"[39m
+        [36m>[39m
+          [36m<header>[39m
+            [36m<h2>[39m
+              [0m同行请求与状态[0m
+            [36m</h2>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m刷新同行消息[0m
+            [36m</button>[39m
+          [36m</header>[39m
+          [36m<label>[39m
+            [0m同行请求筛选[0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"pending"[39m
+              [36m>[39m
+                [0m待处理[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"all"[39m
+              [36m>[39m
+                [0m全部请求[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<article[39m
+            [33maria-label[39m=[32m"入组申请：a同事"[39m
+          [36m>[39m
+            [36m<h3>[39m
+              [0m入组申请[0m
+              [0m ·[0m
+              [0m [0m
+              [0ma同事[0m
+            [36m</h3>[39m
+            [36m<p>[39m
+              [0m申请加入这次同行[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m约 [0m
+              [0m100[0m
+              [0m% 同路 · 共同方向约[0m
+              [0m [0m
+              [0m8.5[0m
+              [0m 公里[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m一起叫车[0m
+            [36m</p>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"status"[39m
+            [36m>[39m
+              [0m等待对方接受[0m
+            [36m</p>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m撤回请求[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m屏蔽该用户[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m举报该请求[0m
+            [36m</button>[39m
+          [36m</article>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m删除我的同行数据[0m
+          [36m</button>[39m
+          [36m<section[39m
+            [33maria-label[39m=[32m"同行通知"[39m
+          [36m>[39m
+            [36m<h3>[39m
+              [0m同行通知[0m
+            [36m</h3>[39m
+            [36m<article>[39m
+              [36m<p>[39m
+                [0m发现新的同行结果，请刷新后查看最新路线与时间条件[0m
+              [36m</p>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m标记已读[0m
+              [36m</button>[39m
+            [36m</article>[39m
+          [36m</section>[39m
+        [36m</section>[39m
+        [36m<section[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"otto-carpool__results"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m筛选同行方式[0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"all"[39m
+              [36m>[39m
+                [0m全部[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"current_rides_candidate_vehicle"[39m
+              [36m>[39m
+                [0m可搭车[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"candidate_rides_current_vehicle"[39m
+              [36m>[39m
+                [0m可带人[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"shared_taxi"[39m
+              [36m>[39m
+                [0m一起叫车[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<header>[39m
+            [36m<div>[39m
+              [36m<h3>[39m
+                [0m同行结果[0m
+              [36m</h3>[39m
+              [36m<p>[39m
+                [0m找到 1 个候选，已显示 1 个[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<span>[39m
+              [0m2026-09-08[0m
+              [0m [0m
+              [0m23:00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m测试园区南门[0m
+              [0m →[0m
+              [0m [0m
+              [0m测试地铁站[0m
+            [36m</span>[39m
+          [36m</header>[39m
+          [36m<article>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"otto-carpool__score"[39m
+            [36m>[39m
+              [36m<strong>[39m
+                [0m约 [0m
+                [0m100[0m
+                [0m% 同路[0m
+              [36m</strong>[39m
+              [36m<span>[39m
+                [0m0 分钟前仍在寻找[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<h4>[39m
+              [0m2 人同行组[0m
+              [0m · [0m
+              [0m同园区已认证成员[0m
+            [36m</h4>[39m
+            [36m<p>[39m
+              [0m2[0m
+              [0m [0m
+              [0m人 · 园区身份已认证 · [0m
+              [0m23:00[0m
+              [0m 出发 · 相差[0m
+              [0m [0m
+              [0m0[0m
+              [0m 分钟[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m可共同出发：[0m
+              [0m22:30[0m
+              [0m—[0m
+              [0m23:30[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m一起叫车 · 协调人：a同事 · 剩余 2 个乘客名额[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m你们可以一起叫车[0m
+            [36m</p>[39m
+            [36m<details>[39m
+              [36m<summary>[39m
+                [0m为什么匹配[0m
+              [36m</summary>[39m
+              [36m<p>[39m
+                [0m全组平均 × 75% ＋ 最低成员 × 25%约 100%；按地图规划的上下车顺序，预计最大增加 0 分钟。路线重合为几何近似，绕行是本次规划估算，非实时交通保证。[0m
+              [36m</p>[39m
+              [36m<p>[39m
+                [0m剩余名额 [0m
+                [0m2[0m
+                [0m · 平均重合[0m
+                [0m [0m
+                [0m100[0m
+                [0m% · 最低成员[0m
+                [0m [0m
+                [0m100[0m
+                [0m% · 最大预计增加[0m
+                [0m [0m
+                [0m0[0m
+                [0m 分钟[0m
+              [36m</p>[39m
+              [36m<ul>[39m
+                [36m<li>[39m
+                  [0ma同事[0m
+                  [0m：与你约[0m
+                  [0m [0m
+                  [0m100[0m
+                  [0m% 同路[0m
+                [36m</li>[39m
+                [36m<li>[39m
+                  [0mb同事[0m
+                  [0m：与你约[0m
+                  [0m [0m
+                  [0m100[0m
+                  [0m% 同路[0m
+                [36m</li>[39m
+              [36m</ul>[39m
+              [36m<p>[39m
+                [0m路线区域：[0m
+                [0m出发区域（具体位置已隐藏）[0m
+                [0m → [0m
+                [0m目的地区域（具体位置已隐藏）[0m
+              [36m</p>[39m
+            [36m</details>[39m
+            [36m<section[39m
+              [33maria-label[39m=[32m"脱敏路线对比"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m查看路线对比[0m
+              [36m</button>[39m
+            [36m</section>[39m
+            [36m<div>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m申请加入同行组[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</article>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/components/CarpoolFlow.integration.test.tsx > real UI publishes, previews, requests, chats, groups, admits and leaves through SQLite and native MLS
+TestingLibraryElementError: Unable to find an element with the text: 已发送请求，等待确认. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"otto-workspace-dialog-overlay"[39m
+  [36m>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"拼车助手"[39m
+      [33maria-modal[39m=[32m"true"[39m
+      [33mclass[39m=[32m"otto-workspace-dialog"[39m
+      [33mrole[39m=[32m"dialog"[39m
+    [36m>[39m
+      [36m<header>[39m
+        [36m<h2>[39m
+          [0m拼车助手[0m
+        [36m</h2>[39m
+        [36m<button[39m
+          [33maria-label[39m=[32m"关闭拼车助手"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m×[0m
+        [36m</button>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"otto-workspace-dialog__body"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33mclass[39m=[32m"otto-carpool__hero"[39m
+        [36m>[39m
+          [36m<div>[39m
+            [36m<strong>[39m
+              [0m找到与你方向相近的园区伙伴[0m
+            [36m</strong>[39m
+            [36m<p>[39m
+              [0mOtto 只提供信息发布、路线匹配和连接提示，不叫车、不收费，也不处理费用分摊。[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<span>[39m
+            [0m正在寻找[0m
+          [36m</span>[39m
+        [36m</section>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"otto-carpool__chat-hint"[39m
+        [36m>[39m
+          [0m也可以直接在对话框说：“今天 18:30 从宏创园区南门到回龙观，想搭车，前后 30 分钟都可以”。Otto 会补问缺失信息并在发布前确认。[0m
+        [36m</p>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"otto-carpool__form"[39m
+        [36m>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__place"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m从哪里出发[0m
+            [36m</legend>[39m
+            [36m<p[39m
+              [33mid[39m=[32m"_r_4_-hint"[39m
+            [36m>[39m
+              [0m优先选择园区出口或公共集合点，不建议填写办公室或地下车库。[0m
+            [36m</p>[39m
+            [36m<div>[39m
+              [36m<label[39m
+                [33mfor[39m=[32m"_r_4_"[39m
+              [36m>[39m
+                [0m从哪里出发[0m
+                [0m搜索[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m"_r_4_-hint"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33maria-label[39m=[32m"从哪里出发搜索"[39m
+                [33mid[39m=[32m"_r_4_"[39m
+                [33mplaceholder[39m=[32m"搜索小区、地标或地址"[39m
+                [33mvalue[39m=[32m"测试园区南门"[39m
+              [36m/>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m搜索[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m使用当前位置[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m在地图上调整选点[0m
+            [36m</button>[39m
+          [36m</fieldset>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__place"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m要去哪里[0m
+            [36m</legend>[39m
+            [36m<p[39m
+              [33mid[39m=[32m"_r_5_-hint"[39m
+            [36m>[39m
+              [0m请选择标准地点；候选阶段不会展示精确坐标或住宅门牌。[0m
+            [36m</p>[39m
+            [36m<div>[39m
+              [36m<label[39m
+                [33mfor[39m=[32m"_r_5_"[39m
+              [36m>[39m
+                [0m要去哪里[0m
+                [0m搜索[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m"_r_5_-hint"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33maria-label[39m=[32m"要去哪里搜索"[39m
+                [33mid[39m=[32m"_r_5_"[39m
+                [33mplaceholder[39m=[32m"搜索小区、地标或地址"[39m
+                [33mvalue[39m=[32m"测试地铁站"[39m
+              [36m/>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m搜索[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m使用当前位置[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m在地图上调整选点[0m
+            [36m</button>[39m
+          [36m</fieldset>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"otto-carpool__row"[39m
+          [36m>[39m
+            [36m<label>[39m
+              [36m<span>[39m
+                [0m计划出发时间[0m
+              [36m</span>[39m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mmax[39m=[32m"2026-09-08T23:59"[39m
+                [33mmin[39m=[32m"2026-09-08T00:00"[39m
+                [33mrequired[39m=[32m""[39m
+                [33mtype[39m=[32m"datetime-local"[39m
+                [33mvalue[39m=[32m"2026-09-08T23:00"[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [36m<span>[39m
+                [0m可接受前后[0m
+              [36m</span>[39m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"10"[39m
+                [36m>[39m
+                  [0m10 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"20"[39m
+                [36m>[39m
+                  [0m20 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"30"[39m
+                [36m>[39m
+                  [0m30 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"45"[39m
+                [36m>[39m
+                  [0m45 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"60"[39m
+                [36m>[39m
+                  [0m60 分钟[0m
+                [36m</option>[39m
+              [36m</select>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__modes"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m你愿意怎么同行（可多选）[0m
+            [36m</legend>[39m
+            [36m<div>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m我有车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m可以由我开车并顺路带人[0m
+                [36m</span>[39m
+              [36m</label>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m搭车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m搭乘同行伙伴的车[0m
+                [36m</span>[39m
+              [36m</label>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m一起叫车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m匹配后自行协商第三方叫车[0m
+                [36m</span>[39m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<p>[39m
+              [0m多选表示本次这几种方式都可以。“一起叫车”不会由 Otto 下单或计费。[0m
+            [36m</p>[39m
+          [36m</fieldset>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"otto-carpool__privacy"[39m
+          [36m>[39m
+            [0m提交后，你的通勤意向将对同园区且路线、时间符合条件的用户可见。你可以随时修改或停止寻找。[0m
+          [36m</p>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"otto-carpool__actions"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"submit"[39m
+            [36m>[39m
+              [0m更新并重新匹配[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"is-secondary"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m停止寻找[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m仍在寻找[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"is-secondary"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m刷新结果[0m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</form>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"同行请求与状态"[39m
+          [33mclass[39m=[32m"otto-carpool__requests"[39m
+        [36m>[39m
+          [36m<header>[39m
+            [36m<h2>[39m
+              [0m同行请求与状态[0m
+            [36m</h2>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m刷新同行消息[0m
+            [36m</button>[39m
+          [36m</header>[39m
+          [36m<label>[39m
+            [0m同行请求筛选[0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"pending"[39m
+              [36m>[39m
+                [0m待处理[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"all"[39m
+              [36m>[39m
+                [0m全部请求[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<article[39m
+            [33maria-label[39m=[32m"入组申请：a同事"[39m
+          [36m>[39m
+            [36m<h3>[39m
+              [0m入组申请[0m
+              [0m ·[0m
+              [0m [0m
+              [0ma同事[0m
+            [36m</h3>[39m
+            [36m<p>[39m
+              [0m申请加入这次同行[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m约 [0m
+              [0m100[0m
+              [0m% 同路 · 共同方向约[0m
+              [0m [0m
+              [0m8.5[0m
+              [0m 公里[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m一起叫车[0m
+            [36m</p>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"status"[39m
+            [36m>[39m
+              [0m等待对方接受[0m
+            [36m</p>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m撤回请求[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m屏蔽该用户[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m举报该请求[0m
+            [36m</button>[39m
+          [36m</article>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m删除我的同行数据[0m
+          [36m</button>[39m
+          [36m<section[39m
+            [33maria-label[39m=[32m"同行通知"[39m
+          [36m>[39m
+            [36m<h3>[39m
+              [0m同行通知[0m
+            [36m</h3>[39m
+            [36m<article>[39m
+              [36m<p>[39m
+                [0m发现新的同行结果，请刷新后查看最新路线与时间条件[0m
+              [36m</p>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m标记已读[0m
+              [36m</button>[39m
+            [36m</article>[39m
+          [36m</section>[39m
+        [36m</section>[39m
+        [36m<section[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"otto-carpool__results"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m筛选同行方式[0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"all"[39m
+              [36m>[39m
+                [0m全部[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"current_rides_candidate_vehicle"[39m
+              [36m>[39m
+                [0m可搭车[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"candidate_rides_current_vehicle"[39m
+              [36m>[39m
+                [0m可带人[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"shared_taxi"[39m
+              [36m>[39m
+                [0m一起叫车[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<header>[39m
+            [36m<div>[39m
+              [36m<h3>[39m
+                [0m同行结果[0m
+              [36m</h3>[39m
+              [36m<p>[39m
+                [0m找到 1 个候选，已显示 1 个[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<span>[39m
+              [0m2026-09-08[0m
+              [0m [0m
+              [0m23:00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m测试园区南门[0m
+              [0m →[0m
+              [0m [0m
+              [0m测试地铁站[0m
+            [36m</span>[39m
+          [36m</header>[39m
+          [36m<article>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"otto-carpool__score"[39m
+            [36m>[39m
+              [36m<strong>[39m
+                [0m约 [0m
+                [0m100[0m
+                [0m% 同路[0m
+              [36m</strong>[39m
+              [36m<span>[39m
+                [0m0 分钟前仍在寻找[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<h4>[39m
+              [0m2 人同行组[0m
+              [0m · [0m
+              [0m同园区已认证成员[0m
+            [36m</h4>[39m
+            [36m<p>[39m
+              [0m2[0m
+              [0m [0m
+              [0m人 · 园区身份已认证 · [0m
+              [0m23:00[0m
+              [0m 出发 · 相差[0m
+              [0m [0m
+              [0m0[0m
+              [0m 分钟[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m可共同出发：[0m
+              [0m22:30[0m
+              [0m—[0m
+              [0m23:30[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m一起叫车 · 协调人：a同事 · 剩余 2 个乘客名额[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m你们可以一起叫车[0m
+            [36m</p>[39m
+            [36m<details>[39m
+              [36m<summary>[39m
+                [0m为什么匹配[0m
+              [36m</summary>[39m
+              [36m<p>[39m
+                [0m全组平均 × 75% ＋ 最低成员 × 25%约 100%；按地图规划的上下车顺序，预计最大增加 0 分钟。路线重合为几何近似，绕行是本次规划估算，非实时交通保证。[0m
+              [36m</p>[39m
+              [36m<p>[39m
+                [0m剩余名额 [0m
+                [0m2[0m
+                [0m · 平均重合[0m
+                [0m [0m
+                [0m100[0m
+                [0m% · 最低成员[0m
+                [0m [0m
+                [0m100[0m
+                [0m% · 最大预计增加[0m
+                [0m [0m
+                [0m0[0m
+                [0m 分钟[0m
+              [36m</p>[39m
+              [36m<ul>[39m
+                [36m<li>[39m
+                  [0ma同事[0m
+                  [0m：与你约[0m
+                  [0m [0m
+                  [0m100[0m
+                  [0m% 同路[0m
+                [36m</li>[39m
+                [36m<li>[39m
+                  [0mb同事[0m
+                  [0m：与你约[0m
+                  [0m [0m
+                  [0m100[0m
+                  [0m% 同路[0m
+                [36m</li>[39m
+              [36m</ul>[39m
+              [36m<p>[39m
+                [0m路线区域：[0m
+                [0m出发区域（具体位置已隐藏）[0m
+                [0m → [0m
+                [0m目的地区域（具体位置已隐藏）[0m
+              [36m</p>[39m
+            [36m</details>[39m
+            [36m<section[39m
+              [33maria-label[39m=[32m"脱敏路线对比"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m查看路线对比[0m
+              [36m</button>[39m
+            [36m</section>[39m
+            [36m<div>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m申请加入同行组[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</article>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+  [36m<div[39m
+    [33mclass[39m=[32m"otto-workspace-dialog-overlay"[39m
+  [36m>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"拼车助手"[39m
+      [33maria-modal[39m=[32m"true"[39m
+      [33mclass[39m=[32m"otto-workspace-dialog"[39m
+      [33mrole[39m=[32m"dialog"[39m
+    [36m>[39m
+      [36m<header>[39m
+        [36m<h2>[39m
+          [0m拼车助手[0m
+        [36m</h2>[39m
+        [36m<button[39m
+          [33maria-label[39m=[32m"关闭拼车助手"[39m
+          [33mtype[39m=[32m"button"[39m
+        [36m>[39m
+          [0m×[0m
+        [36m</button>[39m
+      [36m</header>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"otto-workspace-dialog__body"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33mclass[39m=[32m"otto-carpool__hero"[39m
+        [36m>[39m
+          [36m<div>[39m
+            [36m<strong>[39m
+              [0m找到与你方向相近的园区伙伴[0m
+            [36m</strong>[39m
+            [36m<p>[39m
+              [0mOtto 只提供信息发布、路线匹配和连接提示，不叫车、不收费，也不处理费用分摊。[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<span>[39m
+            [0m正在寻找[0m
+          [36m</span>[39m
+        [36m</section>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"otto-carpool__chat-hint"[39m
+        [36m>[39m
+          [0m也可以直接在对话框说：“今天 18:30 从宏创园区南门到回龙观，想搭车，前后 30 分钟都可以”。Otto 会补问缺失信息并在发布前确认。[0m
+        [36m</p>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"otto-carpool__form"[39m
+        [36m>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__place"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m从哪里出发[0m
+            [36m</legend>[39m
+            [36m<p[39m
+              [33mid[39m=[32m"_r_4_-hint"[39m
+            [36m>[39m
+              [0m优先选择园区出口或公共集合点，不建议填写办公室或地下车库。[0m
+            [36m</p>[39m
+            [36m<div>[39m
+              [36m<label[39m
+                [33mfor[39m=[32m"_r_4_"[39m
+              [36m>[39m
+                [0m从哪里出发[0m
+                [0m搜索[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m"_r_4_-hint"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33maria-label[39m=[32m"从哪里出发搜索"[39m
+                [33mid[39m=[32m"_r_4_"[39m
+                [33mplaceholder[39m=[32m"搜索小区、地标或地址"[39m
+                [33mvalue[39m=[32m"测试园区南门"[39m
+              [36m/>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m搜索[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m使用当前位置[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m在地图上调整选点[0m
+            [36m</button>[39m
+          [36m</fieldset>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__place"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m要去哪里[0m
+            [36m</legend>[39m
+            [36m<p[39m
+              [33mid[39m=[32m"_r_5_-hint"[39m
+            [36m>[39m
+              [0m请选择标准地点；候选阶段不会展示精确坐标或住宅门牌。[0m
+            [36m</p>[39m
+            [36m<div>[39m
+              [36m<label[39m
+                [33mfor[39m=[32m"_r_5_"[39m
+              [36m>[39m
+                [0m要去哪里[0m
+                [0m搜索[0m
+              [36m</label>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m"_r_5_-hint"[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33maria-label[39m=[32m"要去哪里搜索"[39m
+                [33mid[39m=[32m"_r_5_"[39m
+                [33mplaceholder[39m=[32m"搜索小区、地标或地址"[39m
+                [33mvalue[39m=[32m"测试地铁站"[39m
+              [36m/>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m搜索[0m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m使用当前位置[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m在地图上调整选点[0m
+            [36m</button>[39m
+          [36m</fieldset>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"otto-carpool__row"[39m
+          [36m>[39m
+            [36m<label>[39m
+              [36m<span>[39m
+                [0m计划出发时间[0m
+              [36m</span>[39m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mmax[39m=[32m"2026-09-08T23:59"[39m
+                [33mmin[39m=[32m"2026-09-08T00:00"[39m
+                [33mrequired[39m=[32m""[39m
+                [33mtype[39m=[32m"datetime-local"[39m
+                [33mvalue[39m=[32m"2026-09-08T23:00"[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [36m<span>[39m
+                [0m可接受前后[0m
+              [36m</span>[39m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"10"[39m
+                [36m>[39m
+                  [0m10 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"20"[39m
+                [36m>[39m
+                  [0m20 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"30"[39m
+                [36m>[39m
+                  [0m30 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"45"[39m
+                [36m>[39m
+                  [0m45 分钟[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"60"[39m
+                [36m>[39m
+                  [0m60 分钟[0m
+                [36m</option>[39m
+              [36m</select>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"otto-carpool__modes"[39m
+          [36m>[39m
+            [36m<legend>[39m
+              [0m你愿意怎么同行（可多选）[0m
+            [36m</legend>[39m
+            [36m<div>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m我有车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m可以由我开车并顺路带人[0m
+                [36m</span>[39m
+              [36m</label>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m搭车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m搭乘同行伙伴的车[0m
+                [36m</span>[39m
+              [36m</label>[39m
+              [36m<label>[39m
+                [36m<input[39m
+                  [33mtype[39m=[32m"checkbox"[39m
+                [36m/>[39m
+                [36m<strong>[39m
+                  [0m一起叫车[0m
+                [36m</strong>[39m
+                [36m<span>[39m
+                  [0m匹配后自行协商第三方叫车[0m
+                [36m</span>[39m
+              [36m</label>[39m
+            [36m</div>[39m
+            [36m<p>[39m
+              [0m多选表示本次这几种方式都可以。“一起叫车”不会由 Otto 下单或计费。[0m
+            [36m</p>[39m
+          [36m</fieldset>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"otto-carpool__privacy"[39m
+          [36m>[39m
+            [0m提交后，你的通勤意向将对同园区且路线、时间符合条件的用户可见。你可以随时修改或停止寻找。[0m
+          [36m</p>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"otto-carpool__actions"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"submit"[39m
+            [36m>[39m
+              [0m更新并重新匹配[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"is-secondary"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m停止寻找[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m仍在寻找[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"is-secondary"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m刷新结果[0m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</form>[39m
+        [36m<section[39m
+          [33maria-label[39m=[32m"同行请求与状态"[39m
+          [33mclass[39m=[32m"otto-carpool__requests"[39m
+        [36m>[39m
+          [36m<header>[39m
+            [36m<h2>[39m
+              [0m同行请求与状态[0m
+            [36m</h2>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m刷新同行消息[0m
+            [36m</button>[39m
+          [36m</header>[39m
+          [36m<label>[39m
+            [0m同行请求筛选[0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"pending"[39m
+              [36m>[39m
+                [0m待处理[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"all"[39m
+              [36m>[39m
+                [0m全部请求[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<article[39m
+            [33maria-label[39m=[32m"入组申请：a同事"[39m
+          [36m>[39m
+            [36m<h3>[39m
+              [0m入组申请[0m
+              [0m ·[0m
+              [0m [0m
+              [0ma同事[0m
+            [36m</h3>[39m
+            [36m<p>[39m
+              [0m申请加入这次同行[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m约 [0m
+              [0m100[0m
+              [0m% 同路 · 共同方向约[0m
+              [0m [0m
+              [0m8.5[0m
+              [0m 公里[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m一起叫车[0m
+            [36m</p>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"status"[39m
+            [36m>[39m
+              [0m等待对方接受[0m
+            [36m</p>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m撤回请求[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m屏蔽该用户[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m举报该请求[0m
+            [36m</button>[39m
+          [36m</article>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m删除我的同行数据[0m
+          [36m</button>[39m
+          [36m<section[39m
+            [33maria-label[39m=[32m"同行通知"[39m
+          [36m>[39m
+            [36m<h3>[39m
+              [0m同行通知[0m
+            [36m</h3>[39m
+            [36m<article>[39m
+              [36m<p>[39m
+                [0m发现新的同行结果，请刷新后查看最新路线与时间条件[0m
+              [36m</p>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m标记已读[0m
+              [36m</button>[39m
+            [36m</article>[39m
+          [36m</section>[39m
+        [36m</section>[39m
+        [36m<section[39m
+          [33maria-live[39m=[32m"polite"[39m
+          [33mclass[39m=[32m"otto-carpool__results"[39m
+        [36m>[39m
+          [36m<label>[39m
+            [0m筛选同行方式[0m
+            [36m<select>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"all"[39m
+              [36m>[39m
+                [0m全部[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"current_rides_candidate_vehicle"[39m
+              [36m>[39m
+                [0m可搭车[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"candidate_rides_current_vehicle"[39m
+              [36m>[39m
+                [0m可带人[0m
+              [36m</option>[39m
+              [36m<option[39m
+                [33mvalue[39m=[32m"shared_taxi"[39m
+              [36m>[39m
+                [0m一起叫车[0m
+              [36m</option>[39m
+            [36m</select>[39m
+          [36m</label>[39m
+          [36m<header>[39m
+            [36m<div>[39m
+              [36m<h3>[39m
+                [0m同行结果[0m
+              [36m</h3>[39m
+              [36m<p>[39m
+                [0m找到 1 个候选，已显示 1 个[0m
+              [36m</p>[39m
+            [36m</div>[39m
+            [36m<span>[39m
+              [0m2026-09-08[0m
+              [0m [0m
+              [0m23:00[0m
+              [0m ·[0m
+              [0m [0m
+              [0m测试园区南门[0m
+              [0m →[0m
+              [0m [0m
+              [0m测试地铁站[0m
+            [36m</span>[39m
+          [36m</header>[39m
+          [36m<article>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"otto-carpool__score"[39m
+            [36m>[39m
+              [36m<strong>[39m
+                [0m约 [0m
+                [0m100[0m
+                [0m% 同路[0m
+              [36m</strong>[39m
+              [36m<span>[39m
+                [0m0 分钟前仍在寻找[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<h4>[39m
+              [0m2 人同行组[0m
+              [0m · [0m
+              [0m同园区已认证成员[0m
+            [36m</h4>[39m
+            [36m<p>[39m
+              [0m2[0m
+              [0m [0m
+              [0m人 · 园区身份已认证 · [0m
+              [0m23:00[0m
+              [0m 出发 · 相差[0m
+              [0m [0m
+              [0m0[0m
+              [0m 分钟[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m可共同出发：[0m
+              [0m22:30[0m
+              [0m—[0m
+              [0m23:30[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m一起叫车 · 协调人：a同事 · 剩余 2 个乘客名额[0m
+            [36m</p>[39m
+            [36m<p>[39m
+              [0m你们可以一起叫车[0m
+            [36m</p>[39m
+            [36m<details>[39m
+              [36m<summary>[39m
+                [0m为什么匹配[0m
+              [36m</summary>[39m
+              [36m<p>[39m
+                [0m全组平均 × 75% ＋ 最低成员 × 25%约 100%；按地图规划的上下车顺序，预计最大增加 0 分钟。路线重合为几何近似，绕行是本次规划估算，非实时交通保证。[0m
+              [36m</p>[39m
+              [36m<p>[39m
+                [0m剩余名额 [0m
+                [0m2[0m
+                [0m · 平均重合[0m
+                [0m [0m
+                [0m100[0m
+                [0m% · 最低成员[0m
+                [0m [0m
+                [0m100[0m
+                [0m% · 最大预计增加[0m
+                [0m [0m
+                [0m0[0m
+                [0m 分钟[0m
+              [36m</p>[39m
+              [36m<ul>[39m
+                [36m<li>[39m
+                  [0ma同事[0m
+                  [0m：与你约[0m
+                  [0m [0m
+                  [0m100[0m
+                  [0m% 同路[0m
+                [36m</li>[39m
+                [36m<li>[39m
+                  [0mb同事[0m
+                  [0m：与你约[0m
+                  [0m [0m
+                  [0m100[0m
+                  [0m% 同路[0m
+                [36m</li>[39m
+              [36m</ul>[39m
+              [36m<p>[39m
+                [0m路线区域：[0m
+                [0m出发区域（具体位置已隐藏）[0m
+                [0m → [0m
+                [0m目的地区域（具体位置已隐藏）[0m
+              [36m</p>[39m
+            [36m</details>[39m
+            [36m<section[39m
+              [33maria-label[39m=[32m"脱敏路线对比"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m查看路线对比[0m
+              [36m</button>[39m
+            [36m</section>[39m
+            [36m<div>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m申请加入同行组[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</article>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/renderer/components/CarpoolFlow.integration.test.tsx:261:18
+    259|     );
+    260|     await fillRequest('申请加入这次同行');
+    261|     await screen.findByText('已发送请求，等待确认');
+       |                  ^
+    262|     show('a');
+    263|     fireEvent.click(await screen.findByRole('button', { name: '同意入组' }…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  12:08:13
+   Duration  8.84s (transform 1.93s, setup 49ms, collect 3.24s, tests 5.13s, environment 182ms, prepare 56ms)

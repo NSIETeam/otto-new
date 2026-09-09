@@ -1,3 +1,4 @@
+/** @deprecated Legacy supply-demand prototype. The active star map uses enterpriseIndustry.ts; do not label these scores as same-industry relationships. */
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */

@@ -1,0 +1,73 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+ ❯ src/modules/authorization/commercialRoutePolicy.test.ts (41 tests | 1 failed) 7ms
+   ✓ commercial enterprise route policy > maps /enterprise/atoa/inbox to atoa 1ms
+   ✓ commercial enterprise route policy > maps /enterprise/park/services/request to park_service 0ms
+   ✓ commercial enterprise route policy > maps /enterprise/park-statistics/inbox to park_service 0ms
+   ✓ commercial enterprise route policy > maps /enterprise/park-settings to park_service 0ms
+   ✓ commercial enterprise route policy > maps /enterprise/park-meeting-rooms to park_service 0ms
+   ✓ commercial enterprise route policy > maps /enterprise/park-meeting-slots to park_service 0ms
+   ✓ commercial enterprise route policy > maps /enterprise/organization/public-profile to park_service 0ms
+   ✓ commercial enterprise route policy > maps /enterprise/skills/leaderboard to skill_market 0ms
+   ✓ commercial enterprise route policy > maps /enterprise/customer-modules/com.acme.report/1.0.0/install to skill_market 0ms
+   ✓ commercial enterprise route policy > maps /enterprise/platform/customer-modules/com.acme.report/1.0.0/review to skill_market 0ms
+   ✓ commercial enterprise route policy > maps /enterprise/knowledge/revisions to knowledge 0ms
+   ✓ commercial enterprise route policy > maps /enterprise/organization/departments to enterprise_tree 0ms
+   ✓ commercial enterprise route policy > maps /enterprise/platform/organizations/org-a to enterprise_tree 0ms
+   ✓ commercial enterprise route policy > keeps recovery route /enterprise/auth/login outside module gates 0ms
+   ✓ commercial enterprise route policy > keeps recovery route /enterprise/deployment/license outside module gates 0ms
+   ✓ commercial enterprise route policy > keeps recovery route /enterprise/deployment/license/lease outside module gates 0ms
+   ✓ commercial enterprise route policy > keeps recovery route /enterprise/deployment/diagnostics outside module gates 0ms
+   ✓ commercial enterprise route policy > keeps recovery route /enterprise/deployment/data-protection/backup outside module gates 0ms
+   ✓ commercial enterprise route policy > keeps recovery route /enterprise/export outside module gates 0ms
+   ✓ commercial enterprise route policy > keeps recovery route /enterprise/privacy/export outside module gates 0ms
+   ✓ commercial enterprise route policy > keeps recovery route /enterprise/modules/updates outside module gates 0ms
+   ✓ commercial enterprise route policy > leaves mixed internal and park tickets to record-level policy 0ms
+   ✓ commercial enterprise route policy > keeps the current organization directory available as a baseline capability 0ms
+   ✓ commercial enterprise route policy > keeps same-organization member administration /enterprise/accounts GET in the enterprise baseline 0ms
+   ✓ commercial enterprise route policy > keeps same-organization member administration /enterprise/accounts POST in the enterprise baseline 0ms
+   ✓ commercial enterprise route policy > keeps same-organization member administration /enterprise/accounts/account-1 PATCH in the enterprise baseline 0ms
+   ✓ commercial enterprise route policy > keeps same-organization member administration /enterprise/accounts/account-1 DELETE in the enterprise baseline 0ms
+   ✓ commercial enterprise route policy > keeps same-organization member administration /enterprise/organization/invite GET in the enterprise baseline 0ms
+   ✓ commercial enterprise route policy > keeps same-organization member administration /enterprise/organization/invite POST in the enterprise baseline 0ms
+   ✓ commercial enterprise route policy > keeps same-organization collaboration route /enterprise/messages/unread outside module entitlements 0ms
+   ✓ commercial enterprise route policy > keeps same-organization collaboration route /enterprise/messages/account-1 outside module entitlements 1ms
+   ✓ commercial enterprise route policy > keeps same-organization collaboration route /enterprise/message-attachments/file-1 outside module entitlements 0ms
+   ✓ commercial enterprise route policy > keeps same-organization collaboration route /enterprise/attachments/inline outside module entitlements 0ms
+   ✓ commercial enterprise route policy > keeps same-organization collaboration route /enterprise/e2ee/devices outside module entitlements 0ms
+   ✓ commercial enterprise route policy > keeps same-organization collaboration route /enterprise/e2ee/mls/key-packages outside module entitlements 0ms
+   ✓ commercial enterprise route policy > keeps same-organization collaboration route /enterprise/presence/heartbeat outside module entitlements 0ms
+   ✓ commercial enterprise route policy > separates A2A federation grants from direct-message federation routes 0ms
+   ✓ commercial enterprise route policy > does not match similar unowned path prefixes 0ms
+   ✓ keeps existing market MLS history reachable when discovery is unavailable, while new publications remain gated 0ms
+   ✓ keeps associated history and controlled historical images reachable after the market module is removed 0ms
+   × keeps independently authorized chat attachments reachable after removing the market module 3ms
+     → expected 'park_service' to be null
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/authorization/commercialRoutePolicy.test.ts > keeps independently authorized chat attachments reachable after removing the market module
+AssertionError: expected 'park_service' to be null
+
+- Expected:
+null
+
++ Received:
+"park_service"
+
+ ❯ src/modules/authorization/commercialRoutePolicy.test.ts:137:111
+    135|
+    136| it('keeps independently authorized chat attachments reachable after re…
+    137|  expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/c…
+       |                                                                                                               ^
+    138|  expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/c…
+    139|  expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/i…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 40 passed (41)
+   Start at  22:31:20
+   Duration  161ms (transform 31ms, setup 0ms, collect 23ms, tests 7ms, environment 0ms, prepare 36ms)

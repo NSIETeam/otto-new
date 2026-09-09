@@ -1,0 +1,46 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ ✓ packages/server/src/modules/authorization/commercialRoutePolicy.test.ts (41 tests) 3ms
+(node:10905) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | integration/park-market/authenticated-flow.test.ts > real enterprise login and membership authority drive cross-company publish / encrypted contact / reply / reserve / sale HTTP flow
+[Otto Enterprise] 服务端运行于 http://127.0.0.1:0
+[Otto Enterprise] 账号管理: http://localhost:0/enterprise/admin
+[Otto Enterprise] 企业引入: https://59.110.154.44:7777/enterprise/join/{邀请码}
+[Otto Enterprise] 老板看板: http://localhost:0/enterprise/dashboard
+[Otto Enterprise] 数据: ~/.otto-enterprise/data.db（本地，零云端）
+[Otto Enterprise] 已使用环境中配置的平台管理令牌（不会输出令牌内容）
+[Otto Enterprise] 积分管理: http://localhost:0/enterprise/admin/credits
+[Otto Enterprise] Ctrl+C 停止
+
+ ❯ integration/park-market/authenticated-flow.test.ts (1 test | 1 failed) 1523ms
+   × real enterprise login and membership authority drive cross-company publish / encrypted contact / reply / reserve / sale HTTP flow 1523ms
+     → expected [ { id: 'first', …(10) }, …(2) ] to have a length of 2 but got 3
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  integration/park-market/authenticated-flow.test.ts > real enterprise login and membership authority drive cross-company publish / encrypted contact / reply / reserve / sale HTTP flow
+AssertionError: expected [ { id: 'first', …(10) }, …(2) ] to have a length of 2 but got 3
+
+- Expected
++ Received
+
+- 2
++ 3
+
+ ❯ integration/park-market/authenticated-flow.test.ts:277:7
+    275|     expect(
+    276|       (await clients[1].messages(first.conversationId)).items,
+    277|     ).toHaveLength(2);
+       |       ^
+    278|     if (process.env.OTTO_MARKET_DESKTOP_FLOW === '1') {
+    279|       const uiBuyer = createMember('ui-buyer', true);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 41 passed (42)
+   Start at  22:36:10
+   Duration  3.71s (transform 1.68s, setup 0ms, collect 2.08s, tests 1.53s, environment 0ms, prepare 62ms)

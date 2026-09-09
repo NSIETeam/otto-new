@@ -1,0 +1,688 @@
+import { ParkMarketMls } from '../../packages/desktop/src/main/park-market-mls.js';
+/** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
+import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { expect, it } from 'vitest';
+import {
+  EnterpriseE2eeCrypto,
+  EnterpriseE2eeKeyVault,
+} from '../../packages/desktop/src/main/enterprise-e2ee.js';
+import { MarketDraftStore } from '../../packages/desktop/src/main/park-market.js';
+import { ParkMarketMessaging } from '../../packages/desktop/src/main/park-market-messaging.js';
+import { createMarketApplication } from '../../packages/server/src/modules/park_services/flea_market/fleaMarketApplication.js';
+import { createEncryptedObjectStore } from '../../packages/server/src/modules/data_platform/index.js';
+import {
+  sqliteMarketHarness,
+  postgresMarketHarness,
+  marketServiceFixture,
+  testListingFields,
+} from '../../packages/server/src/modules/park_services/flea_market/fleaMarketTestSupport.js';
+
+for (const nativeMls of [false, true])
+  for (const [backend, harness] of [
+    ['sqlite', sqliteMarketHarness],
+    ['postgres', postgresMarketHarness],
+  ] as const) {
+    it(`${backend}/${nativeMls ? 'native MLS' : 'envelope'}: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server`, async () => {
+      const h = await harness(),
+        root = mkdtempSync(join(tmpdir(), 'otto-market-encrypted-'));
+      const nativeClients: ParkMarketMls[] = [];
+      try {
+        const base = await marketServiceFixture(h.repository);
+        const endpoint = (account: string, name = account) => {
+          const vault = new EnterpriseE2eeKeyVault({
+            directory: join(root, name),
+            deviceName: () => account,
+            now: () => new Date(base.now()),
+            protect: (text) => Buffer.from(text).toString('base64'),
+            unprotect: (text) => Buffer.from(text, 'base64').toString(),
+          });
+          const crypto = new EnterpriseE2eeCrypto(vault);
+          return { crypto, device: crypto.localDevice('market-test', account) };
+        };
+        const buyer = endpoint('buyer'),
+          seller = endpoint('seller');
+        await h.repository.transaction(async (tx) => {
+          if (backend === 'sqlite') {
+            await tx.run(
+              'CREATE TABLE e2ee_devices(organization_id TEXT,account_id TEXT,device_id TEXT,device_name TEXT,identity_signing_public_key TEXT,device_exchange_public_key TEXT,key_fingerprint TEXT,approval_state TEXT,approved_by_device_id TEXT,approved_at TEXT,created_at TEXT,last_seen_at TEXT,revoked_at TEXT)',
+            );
+            await tx.run(
+              'CREATE TABLE e2ee_key_transparency_log(organization_id TEXT,sequence INTEGER,account_id TEXT,device_id TEXT,event TEXT,key_fingerprint TEXT,actor_device_id TEXT,previous_hash TEXT,entry_hash TEXT,created_at TEXT)',
+            );
+          } else
+            for (const [account, org] of [
+              ['seller', 'E1'],
+              ['buyer', 'E2'],
+            ]) {
+              await tx.run(
+                'INSERT INTO organizations(id,name,slug) VALUES (?,?,?)',
+                [org, org, org],
+              );
+              await tx.run(
+                'INSERT INTO accounts(id,organization_id,username,password_hash,name) VALUES (?,?,?,?,?)',
+                [account, org, account, 'fixture-not-login', account],
+              );
+            }
+          for (const [account, org, device] of [
+            ['seller', 'E1', seller.device],
+            ['buyer', 'E2', buyer.device],
+          ] as const) {
+            const at = new Date(base.now()).toISOString();
+            await tx.run(
+              'INSERT INTO e2ee_devices(organization_id,account_id,device_id,device_name,identity_signing_public_key,device_exchange_public_key,key_fingerprint,approval_state,approved_by_device_id,approved_at,created_at,last_seen_at,revoked_at) VALUES (?,?,?,?,?,?,?,?,NULL,?,?,?,NULL)',
+              [
+                org,
+                account,
+                device.deviceId,
+                device.deviceName,
+                device.identitySigningPublicKey,
+                device.deviceExchangePublicKey,
+                device.keyFingerprint,
+                'approved',
+                at,
+                at,
+                at,
+              ],
+            );
+            const entry = {
+              sequence: 1,
+              organizationId: org,
+              accountId: account,
+              deviceId: device.deviceId,
+              event: 'bootstrap_approved',
+              keyFingerprint: device.keyFingerprint,
+              actorDeviceId: device.deviceId,
+              previousHash: '0'.repeat(64),
+              createdAt: at,
+            };
+            const hash = createHash('sha256')
+              .update('otto:e2ee-key-transparency:v1\n')
+              .update(JSON.stringify(entry))
+              .digest('hex');
+            await tx.run(
+              'INSERT INTO e2ee_key_transparency_log VALUES (?,?,?,?,?,?,?,?,?,?)',
+              [
+                org,
+                1,
+                account,
+                device.deviceId,
+                entry.event,
+                device.keyFingerprint,
+                device.deviceId,
+                entry.previousHash,
+                hash,
+                at,
+              ],
+            );
+          }
+        });
+        const objects = createEncryptedObjectStore({
+          root: join(root, 'objects'),
+          keyProvider: { getKey: () => Buffer.alloc(32, 99), clear() {} },
+        });
+        const makeApp = () =>
+          createMarketApplication({
+            ...base,
+            repository: h.repository,
+            objects,
+            ready: () => true,
+            principal: async (tx, actor) => {
+              const p = await base.principal(tx, actor);
+              return (
+                p && {
+                  ...p,
+                  marketAdminParkIds: actor === 'stranger' ? ['P'] : [],
+                }
+              );
+            },
+          });
+        let app = makeApp();
+        await app.settings.update('stranger', 'P', {
+          requestId: 'config',
+          expectedVersion: 0,
+          enabled: true,
+          rules: '个人闲置测试规则',
+          responsibleAccountId: 'stranger',
+          contact: '测试责任人',
+        });
+        const item = await app.market.publish('seller', {
+          ...testListingFields,
+          requestId: 'publish',
+        });
+        let loseResponse = true;
+        let loseAttachmentResponse = true;
+        let measureWrites = false;
+        const writeTimes: number[] = [];
+        const client = (
+          actor: 'buyer' | 'seller',
+          forceEnvelope = false,
+          identity = actor === 'buyer' ? buyer : seller,
+          name: string = actor,
+        ) => {
+          const context = () => ({
+            crypto: identity.crypto,
+            accountId: actor,
+            organizationId: actor === 'buyer' ? 'E2' : 'E1',
+            serverScope: 'market-test',
+            serverUrl: 'https://market.test',
+            requiresMls: nativeMls && !forceEnvelope,
+          });
+          const request = async (
+            path: string,
+            method = 'GET',
+            body: Record<string, unknown> = {},
+          ) => {
+            const url = new URL(path, 'https://market.test');
+            const parts = url.pathname.split('/').filter(Boolean);
+            if (parts[0] === 'chat-attachments' && parts[2] === 'read') {
+              await app.authorizeAttachmentDevice(
+                actor,
+                'attachment-read',
+                body as never,
+              );
+              return {
+                data: (
+                  await app.chatAttachments.read(
+                    actor,
+                    parts[1],
+                    String(body.deviceId),
+                  )
+                ).toString('base64'),
+              };
+            }
+            if (parts[0] === 'mls') return app.mls(actor, body as never);
+            if (parts[0] === 'contact-prepare')
+              return app.contacts.prepare(
+                actor,
+                parts[1] as 'listing' | 'conversation',
+                parts[2],
+              );
+            if (parts[0] === 'listings') {
+              const result = await app.contacts.contact(actor, parts[1], body);
+              if (loseResponse) {
+                loseResponse = false;
+                throw new Error('simulated response loss after committed send');
+              }
+              return result;
+            }
+            if (parts[0] === 'contacts')
+              return app.contacts.resolve(actor, parts[1], body);
+            if (parts[0] === 'conversations') {
+              if (method === 'GET')
+                return app.contacts.messages(
+                  actor,
+                  parts[1],
+                  url.searchParams.has('beforeSequence')
+                    ? Number(url.searchParams.get('beforeSequence'))
+                    : undefined,
+                );
+              const started = performance.now();
+              const result = await app.contacts.send(actor, parts[1], body);
+              if (
+                body.requestId === 'attachment-message' &&
+                loseAttachmentResponse
+              ) {
+                loseAttachmentResponse = false;
+                throw new Error('attachment response lost after commit');
+              }
+              if (measureWrites) writeTimes.push(performance.now() - started);
+              return result;
+            }
+            throw new Error('unexpected route');
+          };
+          const mls = nativeMls
+            ? new ParkMarketMls({
+                directory: join(root, `native-${name}`),
+                binaryPath: join(
+                  process.cwd(),
+                  'otto-native/target/debug/otto-native',
+                ),
+                context,
+                request: (body) => request('/mls', 'POST', body),
+                protect: (value) => Buffer.from(value).toString('base64'),
+                unprotect: (value) => Buffer.from(value, 'base64').toString(),
+              })
+            : undefined;
+          if (mls) nativeClients.push(mls);
+          return new ParkMarketMessaging({
+            context,
+            ensureDevice: async () => undefined,
+            request,
+            async uploadAttachment(input) {
+              await app.authorizeAttachmentDevice(
+                actor,
+                'attachment-upload',
+                input.attachmentProof,
+              );
+              const payload = input.attachmentProof.payload;
+              return app.chatAttachments.upload(actor, {
+                id: String(payload.id),
+                conversationId: String(payload.conversationId),
+                messageId: String(payload.messageId),
+                deviceId: input.attachmentProof.deviceId,
+                bytes: Buffer.from(input.attachmentBase64, 'base64'),
+              });
+            },
+            mls,
+            pending: new MarketDraftStore(
+              join(root, `pending-${name}`),
+              (text) => Buffer.from(text),
+              (bytes) => bytes.toString(),
+              process.env.OTTO_MARKET_CHAT_CAPACITY === '1' ? 200 : 20,
+            ),
+          });
+        };
+        const clients = { buyer: client('buyer'), seller: client('seller') };
+        for (const native of nativeClients) await native.activate();
+        const input = {
+          kind: 'listing' as const,
+          id: item.id,
+          expectedVersion: 1,
+          question: '这把椅子的高度可以调吗？',
+          requestId: 'first-question',
+        };
+        await expect(clients.buyer.send(input)).rejects.toThrow(
+          'response loss',
+        );
+        await h.restart();
+        app = makeApp();
+        for (const native of nativeClients) await native.close();
+        const receipt = (await clients.buyer.send(input)) as {
+          conversationId: string;
+          requestId: string;
+        };
+        expect((await app.contacts.inbox('seller')).requests).toHaveLength(1);
+        const received = await clients.seller.messages(receipt.conversationId);
+        expect(received.items[0].content).toBe(input.question);
+        expect(received.items[0].snapshot).toMatchObject({
+          title: '办公椅',
+          priceCents: 1001,
+        });
+        await clients.seller.send({
+          kind: 'reply',
+          id: receipt.requestId,
+          conversationId: receipt.conversationId,
+          question: '可以调节，下午交接方便。',
+          requestId: 'seller-reply',
+        });
+        expect(
+          (await clients.buyer.messages(receipt.conversationId)).items[1]
+            .content,
+        ).toBe('可以调节，下午交接方便。');
+        const attachmentData = Buffer.from(
+          'synthetic private chat attachment',
+        ).toString('base64');
+        await expect(
+          clients.buyer.send({
+            ...input,
+            requestId: 'forbidden-first-file',
+            attachments: [
+              {
+                fileName: 'test.txt',
+                mimeType: 'text/plain',
+                size: 33,
+                data: attachmentData,
+              },
+            ],
+          }),
+        ).rejects.toThrow('首次问题');
+        const attachmentInput = {
+          kind: 'conversation' as const,
+          id: receipt.conversationId,
+          question: '文件说明',
+          requestId: 'attachment-message',
+          attachments: [
+            {
+              fileName: 'test.txt',
+              mimeType: 'text/plain',
+              size: Buffer.from(attachmentData, 'base64').length,
+              data: attachmentData,
+            },
+          ],
+        };
+        await expect(clients.buyer.send(attachmentInput)).rejects.toThrow(
+          'attachment response lost',
+        );
+        await clients.buyer.send(attachmentInput);
+        const attachmentPage = await clients.seller.messages(
+          receipt.conversationId,
+        );
+        const attachmentMessage = attachmentPage.items.find(
+          (m) => m.id === 'attachment-message',
+        )!;
+        expect(attachmentMessage.content).toBe('文件说明');
+        expect(attachmentMessage.attachments).toHaveLength(1);
+        const attachmentId = attachmentMessage.attachments[0].id;
+        expect(
+          (
+            await clients.seller.download(
+              receipt.conversationId,
+              attachmentMessage.id,
+              attachmentMessage.sequence,
+              attachmentId,
+            )
+          ).data,
+        ).toBe(attachmentData);
+        await h.restart();
+        app = makeApp();
+        expect(
+          (
+            await clients.buyer.download(
+              receipt.conversationId,
+              attachmentMessage.id,
+              attachmentMessage.sequence,
+              attachmentId,
+            )
+          ).data,
+        ).toBe(attachmentData);
+        await expect(
+          app.chatAttachments.read(
+            'stranger',
+            attachmentId,
+            seller.device.deviceId,
+          ),
+        ).rejects.toThrow('NOT_FOUND');
+        const storedAttachments = await h.repository.read((tx) =>
+          tx.all('SELECT * FROM park_contact_attachments'),
+        );
+        expect(storedAttachments).toHaveLength(1);
+        expect(JSON.stringify(storedAttachments)).not.toContain('test.txt');
+        if (nativeMls)
+          await expect(
+            client('buyer', true).send({
+              kind: 'conversation',
+              id: receipt.conversationId,
+              question: '禁止降级的信封消息',
+              requestId: 'downgrade-attempt',
+            }),
+          ).rejects.toThrow();
+        await app.market.command('seller', item.id, 'reserve', {
+          requestId: 'reserve',
+          expectedVersion: 1,
+          note: '只给本人看的约定',
+          expectedAt: base.now() + 3600000,
+        });
+        await app.market.command('seller', item.id, 'sold', {
+          requestId: 'sold',
+          expectedVersion: 2,
+        });
+        await clients.buyer.send({
+          kind: 'conversation',
+          id: receipt.conversationId,
+          question: '已收到，谢谢',
+          requestId: 'thanks',
+        });
+        expect(
+          (await clients.seller.messages(receipt.conversationId)).items.map(
+            (item) => item.content,
+          ),
+        ).toEqual([
+          input.question,
+          '可以调节，下午交接方便。',
+          '文件说明',
+          '已收到，谢谢',
+        ]);
+        if (nativeMls) {
+          for (const native of nativeClients) await native.close();
+          // Simulate loss of this device's MLS persistence, keeping its approved identity vault.
+          rmSync(join(root, 'native-buyer'), { recursive: true, force: true });
+          const unavailable = await clients.buyer.messages(
+            receipt.conversationId,
+          );
+          expect(unavailable.items.every((item) => !!item.error)).toBe(true);
+          await clients.buyer.recover(receipt.conversationId);
+          await clients.buyer.send({
+            kind: 'conversation',
+            id: receipt.conversationId,
+            question: '新连接已恢复',
+            requestId: 'recovered-message',
+          });
+          expect(
+            (await clients.seller.messages(receipt.conversationId)).items.at(-1)
+              ?.content,
+          ).toBe('新连接已恢复');
+          const after = await clients.buyer.messages(receipt.conversationId);
+          expect(after.items.at(-1)?.content).toBe('新连接已恢复');
+          expect(after.items[0].error).toBeTruthy();
+        }
+        const second = endpoint('buyer', 'buyer-second');
+        const secondClient = client('buyer', false, second, 'buyer-second');
+        const device = second.device,
+          at = new Date(base.now()).toISOString();
+        await h.repository.transaction((tx) =>
+          tx.run(
+            'INSERT INTO e2ee_devices(organization_id,account_id,device_id,device_name,identity_signing_public_key,device_exchange_public_key,key_fingerprint,approval_state,approved_by_device_id,approved_at,created_at,last_seen_at,revoked_at) VALUES (?,?,?,?,?,?,?,?,NULL,NULL,?,?,NULL)',
+            [
+              'E2',
+              'buyer',
+              device.deviceId,
+              device.deviceName,
+              device.identitySigningPublicKey,
+              device.deviceExchangePublicKey,
+              device.keyFingerprint,
+              'pending',
+              at,
+              at,
+            ],
+          ),
+        );
+        async function deviceEvent(
+          event: 'registered_pending' | 'approved' | 'revoked',
+        ) {
+          await h.repository.transaction(async (tx) => {
+            const [previous] = await tx.all(
+              "SELECT sequence,entry_hash FROM e2ee_key_transparency_log WHERE organization_id='E2' ORDER BY sequence DESC LIMIT 1",
+            );
+            const entry = {
+              sequence: Number(previous.sequence) + 1,
+              organizationId: 'E2',
+              accountId: 'buyer',
+              deviceId: device.deviceId,
+              event,
+              keyFingerprint: device.keyFingerprint,
+              actorDeviceId: buyer.device.deviceId,
+              previousHash: String(previous.entry_hash),
+              createdAt: at,
+            };
+            const hash = createHash('sha256')
+              .update('otto:e2ee-key-transparency:v1\n')
+              .update(JSON.stringify(entry))
+              .digest('hex');
+            await tx.run(
+              'INSERT INTO e2ee_key_transparency_log VALUES (?,?,?,?,?,?,?,?,?,?)',
+              [
+                'E2',
+                entry.sequence,
+                'buyer',
+                device.deviceId,
+                event,
+                device.keyFingerprint,
+                buyer.device.deviceId,
+                entry.previousHash,
+                hash,
+                at,
+              ],
+            );
+            if (event === 'approved')
+              await tx.run(
+                "UPDATE e2ee_devices SET approval_state='approved',approved_by_device_id=?,approved_at=? WHERE device_id=?",
+                [buyer.device.deviceId, at, device.deviceId],
+              );
+            if (event === 'revoked')
+              await tx.run(
+                'UPDATE e2ee_devices SET revoked_at=? WHERE device_id=?',
+                [at, device.deviceId],
+              );
+          });
+        }
+        await deviceEvent('registered_pending');
+        const attachmentProof = () => {
+          const payload = { id: attachmentId };
+          return {
+            payload,
+            ...second.crypto.signParkMarketMls({
+              serverScope: 'market-test',
+              organizationId: 'E2',
+              accountId: 'buyer',
+              action: 'attachment-read',
+              payload,
+            }),
+          };
+        };
+        await expect(
+          app.authorizeAttachmentDevice(
+            'buyer',
+            'attachment-read',
+            attachmentProof(),
+          ),
+        ).rejects.toThrow('FORBIDDEN');
+        await expect(
+          secondClient.send({
+            kind: 'conversation',
+            id: receipt.conversationId,
+            question: 'pending device',
+            requestId: 'pending-device',
+          }),
+        ).rejects.toThrow();
+        await deviceEvent('approved');
+        await expect(
+          app.authorizeAttachmentDevice(
+            'buyer',
+            'attachment-read',
+            attachmentProof(),
+          ),
+        ).resolves.toBeUndefined();
+        const oldHistory = await secondClient.messages(receipt.conversationId);
+        expect(oldHistory.items.every((message) => !!message.error)).toBe(true);
+        await expect(
+          secondClient.download(
+            receipt.conversationId,
+            attachmentMessage.id,
+            attachmentMessage.sequence,
+            attachmentId,
+          ),
+        ).rejects.toThrow();
+        if (nativeMls) await secondClient.recover(receipt.conversationId);
+        await secondClient.send({
+          kind: 'conversation',
+          id: receipt.conversationId,
+          question: 'approved second device',
+          requestId: 'second-device-message',
+        });
+        expect(
+          (await clients.seller.messages(receipt.conversationId)).items.at(-1)
+            ?.content,
+        ).toBe('approved second device');
+        await deviceEvent('revoked');
+        await expect(
+          app.authorizeAttachmentDevice(
+            'buyer',
+            'attachment-read',
+            attachmentProof(),
+          ),
+        ).rejects.toThrow('FORBIDDEN');
+        await expect(
+          secondClient.send({
+            kind: 'conversation',
+            id: receipt.conversationId,
+            question: 'revoked device',
+            requestId: 'revoked-device',
+          }),
+        ).rejects.toThrow();
+        const stored = await h.repository.read((tx) =>
+          tx.all('SELECT payload FROM park_contact_messages'),
+        );
+        expect(JSON.stringify(stored)).not.toContain(input.question);
+        expect(
+          JSON.stringify(
+            await app.contacts.messages('buyer', receipt.conversationId),
+          ),
+        ).not.toContain('只给本人看的约定');
+        const foreignCrypto = seller.crypto.encryptMessage({
+          serverScope: 'market-test',
+          organizationId: 'E1',
+          senderAccountId: 'seller',
+          recipientAccountId: 'buyer',
+          messageId: 'wrong-scope',
+          content: 'wrong scope',
+          contentType: 'message',
+          devices: [seller.device, buyer.device],
+        });
+        await expect(
+          app.contacts.send('seller', receipt.conversationId, {
+            requestId: 'wrong-scope',
+            envelope: foreignCrypto,
+          }),
+        ).rejects.toThrow(nativeMls ? 'FORBIDDEN' : 'signature');
+        if (process.env.OTTO_MARKET_CHAT_CAPACITY === '1') {
+          measureWrites = true;
+          const attempts = await Promise.allSettled(
+            Array.from({ length: 100 }, (_, i) =>
+              (i % 2 ? clients.seller : clients.buyer).send({
+                kind: 'conversation',
+                id: receipt.conversationId,
+                question: `并发消息 ${i}`,
+                requestId: `capacity-${i}`,
+              }),
+            ),
+          );
+          for (const attempt of attempts)
+            expect(
+              attempt.status,
+              attempt.status === 'rejected' ? String(attempt.reason) : '',
+            ).toBe('fulfilled');
+          measureWrites = false;
+          expect(writeTimes).toHaveLength(100);
+          const readTimes: number[] = [];
+          await Promise.all(
+            Array.from({ length: 100 }, async () => {
+              const started = performance.now();
+              const result = await app.contacts.messages(
+                'seller',
+                receipt.conversationId,
+              );
+              expect(result.items.length).toBeGreaterThanOrEqual(103);
+              readTimes.push(performance.now() - started);
+            }),
+          );
+          const p95 = (values: number[]) =>
+            Math.round([...values].sort((a, b) => a - b)[94]);
+          const result = {
+            backend,
+            encryption: nativeMls ? 'native MLS' : 'envelope',
+            concurrency: 100,
+            writeP95Ms: p95(writeTimes),
+            readP95Ms: p95(readTimes),
+            scope:
+              'Real signed/encrypted messages and database; one hot conversation with 50 sends per account (below each account rate limit). 100 in-flight client sends; native coordinators serialize encryption preparation, so native server writes are not 100 simultaneously. Timings measure server service entry to completion, excluding client encryption, HTTP/network and UI. Test-only pending capacity 200, production unchanged.',
+            targetP95Ms: 1000,
+          };
+          writeFileSync(
+            join(
+              process.cwd(),
+              `docs/research/flea-market-evidence/chat-capacity-${backend}-${nativeMls ? 'mls' : 'envelope'}.json`,
+            ),
+            JSON.stringify(result, null, 2),
+          );
+          expect(result.writeP95Ms).toBeLessThanOrEqual(1000);
+          expect(result.readP95Ms).toBeLessThanOrEqual(1000);
+          const decrypted = await clients.seller.messages(
+            receipt.conversationId,
+          );
+          expect(
+            decrypted.items.filter((message) =>
+              message.content?.startsWith('并发消息 '),
+            ),
+          ).toHaveLength(100);
+        }
+      } finally {
+        for (const native of nativeClients) await native.close();
+        await h.close();
+        rmSync(root, { recursive: true });
+      }
+    }, 120000);
+  }

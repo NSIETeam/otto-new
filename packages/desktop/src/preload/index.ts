@@ -1,3 +1,6 @@
+import type { ParkMarketMessaging } from '../main/park-market-messaging.js';
+import type { MarketDesktopRequest, MarketDraft, MarketDraftScope } from '../shared/park-market.js';
+import type { ParkChatView } from '../main/park-carpool-chat.js';
 /**
  * @license
  * Copyright 2025 Otto
@@ -22,6 +25,7 @@
  *   - 连接状态变化经 onConnectionChange 通知 renderer 做 UI 指示。
  */
 
+import type { CarpoolWorkflowView, CarpoolWorkflowCommand } from 'otto-server';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ParkConversationRequest, ParkConversationPlan } from '../main/parkConversationPlan.js';
 import type {
@@ -922,6 +926,7 @@ export interface EnterpriseParkCarpoolPlaceSuggestion extends EnterpriseParkCarp
   district: string;
 }
 export interface EnterpriseParkCarpoolIntent {
+  version?: number;
   id: string;
   accountId: string;
   organizationId: string;
@@ -947,6 +952,10 @@ export interface EnterpriseParkCarpoolIntent {
   updatedAt: string;
 }
 export interface EnterpriseParkCarpoolMatch {
+  pendingRequest?: 'sent' | 'received';
+  sharedDepartureStart?: string;
+  sharedDepartureEnd?: string;
+  confirmedAgoMinutes?: number;
   intentId: string;
   displayName: string;
   organizationName: string;
@@ -958,18 +967,29 @@ export interface EnterpriseParkCarpoolMatch {
   compatibleModes: EnterpriseParkCarpoolCompatibleMode[];
   originArea: string;
   destinationArea: string;
-  freshness: 'just_updated' | 'recent' | 'departing_soon';
+  freshness: 'just_updated' | 'recent' | 'departing_soon' | 'needs_confirmation';
   explanation: string;
 }
 export interface EnterpriseParkCarpoolState {
+  searchStatus?: 'searching' | 'needs_confirmation' | 'not_accepting' | 'inactive';
+  resultPage?:{total:number;nextCursor?:string};
+  capabilities?:string[];
+  hasGroup?: boolean;
+  parkAdmin?: boolean;
+  meetingPoints?: Array<import('otto-server').CarpoolMeetingPoint>;
+  failedCandidateCount?: number;
   capability: 'park_carpool_v1';
+  availability?: { parkEnabled: boolean; canPublish: boolean; reason?: string };
   mapConfigured: boolean;
   parkId: string;
   currentIntent: EnterpriseParkCarpoolIntent | null;
   matches: EnterpriseParkCarpoolMatch[];
+  groupMatches?: Array<import('otto-server').CarpoolGroupMatch>;
   generatedAt: string;
 }
 export interface EnterpriseParkCarpoolPublishInput {
+  requestKey?: string;
+  expectedVersion?: number | null;
   travelDate: string;
   origin: EnterpriseParkCarpoolPlace;
   destination: EnterpriseParkCarpoolPlace;
@@ -979,6 +999,10 @@ export interface EnterpriseParkCarpoolPublishInput {
 }
 
 export interface EnterprisePublicProfileInput {
+  primaryIndustryCode?: string | null;
+  primaryIndustryName?: string | null;
+  industryClassificationBasis?: 'company_selected' | 'researcher_classified_from_public_business' | 'migrated_suggestion' | null;
+  industryConfirmedByCompany?: boolean;
   summary: string;
   website: string;
   industryTags: string[];
@@ -1006,6 +1030,14 @@ export interface EnterpriseParkPartnershipEdge {
 }
 
 export interface EnterpriseParkStarMap {
+  capacityStatus?: 'ready' | 'list_only';
+  totalNodeCount?: number;
+  relationType?: 'same_industry';
+  dataSource?: 'real' | 'demo';
+  taxonomyVersion?: string;
+  industryGroups?: Array<{ code: string; name: string; memberOrganizationIds: string[] }>;
+  unclassifiedNodeIds?: string[];
+  relationshipCount?: number;
   parkId: string;
   parkName: string;
   currentOrganizationId: string;
@@ -1511,11 +1543,27 @@ const IPC = {
   enterpriseAtoaInbox: 'otto:enterprise-atoa-inbox',
   enterpriseParkServicePush: 'otto:enterprise-park-service-push',
   enterpriseParkView: 'otto:enterprise-park-view',
+  enterpriseParkCarpoolChanged: 'otto:enterprise-park-carpool-changed',
+  enterpriseParkCarpoolDeleteData: 'otto:enterprise-park-carpool-delete-data',
+  enterpriseParkCarpoolRoutePreview: 'otto:enterprise-park-carpool-route-preview',
+  enterpriseParkCarpoolReverse: 'otto:enterprise-park-carpool-reverse',
+  enterpriseParkCarpoolMap: 'otto:enterprise-park-carpool-map',
+  enterpriseParkCarpoolLocate: 'otto:enterprise-park-carpool-locate',
+  enterpriseParkCarpoolChatRecover: 'otto:enterprise-park-carpool-chat-recover',
+  enterpriseParkCarpoolChatRead: 'otto:enterprise-park-carpool-chat-read',
+  enterpriseParkCarpoolChatSend: 'otto:enterprise-park-carpool-chat-send',
+  enterpriseParkCarpoolWorkflowGet: 'otto:enterprise-park-carpool-workflow-get',
+  enterpriseParkCarpoolWorkflowExecute: 'otto:enterprise-park-carpool-workflow-execute',
+  enterpriseMarketSend: 'otto:enterprise-market-send',
+  enterpriseMarketMessages: 'otto:enterprise-market-messages',
+  enterpriseParkMarket: 'otto:enterprise-park-market',
+  enterpriseMarketDrafts: 'otto:enterprise-market-drafts',
   enterpriseParkCarpoolGet: 'otto:enterprise-park-carpool-get',
   enterpriseParkCarpoolSearchPlaces: 'otto:enterprise-park-carpool-search-places',
   enterpriseParkCarpoolPublish: 'otto:enterprise-park-carpool-publish',
   enterpriseParkCarpoolRefresh: 'otto:enterprise-park-carpool-refresh',
   enterpriseParkCarpoolStop: 'otto:enterprise-park-carpool-stop',
+  enterpriseParkCarpoolConfirm: 'otto:enterprise-park-carpool-confirm',
   enterpriseParkRegister: 'otto:enterprise-park-register',
   enterpriseParkJoin: 'otto:enterprise-park-join',
   enterpriseParkProfileUpdate: 'otto:enterprise-park-profile-update',
@@ -2298,6 +2346,27 @@ export interface OttoBridge {
     recipientCount?: number;
   }>;
   enterpriseParkView(): Promise<EnterprisePark | null>;
+  onParkCarpoolChanged(callback:(event:{accountId:string;unreadCount:number})=>void):()=>void;
+  enterpriseParkCarpoolDeleteData():Promise<void>;
+  enterpriseParkCarpoolRoutePreview(intentId:string,groupId?:string):Promise<import('otto-server').CarpoolRoutePreview>;
+  enterpriseParkCarpoolLocate(): Promise<void>;
+  enterpriseParkCarpoolReverse(coordinate:EnterpriseParkCarpoolCoordinate,system?:'gps'|'autonavi'):Promise<EnterpriseParkCarpoolPlaceSuggestion>;
+  enterpriseParkCarpoolMap(coordinate:EnterpriseParkCarpoolCoordinate,zoom:number):Promise<string>;
+  enterpriseParkCarpoolChatRecover(conversationId: string, generation: number): Promise<ParkChatView>;
+  enterpriseParkCarpoolChatRead(conversationId: string): Promise<ParkChatView>;
+  enterpriseParkCarpoolChatSend(conversationId: string, text: string, eventId: string): Promise<ParkChatView>;
+  enterpriseParkCarpoolWorkflowGet(): Promise<CarpoolWorkflowView>;
+  enterpriseParkCarpoolWorkflowExecute(command: CarpoolWorkflowCommand): Promise<CarpoolWorkflowView>;
+  enterpriseMarketRecover?(id:string): Promise<{recovered:boolean}>;
+  enterpriseMarketLink?(listingId?: string): Promise<{ listingId?: string; error?: string; copied?: boolean } | null>;
+  onMarketAttachmentProgress?(listener:(progress:{messageId:string;id:string;loaded:number;total:number})=>void):()=>void;
+  enterpriseMarketDownload?(conversationId:string,messageId:string,sequence:number,attachmentId:string): Promise<{canceled:boolean}>;
+  enterpriseMarketSend?(input: Parameters<ParkMarketMessaging['send']>[0]): ReturnType<ParkMarketMessaging['send']>;
+  enterpriseMarketMessages?(id: string, beforeSequence?: number): ReturnType<ParkMarketMessaging['messages']>;
+  enterpriseMarketUploadCancel?(id: string): Promise<boolean>;
+  onMarketImageProgress?(listener: (progress: {uploadId:string;loaded:number;total:number}) => void): () => void;
+  enterpriseParkMarket?(input: MarketDesktopRequest): Promise<unknown>;
+  enterpriseMarketDrafts?(drafts?: MarketDraft[], scope?: MarketDraftScope): Promise<MarketDraft[]>;
   enterpriseParkCarpoolGet(): Promise<EnterpriseParkCarpoolState>;
   enterpriseParkCarpoolSearchPlaces(
     query: string,
@@ -2306,8 +2375,9 @@ export interface OttoBridge {
   enterpriseParkCarpoolPublish(
     input: EnterpriseParkCarpoolPublishInput,
   ): Promise<EnterpriseParkCarpoolIntent>;
-  enterpriseParkCarpoolRefresh(): Promise<EnterpriseParkCarpoolState>;
+  enterpriseParkCarpoolRefresh(query?:{cursor?:string;filter?:string}): Promise<EnterpriseParkCarpoolState>;
   enterpriseParkCarpoolStop(intentId: string): Promise<EnterpriseParkCarpoolIntent>;
+  enterpriseParkCarpoolConfirm(intentId: string): Promise<EnterpriseParkCarpoolIntent>;
   enterpriseParkRegister(input: {
     name: string;
     slug?: string;
@@ -3952,6 +4022,35 @@ const bridge: OttoBridge = {
       IPC.enterpriseParkView,
     ) as Promise<EnterprisePark | null>;
   },
+  onParkCarpoolChanged(callback:(event:{accountId:string;unreadCount:number})=>void):()=>void{const listener=(_event:unknown,value:{accountId:string;unreadCount:number})=>callback(value);ipcRenderer.on(IPC.enterpriseParkCarpoolChanged,listener);return()=>ipcRenderer.removeListener(IPC.enterpriseParkCarpoolChanged,listener);},
+  enterpriseParkCarpoolDeleteData():Promise<void>{return ipcRenderer.invoke(IPC.enterpriseParkCarpoolDeleteData) as Promise<void>;},
+  enterpriseParkCarpoolRoutePreview(intentId:string,groupId?:string):Promise<import('otto-server').CarpoolRoutePreview>{return ipcRenderer.invoke(IPC.enterpriseParkCarpoolRoutePreview,intentId,groupId) as Promise<import('otto-server').CarpoolRoutePreview>;},
+  enterpriseParkCarpoolLocate(): Promise<void> {return ipcRenderer.invoke(IPC.enterpriseParkCarpoolLocate) as Promise<void>;},
+  enterpriseParkCarpoolReverse(coordinate:EnterpriseParkCarpoolCoordinate,system:'gps'|'autonavi'='autonavi'):Promise<EnterpriseParkCarpoolPlaceSuggestion>{return ipcRenderer.invoke(IPC.enterpriseParkCarpoolReverse,coordinate,system) as Promise<EnterpriseParkCarpoolPlaceSuggestion>;},
+  enterpriseParkCarpoolMap(coordinate:EnterpriseParkCarpoolCoordinate,zoom:number):Promise<string>{return ipcRenderer.invoke(IPC.enterpriseParkCarpoolMap,coordinate,zoom) as Promise<string>;},
+  enterpriseParkCarpoolChatRecover(conversationId: string, generation: number): Promise<ParkChatView> { return ipcRenderer.invoke(IPC.enterpriseParkCarpoolChatRecover, conversationId, generation) as Promise<ParkChatView>; },
+  enterpriseParkCarpoolChatRead(conversationId: string): Promise<ParkChatView> { return ipcRenderer.invoke(IPC.enterpriseParkCarpoolChatRead, conversationId) as Promise<ParkChatView>; },
+  enterpriseParkCarpoolChatSend(conversationId: string, text: string, eventId: string): Promise<ParkChatView> { return ipcRenderer.invoke(IPC.enterpriseParkCarpoolChatSend, conversationId, text, eventId) as Promise<ParkChatView>; },
+  enterpriseParkCarpoolWorkflowGet(): Promise<CarpoolWorkflowView> {
+    return ipcRenderer.invoke(IPC.enterpriseParkCarpoolWorkflowGet) as Promise<CarpoolWorkflowView>;
+  },
+  enterpriseParkCarpoolWorkflowExecute(command: CarpoolWorkflowCommand): Promise<CarpoolWorkflowView> {
+    return ipcRenderer.invoke(IPC.enterpriseParkCarpoolWorkflowExecute, command) as Promise<CarpoolWorkflowView>;
+  },
+  enterpriseMarketRecover(id:string): Promise<{recovered:boolean}> { return ipcRenderer.invoke('otto:enterprise-market-recover',id); },
+  enterpriseMarketLink(listingId?: string): Promise<{ listingId?: string; error?: string; copied?: boolean } | null> { return ipcRenderer.invoke('otto:enterprise-market-link', listingId); },
+  onMarketAttachmentProgress(listener:(progress:{messageId:string;id:string;loaded:number;total:number})=>void) { const handler=(_event:Electron.IpcRendererEvent,progress:{messageId:string;id:string;loaded:number;total:number})=>listener(progress); ipcRenderer.on('otto:enterprise-market-attachment-progress',handler); return ()=>ipcRenderer.removeListener('otto:enterprise-market-attachment-progress',handler); },
+  enterpriseMarketDownload(conversationId:string,messageId:string,sequence:number,attachmentId:string): Promise<{canceled:boolean}> { return ipcRenderer.invoke('otto:enterprise-market-download',conversationId,messageId,sequence,attachmentId); },
+  enterpriseMarketSend(input: Parameters<ParkMarketMessaging['send']>[0]): ReturnType<ParkMarketMessaging['send']> { return ipcRenderer.invoke(IPC.enterpriseMarketSend, input); },
+  enterpriseMarketMessages(id: string, beforeSequence?: number): ReturnType<ParkMarketMessaging['messages']> { return ipcRenderer.invoke(IPC.enterpriseMarketMessages, id, beforeSequence); },
+  enterpriseMarketUploadCancel(id: string): Promise<boolean> {return ipcRenderer.invoke('otto:enterprise-market-upload-cancel',id);},
+  onMarketImageProgress(listener: (progress: {uploadId:string;loaded:number;total:number}) => void) {
+    const handler=(_event: unknown, progress: {uploadId:string;loaded:number;total:number}) => listener(progress);
+    ipcRenderer.on('otto:enterprise-market-upload-progress',handler);
+    return () => {ipcRenderer.removeListener('otto:enterprise-market-upload-progress',handler);};
+  },
+  enterpriseParkMarket(input: MarketDesktopRequest): Promise<unknown> { return ipcRenderer.invoke(IPC.enterpriseParkMarket, input); },
+  enterpriseMarketDrafts(drafts?: MarketDraft[], scope?: MarketDraftScope): Promise<MarketDraft[]> { return ipcRenderer.invoke(IPC.enterpriseMarketDrafts, drafts, scope); },
   enterpriseParkCarpoolGet(): Promise<EnterpriseParkCarpoolState> {
     return ipcRenderer.invoke(IPC.enterpriseParkCarpoolGet) as Promise<EnterpriseParkCarpoolState>;
   },
@@ -3973,12 +4072,18 @@ const bridge: OttoBridge = {
       input,
     ) as Promise<EnterpriseParkCarpoolIntent>;
   },
-  enterpriseParkCarpoolRefresh(): Promise<EnterpriseParkCarpoolState> {
-    return ipcRenderer.invoke(IPC.enterpriseParkCarpoolRefresh) as Promise<EnterpriseParkCarpoolState>;
+  enterpriseParkCarpoolRefresh(query?:{cursor?:string;filter?:string}): Promise<EnterpriseParkCarpoolState> {
+    return ipcRenderer.invoke(IPC.enterpriseParkCarpoolRefresh,query) as Promise<EnterpriseParkCarpoolState>;
   },
   enterpriseParkCarpoolStop(intentId: string): Promise<EnterpriseParkCarpoolIntent> {
     return ipcRenderer.invoke(
       IPC.enterpriseParkCarpoolStop,
+      intentId,
+    ) as Promise<EnterpriseParkCarpoolIntent>;
+  },
+  enterpriseParkCarpoolConfirm(intentId: string): Promise<EnterpriseParkCarpoolIntent> {
+    return ipcRenderer.invoke(
+      IPC.enterpriseParkCarpoolConfirm,
       intentId,
     ) as Promise<EnterpriseParkCarpoolIntent>;
   },

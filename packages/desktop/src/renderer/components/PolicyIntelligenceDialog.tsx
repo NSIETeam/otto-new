@@ -60,6 +60,11 @@ export function PolicyIntelligenceDialog({
   const [answer, setAnswer] = useState('');
   const [shareAnswer, setShareAnswer] = useState(false);
   const epoch = useRef(0);
+  const profileDirty = useRef(false);
+  const editProfile = (next: PolicyEnterpriseProfile): void => {
+    profileDirty.current = true;
+    setProfile(next);
+  };
   const seedRef = useRef(seedProfile);
   seedRef.current = seedProfile;
   const request = useCallback(
@@ -73,11 +78,16 @@ export function PolicyIntelligenceDialog({
           : await window.otto.policyIntelligenceGet(scopeId);
         if (current !== epoch.current) return;
         setState(result);
-        setProfile({ ...seedRef.current, ...result.profile });
+        if (!profileDirty.current || action?.action === 'profile') {
+          setProfile({ ...seedRef.current, ...result.profile });
+          profileDirty.current = false;
+        }
+        if (action) {
         setAnswer('');
         setShareAnswer(false);
         setConsentFor(undefined);
         setConsent(false);
+        }
       } catch (cause) {
         if (current === epoch.current)
           setError(cause instanceof Error ? cause.message : String(cause));
@@ -95,6 +105,9 @@ export function PolicyIntelligenceDialog({
     setConsent(false);
     setAnswer('');
     setShareAnswer(false);
+    profileDirty.current = false;
+  }, [scopeId]);
+  useEffect(() => {
     if (open) void request();
     // The epoch is a request generation, not a DOM ref; cleanup invalidates all pending responses.
     return () => {
@@ -168,7 +181,11 @@ export function PolicyIntelligenceDialog({
   };
   if (!open) return null;
   return (
-    <DialogFrame title="政策智能服务" onClose={onClose}>
+    <DialogFrame title="政策智能服务" onClose={() => {
+      if (profileDirty.current && !window.confirm('企业资料尚未保存，确定放弃修改并关闭吗？')) return;
+      if (profileDirty.current) { setProfile({ ...seedRef.current, ...state.profile }); profileDirty.current = false; }
+      onClose();
+    }}>
       <div className="otto-policy-v2">
         <section className="otto-policy-v2__hero">
           <div>
@@ -277,7 +294,7 @@ export function PolicyIntelligenceDialog({
                 disabled={!state.canManage}
                 value={profile.organizationName ?? ''}
                 onChange={(event) =>
-                  setProfile({
+                  editProfile({
                     ...profile,
                     organizationName: event.target.value,
                   })
@@ -292,7 +309,7 @@ export function PolicyIntelligenceDialog({
                   value={profile[key] ?? ''}
                   placeholder={placeholder}
                   onChange={(event) =>
-                    setProfile({ ...profile, [key]: event.target.value })
+                    editProfile({ ...profile, [key]: event.target.value })
                   }
                 />
               </label>
@@ -304,7 +321,7 @@ export function PolicyIntelligenceDialog({
                 placeholder="没有请填“暂无”；不清楚请填“不确定”"
                 value={profile.qualifications?.join('、') ?? ''}
                 onChange={(event) =>
-                  setProfile({
+                  editProfile({
                     ...profile,
                     qualifications: event.target.value
                       .split(/[、，,]/u)

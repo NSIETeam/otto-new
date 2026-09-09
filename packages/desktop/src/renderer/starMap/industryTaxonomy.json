@@ -1,0 +1,54 @@
+[
+  {
+    "code": "analytical_instruments",
+    "name": "分析与生命科学仪器"
+  },
+  {
+    "code": "business_services",
+    "name": "人力资源与企业服务"
+  },
+  {
+    "code": "education_equipment",
+    "name": "教育教学设备"
+  },
+  {
+    "code": "electronics_communications",
+    "name": "电子与通信设备"
+  },
+  {
+    "code": "energy_materials",
+    "name": "油气技术与材料"
+  },
+  {
+    "code": "energy_technology",
+    "name": "能源技术"
+  },
+  {
+    "code": "industrial_automation",
+    "name": "工业自动化与机器人"
+  },
+  {
+    "code": "it_services",
+    "name": "软件与信息技术服务"
+  },
+  {
+    "code": "medical_devices",
+    "name": "医疗器械"
+  },
+  {
+    "code": "optoelectronics",
+    "name": "激光与光电设备"
+  },
+  {
+    "code": "park_services",
+    "name": "园区运营服务"
+  },
+  {
+    "code": "testing_services",
+    "name": "检验检测服务"
+  },
+  {
+    "code": "tourism_services",
+    "name": "旅游服务"
+  }
+]

@@ -41,6 +41,7 @@ mod tests {
             &mut tokenizer,
             &mut pool,
             kernel,
+            &mut super::mls::park::ParkMlsKernel::default(),
         )
         .expect("MLS RPC request must succeed")
     }
@@ -303,6 +304,7 @@ fn main() {
     let mut tok: Option<Tokenizer> = None;
     let mut pool: Option<AgentPool> = None;
     let mut mls_kernel = MlsKernel::default();
+    let mut park_mls_kernel = mls::park::ParkMlsKernel::default();
 
     for line in stdin.lock().lines() {
         let line = match line {
@@ -334,6 +336,7 @@ fn main() {
             &mut tok,
             &mut pool,
             &mut mls_kernel,
+            &mut park_mls_kernel,
         ) {
             Ok(v) => Response {
                 id: req.id,
@@ -359,8 +362,10 @@ fn handle_request(
     tok: &mut Option<Tokenizer>,
     pool: &mut Option<AgentPool>,
     mls_kernel: &mut MlsKernel,
+    park_mls_kernel: &mut mls::park::ParkMlsKernel,
 ) -> Result<serde_json::Value, String> {
     let params = req.params.as_ref();
+    if req.method.starts_with("park_mls.") { return park_mls_kernel.rpc(&req.method, params.ok_or("Missing park parameters")?); }
 
     match req.method.as_str() {
         // === No-params methods ===

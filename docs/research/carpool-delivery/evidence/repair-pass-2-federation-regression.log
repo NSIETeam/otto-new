@@ -1,0 +1,13 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ✓ src/renderer/federationAtoaProtocol.test.ts (3 tests) 3ms
+ ✓ src/main/federation-atoa-protocol.test.ts (3 tests) 3ms
+ ✓ src/main/federation-atoa-tasks.test.ts (3 tests) 4ms
+
+ Test Files  3 passed (3)
+      Tests  9 passed (9)
+   Start at  22:35:31
+   Duration  616ms (transform 60ms, setup 262ms, collect 56ms, tests 10ms, environment 953ms, prepare 113ms)
+
+EXIT_CODE=0

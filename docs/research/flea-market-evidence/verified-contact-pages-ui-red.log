@@ -1,0 +1,124 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ❯ src/renderer/components/MarketContactCenter.test.tsx (1 test | 1 failed) 3023ms
+   × offers older contact history without dropping the current conversation page 3022ms
+     → Unable to find role="button" and name "加载更早咨询记录"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"商品咨询"[39m
+    [36m>[39m
+      [36m<h2>[39m
+        [0m商品咨询[0m
+      [36m</h2>[39m
+      [36m<label>[39m
+        [36m<input[39m
+          [33mtype[39m=[32m"checkbox"[39m
+        [36m/>[39m
+        [0m显示忽略及已结束请求[0m
+      [36m</label>[39m
+      [36m<button>[39m
+        [0m商品会话 ·[0m
+        [0m [0m
+        [0mnewer-peer[0m
+      [36m</button>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"商品咨询"[39m
+    [36m>[39m
+      [36m<h2>[39m
+        [0m商品咨询[0m
+      [36m</h2>[39m
+      [36m<label>[39m
+        [36m<input[39m
+          [33mtype[39m=[32m"checkbox"[39m
+        [36m/>[39m
+        [0m显示忽略及已结束请求[0m
+      [36m</label>[39m
+      [36m<button>[39m
+        [0m商品会话 ·[0m
+        [0m [0m
+        [0mnewer-peer[0m
+      [36m</button>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/components/MarketContactCenter.test.tsx > offers older contact history without dropping the current conversation page
+TestingLibraryElementError: Unable to find role="button" and name "加载更早咨询记录"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"商品咨询"[39m
+    [36m>[39m
+      [36m<h2>[39m
+        [0m商品咨询[0m
+      [36m</h2>[39m
+      [36m<label>[39m
+        [36m<input[39m
+          [33mtype[39m=[32m"checkbox"[39m
+        [36m/>[39m
+        [0m显示忽略及已结束请求[0m
+      [36m</label>[39m
+      [36m<button>[39m
+        [0m商品会话 ·[0m
+        [0m [0m
+        [0mnewer-peer[0m
+      [36m</button>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"商品咨询"[39m
+    [36m>[39m
+      [36m<h2>[39m
+        [0m商品咨询[0m
+      [36m</h2>[39m
+      [36m<label>[39m
+        [36m<input[39m
+          [33mtype[39m=[32m"checkbox"[39m
+        [36m/>[39m
+        [0m显示忽略及已结束请求[0m
+      [36m</label>[39m
+      [36m<button>[39m
+        [0m商品会话 ·[0m
+        [0m [0m
+        [0mnewer-peer[0m
+      [36m</button>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/renderer/components/MarketContactCenter.test.tsx:8:31
+      6|  Object.assign(window.otto,{enterpriseParkMarket:request});
+      7|  render(<MarketContactCenter accountId="buyer"/>);
+      8|  fireEvent.click(await screen.findByRole('button',{name:'加载更早咨询记录'}));
+       |                               ^
+      9|  expect(await screen.findByRole('button',{name:/older-peer/})).toBeTru…
+     10|  expect(screen.getByRole('button',{name:/newer-peer/})).toBeTruthy();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  12:50:23
+   Duration  3.59s (transform 58ms, setup 69ms, collect 64ms, tests 3.02s, environment 253ms, prepare 48ms)

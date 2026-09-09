@@ -1,0 +1,41 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:60758) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ integration/park-market/capacity.test.ts (1 test | 1 failed) 49440ms
+   × enforces 100 concurrent reads / 100k history / 10k active with diverse indexed data 49440ms
+     → postgres/cold/sparse: expected 1232.5592499999984 to be less than or equal to 1000
+     → postgres/cold/emoji: expected 1150.1832920000015 to be less than or equal to 1000
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  integration/park-market/capacity.test.ts > enforces 100 concurrent reads / 100k history / 10k active with diverse indexed data
+AssertionError: postgres/cold/sparse: expected 1232.5592499999984 to be less than or equal to 1000
+ ❯ integration/park-market/capacity.test.ts:76:100
+     74|     } finally {save();}
+     75|     // Persist all measurements before asserting: an over-budget run m…
+     76|     for(const row of results) expect.soft(row.p95Ms,`${row.backend}/${…
+       |                                                                                                    ^
+     77|   }, 600000,
+     78| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  integration/park-market/capacity.test.ts > enforces 100 concurrent reads / 100k history / 10k active with diverse indexed data
+AssertionError: postgres/cold/emoji: expected 1150.1832920000015 to be less than or equal to 1000
+ ❯ integration/park-market/capacity.test.ts:76:100
+     74|     } finally {save();}
+     75|     // Persist all measurements before asserting: an over-budget run m…
+     76|     for(const row of results) expect.soft(row.p95Ms,`${row.backend}/${…
+       |                                                                                                    ^
+     77|   }, 600000,
+     78| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  22:44:45
+   Duration  52.05s (transform 1.17s, setup 0ms, collect 2.45s, tests 49.44s, environment 0ms, prepare 33ms)

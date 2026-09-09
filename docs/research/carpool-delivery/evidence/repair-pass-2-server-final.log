@@ -1,0 +1,101 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:65294) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:65297) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:65296) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:65295) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts (5 tests) 3168ms
+   ✓ PostgreSQL: expires without user reads, cleans precise positions and deletes own workflow facts  1701ms
+   ✓ PostgreSQL: moving parks prunes old scope without deleting new valid intent  1417ms
+(node:65529) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolTransport.integration.test.ts (6 tests) 4523ms
+   ✓ SQLite: actual native processes exchange ciphertext through authorized persistent transport  319ms
+   ✓ PostgreSQL: public transport proves possession of the approved device key  1366ms
+   ✓ PostgreSQL: expired unclaimed packages can be securely retired  1427ms
+   ✓ PostgreSQL: actual native processes exchange ciphertext through authorized persistent transport  1398ms
+(node:65601) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolConfig.integration.test.ts (2 tests) 1050ms
+   ✓ PostgreSQL: injected rollout snapshot survives env drift and restart preserves historical management  1030ms
+(node:65632) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolHttp.integration.test.ts (1 test) 66ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolDomain.test.ts (14 tests) 11ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolGroupMatching.test.ts (5 tests) 11ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolResults.test.ts (1 test) 14ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolRoutePreview.test.ts (3 tests) 11ms
+ ✓ packages/server/src/enterprise/parkCarpoolRoutes.test.ts (28 tests) 11ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolService.test.ts (13 tests) 17ms
+(node:65678) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts (5 tests) 6ms
+ ✓ packages/server/src/modules/park_carpool/amapParkCarpoolProvider.test.ts (11 tests) 7ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts (5 tests) 9ms
+ ✓ packages/server/src/modules/data_platform/enterpriseSharedCache.test.ts (4 tests) 5ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts (5 tests) 3ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolContract.integration.test.ts (6 tests) 7749ms
+   ✓ real database carpool contract (synthetic map only) > postgres: publish, privacy, replay, concurrent updates, stop, identity revocation  1660ms
+   ✓ SQLite: scans beyond 200 candidates before ranking/filtering and pages without duplicates  450ms
+   ✓ PostgreSQL: scans beyond 200 candidates before ranking/filtering and pages without duplicates  3677ms
+   ✓ PostgreSQL: evaluates group invitations across multiple planning batches  1829ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolMetrics.test.ts (1 test) 2ms
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolWorkflow.integration.test.ts (25 tests | 2 failed) 13991ms
+   ✓ SQLite persistent carpool requests > invalidates outstanding pair invitations on joining and allows blocking a fellow group member without a direct request 55ms
+   ✓ SQLite persistent carpool requests > does not restore a candidate who stops accepting during group route planning 8ms
+   ✓ SQLite persistent carpool requests > stopping new matches invalidates pending invitations without removing a group 4ms
+   ✓ SQLite persistent carpool requests > matches and admits today’s intents when the same account has yesterday’s stored route 12ms
+   × SQLite persistent carpool requests > rechecks stopped target authorization in the same transaction that reads preview geometry 6ms
+     → 服务器已暂停新增同行业务，历史管理仍可使用
+   ✓ SQLite persistent carpool requests > persists administrator public meeting points, denies member writes and protects edit versions 2ms
+   ✓ SQLite persistent carpool requests > requires a live match, deduplicates reverse requests, conceals ignore and accepts chat without grouping 7ms
+   ✓ SQLite persistent carpool requests > invalidates changed intent versions and enforces block in both directions 9ms
+   ✓ SQLite persistent carpool requests > accepts one explicit invitation atomically and never creates duplicate two-person groups 10ms
+   ✓ SQLite persistent carpool requests > requires a new driver to confirm capacity and supports invitation into an existing group 13ms
+   ✓ SQLite persistent carpool requests > serializes the last place, rotates member generations, and persists leave-and-stop 34ms
+   ✓ SQLite persistent carpool requests > rolls back rather than expiring requests when a stored route cannot be decrypted 12ms
+   ✓ PostgreSQL persistent carpool requests > invalidates outstanding pair invitations on joining and allows blocking a fellow group member without a direct request  1597ms
+   ✓ PostgreSQL persistent carpool requests > does not restore a candidate who stops accepting during group route planning  1463ms
+   ✓ PostgreSQL persistent carpool requests > stopping new matches invalidates pending invitations without removing a group  1165ms
+   ✓ PostgreSQL persistent carpool requests > matches and admits today’s intents when the same account has yesterday’s stored route  1001ms
+   × PostgreSQL persistent carpool requests > rechecks stopped target authorization in the same transaction that reads preview geometry 1132ms
+     → 服务器已暂停新增同行业务，历史管理仍可使用
+   ✓ PostgreSQL persistent carpool requests > persists administrator public meeting points, denies member writes and protects edit versions  970ms
+   ✓ PostgreSQL persistent carpool requests > requires a live match, deduplicates reverse requests, conceals ignore and accepts chat without grouping  935ms
+   ✓ PostgreSQL persistent carpool requests > invalidates changed intent versions and enforces block in both directions  900ms
+   ✓ PostgreSQL persistent carpool requests > accepts one explicit invitation atomically and never creates duplicate two-person groups  885ms
+   ✓ PostgreSQL persistent carpool requests > requires a new driver to confirm capacity and supports invitation into an existing group  931ms
+   ✓ PostgreSQL persistent carpool requests > serializes the last place, rotates member generations, and persists leave-and-stop  970ms
+   ✓ PostgreSQL persistent carpool requests > rolls back rather than expiring requests when a stored route cannot be decrypted  898ms
+   ✓ uses a single PostgreSQL pool connection without nested borrowing  968ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolRetention.test.ts (1 test) 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolWorkflow.integration.test.ts > SQLite persistent carpool requests > rechecks stopped target authorization in the same transaction that reads preview geometry
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolWorkflow.integration.test.ts > PostgreSQL persistent carpool requests > rechecks stopped target authorization in the same transaction that reads preview geometry
+Error: 服务器已暂停新增同行业务，历史管理仍可使用
+ ❯ Object.publishIntent packages/server/src/modules/park_carpool/parkCarpoolService.ts:553:85
+    551|   ): Promise<ParkCarpoolIntent> {
+    552|     const actor = await principal(accountId);
+    553|     if (!config.requestsEnabled || !carpoolParkEnabled(config, actor.p…
+       |                                                                                     ^
+    554|     if (!input.store.publications) return performPublish(accountId, ra…
+    555|     const requestKey = raw.requestKey ?? randomUUID();
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolWorkflow.integration.test.ts:358:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 18 passed (19)
+      Tests  2 failed | 139 passed (141)
+   Start at  21:45:23
+   Duration  18.09s (transform 1.90s, setup 0ms, collect 19.38s, tests 30.65s, environment 2ms, prepare 705ms)
+
+
+EXIT_CODE=1

@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ✓ src/main/park-market-messaging.test.ts (2 tests) 58ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  23:23:48
+   Duration  2.14s (transform 179ms, setup 258ms, collect 149ms, tests 58ms, environment 1.00s, prepare 142ms)

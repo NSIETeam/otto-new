@@ -5,3 +5,5 @@ export * from './parkCarpoolDomain.js';
 export * from './parkCarpoolSchema.js';
 export * from './parkCarpoolService.js';
 export * from './parkCarpoolSqliteRepository.js';
+
+export { readCarpoolConfig, type CarpoolConfig } from './parkCarpoolConfig.js';

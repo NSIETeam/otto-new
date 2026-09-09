@@ -1,0 +1,31 @@
+
+> otto-desktop@1.9.14 pretypecheck
+> npm run build:native
+
+
+> otto-desktop@1.9.14 build:native
+> npm run build --workspace=@otto/native
+
+
+> @otto/native@0.1.0 build
+> tsc -p tsconfig.json
+
+
+> otto-desktop@1.9.14 typecheck
+> tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit
+
+src/main/park-carpool-chat.integration.test.ts(1,35): error TS6059: File '/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/src/test/carpoolTestSupport.ts' is not under 'rootDir' '/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/src/main'. 'rootDir' is expected to contain all source files.
+  The file is in the program because:
+    Imported via '../test/carpoolTestSupport.js' from file '/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/src/main/park-carpool-chat.integration.test.ts'
+    Imported via '../test/carpoolTestSupport.js' from file '/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/src/main/park-carpool-chat.integration.test.ts'
+  File is CommonJS module because '/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/package.json' does not have field "type"
+src/test/carpoolTestSupport.ts(12,48): error TS1470: The 'import.meta' meta-property is not allowed in files which will build into CommonJS output.
+npm error Lifecycle script `typecheck` failed with error:
+npm error code 2
+npm error path /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+npm error workspace otto-desktop@1.9.14
+npm error location /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+npm error command failed
+npm error command sh -c tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit
+
+EXIT_CODE=2

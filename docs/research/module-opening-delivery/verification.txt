@@ -1,0 +1,107 @@
+renderer typecheck: exit 0
+
+
+changed-file lint: exit 0
+
+
+doctor: exit 0
+
+> otto-ai@1.9.14 doctor
+> node scripts/doctor.cjs
+
+Otto repository doctor
+
+✓ Node.js version: v24.4.0 (required: >=22.16.0)
+✓ npm available: npm 11.5.2
+✓ package-lock present: package-lock.json is required for reproducible installs
+✓ source payload size: 48.63 MB (budget: 50 MB; top: packages 33.88 MB, docs 8.30 MB, resources 3.87 MB, package-lock.json 0.79 MB, scripts 0.73 MB)
+✓ release distribution size: 0.05 MB (budget: 10 MB; paths: bundle)
+✓ host memory profile: 16.0 GB RAM detected
+✓ agent-critical text encoding: no mojibake markers found in docs/core/tools/prompts
+✓ workspace packages/core: packages/core/package.json
+✓ workspace packages/server: packages/server/package.json
+✓ workspace packages/desktop: packages/desktop/package.json
+✓ local bin vitest: node_modules/.bin/vitest
+✓ local bin tsc: node_modules/.bin/tsc
+✓ local bin eslint: node_modules/.bin/eslint
+
+Ready for verification: git diff --check, focused tests, typecheck, lint/build as needed.
+
+
+diff check: exit 0
+
+
+Full desktop suite (actual run):
+Test Files  219 passed (219)
+      Tests  1687 passed (1687)
+   Start at  07:57:01
+   Duration  34.01s (transform 10.11s, setup 12.89s, collect 53.74s, tests 60.74s, environment 65.56s, prepare 10.41s)
+
+
+main-types (exit 0):
+
+
+preload-types (exit 0):
+
+
+code-map (exit 0):
+
+> otto-ai@1.9.14 code-map:check
+> node scripts/generate-code-map.mjs --check
+
+Code map is current.
+
+
+Baseline full lint (exit 1; not waived):
+
+> otto-ai@1.9.14 lint:ci
+> eslint packages/server/src packages/desktop/src otto-native/src/index.ts scripts deployment/enterprise-oneclick start-enterprise.cjs "packages/desktop/*.{js,mjs,cjs}" --ext .ts,.tsx,.js,.mjs,.cjs --max-warnings 0
+
+
+/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/src/renderer/components/EnterprisePublicProfilePanel.test.tsx
+  1:8  error  'React' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/src/renderer/components/EnterpriseStarMapView.test.tsx
+    1:8   error  'React' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+   15:37  error  Unexpected function expression                                           prefer-arrow-callback
+   15:63  error  Unexpected any. Specify a different type                                 @typescript-eslint/no-explicit-any
+   25:39  error  Unexpected any. Specify a different type                                 @typescript-eslint/no-explicit-any
+  180:42  error  Unexpected any. Specify a different type                                 @typescript-eslint/no-explicit-any
+  190:27  error  Unexpected any. Specify a different type                                 @typescript-eslint/no-explicit-any
+  229:10  error  Unexpected any. Specify a different type                                 @typescript-eslint/no-explicit-any
+
+/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/src/renderer/starMap/EnterpriseList.test.tsx
+  1:8  error  'React' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/enterprise/enterpriseStarMapRoutes.test.ts
+    7:35  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   12:14  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   65:17  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   72:43  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   86:11  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   89:17  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   94:18  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   95:18  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  101:12  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  102:33  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  119:39  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  173:41  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+✖ 21 problems (21 errors, 0 warnings)
+  1 error and 0 warnings potentially fixable with the `--fix` option.
+
+
+
+Baseline boundary check (exit 1; not waived):
+
+> otto-ai@1.9.14 validate:boundaries
+> node scripts/validate-boundaries.mjs
+
+Otto package boundary validation
+FAIL packages/desktop/src/renderer/policyIntelligencePresentation.test.ts imports ../../../server/src/modules/policy_intelligence/policyDomain.js
+  desktop must not import server source deep paths
+
+Boundary validation failed: 1 new violation(s).
+
+
+All five files responsible for baseline lint/boundary failures are byte-identical to 0c075de0.

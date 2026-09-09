@@ -1,0 +1,76 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+ ❯ src/modules/park_services/flea_market/fleaMarketAccess.test.ts (4 tests | 4 failed) 5ms
+   × allows cross-enterprise same-park discovery only 4ms
+     → expected true to be false // Object.is equality
+   × preserves own management during closure or exit but denies disabled accounts and other owners 0ms
+     → expected true to be false // Object.is equality
+   × requires explicit market role in the current park 0ms
+     → expected true to be false // Object.is equality
+   × requires per-listing grant and revokes history detail on membership loss, removal or cleanup 0ms
+     → expected true to be false // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketAccess.test.ts > allows cross-enterprise same-park discovery only
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/modules/park_services/flea_market/fleaMarketAccess.test.ts:8:152
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketAccess.test.ts > preserves own management during closure or exit but denies disabled accounts and other owners
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/modules/park_services/flea_market/fleaMarketAccess.test.ts:9:248
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketAccess.test.ts > requires explicit market role in the current park
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/modules/park_services/flea_market/fleaMarketAccess.test.ts:10:96
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketAccess.test.ts > requires per-listing grant and revokes history detail on membership loss, removal or cleanup
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/modules/park_services/flea_market/fleaMarketAccess.test.ts:11:207
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  09:32:15
+   Duration  176ms (transform 20ms, setup 0ms, collect 18ms, tests 5ms, environment 0ms, prepare 41ms)

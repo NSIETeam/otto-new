@@ -1,0 +1,25 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+(node:33893) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/modules/park_services/flea_market/fleaMarketAttachments.test.ts (3 tests | 1 failed) 100ms
+   ✓ requires current same-park qualification and independent resource authorization 1ms
+   ✓ persists real encrypted image bytes, denies another account and cleans expired leases after grace period 70ms
+   × bounds orphan collection and makes progress across repeated runs instead of scanning every stored image 29ms
+     → expected 410 to be less than or equal to 200
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketAttachments.test.ts > bounds orphan collection and makes progress across repeated runs instead of scanning every stored image
+AssertionError: expected 410 to be less than or equal to 200
+ ❯ src/modules/park_services/flea_market/fleaMarketAttachments.test.ts:87:68
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  23:13:05
+   Duration  2.83s (transform 1.27s, setup 0ms, collect 2.58s, tests 100ms, environment 0ms, prepare 33ms)

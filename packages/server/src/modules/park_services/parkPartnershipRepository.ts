@@ -3,7 +3,11 @@
  */
 
 import type { Database } from '../data_platform/index.js';
-import { inferParkPartnerships } from './parkPartnershipInference.js';
+import {
+  buildIndustryGraph,
+  normalizePrimaryIndustry,
+  parsePrimaryIndustry,
+} from './enterpriseIndustry.js';
 import type {
   EnterpriseParkStarMap,
   EnterprisePublicProfile,
@@ -28,6 +32,7 @@ interface ProfileRow {
   summary: string;
   website: string;
   industry_tags_json: string;
+  primary_industry_json: string;
   products_services_json: string;
   capabilities_json: string;
   cooperation_needs_json: string;
@@ -55,8 +60,7 @@ export interface ParkPartnershipRepositoryStore {
   ): void;
 }
 
-export interface UpdateEnterprisePublicProfileInput
-  extends EnterprisePublicProfileInput {
+export interface UpdateEnterprisePublicProfileInput extends EnterprisePublicProfileInput {
   organizationId: string;
   actorAccountId: string;
 }
@@ -97,6 +101,7 @@ function profileFromRow(row: ProfileRow): EnterprisePublicProfile {
     summary: row.summary,
     website: row.website,
     industryTags: parseStringList(row.industry_tags_json),
+    ...parsePrimaryIndustry(row.primary_industry_json),
     productsServices: parseStringList(row.products_services_json),
     capabilities: parseStringList(row.capabilities_json),
     cooperationNeeds: parseStringList(row.cooperation_needs_json),
@@ -106,13 +111,16 @@ function profileFromRow(row: ProfileRow): EnterprisePublicProfile {
   };
 }
 
-function defaultProfile(organization: ProfileOrganization): EnterprisePublicProfile {
+function defaultProfile(
+  organization: ProfileOrganization,
+): EnterprisePublicProfile {
   return {
     organizationId: organization.id,
     organizationName: organization.name,
     summary: '',
     website: '',
     industryTags: [],
+    ...normalizePrimaryIndustry(null),
     productsServices: [],
     capabilities: [],
     cooperationNeeds: [],
@@ -155,7 +163,8 @@ export function updateEnterprisePublicProfileInRepository(
   }
   const summary =
     store.normalizeOptionalText(input.summary, '企业简介', 1000) ?? '';
-  const website = store.normalizeOptionalText(input.website, '企业官网', 300) ?? '';
+  const website =
+    store.normalizeOptionalText(input.website, '企业官网', 300) ?? '';
   if (website && !/^https?:\/\//i.test(website)) {
     throw new Error('企业官网必须以 http:// 或 https:// 开头');
   }
@@ -176,11 +185,28 @@ export function updateEnterprisePublicProfileInRepository(
   if (
     input.isPublic &&
     (!summary ||
-      productsServices.length + capabilities.length + cooperationNeeds.length ===
+      productsServices.length +
+        capabilities.length +
+        cooperationNeeds.length ===
         0)
   ) {
     throw new Error('公开企业资料前请填写简介及至少一项产品、能力或合作需求');
   }
+  const current = getEnterprisePublicProfileFromRepository(
+    store,
+    input.organizationId,
+  );
+  const industry =
+    input.primaryIndustryCode === undefined
+      ? {
+          primaryIndustryCode: current.primaryIndustryCode ?? null,
+          primaryIndustryName: current.primaryIndustryName ?? null,
+          industryClassificationBasis:
+            current.industryClassificationBasis ?? null,
+          industryConfirmedByCompany:
+            current.industryConfirmedByCompany ?? false,
+        }
+      : normalizePrimaryIndustry(input.primaryIndustryCode);
   const updatedAt = store.nowISO();
   store
     .db()
@@ -188,9 +214,10 @@ export function updateEnterprisePublicProfileInRepository(
       `INSERT INTO enterprise_public_profiles (
          organization_id, summary, website, industry_tags_json,
          products_services_json, capabilities_json, cooperation_needs_json,
-         public_contact, is_public, updated_by_account_id, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         public_contact, is_public, updated_by_account_id, updated_at, primary_industry_json
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(organization_id) DO UPDATE SET
+         primary_industry_json = excluded.primary_industry_json,
          summary = excluded.summary,
          website = excluded.website,
          industry_tags_json = excluded.industry_tags_json,
@@ -214,6 +241,7 @@ export function updateEnterprisePublicProfileInRepository(
       input.isPublic ? 1 : 0,
       input.actorAccountId,
       updatedAt,
+      JSON.stringify(industry),
     );
   store.audit(
     'enterprise_public_profile_updated',
@@ -235,7 +263,8 @@ export function getEnterpriseParkStarMapFromRepository(
   organizationId: string,
 ): EnterpriseParkStarMap {
   const park = store.getParkForOrganization(organizationId);
-  if (!park) throw new Error('当前企业尚未加入产业园');
+  if (!park || park.status !== 'active')
+    throw new Error('当前企业尚未加入有效产业园');
   const rows = store
     .db()
     .prepare(
@@ -256,6 +285,7 @@ export function getEnterpriseParkStarMapFromRepository(
     currentOrganizationId: organizationId,
     generatedAt: store.nowISO(),
     nodes,
-    edges: inferParkPartnerships(nodes),
+    edges: [],
+    ...buildIndustryGraph(nodes),
   };
 }

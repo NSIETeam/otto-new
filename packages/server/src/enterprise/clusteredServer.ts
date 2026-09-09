@@ -1,3 +1,7 @@
+import { carpoolCommunicationCapabilities } from '../modules/park_carpool/parkCarpoolConfig.js';
+import { handleMarketHttp } from '../modules/park_services/flea_market/fleaMarketHttp.js';
+import type { MarketApplication } from '../modules/park_services/flea_market/fleaMarketApplication.js';
+import { startCarpoolMaintenance } from '../modules/park_carpool/parkCarpoolRuntime.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  *
@@ -71,7 +75,7 @@ import {
 } from '../modules/model_gateway/index.js';
 import { loadEnterpriseModelCatalog } from '../modelCatalog.js';
 import { createClusteredAttachmentMaintenance } from './clusteredAttachmentMaintenance.js';
-import { handleClusteredBusinessRoute } from './clusteredBusinessRoutes.js';
+import { createClusteredCarpoolService, handleClusteredBusinessRoute } from './clusteredBusinessRoutes.js';
 import { EnterprisePolicyService } from '../modules/policy_intelligence/policyService.js';
 import { loadPolicySources } from '../modules/policy_intelligence/policySources.js';
 import { createPolicyModelFromEnv } from '../modules/policy_intelligence/policyModel.js';
@@ -759,6 +763,7 @@ export function createClusteredEnterpriseServer(
     topologyDescription?: Record<string, unknown>;
     sharedState?: ClusteredEnterpriseSharedState;
     attachmentStorage?: AttachmentStorageService;
+    fleaMarketApplication?: MarketApplication;
     publicUrl?: string;
     smsSender?: ClusteredEnterpriseSmsSender | null;
     licensePublicKeys?: readonly string[];
@@ -767,6 +772,7 @@ export function createClusteredEnterpriseServer(
     edgeGatewayUrl?: string;
     edgeGatewayFetch?: typeof fetch;
     recruitmentSources?: RecruitmentSourceRuntime;
+    taskRegistry?: RecurringTaskRegistry;
   } = {},
 ): {
   server: Server;
@@ -914,6 +920,7 @@ export function createClusteredEnterpriseServer(
             'policy_intelligence_v2',
             'policy_intelligence_v3',
             'policy_intelligence_inbox_v1',
+            'park_flea_market_protocol_v1',
             'password_auth',
             'sms_registration',
             'personal_registration',
@@ -944,6 +951,7 @@ export function createClusteredEnterpriseServer(
             'recruitment_jobs_v1',
             'recruitment_workable_connections_v1',
             'recruitment_people_v1',
+            ...carpoolCommunicationCapabilities(),
             'enterprise_ticketing_v1',
             'commercial_control_v1',
             'managed_model_gateway_v1',
@@ -1926,6 +1934,11 @@ export function createClusteredEnterpriseServer(
         }
       }
 
+      if (path === '/enterprise/park-market' || path.startsWith('/enterprise/park-market/')) {
+        if (!options.fleaMarketApplication) { sendJson(res, 503, { error: 'DEPENDENCY_UNAVAILABLE' }); return; }
+        await handleMarketHttp({ path, method, url, req, res, memberAccount: member, application: options.fleaMarketApplication, readBody: readJsonBody, sendJSON: sendJson });
+        return;
+      }
       if (await handlePolicyRoute({ path, method, req, res, accountId: member.id, service: getPolicyService, readBody: readJsonBody, sendJSON: sendJson })) return;
       if (await handleRecruitmentJobRoute({ path, method, req, res, accountId: member.id, service: getRecruitmentJobService, readBody: readJsonBody, sendJson })) return;
       if (await handleWorkableConnectionRoute({ path, method, req, res, accountId: member.id, service: getWorkableConnectionService, readBody: readJsonBody, sendJson })) return;
@@ -2970,7 +2983,7 @@ export function createClusteredEnterpriseServer(
   // Validate configuration before listening so malformed settings cannot throw from an event callback.
   const initializedPolicyService = typeof repository.getPolicyIntelligenceStore === 'function' ? getPolicyService() : undefined;
   server.once('listening', () => {
-    if (initializedPolicyService) stopPolicy = startPolicyRuntime(initializedPolicyService, repository.getPolicyIntelligenceStore());
+    if (initializedPolicyService) stopPolicy = startPolicyRuntime(initializedPolicyService, repository.getPolicyIntelligenceStore(), options.taskRegistry);
   });
   server.once('close', () => stopPolicy?.());
   const recruitmentWorkerOptions = () => ({
@@ -2996,6 +3009,35 @@ export function createClusteredEnterpriseServer(
   return { server, host, port, adminToken, createRecruitmentIntakeWorker, createRecruitmentBackgroundWorker };
 }
 
+/** A failed/late drain is never permission to tear down live database/cache IO. */
+export async function drainClusteredEnterpriseResources(input: {
+  registries: Array<Pick<RecurringTaskRegistry, 'shutdown'>>;
+  initialized: Promise<void>;
+  httpClosed: Promise<void>;
+  stop(): void;
+  close(): Promise<void>;
+  timeoutMs?: number;
+}): Promise<void> {
+  const timeoutMs = input.timeoutMs ?? 30_000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  input.stop();
+  try {
+    await Promise.race([
+      Promise.all([
+        input.httpClosed,
+        input.initialized,
+        ...input.registries.map(registry => registry.shutdown({ timeoutMs })),
+      ]),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('clustered enterprise drain timed out')), timeoutMs);
+      }),
+    ]);
+    await input.close();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function startClusteredEnterpriseServer(
   options: ClusteredEnterpriseServerOptions = {},
 ): Promise<Server> {
@@ -3013,6 +3055,7 @@ export async function startClusteredEnterpriseServer(
       environment: process.env,
     }));
   const repository = infrastructure.repository;
+  let closeStartedServer: (() => Promise<void>) | undefined;
 
   try {
     if (options.bootstrapAdmin) {
@@ -3032,7 +3075,16 @@ export async function startClusteredEnterpriseServer(
       });
     }
 
+    const marketTasks = new RecurringTaskRegistry({
+      allowPaidBackground: true,
+      onError: () => console.error('[Otto Enterprise] shared maintenance failed'),
+    });
+    const recruitmentMaintenanceRegistry = new RecurringTaskRegistry({
+      allowPaidBackground: process.env['OTTO_RECRUITMENT_BACKGROUND_ANALYSIS_ENABLED'] === '1',
+      onError() { console.error('[Otto Enterprise] 招聘后台任务未完成，将检查持久状态后重试'); },
+    });
     const created = createClusteredEnterpriseServer(repository, {
+      taskRegistry: marketTasks,
       host: options.host ?? process.env.OTTO_ENTERPRISE_HOST,
       port:
         options.port ??
@@ -3047,6 +3099,7 @@ export async function startClusteredEnterpriseServer(
       topologyDescription: infrastructure.topologyDescription,
       sharedState: infrastructure.sharedState,
       attachmentStorage: infrastructure.attachmentStorage,
+      fleaMarketApplication: infrastructure.fleaMarketApplication,
       publicUrl: options.publicUrl ?? process.env.OTTO_ENTERPRISE_PUBLIC_URL,
       licensePublicKeys: options.licensePublicKeys,
       edgeGatewayLeaseToken: options.edgeGatewayLeaseToken,
@@ -3059,6 +3112,7 @@ export async function startClusteredEnterpriseServer(
           : createAliyunLoginSmsFromEnv(),
     });
     const maintenance = createClusteredAttachmentMaintenance({
+      taskRegistry: marketTasks,
       storage: infrastructure.attachmentStorage,
       cache: infrastructure.cache,
       attachmentAuthority: infrastructure.repository,
@@ -3071,6 +3125,7 @@ export async function startClusteredEnterpriseServer(
       },
     });
     const mlsMaintenance = createClusteredMlsMaintenance({
+      taskRegistry: marketTasks,
       cache: infrastructure.cache,
       authority: infrastructure.repository,
       onError(error) {
@@ -3079,22 +3134,61 @@ export async function startClusteredEnterpriseServer(
         );
       },
     });
-    const recruitmentMaintenanceRegistry = new RecurringTaskRegistry({
-      allowPaidBackground: process.env['OTTO_RECRUITMENT_BACKGROUND_ANALYSIS_ENABLED'] === '1',
-      onError() { console.error('[Otto Enterprise] 招聘后台任务未完成，将检查持久状态后重试'); },
-    });
     let stopRecruitmentIntake: () => void = () => undefined;
     let stopRecruitmentAnalysis: () => void = () => undefined;
-    created.server.once('close', () => {
+    let stopCarpoolMaintenance: () => void = () => undefined;
+    let stopMarket: () => void = () => undefined;
+    let initializedMarket = Promise.resolve();
+    const stopRuntimes = () => {
       stopRecruitmentIntake();
       stopRecruitmentAnalysis();
+      stopMarket();
       maintenance.close();
+      stopCarpoolMaintenance();
       mlsMaintenance.close();
-      // Keep the database alive until an in-flight cache batch has finished.
-      void recruitmentMaintenanceRegistry.shutdown({ timeoutMs: 30_000 })
-        .then(() => infrastructure.close())
-        .catch(() => console.error('[Otto Enterprise] 后台清理尚未安全退出，保留数据库连接等待进程处理'));
+    };
+    const nativeClose = created.server.close.bind(created.server);
+    let closePromise: Promise<void> | undefined;
+    const drain = (httpClosed: Promise<void>) => drainClusteredEnterpriseResources({
+      registries: [marketTasks, recruitmentMaintenanceRegistry],
+      initialized: initializedMarket,
+      httpClosed,
+      stop: stopRuntimes,
+      close: () => infrastructure.close(),
     });
+    closeStartedServer = () => {
+      if (closePromise) return closePromise;
+      const httpClosed = new Promise<void>((resolve, reject) => {
+        nativeClose(error => {
+          if (!error || (error as NodeJS.ErrnoException).code === 'ERR_SERVER_NOT_RUNNING') resolve();
+          else reject(error);
+        });
+      });
+      closePromise = drain(httpClosed);
+      return closePromise;
+    };
+    created.server.close = ((callback?: (error?: Error) => void) => {
+      void closeStartedServer!().then(() => callback?.(), error => {
+        console.error('[Otto Enterprise] 后台清理尚未安全退出，保留数据库连接等待进程处理');
+        callback?.(error instanceof Error ? error : new Error('clustered enterprise shutdown failed'));
+      });
+      return created.server;
+    }) as typeof created.server.close;
+    created.server.once('close', () => {
+      if (closePromise) return;
+      closePromise = drain(Promise.resolve());
+      void closePromise.catch(() => console.error('[Otto Enterprise] 后台清理尚未安全退出，保留数据库连接等待进程处理'));
+    });
+    stopCarpoolMaintenance = startCarpoolMaintenance({
+      run: createClusteredCarpoolService(infrastructure.repository).maintain,
+      cache: infrastructure.cache,
+      taskRegistry: marketTasks,
+      onError: error => console.error(`[Otto Enterprise] carpool maintenance failed: ${safeRouteError(error)}`),
+    });
+    stopMarket = infrastructure.fleaMarketApplication?.start(marketTasks) ?? (() => undefined);
+    // start() already began this readiness promise; join it instead of leaving
+    // its object/database probes live after both recurring registries drain.
+    initializedMarket = infrastructure.fleaMarketApplication?.initialize() ?? Promise.resolve();
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => reject(error);
       created.server.once('error', onError);
@@ -3118,7 +3212,8 @@ export async function startClusteredEnterpriseServer(
     );
     return created.server;
   } catch (error) {
-    await infrastructure.close();
+    if (closeStartedServer) await closeStartedServer();
+    else await infrastructure.close();
     throw error;
   }
 }

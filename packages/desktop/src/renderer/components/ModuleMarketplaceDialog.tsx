@@ -20,6 +20,7 @@ const CATEGORY_LABELS: Readonly<Record<ModuleCategory, string>> = {
 
 const CATEGORY_ORDER: readonly ModuleCategory[] = [
   'common',
+  'park',
   'recruitment',
   'capability',
   'custom-agent',
@@ -105,7 +106,6 @@ export function ModuleMarketplaceDialog({
   const visibleModules = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     return modules.filter((module) => {
-      if (module.category === 'park') return false;
       if (module.availability === 'hidden') return false;
       if (!normalizedQuery) return true;
       return `${module.label} ${module.description ?? ''}`

@@ -49,6 +49,7 @@ const MODULE_LINE_ICON_REGISTRY = {
   'park-repair': IconRepair,
   'park-vehicle-visit': IconCar,
   'park-carpool': IconCar,
+  'park-flea-market': IconStore,
   'park-staff-tasks': IconClipboardList,
   'park-my-applications': IconHistory,
   'enterprise-memory': IconBrain,

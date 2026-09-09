@@ -1,0 +1,27 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ❯ src/renderer/components/ParkMarketModel.test.ts (2 tests | 1 failed) 14ms
+   ✓ requires explicit condition and function, preserves sale price and validates visible characters 12ms
+   × accepts remaining image slots in selection order and names only overflow files 2ms
+     → (0 , selectMarketImages) is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/components/ParkMarketModel.test.ts > accepts remaining image slots in selection order and names only overflow files
+TypeError: (0 , selectMarketImages) is not a function
+ ❯ src/renderer/components/ParkMarketModel.test.ts:47:9
+     45| it('accepts remaining image slots in selection order and names only ov…
+     46|  const files=Array.from({length:10},(_,i)=>`image-${i}`);
+     47|  expect(selectMarketImages(files,2)).toEqual({accepted:files.slice(0,7…
+       |         ^
+     48|  expect(selectMarketImages(files,9)).toEqual({accepted:[],rejected:fil…
+     49| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  12:26:33
+   Duration  529ms (transform 36ms, setup 45ms, collect 10ms, tests 14ms, environment 182ms, prepare 132ms)

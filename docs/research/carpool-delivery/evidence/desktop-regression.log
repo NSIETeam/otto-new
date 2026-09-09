@@ -1,0 +1,22 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/desktop
+
+ ✓ src/renderer/components/InboxPage.test.tsx (12 tests) 262ms
+ ✓ src/main/enterprise-mls-attachments.test.ts (4 tests) 674ms
+   ✓ MLS private-message attachment files > round-trips a multi-chunk file with a random per-file DEK and bound AAD  653ms
+ ✓ src/renderer/components/ParkCarpoolDialog.test.tsx (2 tests) 160ms
+ ✓ src/main/enterprise-mls.test.ts (32 tests) 73ms
+ ✓ src/main/enterprise-mls-private-messages.test.ts (6 tests) 69ms
+ ✓ src/renderer/parkCarpoolConversationBridge.test.ts (8 tests) 22ms
+ ✓ src/renderer/moduleWorkspace.test.ts (21 tests) 9ms
+ ✓ src/renderer/moduleCatalog.test.ts (12 tests) 7ms
+ ✓ src/renderer/conversationDraftRecovery.test.ts (1 test) 4ms
+(node:54829) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/renderer/moduleModal.test.ts (2 tests) 2ms
+ ✓ src/renderer/parkCarpoolContract.integration.test.ts (2 tests) 142ms
+
+ Test Files  11 passed (11)
+      Tests  102 passed (102)
+   Start at  09:23:46
+   Duration  5.84s (transform 2.46s, setup 469ms, collect 4.58s, tests 1.42s, environment 2.54s, prepare 399ms)

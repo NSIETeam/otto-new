@@ -35,27 +35,65 @@ function setup() {
       ('park-a', '宏创园区', 'hongchuang', 'secret', 'org-admin', '宏创园区服务');
   `);
   const accounts = new Map([
-    ['admin-a', { id: 'admin-a', organizationId: 'org-a', isAdmin: true, status: 'active' }],
-    ['member-a', { id: 'member-a', organizationId: 'org-a', isAdmin: false, status: 'active' }],
-    ['admin-b', { id: 'admin-b', organizationId: 'org-b', isAdmin: true, status: 'active' }],
-    ['private-admin', { id: 'private-admin', organizationId: 'org-private', isAdmin: true, status: 'active' }],
+    [
+      'admin-a',
+      {
+        id: 'admin-a',
+        organizationId: 'org-a',
+        isAdmin: true,
+        status: 'active',
+      },
+    ],
+    [
+      'member-a',
+      {
+        id: 'member-a',
+        organizationId: 'org-a',
+        isAdmin: false,
+        status: 'active',
+      },
+    ],
+    [
+      'admin-b',
+      {
+        id: 'admin-b',
+        organizationId: 'org-b',
+        isAdmin: true,
+        status: 'active',
+      },
+    ],
+    [
+      'private-admin',
+      {
+        id: 'private-admin',
+        organizationId: 'org-private',
+        isAdmin: true,
+        status: 'active',
+      },
+    ],
   ]);
   const organizations = new Map(
-    (database.prepare('SELECT id, name, status FROM organizations').all() as Array<{
-      id: string;
-      name: string;
-      status: string;
-    }>).map((organization) => [organization.id, organization]),
+    (
+      database
+        .prepare('SELECT id, name, status FROM organizations')
+        .all() as Array<{
+        id: string;
+        name: string;
+        status: string;
+      }>
+    ).map((organization) => [organization.id, organization]),
   );
   const store: ParkPartnershipRepositoryStore = {
     db: () => database,
     getAccount: (accountId, organizationId) => {
       const account = accounts.get(accountId);
-      return account && (!organizationId || account.organizationId === organizationId)
+      return account &&
+        (!organizationId || account.organizationId === organizationId)
         ? account
         : null;
     },
-    getOrganization: (organizationId) => organizations.get(organizationId) ?? null,
+    getOrganization: (organizationId) =>
+      organizations.get(organizationId) ?? null,
     getParkForOrganization: (organizationId) => {
       const row = database
         .prepare(
@@ -64,7 +102,8 @@ function setup() {
            WHERE park.admin_organization_id = ? OR organization.id = ?
            LIMIT 1`,
         )
-        .get(organizationId, organizationId) as Record<string, unknown> | undefined;
+        .get(organizationId, organizationId) as
+        Record<string, unknown> | undefined;
       return row
         ? {
             id: String(row.id),
@@ -93,6 +132,7 @@ const publicInput = {
   summary: '为园区企业提供数字化服务',
   website: 'https://example.com',
   industryTags: ['软件'],
+  primaryIndustryCode: 'it_services',
   productsServices: ['园区数字化改造'],
   capabilities: ['软件开发'],
   cooperationNeeds: ['法律咨询'],
@@ -104,7 +144,9 @@ describe('park partnership repository', () => {
   it('keeps a new profile private and only lets an active admin publish it', () => {
     const { database, store } = setup();
     try {
-      expect(getEnterprisePublicProfileFromRepository(store, 'org-a')).toMatchObject({
+      expect(
+        getEnterprisePublicProfileFromRepository(store, 'org-a'),
+      ).toMatchObject({
         organizationName: '甲企业',
         isPublic: false,
       });
@@ -127,7 +169,7 @@ describe('park partnership repository', () => {
     }
   });
 
-  it('excludes private organizations and returns evidence-based park edges', () => {
+  it('excludes private organizations and returns confirmed industry groups', () => {
     const { database, store } = setup();
     try {
       updateEnterprisePublicProfileInRepository(store, {
@@ -151,10 +193,65 @@ describe('park partnership repository', () => {
       });
 
       const map = getEnterpriseParkStarMapFromRepository(store, 'org-a');
-      expect(map.nodes.map((node) => node.organizationId).sort()).toEqual(['org-a', 'org-b']);
-      expect(map.edges).toHaveLength(1);
-      expect(map.edges[0]!.evidence.join(' ')).toContain('公开需求');
-      expect(map.nodes.some((node) => node.publicContact.includes('bd@'))).toBe(true);
+      expect(map.nodes.map((node) => node.organizationId).sort()).toEqual([
+        'org-a',
+        'org-b',
+      ]);
+      expect(map.relationType).toBe('same_industry');
+      expect(map.relationshipCount).toBe(1);
+      expect(map.industryGroups?.[0].memberOrganizationIds).toEqual([
+        'org-a',
+        'org-b',
+      ]);
+      expect(map.edges).toEqual([]);
+      expect(map.nodes.some((node) => node.publicContact.includes('bd@'))).toBe(
+        true,
+      );
+    } finally {
+      database.close();
+    }
+  });
+  it('persists confirmed industries, preserves them for older clients, and clears on explicit null', () => {
+    const { database, store } = setup();
+    try {
+      const input = {
+        ...publicInput,
+        organizationId: 'org-a',
+        actorAccountId: 'admin-a',
+        isPublic: false,
+      };
+      const saved = updateEnterprisePublicProfileInRepository(store, input);
+      expect(saved).toMatchObject({
+        primaryIndustryCode: 'it_services',
+        primaryIndustryName: '软件与信息技术服务',
+        industryConfirmedByCompany: true,
+        isPublic: false,
+      });
+      const { primaryIndustryCode: _code, ...legacy } = input;
+      expect(
+        updateEnterprisePublicProfileInRepository(store, legacy)
+          .primaryIndustryCode,
+      ).toBe('it_services');
+      expect(() =>
+        updateEnterprisePublicProfileInRepository(store, {
+          ...input,
+          primaryIndustryCode: 'invented',
+        }),
+      ).toThrow('主营行业');
+      expect(
+        updateEnterprisePublicProfileInRepository(store, {
+          ...input,
+          primaryIndustryCode: null,
+        }),
+      ).toMatchObject({
+        primaryIndustryCode: null,
+        industryConfirmedByCompany: false,
+        isPublic: false,
+      });
+      PARK_CORE_SCHEMA_CONTRIBUTOR.apply(database);
+      expect(
+        getEnterprisePublicProfileFromRepository(store, 'org-a').summary,
+      ).toBe(input.summary);
     } finally {
       database.close();
     }

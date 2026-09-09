@@ -22,3 +22,7 @@ Makefile eol=lf
 *.eot binary
 *.ttf binary
 *.otf binary
+
+# Historical raw test receipts contain diff excerpts and terminal blank lines.
+# Preserve their original contents; this does not exempt source or new test code.
+docs/research/carpool-delivery/evidence/*.log whitespace=-blank-at-eol,-blank-at-eof

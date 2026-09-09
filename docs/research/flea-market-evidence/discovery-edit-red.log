@@ -1,0 +1,42 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+(node:79256) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/modules/park_services/flea_market/fleaMarketDiscovery.test.ts (2 tests | 2 failed) 31ms
+   × lists same-park public items, filters free and retains favorite placeholders after deletion 19ms
+     → service.discover is not a function
+   × requires same-item confirmation for a category change and rejects outdated edits 11ms
+     → service.edit is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketDiscovery.test.ts > lists same-park public items, filters free and retains favorite placeholders after deletion
+TypeError: service.discover is not a function
+ ❯ src/modules/park_services/flea_market/fleaMarketDiscovery.test.ts:10:27
+      8|     const service=createMarketService(await marketServiceFixture(h.rep…
+      9|     const listing=await service.publish('seller',{...testListingFields…
+     10|     expect((await service.discover('buyer',{})).items).toHaveLength(1);
+       |                           ^
+     11|     expect((await service.discover('buyer',{free:true})).items).toHave…
+     12|     expect((await service.discover('outsider',{})).items).toHaveLength…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketDiscovery.test.ts > requires same-item confirmation for a category change and rejects outdated edits
+TypeError: service.edit is not a function
+ ❯ src/modules/park_services/flea_market/fleaMarketDiscovery.test.ts:25:26
+     23|     const service=createMarketService(await marketServiceFixture(h.rep…
+     24|     const listing=await service.publish('seller',{...testListingFields…
+     25|     await expect(service.edit('seller',listing.id,{...testListingField…
+       |                          ^
+     26|     const edited=await service.edit('seller',listing.id,{...testListin…
+     27|     expect(edited).toMatchObject({category:'home',listedAt:listing.lis…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  09:38:37
+   Duration  2.48s (transform 1.13s, setup 0ms, collect 2.31s, tests 31ms, environment 0ms, prepare 32ms)

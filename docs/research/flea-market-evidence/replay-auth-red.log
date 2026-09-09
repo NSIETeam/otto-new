@@ -1,0 +1,71 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+(node:94307) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/modules/park_services/flea_market/fleaMarketPublication.test.ts (2 tests | 1 failed) 54ms
+   ✓ publishes an image-bound listing exactly once into a real database 28ms
+   × rechecks account inside the receipt transaction after a concurrent disable 26ms
+     → promise resolved "{ title: '办公椅', …(30) }" instead of rejecting
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketPublication.test.ts > rechecks account inside the receipt transaction after a concurrent disable
+AssertionError: promise resolved "{ title: '办公椅', …(30) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "category": "office",
++   "cleanedAt": null,
++   "condition": "used",
++   "confirmedAt": 1788825600000,
++   "createdAt": 1788825600000,
++   "description": "可正常升降的办公椅",
++   "endedAt": null,
++   "expiresAt": 1791417600000,
++   "faultDescription": "",
++   "functionStatus": "working",
++   "handoverArea": "园区南门",
++   "handoverTime": "",
++   "id": "a31e411c-638b-418a-bf56-c7026beb9e75",
++   "imageIds": [
++     "image-1",
++   ],
++   "lastRelistedAt": null,
++   "listedAt": 1788825600000,
++   "negotiable": false,
++   "offlineAt": null,
++   "offlineReason": null,
++   "offlineVersion": null,
++   "ownerId": "seller",
++   "parkId": "P",
++   "priceCents": 1001,
++   "reservation": null,
++   "saleMode": "sale",
++   "soldAt": null,
++   "soldFrom": null,
++   "state": "active",
++   "title": "办公椅",
++   "updatedAt": 1788825600000,
++   "version": 1,
+  }
+
+ ❯ src/modules/park_services/flea_market/fleaMarketPublication.test.ts:25:89
+     23|     await service.publish('seller',{...testListingFields,requestId:'id…
+     24|     disableAfterRead=true;
+     25|     await expect(service.publish('seller',{...testListingFields,reques…
+       |                                                                                         ^
+     26|   } finally { await h.close(); }
+     27| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  09:41:12
+   Duration  2.64s (transform 1.16s, setup 0ms, collect 2.43s, tests 54ms, environment 0ms, prepare 37ms)

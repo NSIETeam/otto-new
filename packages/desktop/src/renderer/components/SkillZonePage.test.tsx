@@ -1,3 +1,4 @@
+import { ModuleReadProvider } from '../state/ModuleReadProvider.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -108,4 +109,39 @@ describe('SkillZonePage', () => {
     fireEvent.click(screen.getByRole('button', { name: '公司上架' }));
     await waitFor(() => expect(enterpriseSkillReview).toHaveBeenCalledWith('skill-1', 'approve', 'company'));
   });
+});
+
+it('返回专区先显示已有列表，慢速刷新不遮住内容', async () => {
+  const list = vi.fn().mockResolvedValueOnce([skill()]).mockImplementation(() => new Promise(() => {}));
+  Object.assign(window, { otto: installBridge({ enterpriseSkillList: list }) });
+  const page = <SkillZonePage accountId="account-1" isAdmin={false} onBack={() => {}} />;
+  const view = render(<ModuleReadProvider>{page}</ModuleReadProvider>);
+  await screen.findByText('月报整理');
+  view.rerender(<ModuleReadProvider>{null}</ModuleReadProvider>);
+  view.rerender(<ModuleReadProvider>{page}</ModuleReadProvider>);
+  expect(screen.getByText('月报整理')).toBeTruthy();
+});
+
+it('未完成的新筛选不能把旧列表保存为新条件的结果', async () => {
+  const list = vi.fn().mockResolvedValueOnce([skill()]).mockImplementation(() => new Promise(() => {}));
+  Object.assign(window, { otto: installBridge({ enterpriseSkillList: list }) });
+  const page = <SkillZonePage accountId="account-1" isAdmin={false} onBack={() => {}} />;
+  const view = render(<ModuleReadProvider>{page}</ModuleReadProvider>);
+  await screen.findByText('月报整理');
+  fireEvent.change(screen.getByPlaceholderText('搜索 Skill、作者或部门'), { target: { value: '不存在的新条件' } });
+  fireEvent.click(screen.getByRole('button', { name: '搜索' }));
+  view.rerender(<ModuleReadProvider>{null}</ModuleReadProvider>);
+  view.rerender(<ModuleReadProvider>{page}</ModuleReadProvider>);
+  expect(screen.queryByText('月报整理')).toBeNull();
+});
+
+it('本机 Skill 已返回时不等待远端投稿记录再显示', async () => {
+  Object.assign(window, { otto: installBridge({
+    enterpriseSkillLocalList: vi.fn(async () => [{ name: 'local-budget', description: '本机预算技能', kind: 'auto' }]),
+    enterpriseSkillList: vi.fn(() => new Promise(() => {})),
+  }) });
+  render(<SkillZonePage accountId="account-1" isAdmin={false} onBack={() => {}} />);
+  fireEvent.click(screen.getByRole('button', { name: '我的 Skill' }));
+  expect(await screen.findByText('local-budget')).toBeTruthy();
+  expect(screen.queryByText('暂无投稿记录')).toBeNull();
 });

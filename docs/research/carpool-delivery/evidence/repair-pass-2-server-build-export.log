@@ -1,0 +1,15 @@
+
+> otto-server@0.1.0 build
+> node ../../scripts/build_package.js
+
+- Compiling TypeScript sources...
+✔ TypeScript compilation completed successfully.
+- Synchronizing resource files...
+✔ Resource files synchronized successfully.
+- Generating build metadata...
+✔ Build metadata generated.
+
+✅ otto-server build completed successfully.
+
+
+EXIT_CODE=0

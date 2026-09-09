@@ -1,0 +1,53 @@
+
+> otto-desktop@1.18.0 build
+> npm run build:main && npm run build:preload && npm run build:renderer
+
+
+> otto-desktop@1.18.0 prebuild:main
+> npm run build:native
+
+
+> otto-desktop@1.18.0 build:native
+> npm run build --workspace=@otto/native
+
+
+> @otto/native@0.1.0 build
+> tsc -p tsconfig.json
+
+
+> otto-desktop@1.18.0 build:main
+> tsc -p tsconfig.main.json
+
+
+> otto-desktop@1.18.0 build:preload
+> tsc -p tsconfig.preload.json --noEmit && webpack-cli --config webpack.preload.cjs --mode production && node scripts/verify-preload-bundle.mjs
+
+asset index.js 23.9 KiB [compared for emit] [minimized] (name: main) 1 related asset
+orphan modules 7.89 KiB [orphan] 4 modules
+./src/preload/index.ts + 4 modules 57.4 KiB [not cacheable] [built] [code generated]
+webpack 5.108.4 compiled successfully in 553 ms
+[preload] sandbox 单文件验证通过: /Users/yang/Desktop/otto-new/packages/desktop/dist/preload/index.js; requires=["electron"]
+
+> otto-desktop@1.18.0 build:renderer
+> webpack-cli --config webpack.config.cjs --mode production
+
+assets by status 5.75 MiB [big]
+  asset 798.main.js 4.43 MiB [emitted] [minimized] [big] 1 related asset
+  asset 314.main.js 1.33 MiB [compared for emit] [minimized] [big]
+asset 818.main.js 150 KiB [compared for emit] [minimized] (id hint: vendors)
+asset main.js 142 KiB [compared for emit] [minimized] (name: main) 1 related asset
+asset 216.main.js 33.8 KiB [compared for emit] [minimized] 1 related asset
+asset 642.main.js 3.7 KiB [compared for emit] [minimized] 1 related asset
+asset index.html 1.69 KiB [compared for emit]
+asset 513.main.js 645 bytes [compared for emit] [minimized] 1 related asset
+orphan modules 6.66 MiB [orphan] 545 modules
+runtime modules 7.52 KiB 11 modules
+cacheable modules 7.31 MiB
+  modules by path ../../node_modules/ 514 KiB 58 modules
+  modules by path ./ 6.81 MiB
+    modules by path ./src/renderer/ 6.67 MiB 15 modules
+    modules by path ./node_modules/ 143 KiB
+      modules by path ./node_modules/react/ 8 KiB 4 modules
+      modules by path ./node_modules/react-dom/ 131 KiB 3 modules
+      modules by path ./node_modules/scheduler/ 4.33 KiB 2 modules
+webpack 5.108.4 compiled successfully in 5439 ms

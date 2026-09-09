@@ -1,0 +1,20 @@
+packages/server/src/modules/collaboration/parkContactAttachments.test.ts 104ms
+packages/server/src/modules/collaboration/parkContactAttachments.ts 54ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketApplication.ts 55ms
+packages/server/src/modules/park_services/flea_market/fleaMarketContacts.ts 86ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketDiscovery.ts 28ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketHttp.ts 38ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketJobs.test.ts 15ms
+packages/server/src/modules/park_services/flea_market/fleaMarketJobs.ts 26ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketObjectStore.ts 9ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketPostgresRuntime.ts 10ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketReadiness.test.ts 8ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketReadiness.ts 8ms
+packages/server/src/modules/park_services/flea_market/fleaMarketRemoteReferences.test.ts 5ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketRepairRaces.test.ts 27ms
+packages/server/src/modules/park_services/flea_market/fleaMarketSchema.ts 5ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts 30ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketSearchIndex.ts 22ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketSqliteRuntime.ts 8ms (unchanged)
+packages/server/src/modules/park_services/flea_market/fleaMarketAttachments.ts 29ms
+packages/server/src/modules/park_services/flea_market/fleaMarketAttachments.test.ts 19ms

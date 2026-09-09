@@ -2528,7 +2528,7 @@ describe('enterprise one-click provenance contract', () => {
     )?.[1];
 
     expect(bundle).toContain(
-      "const enterpriseBuildWorkspaces = ['otto-core', 'otto-server'];",
+      "const enterpriseBuildWorkspaces = ['otto-workflow', 'otto-core', 'otto-server'];",
     );
     expect(buildLoop).toBeDefined();
     expect(buildLoop).toContain(

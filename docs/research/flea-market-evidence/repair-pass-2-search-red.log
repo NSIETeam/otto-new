@@ -1,0 +1,120 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+(node:71548) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts (6 tests | 6 failed) 3025ms
+   × sqlite: persists private substring candidates atomically, updates on edit, and recovers search after restart 36ms
+     → promise resolved "{ items: [ { …(19) } ], …(1) }" instead of rejecting
+   × postgres: persists private substring candidates atomically, updates on edit, and recovers search after restart 1225ms
+     → promise resolved "{ items: [ { …(19) } ], …(1) }" instead of rejecting
+   × sqlite: preserves literal substring semantics and caches sellers only within one request 23ms
+     → expected [ [ { …(2) }, 'seller' ], …(1) ] to have a length of 1 but got 2
+   × sqlite: backfill is bounded, restartable and rollback-safe 22ms
+     → promise resolved "{ items: [], nextCursor: null }" instead of rejecting
+   × postgres: preserves literal substring semantics and caches sellers only within one request 862ms
+     → expected [ [ { …(2) }, 'seller' ], …(1) ] to have a length of 1 but got 2
+   × postgres: backfill is bounded, restartable and rollback-safe 857ms
+     → promise resolved "{ items: [], nextCursor: null }" instead of rejecting
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts > sqlite: persists private substring candidates atomically, updates on edit, and recovers search after restart
+ FAIL  src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts > postgres: persists private substring candidates atomically, updates on edit, and recovers search after restart
+AssertionError: promise resolved "{ items: [ { …(19) } ], …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "items": [
++     {
++       "category": "office",
++       "condition": "used",
++       "confirmedAt": 1788825600000,
++       "description": "可正常升降的办公椅",
++       "expiresAt": 1791417600000,
++       "faultDescription": "",
++       "functionStatus": "working",
++       "handoverArea": "园区南门",
++       "handoverTime": "",
++       "id": "9e546135-13df-40d7-a012-570d638e5b98",
++       "imageIds": [
++         "image-1",
++       ],
++       "listedAt": 1788825600000,
++       "negotiable": false,
++       "priceCents": 1001,
++       "saleMode": "sale",
++       "seller": {
++         "nickname": "园区成员",
++       },
++       "state": "active",
++       "title": "二手书架",
++       "version": 2,
++     },
++   ],
++   "nextCursor": null,
+  }
+
+ ❯ src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts:58:62
+     56|         ]),
+     57|       );
+     58|       await expect(service.discover('buyer', { query: '书架' })).rejects…
+       |                                                              ^
+     59|       expect(await backfillMarketSearch({ ...deps, repository: h.repos…
+     60|       expect((await service.discover('buyer', { query: '书架' })).items)…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts > sqlite: preserves literal substring semantics and caches sellers only within one request
+ FAIL  src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts > postgres: preserves literal substring semantics and caches sellers only within one request
+AssertionError: expected [ [ { …(2) }, 'seller' ], …(1) ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts:79:74
+     77|         principal.mockClear();
+     78|         expect((await service.discover('buyer', { query })).items).toH…
+     79|         expect(principal.mock.calls.filter(([, id]) => id === 'seller'…
+       |                                                                          ^
+     80|       }
+     81|       await h.repository.transaction(tx => tx.run("UPDATE test_market_…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts > sqlite: backfill is bounded, restartable and rollback-safe
+ FAIL  src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts > postgres: backfill is bounded, restartable and rollback-safe
+AssertionError: promise resolved "{ items: [], nextCursor: null }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "items": [],
++   "nextCursor": null,
+  }
+
+ ❯ src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts:96:63
+     94|       });
+     95|       const decrypt = vi.spyOn(deps.cipher, 'decryptText');
+     96|       await expect(service.discover('buyer', { query: '不存在' })).reject…
+       |                                                               ^
+     97|       expect(decrypt.mock.calls.filter(([, context]) => String(context…
+     98|       expect(await backfillMarketSearch(deps, 1)).toMatchObject({ inde…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed (6)
+   Start at  20:12:42
+   Duration  5.55s (transform 1.11s, setup 0ms, collect 2.39s, tests 3.03s, environment 0ms, prepare 31ms)

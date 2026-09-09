@@ -1,0 +1,28 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-repair-91bc4e/packages/desktop
+
+ ❯ src/main/park-carpool-startup.test.ts (3 tests | 1 failed) 57ms
+   ✓ does not block private startup and never starts a stale identity 52ms
+   ✓ checks permission before activation and isolates failure from later identities 0ms
+   × times out optional initialization and does not start it after a late completion 4ms
+     → expected "spy" to be called once, but got 0 times
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-carpool-startup.test.ts > times out optional initialization and does not start it after a late completion
+AssertionError: expected "spy" to be called once, but got 0 times
+ ❯ src/main/park-carpool-startup.test.ts:62:56
+     60|   startup.update(scope);await vi.advanceTimersByTimeAsync(0);
+     61|   expect(chat.activate).toHaveBeenCalledOnce();
+     62|   await vi.advanceTimersByTimeAsync(101);expect(error).toHaveBeenCalle…
+       |                                                        ^
+     63|   release();await startup.settled();expect(chat.start).not.toHaveBeenC…
+     64|  }finally{release();await startup.settled();vi.useRealTimers();}
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  12:49:08
+   Duration  421ms (transform 28ms, setup 40ms, collect 8ms, tests 57ms, environment 151ms, prepare 35ms)

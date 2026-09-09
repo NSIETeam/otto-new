@@ -1,0 +1,58 @@
+{
+  "at": "2026-09-08T03:56:53.672Z",
+  "scope": "real DB service calls, local Unix socket; excludes HTTP, images, network shaping and browser usability",
+  "results": [
+    {
+      "backend": "sqlite",
+      "records": 100000,
+      "active": 10000,
+      "concurrency": 100,
+      "scenario": "latest-page",
+      "seedMs": 4339,
+      "p50Ms": 262,
+      "p95Ms": 510,
+      "maxMs": 532,
+      "targetP95Ms": 1000,
+      "passed": true
+    },
+    {
+      "backend": "sqlite",
+      "records": 100000,
+      "active": 10000,
+      "concurrency": 100,
+      "scenario": "no-match-search",
+      "seedMs": 4339,
+      "p50Ms": 338,
+      "p95Ms": 682,
+      "maxMs": 722,
+      "targetP95Ms": 1000,
+      "passed": true
+    },
+    {
+      "backend": "postgres",
+      "records": 100000,
+      "active": 10000,
+      "concurrency": 100,
+      "scenario": "latest-page",
+      "seedMs": 6866,
+      "p50Ms": 76,
+      "p95Ms": 123,
+      "maxMs": 127,
+      "targetP95Ms": 1000,
+      "passed": true
+    },
+    {
+      "backend": "postgres",
+      "records": 100000,
+      "active": 10000,
+      "concurrency": 100,
+      "scenario": "no-match-search",
+      "seedMs": 6866,
+      "p50Ms": 129,
+      "p95Ms": 236,
+      "maxMs": 245,
+      "targetP95Ms": 1000,
+      "passed": true
+    }
+  ]
+}

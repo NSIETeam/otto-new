@@ -8,7 +8,9 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
-const DEFAULT_EXCLUDED_PACKAGES = new Set(['better-sqlite3', 'otto-core']);
+// Native SQLite and source-built workspace runtimes are explicitly vendored
+// by build-enterprise-oneclick.mjs, never silently fetched through npm links.
+const DEFAULT_EXCLUDED_PACKAGES = new Set(['better-sqlite3', 'otto-core', 'otto-workflow']);
 
 function normalizeLockLocation(value) {
   return String(value).replaceAll('\\', '/').replace(/^\.\//u, '');

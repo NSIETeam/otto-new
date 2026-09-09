@@ -1,0 +1,11 @@
+
+/Users/yang/Desktop/otto-new/packages/server/src/modules/park_services/flea_market/fleaMarketTypes.ts
+  4:15  error  Public accessibility modifier on parameter property code     @typescript-eslint/explicit-member-accessibility
+  4:54  error  Public accessibility modifier on parameter property field    @typescript-eslint/explicit-member-accessibility
+  4:86  error  Public accessibility modifier on parameter property retryAt  @typescript-eslint/explicit-member-accessibility
+
+/Users/yang/Desktop/otto-new/packages/server/src/modules/park_services/flea_market/fleaMarketValidation.ts
+  17:65  error  Unexpected control character(s) in regular expression: \x00, \x08, \x0b, \x0c, \x0e, \x1f  no-control-regex
+
+✖ 4 problems (4 errors, 0 warnings)
+  3 errors and 0 warnings potentially fixable with the `--fix` option.

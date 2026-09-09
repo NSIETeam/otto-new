@@ -1,0 +1,106 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:92838) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ integration/park-market/capacity.test.ts (1 test | 1 failed) 90329ms
+   × enforces 100 concurrent reads / 100k history / 10k active with diverse indexed data 90329ms
+     → sqlite/cold/sparse: expected 1250.7594169999993 to be less than or equal to 1000
+     → sqlite/cold/emoji: expected 1104.9669169999997 to be less than or equal to 1000
+     → sqlite/warm/sparse: expected 1146.240167 to be less than or equal to 1000
+     → sqlite/warm/emoji: expected 1127.4775420000005 to be less than or equal to 1000
+     → postgres/cold/sparse: expected 1111.1727079999982 to be less than or equal to 1000
+     → postgres/cold/common: expected 33101.229458 to be less than or equal to 1000
+     → postgres/warm/common: expected 2995.8386670000036 to be less than or equal to 1000
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  integration/park-market/capacity.test.ts > enforces 100 concurrent reads / 100k history / 10k active with diverse indexed data
+AssertionError: sqlite/cold/sparse: expected 1250.7594169999993 to be less than or equal to 1000
+ ❯ integration/park-market/capacity.test.ts:76:100
+     74|     } finally {save();}
+     75|     // Persist all measurements before asserting: an over-budget run m…
+     76|     for(const row of results) expect.soft(row.p95Ms,`${row.backend}/${…
+       |                                                                                                    ^
+     77|   }, 600000,
+     78| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  integration/park-market/capacity.test.ts > enforces 100 concurrent reads / 100k history / 10k active with diverse indexed data
+AssertionError: sqlite/cold/emoji: expected 1104.9669169999997 to be less than or equal to 1000
+ ❯ integration/park-market/capacity.test.ts:76:100
+     74|     } finally {save();}
+     75|     // Persist all measurements before asserting: an over-budget run m…
+     76|     for(const row of results) expect.soft(row.p95Ms,`${row.backend}/${…
+       |                                                                                                    ^
+     77|   }, 600000,
+     78| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  integration/park-market/capacity.test.ts > enforces 100 concurrent reads / 100k history / 10k active with diverse indexed data
+AssertionError: sqlite/warm/sparse: expected 1146.240167 to be less than or equal to 1000
+ ❯ integration/park-market/capacity.test.ts:76:100
+     74|     } finally {save();}
+     75|     // Persist all measurements before asserting: an over-budget run m…
+     76|     for(const row of results) expect.soft(row.p95Ms,`${row.backend}/${…
+       |                                                                                                    ^
+     77|   }, 600000,
+     78| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  integration/park-market/capacity.test.ts > enforces 100 concurrent reads / 100k history / 10k active with diverse indexed data
+AssertionError: sqlite/warm/emoji: expected 1127.4775420000005 to be less than or equal to 1000
+ ❯ integration/park-market/capacity.test.ts:76:100
+     74|     } finally {save();}
+     75|     // Persist all measurements before asserting: an over-budget run m…
+     76|     for(const row of results) expect.soft(row.p95Ms,`${row.backend}/${…
+       |                                                                                                    ^
+     77|   }, 600000,
+     78| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  integration/park-market/capacity.test.ts > enforces 100 concurrent reads / 100k history / 10k active with diverse indexed data
+AssertionError: postgres/cold/sparse: expected 1111.1727079999982 to be less than or equal to 1000
+ ❯ integration/park-market/capacity.test.ts:76:100
+     74|     } finally {save();}
+     75|     // Persist all measurements before asserting: an over-budget run m…
+     76|     for(const row of results) expect.soft(row.p95Ms,`${row.backend}/${…
+       |                                                                                                    ^
+     77|   }, 600000,
+     78| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  integration/park-market/capacity.test.ts > enforces 100 concurrent reads / 100k history / 10k active with diverse indexed data
+AssertionError: postgres/cold/common: expected 33101.229458 to be less than or equal to 1000
+ ❯ integration/park-market/capacity.test.ts:76:100
+     74|     } finally {save();}
+     75|     // Persist all measurements before asserting: an over-budget run m…
+     76|     for(const row of results) expect.soft(row.p95Ms,`${row.backend}/${…
+       |                                                                                                    ^
+     77|   }, 600000,
+     78| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  integration/park-market/capacity.test.ts > enforces 100 concurrent reads / 100k history / 10k active with diverse indexed data
+AssertionError: postgres/warm/common: expected 2995.8386670000036 to be less than or equal to 1000
+ ❯ integration/park-market/capacity.test.ts:76:100
+     74|     } finally {save();}
+     75|     // Persist all measurements before asserting: an over-budget run m…
+     76|     for(const row of results) expect.soft(row.p95Ms,`${row.backend}/${…
+       |                                                                                                    ^
+     77|   }, 600000,
+     78| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  20:17:23
+   Duration  93.05s (transform 1.18s, setup 0ms, collect 2.56s, tests 90.33s, environment 0ms, prepare 33ms)

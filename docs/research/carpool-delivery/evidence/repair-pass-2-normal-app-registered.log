@@ -1,0 +1,10 @@
+[Otto Enterprise] 服务端运行于 http://127.0.0.1:0
+[Otto Enterprise] 账号管理: http://localhost:0/enterprise/admin
+[Otto Enterprise] 企业引入: http://127.0.0.1/enterprise/join/{邀请码}
+[Otto Enterprise] 老板看板: http://localhost:0/enterprise/dashboard
+[Otto Enterprise] 数据: ~/.otto-enterprise/data.db（本地，零云端）
+[Otto Enterprise] 已使用环境中配置的平台管理令牌（不会输出令牌内容）
+[Otto Enterprise] 积分管理: http://localhost:0/enterprise/admin/credits
+[Otto Enterprise] Ctrl+C 停止
+{"status":"login_passed","localTestLicense":true,"normalMain":true,"normalPreload":true,"normalApp":true,"localEnterpriseServer":true,"testOrganizations":3,"loginCompleted":true,"threeStageJourney":false,"mapConfigured":false}
+EXIT_CODE=0

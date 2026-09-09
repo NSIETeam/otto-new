@@ -107,7 +107,7 @@ vi.mock('./state/useOttoStore.js', () => ({
       pendingCreateRequestId: null,
       unreadSessions: [],
     },
-    actions: harness.storeActions,
+    actions: { ...harness.storeActions },
   }),
   selectSortedSessions: () => [],
 }));
@@ -569,6 +569,17 @@ afterEach(() => {
 });
 
 describe('App workspace UI integration', () => {
+  it('does not restart ticket polling when the store actions object is recreated', async () => {
+    harness.centralIdentity.current = { edition: 'enterprise', role: 'member', profiles: [] };
+    const listTickets = vi.fn(async () => []);
+    window.otto.enterpriseTicketList = listTickets;
+    const view = render(<App />);
+    await waitFor(() => expect(listTickets).toHaveBeenCalledTimes(1));
+    view.rerender(<App />);
+    view.rerender(<App />);
+    expect(listTickets).toHaveBeenCalledTimes(1);
+  });
+
   it('shows boot and login states without entering the workspace', () => {
     harness.auth.current = authFor(null, 'loading');
     const view = render(<App />);
@@ -662,6 +673,9 @@ describe('App workspace UI integration', () => {
     expect(bridge.conversationDraftLoad).toHaveBeenCalledWith(JSON.stringify([
       'https://enterprise.example.com/', 'organization-a', 'account-a',
     ]));
+    // useOttoStore creates a new actions object each render; it must not
+    // restart asynchronous vault restoration and erase the live draft.
+    expect(bridge.conversationDraftLoad).toHaveBeenCalledOnce();
 
     fireEvent.click(screen.getByRole('button', { name: 'start-repair-chat' }));
     await waitFor(() => expect(enterpriseParkView).toHaveBeenCalledOnce());
@@ -690,6 +704,11 @@ describe('App workspace UI integration', () => {
       urgency: '普通',
     })));
     expect(bridge.conversationDraftSave).toHaveBeenCalled();
+    expect(bridge.conversationDraftLoad).toHaveBeenCalledOnce();
+    expect(bridge.conversationDraftSave).toHaveBeenCalledWith(
+      JSON.stringify(['https://enterprise.example.com/', 'organization-a', 'account-a']),
+      expect.objectContaining({ parkQueue: expect.any(Array), parkCarpool: expect.any(Array) }),
+    );
     expect(bridge.conversationDraftSave.mock.invocationCallOrder.at(-1))
       .toBeLessThan(enterpriseTicketSubmit.mock.invocationCallOrder[0]);
     expect(harness.storeActions.postLocalChatMessage).toHaveBeenCalledWith(

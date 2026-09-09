@@ -22,7 +22,10 @@ interface DraftFields {
 interface PendingCarpoolDraft {
   scopeId: string;
   sessionId: string;
-  phase: 'collecting' | 'confirming_publish' | 'confirming_stop';
+  phase: 'collecting' | 'selecting_places' | 'confirming_publish' | 'confirming_stop';
+  choices?: { origins: EnterpriseParkCarpoolPlaceSuggestion[]; destinations: EnterpriseParkCarpoolPlaceSuggestion[] };
+  requestKey?: string;
+  expectedVersion?: number | null;
   fields: DraftFields;
   resolved?: {
     origin: EnterpriseParkCarpoolPlace;
@@ -33,6 +36,7 @@ interface PendingCarpoolDraft {
 }
 
 export class ParkCarpoolConversationRegistry {
+  readonly busy = new Set<string>();
   private readonly pending = new Map<string, PendingCarpoolDraft>();
   private key(scopeId: string, sessionId: string): string { return `${scopeId}:${sessionId}`; }
   get(scopeId: string, sessionId: string, now = Date.now()): PendingCarpoolDraft | undefined {
@@ -50,6 +54,25 @@ export class ParkCarpoolConversationRegistry {
       expiresAt: now + 30 * 60_000,
     });
   }
+  snapshot(scopeId: string, now = Date.now()): PendingCarpoolDraft[] {
+    return [...this.pending.values()].filter(value => value.scopeId === scopeId && value.expiresAt > now).map(value => structuredClone(value));
+  }
+  restore(scopeId: string, payload: unknown, now = Date.now()): void {
+    if (!Array.isArray(payload)) return;
+    for (const raw of payload.slice(0, 50)) {
+      if (!raw || typeof raw !== 'object') continue;
+      const value = raw as PendingCarpoolDraft;
+      if (value.scopeId !== scopeId || typeof value.sessionId !== 'string' || !value.sessionId
+        || !Number.isFinite(value.expiresAt) || value.expiresAt <= now || value.expiresAt > now + 30 * 60_000
+        || !['collecting', 'confirming_publish', 'confirming_stop', 'selecting_places'].includes(value.phase)
+        || !value.fields || typeof value.fields !== 'object') continue;
+      if (value.phase === 'confirming_publish' && (!value.resolved || !value.fields.departureTime || !value.fields.travelOptions?.length)) continue;
+      if (value.phase === 'confirming_stop' && typeof value.intentId !== 'string') continue;
+      if (value.phase === 'selecting_places' && (!Array.isArray(value.choices?.origins) || !Array.isArray(value.choices?.destinations))) continue;
+      this.pending.set(this.key(scopeId, value.sessionId), structuredClone(value));
+    }
+  }
+  clearScope(scopeId:string):void {for(const [key,draft] of this.pending)if(draft.scopeId===scopeId)this.pending.delete(key);}
   clear(scopeId: string, sessionId: string): void {
     this.pending.delete(this.key(scopeId, sessionId));
   }
@@ -73,11 +96,13 @@ function parseFields(text: string, today: string): DraftFields {
   const route = text.match(/从\s*([^，,。；;]+?)\s*到\s*([^，,。；;]+?)(?=，|,|。|；|;|$)/u);
   if (route?.[1]?.trim()) fields.originQuery = route[1].trim();
   if (route?.[2]?.trim()) fields.destinationQuery = route[2].trim();
-  const time = text.match(/(?:今天|今晚|晚上|下午)?\s*([01]?\d|2[0-3])\s*(?:[:：点时]\s*([0-5]?\d)\s*分?)?/u);
+  const time = text.match(/(?:(今天|今晚|晚上|下午|早上|上午|中午)\s*)?(\d{1,2})\s*(?:[:：]\s*([0-5]\d)|[点时](?:\s*([0-5]?\d)\s*分?|(半))?)/u);
   if (time) {
-    const hour = Number(time[1]);
-    const minute = Number(time[2] ?? 0);
-    fields.departureTime = `${today}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+08:00`;
+    let hour = Number(time[2]);
+    if (['今晚', '晚上', '下午', '中午'].includes(time[1] ?? '') && hour < 12) hour += 12;
+    if (['早上', '上午'].includes(time[1] ?? '') && hour === 12) hour = 0;
+    const minute = time[5] ? 30 : Number(time[3] ?? time[4] ?? 0);
+    if (hour <= 23) fields.departureTime = `${today}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+08:00`;
   }
   const flexible = text.match(/(?:前后|提前或延后|可接受)\s*(\d{1,3})\s*分钟/u)?.[1];
   if (flexible) fields.flexibleMinutes = Math.min(120, Number(flexible));
@@ -141,7 +166,7 @@ function selectedPlace(suggestion: EnterpriseParkCarpoolPlaceSuggestion): Enterp
   return { label: suggestion.label, coordinate: suggestion.coordinate };
 }
 
-export async function handleParkCarpoolConversation(input: {
+async function handleConversation(input: {
   text: string;
   scopeId: string;
   sessionId: string;
@@ -156,6 +181,23 @@ export async function handleParkCarpoolConversation(input: {
   const text = input.text.trim();
   const currentTime = input.now?.() ?? new Date();
   const pending = input.registry.get(input.scopeId, input.sessionId, currentTime.getTime());
+  if (pending && /^(?:取消|不发布|放弃)$/u.test(text)) {
+    input.registry.clear(input.scopeId, input.sessionId);
+    input.postMessage('assistant', pending.phase === 'confirming_stop' ? '已取消停止操作，当前同行意向继续有效。' : '已取消，本次同行意向没有发布。');
+    return true;
+  }
+  if (pending?.phase === 'selecting_places' && pending.choices) {
+    const selection = text.match(/^出发地\s*(\d+)\s*[,，、 ]+\s*目的地\s*(\d+)$/u);
+    const origin = selection ? pending.choices.origins[Number(selection[1]) - 1] : undefined;
+    const destination = selection ? pending.choices.destinations[Number(selection[2]) - 1] : undefined;
+    if (!origin || !destination) {
+      input.postMessage('assistant', '请明确选择标准地点，回复“出发地1，目的地2”，或取消后重新填写。');
+      return true;
+    }
+    input.registry.set({ ...pending, phase: 'confirming_publish', resolved: { origin: selectedPlace(origin), destination: selectedPlace(destination) } }, currentTime.getTime());
+    input.postMessage('assistant', `请确认：${origin.label} → ${destination.label}，${departureLabel(pending.fields.departureTime!)}，前后 ${pending.fields.flexibleMinutes ?? 30} 分钟，${modeLabels(pending.fields.travelOptions!)}。发布后同园区匹配用户可见脱敏意向。回复“确认发布”或“取消”。`);
+    return true;
+  }
   if ((pending || CARPOOL_INTENT.test(text)) && NON_TODAY_REQUEST.test(text)) {
     input.postMessage('assistant', '拼车助手首发版本只支持发布当天的单程同行意向，请改为今天的出发时间。');
     return true;
@@ -165,6 +207,8 @@ export async function handleParkCarpoolConversation(input: {
       const fields = pending.fields;
       const resolved = pending.resolved!;
       const intent = await input.publish({
+        requestKey: pending.requestKey,
+        expectedVersion: pending.expectedVersion ?? null,
         travelDate: shanghaiDate(currentTime),
         origin: resolved.origin,
         destination: resolved.destination,
@@ -218,15 +262,19 @@ export async function handleParkCarpoolConversation(input: {
   }
 
   if (!pending && !CARPOOL_INTENT.test(text)) return false;
+  let expectedVersion = pending?.expectedVersion ?? null;
+  let startingFields = pending?.fields ?? {};
   if (!pending) {
     const state = await input.getState();
+    expectedVersion = state.currentIntent?.version ?? null;
+    if (state.currentIntent) startingFields = { originQuery: state.currentIntent.origin.label, destinationQuery: state.currentIntent.destination.label, departureTime: state.currentIntent.departureTime, flexibleMinutes: state.currentIntent.flexibleMinutes, travelOptions: state.currentIntent.travelOptions };
     if (state.currentIntent?.status === 'active' && !/(?:修改|重新发布|更新)/u.test(text)) {
       input.postMessage('assistant', `${matchSummary(state)}\n\n如需改变路线或时间，请明确说“修改拼车信息”。`);
       return true;
     }
   }
   let fields = mergeFields(
-    pending?.fields ?? {},
+    startingFields,
     parseFields(text, shanghaiDate(currentTime)),
   );
   if (pending?.phase === 'collecting' && Object.keys(parseFields(text, shanghaiDate(currentTime))).length === 0) {
@@ -240,6 +288,7 @@ export async function handleParkCarpoolConversation(input: {
       scopeId: input.scopeId,
       sessionId: input.sessionId,
       phase: 'collecting',
+      expectedVersion,
       fields,
     }, currentTime.getTime());
     input.postMessage('assistant', `可以，我还需要：${missing.join('、')}。\n你也可以一次回复：“今天 18:30 从宏创园区南门到回龙观地铁站，想搭车或一起叫车，前后 30 分钟都可以”。`);
@@ -250,23 +299,31 @@ export async function handleParkCarpoolConversation(input: {
       scopeId: input.scopeId,
       sessionId: input.sessionId,
       phase: 'collecting',
+      expectedVersion,
       fields: { ...fields, departureTime: undefined },
     }, currentTime.getTime());
     input.postMessage('assistant', '这个出发时间已经过去，请补充今天稍后的出发时间，例如“今天 18:30”。');
     return true;
   }
+  input.registry.set({ scopeId: input.scopeId, sessionId: input.sessionId, phase: 'collecting', expectedVersion, fields }, currentTime.getTime());
   const [origins, destinations] = await Promise.all([
-    input.searchPlaces(fields.originQuery!, '北京'),
-    input.searchPlaces(fields.destinationQuery!, '北京'),
+    input.searchPlaces(fields.originQuery!),
+    input.searchPlaces(fields.destinationQuery!),
   ]);
   if (!origins[0] || !destinations[0]) {
     input.registry.set({
       scopeId: input.scopeId,
       sessionId: input.sessionId,
       phase: 'collecting',
+      expectedVersion,
       fields,
     }, currentTime.getTime());
     input.postMessage('assistant', '有地点没有搜索到标准位置。请补充更明确的地标、小区或地址；本次不会使用模糊文本发布。');
+    return true;
+  }
+  if (origins.length > 1 || destinations.length > 1) {
+    input.registry.set({ scopeId: input.scopeId, sessionId: input.sessionId, phase: 'selecting_places', expectedVersion, fields, choices: { origins, destinations }, requestKey: crypto.randomUUID() }, currentTime.getTime());
+    input.postMessage('assistant', `找到多个地点，请选择：\n出发地：\n${origins.map((p, i) => `${i + 1}. ${p.label} · ${p.district} · ${p.address}`).join('\n')}\n目的地：\n${destinations.map((p, i) => `${i + 1}. ${p.label} · ${p.district} · ${p.address}`).join('\n')}\n回复“出发地1，目的地2”。`);
     return true;
   }
   const resolved = {
@@ -277,9 +334,26 @@ export async function handleParkCarpoolConversation(input: {
     scopeId: input.scopeId,
     sessionId: input.sessionId,
     phase: 'confirming_publish',
+    expectedVersion,
+    requestKey: crypto.randomUUID(),
     fields,
     resolved,
   }, currentTime.getTime());
   input.postMessage('assistant', `请确认同行意向：\n- 出发地：${resolved.origin.label}${origins[0].district ? `（${origins[0].district}）` : ''}\n- 目的地：${resolved.destination.label}${destinations[0].district ? `（${destinations[0].district}）` : ''}\n- 时间：今天 ${departureLabel(fields.departureTime!)}，可接受前后 ${fields.flexibleMinutes ?? 30} 分钟\n- 方式：${modeLabels(fields.travelOptions!)}\n\n发布后，同园区且路线、时间符合条件的用户会看到脱敏意向。回复“确认发布”后才会执行；回复“取消”则不发布。`);
   return true;
+}
+
+
+export async function handleParkCarpoolConversation(input: Parameters<typeof handleConversation>[0]): Promise<boolean> {
+  const key = `${input.scopeId}:${input.sessionId}`;
+  if (input.registry.busy.has(key)) {
+    input.postMessage('assistant', '拼车操作正在处理，请勿重复确认。');
+    return true;
+  }
+  input.registry.busy.add(key);
+  try { return await handleConversation(input); }
+  catch (error) {
+    input.postMessage('assistant', `拼车操作未能确认完成：${error instanceof Error ? error.message : String(error)}。草稿已保留；可重试，发布超时后也可先查询当前意向。`);
+    return true;
+  } finally { input.registry.busy.delete(key); }
 }

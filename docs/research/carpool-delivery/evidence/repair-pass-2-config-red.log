@@ -1,0 +1,67 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts (4 tests | 2 failed) 7ms
+   ✓ validates independent rollout flags and bounded request/capacity settings 1ms
+   × keeps production and unspecified environments closed unless explicitly enabled 4ms
+     → expected { requestLimitPerHour: 10, …(12) } to match object { requestsEnabled: false, …(2) }
+(10 matching properties omitted from actual)
+   ✓ advertises only explicitly enabled production stages with their prerequisites 0ms
+   × uses an immutable supplied snapshot even when the process environment changes 1ms
+     → expected false to be true // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts > keeps production and unspecified environments closed unless explicitly enabled
+AssertionError: expected { requestLimitPerHour: 10, …(12) } to match object { requestsEnabled: false, …(2) }
+(10 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "groupsEnabled": false,
+-   "invitationsEnabled": false,
+-   "requestsEnabled": false,
++   "groupsEnabled": true,
++   "invitationsEnabled": true,
++   "requestsEnabled": true,
+  }
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts:34:45
+     32| it('keeps production and unspecified environments closed unless explic…
+     33|   for (const NODE_ENV of [undefined, 'production', 'test', 'developmen…
+     34|     expect(readCarpoolConfig({ NODE_ENV })).toMatchObject({
+       |                                             ^
+     35|       requestsEnabled: false,
+     36|       invitationsEnabled: false,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts > uses an immutable supplied snapshot even when the process environment changes
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts:82:38
+     80|   vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'false');
+     81|   try {
+     82|     expect(Object.isFrozen(enabled)).toBe(true);
+       |                                      ^
+     83|     expect(carpoolCommunicationCapabilities(enabled)).toContain('park_…
+     84|     expect(carpoolCommunicationCapabilities(readCarpoolConfig({}))).to…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  20:08:27
+   Duration  149ms (transform 21ms, setup 0ms, collect 19ms, tests 7ms, environment 0ms, prepare 31ms)
+
+
+EXIT_CODE=1

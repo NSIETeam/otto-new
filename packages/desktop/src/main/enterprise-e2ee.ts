@@ -1471,6 +1471,24 @@ export class EnterpriseE2eeCrypto {
     };
   }
 
+  signParkCarpoolCommand(input:{serverScope:string;accountId:string;command:Record<string,unknown>}) {
+    const active=this.vault.loadOrCreate(input.serverScope,input.accountId).active;
+    if(input.command.deviceId!==active.deviceId)throw new Error('同行设备与当前加密身份不一致');
+    const timestamp=new Date().toISOString();
+    const bytes=Buffer.from(JSON.stringify(['otto:park-carpool-device:v1',input.accountId,timestamp,input.command]));
+    return {timestamp,signature:sign(null,bytes,active.identitySigningPrivateKey).toString('base64')};
+  }
+
+  signParkMarketMls(input: {
+    serverScope: string; accountId: string;
+    action: 'package' | 'state' | 'activate' | 'message' | 'attachment-upload' | 'attachment-read';
+    payload: Record<string, unknown>;
+  }) {
+    const active = this.vault.loadOrCreate(input.serverScope, input.accountId).active;
+    const bytes = Buffer.from(JSON.stringify(['otto:park-market-mls:v1', input.action, input.accountId, active.deviceId, input.payload]));
+    return { deviceId: active.deviceId, signature: sign(null, bytes, active.identitySigningPrivateKey).toString('base64') };
+  }
+
   signDeviceApproval(input: {
     serverScope: string;
     organizationId: string;

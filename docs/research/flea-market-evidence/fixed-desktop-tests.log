@@ -1,0 +1,21 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ✓ src/renderer/components/ParkMarketModel.test.ts (3 tests) 27ms
+ ✓ src/main/park-market-messaging.test.ts (2 tests) 23ms
+ ✓ src/renderer/components/MarketImageViewer.test.tsx (1 test) 81ms
+ ✓ src/renderer/components/MarketAssociatedItems.test.tsx (2 tests) 249ms
+ ✓ src/renderer/components/MarketNotifications.test.tsx (3 tests) 251ms
+ ✓ src/renderer/components/MarketContactCenter.test.tsx (1 test) 206ms
+ ✓ src/main/park-market-uploads.test.ts (1 test) 7ms
+ ✓ src/main/park-market.test.ts (2 tests) 9ms
+ ✓ src/main/park-market-links.test.ts (1 test) 10ms
+ ✓ src/renderer/parkMarketMutation.test.ts (2 tests) 4ms
+ ✓ src/main/park-market-mls.test.ts (1 test) 2ms
+ ✓ src/renderer/components/ParkMarketDialog.test.tsx (11 tests) 1986ms
+   ✓ closes directly after the current form is durably saved  1044ms
+
+ Test Files  12 passed (12)
+      Tests  30 passed (30)
+   Start at  16:23:16
+   Duration  3.21s (transform 523ms, setup 1.19s, collect 1.28s, tests 2.86s, environment 5.73s, prepare 960ms)

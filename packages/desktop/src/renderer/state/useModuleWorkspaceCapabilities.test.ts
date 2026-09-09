@@ -37,6 +37,8 @@ beforeEach(() => {
     enterpriseTicketList: vi.fn(async () => []),
     enterpriseParkCarpoolGet: vi.fn(async () => ({
       capability: 'park_carpool_v1' as const,
+      capabilities: ['park_carpool_requests_v1'],
+      availability: { parkEnabled: true, canPublish: true },
       mapConfigured: true,
       parkId: 'park-hongchuang',
       currentIntent: null,
@@ -288,3 +290,17 @@ describe('useModuleWorkspaceCapabilities', () => {
     expect(window.otto.enterpriseParkView).not.toHaveBeenCalled();
   });
 });
+
+ it.each([true, false])('keeps an enabled carpool entry without a map but respects pilot access %s', async (parkEnabled) => {
+   Object.assign(window.otto, { enterpriseParkCarpoolGet: vi.fn(async () => ({
+     capability: 'park_carpool_v1', capabilities: parkEnabled ? ['park_carpool_requests_v1'] : [],
+     availability: {parkEnabled, canPublish:false, reason:'地图未配置'}, mapConfigured:false,
+     parkId:'park-hongchuang', currentIntent:null, matches:[],
+   })) });
+   const view = renderHook(() => useModuleWorkspaceCapabilities({
+     edition:'enterprise', serverUrl:'https://local-test.example', organizationId:'org-a', accountId:'admin-a',
+     accountIsAdmin:true, profiles:BASE_AGENT_PROFILES, customAgents:[],
+   }));
+   await waitFor(() => expect(view.result.current.status).toBe('ready'));
+   expect(view.result.current.modules.find(module => module.id === 'park-carpool')?.availability).toBe(parkEnabled ? 'available' : 'hidden');
+ });

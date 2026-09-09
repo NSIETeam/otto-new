@@ -10,6 +10,7 @@ export const PARK_CARPOOL_SCHEMA_CONTRIBUTOR: DatabaseSchemaContributor = {
     database.exec(`
       CREATE TABLE IF NOT EXISTS park_carpool_intents (
         id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL DEFAULT 1,
         account_id TEXT NOT NULL,
         organization_id TEXT NOT NULL,
         park_id TEXT NOT NULL,
@@ -33,6 +34,18 @@ export const PARK_CARPOOL_SCHEMA_CONTRIBUTOR: DatabaseSchemaContributor = {
         FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS park_carpool_workflow (
+        park_id TEXT PRIMARY KEY,
+        encrypted_payload TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+      );
+      CREATE TABLE IF NOT EXISTS park_carpool_publications (
+        account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        request_key TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        encrypted_payload TEXT NOT NULL,
+        PRIMARY KEY(account_id, request_key)
+      );
       CREATE INDEX IF NOT EXISTS idx_park_carpool_match
         ON park_carpool_intents(park_id, travel_date, status, departure_time);
       CREATE INDEX IF NOT EXISTS idx_park_carpool_owner
@@ -40,5 +53,13 @@ export const PARK_CARPOOL_SCHEMA_CONTRIBUTOR: DatabaseSchemaContributor = {
       CREATE INDEX IF NOT EXISTS idx_park_carpool_expiry
         ON park_carpool_intents(status, expires_at);
     `);
+    const columns = database
+      .prepare('PRAGMA table_info(park_carpool_intents)')
+      .all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'version')) {
+      database.exec(
+        'ALTER TABLE park_carpool_intents ADD COLUMN version INTEGER NOT NULL DEFAULT 1',
+      );
+    }
   },
 };

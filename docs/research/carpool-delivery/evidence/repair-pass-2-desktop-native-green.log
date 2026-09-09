@@ -1,0 +1,15 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+(node:19593) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/main/park-carpool-chat.integration.test.ts (1 test) 3951ms
+   ✓ desktop coordinators exchange, retry after lost response, and restore actual MLS ciphertext from SQLite  3950ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  20:22:55
+   Duration  7.79s (transform 1.94s, setup 79ms, collect 3.24s, tests 3.95s, environment 300ms, prepare 56ms)
+
+
+EXIT_CODE=0

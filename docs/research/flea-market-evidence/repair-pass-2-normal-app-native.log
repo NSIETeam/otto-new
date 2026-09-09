@@ -1,0 +1,7 @@
+The module '/Users/yang/Desktop/otto-new/native/sqlcipher/darwin-arm64/better_sqlite3.node'
+was compiled against a different Node.js version using
+NODE_MODULE_VERSION 148. This version of Node.js requires
+NODE_MODULE_VERSION 137. Please try re-compiling or re-installing
+the module (for instance, using `npm rebuild` or `npm install`).
+(node:84503) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

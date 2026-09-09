@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+ ✓ src/modules/park_services/flea_market/fleaMarketValidation.test.ts (25 tests) 4ms
+
+ Test Files  1 passed (1)
+      Tests  25 passed (25)
+   Start at  09:29:41
+   Duration  157ms (transform 25ms, setup 0ms, collect 34ms, tests 4ms, environment 0ms, prepare 36ms)

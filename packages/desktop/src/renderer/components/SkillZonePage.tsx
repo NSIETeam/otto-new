@@ -1,3 +1,4 @@
+import { useModuleReadCache } from '../state/ModuleReadProvider.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -56,16 +57,29 @@ function EmptyState({ children }: { children: React.ReactNode }): React.JSX.Elem
   return <div className="otto-skillzone__empty">{children}</div>;
 }
 
+interface SkillZoneSnapshot {
+  section: Section; marketScope: MarketScope; sort: EnterpriseSkillSort;
+  query: string; submittedQuery: string; skills: EnterpriseSkillMarketItem[];
+  localSkills: LocalSkillShareCandidate[]; leaderboard: EnterpriseSkillLeaderboard;
+  rankingMode: 'skills' | 'contributors'; scroll: number; loaded: boolean; localLoaded: boolean;
+}
+
 export function SkillZonePage({ onBack, accountId, isAdmin }: SkillZonePageProps): React.JSX.Element {
-  const [section, setSection] = useState<Section>('market');
-  const [marketScope, setMarketScope] = useState<MarketScope>('department');
-  const [sort, setSort] = useState<EnterpriseSkillSort>('recommended');
-  const [query, setQuery] = useState('');
-  const [submittedQuery, setSubmittedQuery] = useState('');
-  const [skills, setSkills] = useState<EnterpriseSkillMarketItem[]>([]);
-  const [localSkills, setLocalSkills] = useState<LocalSkillShareCandidate[]>([]);
-  const [leaderboard, setLeaderboard] = useState<EnterpriseSkillLeaderboard>(EMPTY_LEADERBOARD);
-  const [rankingMode, setRankingMode] = useState<'skills' | 'contributors'>('skills');
+  const cache = useModuleReadCache();
+  const cacheKey = `skill-zone:${accountId}:${isAdmin}`;
+  const [saved] = useState(() => cache.peek<SkillZoneSnapshot>(cacheKey));
+  const [section, setSection] = useState<Section>(saved?.section ?? 'market');
+  const [marketScope, setMarketScope] = useState<MarketScope>(saved?.marketScope ?? 'department');
+  const [sort, setSort] = useState<EnterpriseSkillSort>(saved?.sort ?? 'recommended');
+  const [query, setQuery] = useState(saved?.query ?? '');
+  const [submittedQuery, setSubmittedQuery] = useState(saved?.submittedQuery ?? '');
+  const [skills, setSkills] = useState<EnterpriseSkillMarketItem[]>(saved?.skills ?? []);
+  const [localLoaded, setLocalLoaded] = useState(saved?.localLoaded === true);
+  const [localLoading, setLocalLoading] = useState(false);
+  const [localError, setLocalError] = useState('');
+  const [localSkills, setLocalSkills] = useState<LocalSkillShareCandidate[]>(saved?.localSkills ?? []);
+  const [leaderboard, setLeaderboard] = useState<EnterpriseSkillLeaderboard>(saved?.leaderboard ?? EMPTY_LEADERBOARD);
+  const [rankingMode, setRankingMode] = useState<'skills' | 'contributors'>(saved?.rankingMode ?? 'skills');
   const [submitVisibility, setSubmitVisibility] = useState<Record<string, EnterpriseSkillVisibility>>({});
   const [ratingDraft, setRatingDraft] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
@@ -74,31 +88,55 @@ export function SkillZonePage({ onBack, accountId, isAdmin }: SkillZonePageProps
   const [notice, setNotice] = useState('');
   const [revision, setRevision] = useState(0);
   const loadRequest = useRef(0);
+  const scroller = useRef<HTMLElement>(null);
+  const scrollPosition = useRef(saved?.scroll ?? 0);
+  const [hasSnapshot, setHasSnapshot] = useState(saved?.loaded === true);
+  const snapshot = useRef<SkillZoneSnapshot>();
+  snapshot.current = { section, marketScope, sort, query, submittedQuery, skills, localSkills, leaderboard, rankingMode, scroll: scrollPosition.current, loaded: hasSnapshot, localLoaded };
+  useEffect(() => () => {
+    loadRequest.current++;
+    if (snapshot.current) cache.set(cacheKey, { ...snapshot.current, scroll: scrollPosition.current });
+  }, [cache, cacheKey]);
 
+  useEffect(() => { if (scroller.current) scroller.current.scrollTop = saved?.scroll ?? 0; }, [saved]);
+
+  const requestedView = useRef(JSON.stringify([section, marketScope, sort, submittedQuery]));
   const load = useCallback(async (): Promise<void> => {
     const request = loadRequest.current + 1;
     loadRequest.current = request;
+    const viewKey = JSON.stringify([section, marketScope, sort, submittedQuery]);
+    if (viewKey !== requestedView.current) {
+      setHasSnapshot(false); setSkills([]); setLocalSkills([]); setLocalLoaded(false); setLocalError(''); setLocalLoading(false); setLeaderboard(EMPTY_LEADERBOARD);
+      scrollPosition.current = 0;
+    }
+    requestedView.current = viewKey;
     setLoading(true);
     setError('');
     try {
       if (section === 'ranking') {
         const result = await window.otto.enterpriseSkillLeaderboard();
-        if (loadRequest.current === request) setLeaderboard(result);
+        if (loadRequest.current === request) { setLeaderboard(result); setHasSnapshot(true); }
         return;
       }
       if (section === 'mine') {
-        const [local, shared] = await Promise.all([
-          window.otto.enterpriseSkillLocalList(),
-          window.otto.enterpriseSkillList({ scope: 'mine', sort: 'newest' }),
+        setLocalLoading(true); setLocalError('');
+        await Promise.allSettled([
+          window.otto.enterpriseSkillLocalList().then(local => {
+            if (loadRequest.current === request) { setLocalSkills(local); setLocalLoaded(true); }
+          }).catch(cause => {
+            if (loadRequest.current === request) setLocalError(cause instanceof Error ? cause.message : String(cause));
+          }).finally(() => { if (loadRequest.current === request) setLocalLoading(false); }),
+          window.otto.enterpriseSkillList({ scope: 'mine', sort: 'newest' }).then(shared => {
+            if (loadRequest.current === request) { setSkills(shared); setHasSnapshot(true); }
+          }).catch(cause => {
+            if (loadRequest.current === request) setError(cause instanceof Error ? cause.message : String(cause));
+          }),
         ]);
-        if (loadRequest.current !== request) return;
-        setLocalSkills(local);
-        setSkills(shared);
         return;
       }
       if (section === 'review') {
         const result = await window.otto.enterpriseSkillList({ scope: 'review', sort: 'newest' });
-        if (loadRequest.current === request) setSkills(result);
+        if (loadRequest.current === request) { setSkills(result); setHasSnapshot(true); }
         return;
       }
       const result = await window.otto.enterpriseSkillList({
@@ -106,7 +144,7 @@ export function SkillZonePage({ onBack, accountId, isAdmin }: SkillZonePageProps
         query: submittedQuery || undefined,
         sort,
       });
-      if (loadRequest.current === request) setSkills(result);
+      if (loadRequest.current === request) { setSkills(result); setHasSnapshot(true); }
     } catch (loadError) {
       if (loadRequest.current === request) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -207,7 +245,7 @@ export function SkillZonePage({ onBack, accountId, isAdmin }: SkillZonePageProps
           <IconRegenerate size={16} />
         </button>
       </form>
-      {loading ? <EmptyState>正在加载 Skill…</EmptyState> : skills.length === 0 ? <EmptyState>没有符合条件的 Skill</EmptyState> : (
+      {!hasSnapshot && (loading || error) ? <EmptyState>{loading ? '正在加载 Skill…' : '列表读取失败，请重试。'}</EmptyState> : skills.length === 0 ? <EmptyState>没有符合条件的 Skill</EmptyState> : (
         <div className="otto-skillzone__grid">
           {skills.map((skill) => {
             const installed = skill.installedVersion !== null && skill.installedVersion >= skill.version;
@@ -253,7 +291,7 @@ export function SkillZonePage({ onBack, accountId, isAdmin }: SkillZonePageProps
     <div className="otto-skillzone__mine-layout">
       <section className="otto-skillzone__panel" aria-labelledby="local-skills-heading">
         <div className="otto-skillzone__panel-head"><h2 id="local-skills-heading">本机 Skill</h2><span>{localSkills.length}</span></div>
-        {loading ? <EmptyState>正在读取本机 Skill…</EmptyState> : localSkills.length === 0 ? <EmptyState>本机暂无可投稿 Skill</EmptyState> : (
+        {!localLoaded && (localLoading || localError) ? <EmptyState>{localError || '正在读取本机 Skill…'}</EmptyState> : localSkills.length === 0 ? <EmptyState>本机暂无可投稿 Skill</EmptyState> : (
           <div className="otto-skillzone__rows">
             {localSkills.map((skill) => {
               const shared = sharedByLocalName.get(skill.name);
@@ -273,8 +311,8 @@ export function SkillZonePage({ onBack, accountId, isAdmin }: SkillZonePageProps
                       <option value="department">本部门</option>
                       <option value="company">全公司</option>
                     </select>
-                    <button type="button" disabled={Boolean(shared) || actionId === `local:${skill.name}`} onClick={() => submit(skill)}>
-                      {shared ? skillStatusLabel(shared.status) : '提交审核'}
+                    <button type="button" disabled={!hasSnapshot || Boolean(shared) || actionId === `local:${skill.name}`} onClick={() => submit(skill)}>
+                      {!hasSnapshot ? '正在确认投稿状态…' : shared ? skillStatusLabel(shared.status) : '提交审核'}
                     </button>
                   </div>
                 </div>
@@ -285,7 +323,7 @@ export function SkillZonePage({ onBack, accountId, isAdmin }: SkillZonePageProps
       </section>
       <section className="otto-skillzone__panel" aria-labelledby="shared-skills-heading">
         <div className="otto-skillzone__panel-head"><h2 id="shared-skills-heading">我的投稿</h2><span>{skills.length}</span></div>
-        {skills.length === 0 ? <EmptyState>暂无投稿记录</EmptyState> : (
+        {!hasSnapshot && (loading || error) ? <EmptyState>{error ? '投稿记录读取失败，请重试。' : '正在读取投稿记录…'}</EmptyState> : skills.length === 0 ? <EmptyState>暂无投稿记录</EmptyState> : (
           <div className="otto-skillzone__rows">
             {skills.map((skill) => (
               <div className="otto-skillzone__shared-row" key={skill.id}>
@@ -310,7 +348,7 @@ export function SkillZonePage({ onBack, accountId, isAdmin }: SkillZonePageProps
           <IconRegenerate size={16} />
         </button>
       </div>
-      {loading ? <EmptyState>正在计算排行榜…</EmptyState> : rankingMode === 'skills' ? (
+      {!hasSnapshot && (loading || error) ? <EmptyState>{loading ? '正在计算排行榜…' : '排行榜读取失败，请重试。'}</EmptyState> : rankingMode === 'skills' ? (
         leaderboard.skills.length === 0 ? <EmptyState>还没有可排名的 Skill</EmptyState> : (
           <ol className="otto-skillzone__leaderboard">
             {leaderboard.skills.map((skill) => (
@@ -341,7 +379,7 @@ export function SkillZonePage({ onBack, accountId, isAdmin }: SkillZonePageProps
     </>
   );
 
-  const renderReview = (): React.JSX.Element => loading ? <EmptyState>正在读取审核队列…</EmptyState> : skills.length === 0 ? (
+  const renderReview = (): React.JSX.Element => !hasSnapshot && (loading || error) ? <EmptyState>{loading ? '正在读取审核队列…' : '审核队列读取失败，请重试。'}</EmptyState> : skills.length === 0 ? (
     <EmptyState>审核队列为空</EmptyState>
   ) : (
     <div className="otto-skillzone__review-list">
@@ -359,7 +397,7 @@ export function SkillZonePage({ onBack, accountId, isAdmin }: SkillZonePageProps
   );
 
   return (
-    <section className="otto-skillzone" aria-label="Skill 专区">
+    <section ref={scroller} onScroll={event => { scrollPosition.current = event.currentTarget.scrollTop; }} className="otto-skillzone" aria-label="Skill 专区">
       <header className="otto-skillzone__head">
         <div><div className="otto-skillzone__eyebrow">Enterprise Skills</div><h1>Skill 专区</h1></div>
         <button type="button" className="otto-hub__btn" onClick={onBack}><IconChevron size={13} /> 返回对话</button>
@@ -371,7 +409,7 @@ export function SkillZonePage({ onBack, accountId, isAdmin }: SkillZonePageProps
         {isAdmin ? <button type="button" className={section === 'review' ? 'is-active' : ''} onClick={() => setSection('review')}>审核</button> : null}
       </nav>
       <div className="otto-skillzone__content">
-        {error ? <div className="otto-skillzone__message is-error" role="alert">{error}</div> : null}
+        {error || localError ? <div className="otto-skillzone__message is-error" role="alert">{error || localError}<button type="button" onClick={() => { void load(); }}>重试</button></div> : null}
         {notice ? <div className="otto-skillzone__message is-success" role="status">{notice}</div> : null}
         {section === 'market' ? renderMarket() : null}
         {section === 'mine' ? renderMine() : null}

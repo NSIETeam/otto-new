@@ -1,0 +1,38 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c
+
+(node:71218) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketContactPages.test.ts (2 tests | 2 failed) 937ms
+   × sqlite: pages all same-timestamp contact history without duplicates or another account's records 39ms
+     → expected undefined to be truthy
+   × postgres: pages all same-timestamp contact history without duplicates or another account's records 897ms
+     → expected undefined to be truthy
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_services/flea_market/fleaMarketContactPages.test.ts > sqlite: pages all same-timestamp contact history without duplicates or another account's records
+ FAIL  packages/server/src/modules/park_services/flea_market/fleaMarketContactPages.test.ts > postgres: pages all same-timestamp contact history without duplicates or another account's records
+AssertionError: expected undefined to be truthy
+
+- Expected:
+true
+
++ Received:
+undefined
+
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketContactPages.test.ts:20:116
+     18|    const contacts=createMarketContacts({...deps,verifyMessage:async(_t…
+     19|    const first=await contacts.inbox('buyer');
+     20|    expect(first.requests).toHaveLength(200);expect(first.conversations…
+       |                                                                                                                    ^
+     21|    const second=await contacts.inbox('buyer',first.nextCursor!);
+     22|    expect(second.requests).toHaveLength(20);expect(second.conversation…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  12:48:55
+   Duration  3.58s (transform 1.13s, setup 0ms, collect 2.47s, tests 937ms, environment 0ms, prepare 42ms)

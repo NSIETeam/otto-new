@@ -256,3 +256,7 @@ describe('installed customer modules', () => {
       .toBe('customer-module');
   });
 });
+
+it('exposes the flea market module without requiring its service settings to be enabled', () => {
+  expect(buildModuleCatalog(enterpriseContext()).find(module => module.id === 'park-flea-market')).toMatchObject({ availability: 'available', activation: { kind: 'dialog', dialog: 'park-flea-market' } });
+});

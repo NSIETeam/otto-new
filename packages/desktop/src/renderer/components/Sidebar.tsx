@@ -127,6 +127,7 @@ interface SidebarProps {
   recentWorkspacePaths?: string[];
   onOpenHub: () => void;
   onOpenAccounts?: () => void;
+  onOpenMarketRecords?: () => void;
   onNavigate?: (view: 'chat' | 'organization' | 'inbox' | 'work' | 'hub') => void;
   onJoinEnterprise?: (input: { inviteCode: string }) => Promise<void>;
   onLogout?: () => void | Promise<void>;
@@ -156,6 +157,7 @@ export function Sidebar({
   recentWorkspacePaths = [],
   onOpenHub,
   onOpenAccounts,
+  onOpenMarketRecords,
   onNavigate,
   onJoinEnterprise,
   onLogout,
@@ -711,6 +713,7 @@ export function Sidebar({
             </button>
             {accountMenuOpen ? (
               <div className="otto-sidebar-account__menu" role="menu" aria-label="账户菜单">
+                {onOpenMarketRecords && <button type="button" role="menuitem" className="otto-sidebar-account__menuitem" onClick={onOpenMarketRecords}>我的发布记录</button>}
                 <button
                   ref={accountMenuItemRef}
                   type="button"

@@ -1,3 +1,5 @@
+import { useModuleReadCache } from '../state/ModuleReadProvider.js';
+import { prefetchModule } from '../state/prefetchModule.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -134,6 +136,7 @@ export function ModuleWorkspace({
   onAddGroup,
   onLayoutChange,
 }: ModuleWorkspaceProps): React.JSX.Element {
+  const cache = useModuleReadCache();
   const [openPopover, setOpenPopover] = useState<WorkspacePopover>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [activeCondensedGroupId, setActiveCondensedGroupId] = useState<string | null>(
@@ -412,13 +415,11 @@ export function ModuleWorkspace({
         const groupModules = group.moduleIds
           .map((moduleId) => modulesById.get(moduleId))
           .filter((module): module is ModuleDefinition => Boolean(module));
-        const displayRows = Math.min(
-          3,
-          Math.max(group.rows, Math.ceil((groupModules.length + 1) / gridColumns)),
-        );
-        const capacity = displayRows * gridColumns;
-        const addTileFits = groupModules.length < capacity;
-        const overflowing = groupModules.length > capacity;
+        const displayRows = Math.min(3, Math.max(
+          group.rows,
+          Math.ceil((groupModules.length + 1) / gridColumns),
+        ));
+        const overflowing = groupModules.length + 1 > displayRows * gridColumns;
         const condensed = presentation === 'panel' && density === 'condensed';
         const collapsed = condensed && activeCondensedGroupId !== group.id;
         return (
@@ -568,9 +569,7 @@ export function ModuleWorkspace({
                 );
                 updateTransientLayout(reorderModulesInGroup(current, group.id, mergedOrder));
               }}
-              className={`otto-module-group__grid otto-module-group__grid--rows-${displayRows}${
-                overflowing ? ' is-overflowing' : ''
-              }`}
+              className={`otto-module-group__grid otto-module-group__grid--rows-${displayRows}${overflowing ? ' is-overflowing' : ''}`}
               hidden={collapsed}
               data-reorder-group={`modules:${group.id}`}
               layoutScroll={overflowing}
@@ -601,6 +600,8 @@ export function ModuleWorkspace({
                       type="button"
                       className={`otto-module-tile${disabled ? ' is-unavailable' : ''}`}
                       aria-label={`打开 ${module.label}`}
+                      onMouseEnter={() => { if (!editing) void prefetchModule(module, cache); }}
+                      onFocus={() => { if (!editing) void prefetchModule(module, cache); }}
                       aria-haspopup={disabled ? 'dialog' : undefined}
                       title={disabled ? module.disabledReason : editing ? '拖动调整模块顺序' : module.description}
                       onClick={() => {
@@ -649,7 +650,7 @@ export function ModuleWorkspace({
                   </DraggableItem>
                 );
               })}
-              {addTileFits ? <button
+              <button
                 type="button"
                 className="otto-module-group__add"
                 aria-label={`管理“${group.name}”中的模块`}
@@ -657,19 +658,8 @@ export function ModuleWorkspace({
               >
                 <span className="otto-module-group__add-icon" aria-hidden>＋</span>
                 <span>管理模块</span>
-              </button> : null}
-            </Reorder.Group>
-            {!addTileFits ? (
-              <button
-                type="button"
-                className="otto-module-group__add otto-module-group__add--compact"
-                aria-label={`向${group.name}添加模块`}
-                onClick={() => onOpenMarketplace(group.id)}
-              >
-                <span className="otto-module-group__add-icon" aria-hidden>＋</span>
-                <span>添加模块</span>
               </button>
-            ) : null}
+            </Reorder.Group>
           </article>
             )}
           </DraggableItem>

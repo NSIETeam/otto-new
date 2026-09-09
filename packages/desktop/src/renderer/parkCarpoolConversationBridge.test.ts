@@ -153,3 +153,50 @@ describe('handleParkCarpoolConversation', () => {
     expect(h.publish).not.toHaveBeenCalled();
   });
 });
+
+describe('carpool field patches', () => {
+  it('uses afternoon hours and does not parse flexible minutes as departure', async () => {
+    const h = harness();
+    const common = { scopeId: 'o:a', sessionId: 's', registry: h.registry, ...h.api, postMessage: h.postMessage, now: () => new Date('2026-09-02T00:00:00Z') };
+    await handleParkCarpoolConversation({ ...common, text: '我要拼车，今天下午3点从园区南门到测试地铁站，想搭车' });
+    await handleParkCarpoolConversation({ ...common, text: '前后20分钟都可以' });
+    await handleParkCarpoolConversation({ ...common, text: '确认发布' });
+    expect(h.publish).toHaveBeenCalledWith(expect.objectContaining({ departureTime: '2026-09-02T15:00:00+08:00', flexibleMinutes: 20 }));
+  });
+  it('keeps a retryable draft on failure and cancels collecting drafts', async () => {
+    const h = harness();
+    const common = { scopeId: 'o:a', sessionId: 's', registry: h.registry, ...h.api, postMessage: h.postMessage, now: () => new Date('2026-09-02T00:00:00Z') };
+    await handleParkCarpoolConversation({ ...common, text: '我要拼车' });
+    await handleParkCarpoolConversation({ ...common, text: '取消' });
+    expect(h.registry.get('o:a', 's', Date.parse('2026-09-02T00:00:00Z'))).toBeUndefined();
+    await handleParkCarpoolConversation({ ...common, text: '我要拼车，今天18:30从园区南门到测试地铁站，想搭车' });
+    h.publish.mockRejectedValueOnce(new Error('连接失败'));
+    await expect(handleParkCarpoolConversation({ ...common, text: '确认发布' })).resolves.toBe(true);
+    expect(h.messages.at(-1)).toContain('草稿已保留');
+    await handleParkCarpoolConversation({ ...common, text: '确认发布' });
+    expect(h.messages.at(-1)).toContain('已发布');
+  });
+  it('asks explicitly about ambiguous places', async () => {
+    const h = harness();
+    h.api.searchPlaces.mockResolvedValue([{ id: 'a', label: '测试南门甲', address: '', district: '甲区', coordinate: { longitude: 116.23, latitude: 40.22 } }, { id: 'b', label: '测试南门乙', address: '', district: '乙区', coordinate: { longitude: 116.31, latitude: 40.17 } }]);
+    const common = { scopeId: 'o:a', sessionId: 's', registry: h.registry, ...h.api, postMessage: h.postMessage, now: () => new Date('2026-09-02T00:00:00Z') };
+    await handleParkCarpoolConversation({ ...common, text: '我要拼车，今天18:30从园区南门到测试地铁站，想搭车' });
+    expect(h.messages.at(-1)).toContain('选择');
+    await handleParkCarpoolConversation({ ...common, text: '确认发布' });
+    expect(h.publish).not.toHaveBeenCalled();
+  });
+});
+
+
+it('restores encrypted-vault draft payload only to the same scope and before expiry', () => {
+  const registry = new ParkCarpoolConversationRegistry();
+  const now = Date.parse('2026-09-02T00:00:00Z');
+  registry.set({ scopeId: 'org:a', sessionId: 's', phase: 'collecting', fields: { originQuery: '测试南门' } }, now);
+  const snapshot = registry.snapshot('org:a', now);
+  const restored = new ParkCarpoolConversationRegistry();
+  restored.restore('org:b', snapshot, now);
+  expect(restored.get('org:a', 's', now)).toBeUndefined();
+  restored.restore('org:a', snapshot, now);
+  expect(restored.get('org:a', 's', now)?.fields.originQuery).toBe('测试南门');
+  expect(restored.get('org:a', 's', now + 31 * 60000)).toBeUndefined();
+});

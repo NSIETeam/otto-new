@@ -197,6 +197,7 @@ export function AccountManagementPage({
   onOrganizationChanged?: () => void;
 }): React.JSX.Element {
   const [accounts, setAccounts] = useState<EnterpriseAccount[]>([]);
+  const [profileDirty, setProfileDirty] = useState(false);
   const [activeSection, setActiveSection] = useState<EnterpriseManagementSection>('members');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -795,6 +796,8 @@ export function AccountManagementPage({
     if (pageRef.current) {
       sectionScrollPositionsRef.current[activeSection] = pageRef.current.scrollTop;
     }
+    if (activeSection === 'profile' && profileDirty && !window.confirm('有未保存的企业资料，放弃修改？')) return;
+    setProfileDirty(false);
     setActiveSection(nextSection);
     window.requestAnimationFrame(() => {
       if (pageRef.current) {
@@ -1003,7 +1006,7 @@ export function AccountManagementPage({
 
       {currentAccount.isAdmin && activeSection === 'profile' ? (
         configurationFeatures?.park_service === true
-          ? <EnterprisePublicProfilePanel />
+          ? <EnterprisePublicProfilePanel canEdit={currentAccount.isAdmin} onDirtyChange={setProfileDirty} />
           : (
             <section className="otto-enterprise-profile" aria-label="企业公开资料">
               <div className="otto-enterprise-profile__notice">

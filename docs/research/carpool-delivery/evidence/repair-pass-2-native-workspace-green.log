@@ -1,0 +1,17 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+(node:47582) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_carpool/parkCarpoolTransport.integration.test.ts (6 tests) 2897ms
+   ✓ PostgreSQL: public transport proves possession of the approved device key  841ms
+   ✓ PostgreSQL: expired unclaimed packages can be securely retired  844ms
+   ✓ PostgreSQL: actual native processes exchange ciphertext through authorized persistent transport  1038ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  20:07:24
+   Duration  5.42s (transform 1.31s, setup 0ms, collect 2.39s, tests 2.90s, environment 0ms, prepare 30ms)
+
+
+EXIT_CODE=0

@@ -1,0 +1,59 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-repair-91bc4e
+
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolDomain.test.ts (14 tests) 28ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolService.test.ts (13 tests) 40ms
+(node:63225) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:63223) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:63231) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:63233) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts (5 tests) 11ms
+(node:63249) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts (4 tests) 3709ms
+   ✓ PostgreSQL: expires without user reads, cleans precise positions and deletes own workflow facts  1901ms
+   ✓ PostgreSQL: moving parks prunes old scope without deleting new valid intent  1762ms
+(node:63498) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolTransport.integration.test.ts (6 tests) 5339ms
+   ✓ PostgreSQL: public transport proves possession of the approved device key  1248ms
+   ✓ PostgreSQL: expired unclaimed packages can be securely retired  1819ms
+   ✓ PostgreSQL: actual native processes exchange ciphertext through authorized persistent transport  1978ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolGroupMatching.test.ts (5 tests) 20ms
+ ✓ packages/server/src/modules/park_carpool/amapParkCarpoolProvider.test.ts (3 tests) 9ms
+ ✓ packages/server/src/enterprise/parkCarpoolRoutes.test.ts (3 tests) 6ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts (3 tests) 5ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolRoutePreview.test.ts (3 tests) 13ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolResults.test.ts (1 test) 13ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolHttp.integration.test.ts (1 test) 60ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolMetrics.test.ts (1 test) 2ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolContract.integration.test.ts (6 tests) 8894ms
+   ✓ real database carpool contract (synthetic map only) > postgres: publish, privacy, replay, concurrent updates, stop, identity revocation  1540ms
+   ✓ SQLite: scans beyond 200 candidates before ranking/filtering and pages without duplicates  503ms
+   ✓ PostgreSQL: scans beyond 200 candidates before ranking/filtering and pages without duplicates  4890ms
+   ✓ PostgreSQL: evaluates group invitations across multiple planning batches  1779ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolRetention.test.ts (1 test) 1ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolWorkflow.integration.test.ts (25 tests) 15193ms
+   ✓ PostgreSQL persistent carpool requests > invalidates outstanding pair invitations on joining and allows blocking a fellow group member without a direct request  1476ms
+   ✓ PostgreSQL persistent carpool requests > does not restore a candidate who stops accepting during group route planning  1879ms
+   ✓ PostgreSQL persistent carpool requests > stopping new matches invalidates pending invitations without removing a group  1580ms
+   ✓ PostgreSQL persistent carpool requests > matches and admits today’s intents when the same account has yesterday’s stored route  1544ms
+   ✓ PostgreSQL persistent carpool requests > rechecks stopped target authorization in the same transaction that reads preview geometry  1300ms
+   ✓ PostgreSQL persistent carpool requests > persists administrator public meeting points, denies member writes and protects edit versions  997ms
+   ✓ PostgreSQL persistent carpool requests > requires a live match, deduplicates reverse requests, conceals ignore and accepts chat without grouping  1010ms
+   ✓ PostgreSQL persistent carpool requests > invalidates changed intent versions and enforces block in both directions  875ms
+   ✓ PostgreSQL persistent carpool requests > accepts one explicit invitation atomically and never creates duplicate two-person groups  829ms
+   ✓ PostgreSQL persistent carpool requests > requires a new driver to confirm capacity and supports invitation into an existing group  915ms
+   ✓ PostgreSQL persistent carpool requests > serializes the last place, rotates member generations, and persists leave-and-stop  926ms
+   ✓ PostgreSQL persistent carpool requests > rolls back rather than expiring requests when a stored route cannot be decrypted  803ms
+   ✓ uses a single PostgreSQL pool connection without nested borrowing  832ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts (1 test) 3ms
+
+ Test Files  17 passed (17)
+      Tests  95 passed (95)
+   Start at  12:47:59
+   Duration  20.15s (transform 2.23s, setup 0ms, collect 18.42s, tests 33.35s, environment 2ms, prepare 781ms)

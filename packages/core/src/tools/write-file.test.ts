@@ -101,7 +101,8 @@ describe('WriteFileTool', () => {
     mockGeminiClientInstance = new (vi.mocked(OttoClient))(
       mockConfig,
     ) as Mocked<OttoClient>;
-    vi.mocked(OttoClient).mockImplementation(() => mockGeminiClientInstance);
+    // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+    vi.mocked(OttoClient).mockImplementation(function () { return mockGeminiClientInstance; });
 
     // Now that mockGeminiClientInstance is initialized, set the mock implementation for getOttoClient
     mockConfigInternal.getOttoClient.mockReturnValue(
@@ -150,6 +151,7 @@ describe('WriteFileTool', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     // Clean up the temporary directories
     if (fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -278,8 +280,7 @@ describe('WriteFileTool', () => {
       fs.writeFileSync(filePath, 'content', { mode: 0o000 });
 
       const readError = new Error('Permission denied');
-      const originalReadFileSync = fs.readFileSync;
-      vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
+      const readFileSpy = vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
         throw readError;
       });
 
@@ -301,7 +302,7 @@ describe('WriteFileTool', () => {
         code: undefined,
       });
 
-      vi.spyOn(fs, 'readFileSync').mockImplementation(originalReadFileSync);
+      readFileSpy.mockRestore();
       fs.chmodSync(filePath, 0o600);
     });
   });
@@ -327,15 +328,14 @@ describe('WriteFileTool', () => {
       fs.writeFileSync(filePath, 'original', { mode: 0o000 });
 
       const readError = new Error('Simulated read error for confirmation');
-      const originalReadFileSync = fs.readFileSync;
-      vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
+      const readFileSpy = vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
         throw readError;
       });
 
       const confirmation = await tool.shouldConfirmExecute(params, abortSignal);
       expect(confirmation).toBe(false);
 
-      vi.spyOn(fs, 'readFileSync').mockImplementation(originalReadFileSync);
+      readFileSpy.mockRestore();
       fs.chmodSync(filePath, 0o600);
     });
 
@@ -443,8 +443,7 @@ describe('WriteFileTool', () => {
       fs.writeFileSync(filePath, 'original', { mode: 0o000 });
 
       const readError = new Error('Simulated read error for execute');
-      const originalReadFileSync = fs.readFileSync;
-      vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
+      const readFileSpy = vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
         throw readError;
       });
 
@@ -454,7 +453,7 @@ describe('WriteFileTool', () => {
         /Error checking existing file: Simulated read error for execute/,
       );
 
-      vi.spyOn(fs, 'readFileSync').mockImplementation(originalReadFileSync);
+      readFileSpy.mockRestore();
       fs.chmodSync(filePath, 0o600);
     });
 

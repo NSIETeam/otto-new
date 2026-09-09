@@ -34,11 +34,13 @@ describe('setupUser', () => {
       },
     });
     vi.mocked(CodeAssistServer).mockImplementation(
-      () =>
-        ({
+      // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+      function () {
+        return {
           loadCodeAssist: mockLoad,
           onboardUser: mockOnboardUser,
-        }) as unknown as CodeAssistServer,
+        } as unknown as CodeAssistServer;
+      },
     );
   });
 
@@ -74,7 +76,8 @@ describe('setupUser', () => {
   it('should throw ProjectIdRequiredError when no project ID is available', async () => {
     delete process.env.GOOGLE_CLOUD_PROJECT;
     // And the server itself requires a project ID internally
-    vi.mocked(CodeAssistServer).mockImplementation(() => {
+    // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+    vi.mocked(CodeAssistServer).mockImplementation(function () {
       throw new ProjectIdRequiredError();
     });
 

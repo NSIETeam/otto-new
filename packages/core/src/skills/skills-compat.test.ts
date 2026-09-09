@@ -78,18 +78,21 @@ describe('SkillsCompatAdapter', () => {
     mockSettings = {
       initialize: vi.fn().mockResolvedValue(undefined),
     };
-    (SettingsManager as unknown as { mockImplementation: (factory: () => unknown) => unknown }).mockImplementation(() => mockSettings);
+    // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+    (SettingsManager as unknown as { mockImplementation: (factory: () => unknown) => unknown }).mockImplementation(function () { return mockSettings; });
 
     // Mock MarketplaceManager
     mockMarketplace = {};
-    (MarketplaceManager as unknown as { mockImplementation: (factory: () => unknown) => unknown }).mockImplementation(() => mockMarketplace);
+    // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+    (MarketplaceManager as unknown as { mockImplementation: (factory: () => unknown) => unknown }).mockImplementation(function () { return mockMarketplace; });
 
     // Mock SkillLoader
     mockLoader = {
       loadEnabledSkills: vi.fn(),
       loadSkill: vi.fn(),
     };
-    (SkillLoader as unknown as { mockImplementation: (factory: () => unknown) => unknown }).mockImplementation(() => mockLoader);
+    // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+    (SkillLoader as unknown as { mockImplementation: (factory: () => unknown) => unknown }).mockImplementation(function () { return mockLoader; });
 
     // Create adapter instance
     adapter = new SkillsCompatAdapter('/mock/project/root');

@@ -64,7 +64,7 @@
     "style-loader": "^4.0.0",
     "ts-loader": "^9.5.1",
     "typescript": "5.9.3",
-    "vitest": "^3.2.7",
+    "vitest": "4.1.11",
     "webpack": "^5.97.1",
     "webpack-cli": "^5.1.4",
     "ws": "^8.21.1"

@@ -64,9 +64,10 @@ vi.mock('../core/contentGenerator.js', async (importOriginal) => {
 });
 
 vi.mock('../core/client.js', () => ({
-  OttoClient: vi.fn().mockImplementation(() => ({
-    initialize: vi.fn().mockResolvedValue(undefined),
-  })),
+  // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+  OttoClient: vi.fn().mockImplementation(function () {
+    return { initialize: vi.fn().mockResolvedValue(undefined) };
+  }),
 }));
 
 vi.mock('../telemetry/index.js', async (importOriginal) => {

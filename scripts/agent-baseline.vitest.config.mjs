@@ -23,7 +23,6 @@ export default defineConfig({
   resolve: { alias: aliases },
   test: {
     maxWorkers: 1,
-    minWorkers: 1,
     fileParallelism: false,
     testTimeout: 60000,
     hookTimeout: 60000,

@@ -32,7 +32,8 @@ const originalPlatform = process.platform;
 
 describe('editor utils', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // A previous command probe may leave an unused one-shot implementation.
+    vi.resetAllMocks();
     delete process.env.SANDBOX;
     Object.defineProperty(process, 'platform', {
       value: originalPlatform,

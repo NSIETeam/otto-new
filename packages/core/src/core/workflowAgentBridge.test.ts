@@ -72,9 +72,10 @@ function makeBridge(opts: {
   };
 
   // Mock SubAgent.prototype.executeTask
-  (SubAgent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-    executeTask: vi.fn().mockResolvedValue(subAgentResult),
-  }));
+  // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+  (SubAgent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () {
+    return { executeTask: vi.fn().mockResolvedValue(subAgentResult) };
+  });
 
   const ctrl = new AbortController();
   return new WorkflowAgentBridge(
@@ -95,13 +96,16 @@ describe('WorkflowAgentBridge.buildPrompt — context truncation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Reset SubAgent mock to default behavior before each test
-    (SubAgent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      executeTask: vi.fn().mockResolvedValue({
-        success: true,
-        summary: 'Task completed',
-        tokenUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-      }),
-    }));
+    // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+    (SubAgent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () {
+      return {
+        executeTask: vi.fn().mockResolvedValue({
+          success: true,
+          summary: 'Task completed',
+          tokenUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        }),
+      };
+    });
   });
 
   /** Helper: get the prompt passed to the most recently created SubAgent's executeTask */
@@ -237,13 +241,16 @@ describe('WorkflowAgentBridge — max_agents limit', () => {
 
 describe('WorkflowAgentBridge.runParallel — concurrency', () => {
   it('executes all tasks and returns results in original order', async () => {
-    (SubAgent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      executeTask: vi.fn().mockImplementation(async (prompt: string) => ({
+    // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+    (SubAgent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () {
+      return {
+        executeTask: vi.fn().mockImplementation(async (prompt: string) => ({
           success: true,
           summary: `result-for-${prompt}`,
           tokenUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         })),
-    }));
+      };
+    });
 
     const ctrl = new AbortController();
     const mockConfig = {
@@ -285,13 +292,16 @@ describe('WorkflowAgentBridge.runParallel — concurrency', () => {
 describe('WorkflowAgentBridge.buildPrompt — schema injection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (SubAgent as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      executeTask: vi.fn().mockResolvedValue({
-        success: true,
-        summary: '{"coverage": 85}',
-        tokenUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
-      }),
-    }));
+    // eslint-disable-next-line prefer-arrow-callback -- Vitest 4 constructor mocks must support new.
+    (SubAgent as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () {
+      return {
+        executeTask: vi.fn().mockResolvedValue({
+          success: true,
+          summary: '{"coverage": 85}',
+          tokenUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        }),
+      };
+    });
   });
 
   function getLastCalledPrompt(): string {

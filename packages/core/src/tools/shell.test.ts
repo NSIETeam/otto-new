@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { expect, describe, it, vi, beforeEach } from 'vitest';
+import { expect, describe, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   ShellTool,
   backgroundShellOutcome,
@@ -34,6 +34,10 @@ describe('ShellTool Bug Reproduction', () => {
       }),
     } as unknown as Config;
     shellTool = new ShellTool(config);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('should not let the summarizer override the return display', async () => {

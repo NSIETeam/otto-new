@@ -677,7 +677,7 @@ it('explains reserved buyer contact restrictions without treating park membershi
       return { items: [] };
     }),
   });
-  render(<ParkMarketDialog open accountId="buyer" initialListingId="reserved" onClose={() => {}} />);
+  render(<ParkMarketDialog open accountId="buyer" initialListingId="reserved" draftScope={{ server: 'http://localhost:51461', organization: 'E', account: 'buyer' }} onClose={() => {}} />);
   expect(await screen.findByText('商品已预留，暂不接受新咨询。已有咨询可在“我的消息”的“商品咨询”中继续。')).toBeTruthy();
   expect(screen.getByRole('button', { name: '联系卖家' }).hasAttribute('disabled')).toBe(true);
   expect(screen.queryByRole('button', { name: '编辑' })).toBeNull();
@@ -719,4 +719,25 @@ it('shows a retry after list failure instead of claiming the market is empty', a
   fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
   expect(await screen.findByText('园区还没有在售闲置，可以发布第一件物品。')).toBeTruthy();
   expect(screen.getByRole('button', { name: '发布闲置' }).hasAttribute('disabled')).toBe(false);
+});
+
+it('opens local module directly in demo without server requests and lets the user switch to real data', async () => {
+  const request = vi.fn(async ({ path }: { path: string }) => path === '/settings' ? { enabled: true, ready: true } : { items: [] });
+  Object.assign(window.otto, { enterpriseParkMarket: request, enterpriseMarketDrafts: vi.fn(async () => []) });
+  render(<ParkMarketDialog open accountId="local-demo" draftScope={{ server: 'http://127.0.0.1:51461', organization: 'E', account: 'local-demo' }} onClose={vi.fn()} />);
+  expect(screen.getByRole('button', { name: /查看 轻薄笔记本电脑/ })).toBeTruthy();
+  expect(request).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '返回真实市场' }));
+  expect(await screen.findByText('园区还没有在售闲置，可以发布第一件物品。')).toBeTruthy();
+});
+it('keeps administrator assignment out of browsing even for an authorized administrator', async () => {
+  Object.assign(window.otto, {
+    enterpriseMarketDrafts: vi.fn(async () => []),
+    enterpriseParkMarket: vi.fn(async ({ path }: { path: string }) => path === '/settings' ? { enabled: true, ready: true, canAssign: true, canModerate: false, parkId: 'P' } : path === '/roles/P' ? [] : { items: [] }),
+  });
+  render(<ParkMarketDialog open accountId="admin-ui" onClose={vi.fn()} />);
+  await screen.findByRole('button', { name: '市场管理' });
+  expect(screen.queryByText('市场管理员授权')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '市场管理' }));
+  expect(await screen.findByText('市场管理员授权')).toBeTruthy();
 });

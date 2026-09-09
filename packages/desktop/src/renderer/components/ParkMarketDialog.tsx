@@ -195,8 +195,16 @@ function ParkMarketLauncher({
   initialError?: string;
   onClose(): void;
 }) {
-  const [demo, setDemo] = useState(false);
   const demoScope = JSON.stringify([draftScope?.server, draftScope?.organization, accountId]);
+  const [choice, setChoice] = useState<{ scope: string; demo: boolean } | null>(null);
+  const setDemo = (demo: boolean) => setChoice({ scope: demoScope, demo });
+  let localServer = draftScope?.server === 'local';
+  try {
+    localServer ||= ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(draftScope?.server ?? '').hostname);
+  } catch { /* A missing server scope uses the real-data entry. */ }
+  const demo = !initialListingId && !initialError && (choice?.scope === demoScope
+    ? choice.demo
+    : localServer && initialView === 'market');
   if (open && demo) return <MarketDemo key={demoScope} scope={demoScope} onClose={onClose} onExit={() => setDemo(false)} />;
   return open ? (
     <MarketContent
@@ -929,7 +937,7 @@ function MarketContent({
         >
           发布闲置
         </button>
-        {settings?.canModerate && (
+        {(settings?.canModerate || settings?.canAssign) && (
           <button type="button" onClick={() => navigate('admin')}>
             市场管理
           </button>
@@ -1831,7 +1839,7 @@ function MarketContent({
           }}
         />
       )}
-      {settings?.canAssign && settings.parkId && (
+      {view === 'admin' && settings?.canAssign && settings.parkId && (
         <MarketRoles
           parkId={settings.parkId}
           onChanged={() => {
@@ -1841,7 +1849,7 @@ function MarketContent({
           }}
         />
       )}
-      {view === 'admin' && settings?.parkId && (
+      {view === 'admin' && settings?.canModerate && settings.parkId && (
         <MarketAdmin
           settings={settings}
           onError={setError}

@@ -173,6 +173,13 @@ the checkout. stdout is JSON with `archivePath`, `sha256Path`, `sourceCommit`,
 `version`, `sha256`; assets are never silently overwritten. Each installer/ASAR
 must independently retain NOTICE and the shipped dependency license files.
 
+The two GNU license texts are preserved verbatim under `scripts/licenses/`.
+Construction reads them from the exact committed Git blobs and verifies their
+original pinned length and digest; missing or corrupted blobs fail closed.
+`bundledLicenseSources` records `vendored-reviewed` rather than claiming a live
+GNU website download. Canonical URLs remain in the inventory, and the other
+33 source inputs retain the same network/cache verification requirements.
+
 The shared manifest now also supplies 21 reviewed sharp/libvips source, build,
 patch, development/linking and license inputs. Its five shipped native-target
 records are checked against the exact release lock before construction. See

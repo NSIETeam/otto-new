@@ -172,3 +172,182 @@ it('does not start work from a successful lease response delivered after its TTL
  try{await vi.advanceTimersByTimeAsync(121000);release();await vi.advanceTimersByTimeAsync(1);expect(work).not.toHaveBeenCalled();}
  finally{stop();vi.useRealTimers();}
 });
+
+it('owns lease heartbeats in a separate registry and drains renewal before release', async () => {
+  vi.useFakeTimers();
+  const registry = new RecurringTaskRegistry();
+  const register = vi.spyOn(RecurringTaskRegistry.prototype, 'register');
+  let finishWork!: () => void;
+  let finishRenewal!: () => void;
+  const work = new Promise<void>((resolve) => {
+    finishWork = resolve;
+  });
+  const renewal = new Promise<void>((resolve) => {
+    finishRenewal = resolve;
+  });
+  const releaseLease = vi.fn(async () => true);
+  const renewLease = vi.fn(async () => {
+    await renewal;
+    return true;
+  });
+  const stop = startCarpoolMaintenance({
+    run: async () => work,
+    taskRegistry: registry,
+    cache: {
+      acquireLease: async () => true,
+      renewLease,
+      releaseLease,
+    } as unknown as EnterpriseSharedCache,
+  });
+  try {
+    await vi.advanceTimersByTimeAsync(1);
+    const heartbeatIndex = register.mock.calls.findIndex(
+      ([definition]) =>
+        definition.name === 'enterprise.park-carpool-lease-renewal',
+    );
+    expect(heartbeatIndex).toBeGreaterThanOrEqual(0);
+    expect(register.mock.calls[heartbeatIndex][0]).toMatchObject({
+      source: 'packages/server/src/modules/park_carpool/parkCarpoolRuntime.ts',
+      intervalMs: 40_000,
+      initialDelayMs: 40_000,
+      estimatedCostUsdPerRun: 0,
+    });
+    const child = register.mock.contexts[
+      heartbeatIndex
+    ] as RecurringTaskRegistry;
+    expect(child).not.toBe(registry);
+    expect(child.list()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(renewLease).toHaveBeenCalledOnce();
+    finishWork();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(child.list()).toHaveLength(0);
+    expect(releaseLease).not.toHaveBeenCalled();
+    let drained = false;
+    const shutdown = registry.shutdown({ timeoutMs: 1_000 }).then(() => {
+      drained = true;
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(drained).toBe(false);
+    finishRenewal();
+    await shutdown;
+    expect(releaseLease).toHaveBeenCalledOnce();
+    await child.shutdown({ timeoutMs: 100 });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(renewLease).toHaveBeenCalledOnce();
+  } finally {
+    finishWork();
+    finishRenewal();
+    stop();
+    await vi.advanceTimersByTimeAsync(1);
+    register.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+it('stops the child registry immediately while cancelled main work still drains', async () => {
+  vi.useFakeTimers();
+  const registry = new RecurringTaskRegistry();
+  const register = vi.spyOn(RecurringTaskRegistry.prototype, 'register');
+  let finishWork!: () => void;
+  const work = new Promise<void>((resolve) => {
+    finishWork = resolve;
+  });
+  const renewLease = vi.fn(async () => true);
+  const releaseLease = vi.fn(async () => true);
+  const stop = startCarpoolMaintenance({
+    run: async () => work,
+    taskRegistry: registry,
+    cache: {
+      acquireLease: async () => true,
+      renewLease,
+      releaseLease,
+    } as unknown as EnterpriseSharedCache,
+  });
+  try {
+    await vi.advanceTimersByTimeAsync(1);
+    const heartbeatIndex = register.mock.calls.findIndex(
+      ([definition]) =>
+        definition.name === 'enterprise.park-carpool-lease-renewal',
+    );
+    expect(heartbeatIndex).toBeGreaterThanOrEqual(0);
+    const child = register.mock.contexts[
+      heartbeatIndex
+    ] as RecurringTaskRegistry;
+    stop();
+    expect(child.list()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(renewLease).not.toHaveBeenCalled();
+    expect(releaseLease).not.toHaveBeenCalled();
+    finishWork();
+    await registry.shutdown({ timeoutMs: 100 });
+    expect(releaseLease).toHaveBeenCalledOnce();
+  } finally {
+    finishWork();
+    stop();
+    await vi.advanceTimersByTimeAsync(1);
+    register.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+it('anchors a successful renewal deadline to request start rather than delayed response', async () => {
+  vi.useFakeTimers({
+    toFake: [
+      'setTimeout',
+      'clearTimeout',
+      'setInterval',
+      'clearInterval',
+      'Date',
+      'performance',
+    ],
+  });
+  const registry = new RecurringTaskRegistry();
+  let signal: AbortSignal | undefined;
+  const pending: Array<() => void> = [];
+  const errors: unknown[] = [];
+  const renewLease = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        pending.push(() => resolve(true));
+      }),
+  );
+  const releaseLease = vi.fn(async () => true);
+  const stop = startCarpoolMaintenance({
+    run: async (received) => {
+      signal = received;
+      await new Promise<void>((resolve) =>
+        received.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    },
+    taskRegistry: registry,
+    onError: (error) => errors.push(error),
+    cache: {
+      acquireLease: async () => true,
+      renewLease,
+      releaseLease,
+    } as unknown as EnterpriseSharedCache,
+  });
+  try {
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(renewLease).toHaveBeenCalledOnce();
+    pending.shift()!();
+    await vi.advanceTimersByTimeAsync(69_999);
+    expect(signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signal?.aborted).toBe(true);
+    expect(errors).toEqual([
+      expect.objectContaining({ message: 'Carpool maintenance lease expired' }),
+    ]);
+    expect(releaseLease).not.toHaveBeenCalled();
+    pending.splice(0).forEach((resolve) => resolve());
+    stop();
+    await registry.shutdown({ timeoutMs: 100 });
+    expect(releaseLease).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+    pending.splice(0).forEach((resolve) => resolve());
+    await vi.advanceTimersByTimeAsync(1);
+    vi.useRealTimers();
+  }
+});

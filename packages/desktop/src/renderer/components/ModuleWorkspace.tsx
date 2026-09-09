@@ -415,10 +415,11 @@ export function ModuleWorkspace({
         const groupModules = group.moduleIds
           .map((moduleId) => modulesById.get(moduleId))
           .filter((module): module is ModuleDefinition => Boolean(module));
-        const displayRows = Math.max(
+        const displayRows = Math.min(3, Math.max(
           group.rows,
           Math.ceil((groupModules.length + 1) / gridColumns),
-        );
+        ));
+        const overflowing = groupModules.length + 1 > displayRows * gridColumns;
         const condensed = presentation === 'panel' && density === 'condensed';
         const collapsed = condensed && activeCondensedGroupId !== group.id;
         return (
@@ -568,9 +569,11 @@ export function ModuleWorkspace({
                 );
                 updateTransientLayout(reorderModulesInGroup(current, group.id, mergedOrder));
               }}
-              className={`otto-module-group__grid otto-module-group__grid--rows-${displayRows}`}
+              className={`otto-module-group__grid otto-module-group__grid--rows-${displayRows}${overflowing ? ' is-overflowing' : ''}`}
               hidden={collapsed}
               data-reorder-group={`modules:${group.id}`}
+              layoutScroll={overflowing}
+              tabIndex={overflowing ? 0 : undefined}
               aria-label={`${group.name}模块`}
             >
               {groupModules.map((module, moduleIndex) => {

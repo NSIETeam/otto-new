@@ -271,6 +271,81 @@ sync_live_deployment_filesystems() {
   done
 }
 
+otto_read_compensation_service_state() {
+  local output key value seen_state=0 seen_pid=0 seen_group=0
+  COMPENSATION_ACTIVE_STATE=''
+  COMPENSATION_MAIN_PID=''
+  COMPENSATION_CONTROL_GROUP=''
+  output="$(timeout --signal=TERM --kill-after=1s 5s systemctl show otto-enterprise \
+    --property=ActiveState --property=MainPID --property=ControlGroup)" || return 1
+  [ "${#output}" -le 1024 ] || return 1
+  while IFS='=' read -r key value; do
+    case "$key" in
+      ActiveState)
+        [ "$seen_state" -eq 0 ] && [[ "$value" =~ ^[a-z-]+$ ]] || return 1
+        seen_state=1; COMPENSATION_ACTIVE_STATE="$value" ;;
+      MainPID)
+        [ "$seen_pid" -eq 0 ] && [[ "$value" =~ ^(0|[1-9][0-9]*)$ ]] || return 1
+        seen_pid=1; COMPENSATION_MAIN_PID="$value" ;;
+      ControlGroup)
+        [ "$seen_group" -eq 0 ] || return 1
+        case "$value" in ''|/system.slice/otto-enterprise.service) ;; *) return 1 ;; esac
+        seen_group=1; COMPENSATION_CONTROL_GROUP="$value" ;;
+      *) return 1 ;;
+    esac
+  done <<< "$output"
+  [ "$seen_state:$seen_pid:$seen_group" = '1:1:1' ]
+}
+
+otto_compensation_cgroup_empty() {
+  local group='/sys/fs/cgroup/system.slice/otto-enterprise.service'
+  local events processes key value extra populated='' seen_populated=0
+  # The managed service uses system.slice on unified cgroup v2. Fail closed on
+  # an unknown hierarchy; never infer an empty group from a missing PID alone.
+  [ "$(stat -f -c %T /sys/fs/cgroup)" = cgroup2fs ] || return 1
+  [ -f /sys/fs/cgroup/cgroup.controllers ] \
+    && [ ! -L /sys/fs/cgroup ] \
+    && [ ! -L /sys/fs/cgroup/system.slice ] || return 1
+  if [ ! -e "$group" ] && [ ! -L "$group" ]; then return 0; fi
+  [ -d "$group" ] && [ ! -L "$group" ] \
+    && [ -f "$group/cgroup.events" ] && [ ! -L "$group/cgroup.events" ] \
+    && [ -f "$group/cgroup.procs" ] && [ ! -L "$group/cgroup.procs" ] || return 1
+  events="$(cat -- "$group/cgroup.events")" || return 1
+  while read -r key value extra; do
+    if [ "$key" = populated ]; then
+      [ "$seen_populated" -eq 0 ] && [ -z "$extra" ] || return 1
+      seen_populated=1; populated="$value"
+    fi
+  done <<< "$events"
+  # populated covers every descendant, not just this group's cgroup.procs:
+  # https://docs.kernel.org/admin-guide/cgroup-v2.html#un-populated-notification
+  [ "$seen_populated:$populated" = '1:0' ] || return 1
+  processes="$(cat -- "$group/cgroup.procs")" || return 1
+  [ -z "$processes" ]
+}
+
+otto_prove_compensation_stopped() {
+  COMPENSATION_STOP_REASON='service-state-unavailable'
+  command -v timeout >/dev/null 2>&1 || return 1
+  otto_read_compensation_service_state || return 1
+  COMPENSATION_STOP_REASON='service-stop-failed-or-timed-out'
+  # Do not compete with Restart=on-failure using a manual process signal.
+  # systemd owns stop; the outer timeout exceeds the managed unit's 60s budget.
+  timeout --signal=TERM --kill-after=5s 75s systemctl stop otto-enterprise \
+    >/dev/null 2>&1 || return 1
+  # A failed candidate may have Result=exit-code / ExecMainStatus!=0 and still
+  # be safe to replace. The old-service graceful gate below remains stricter.
+  for _ in 1 2; do
+    COMPENSATION_STOP_REASON='service-state-unavailable'
+    otto_read_compensation_service_state || return 1
+    COMPENSATION_STOP_REASON='service-not-fully-stopped'
+    case "$COMPENSATION_ACTIVE_STATE" in inactive|failed) ;; *) return 1 ;; esac
+    [ "$COMPENSATION_MAIN_PID" = 0 ] || return 1
+    COMPENSATION_STOP_REASON='service-cgroup-not-proven-empty'
+    otto_compensation_cgroup_empty || return 1
+  done
+}
+
 cleanup() {
   local rollback_ok=1
   local preserve_transaction=0
@@ -298,7 +373,19 @@ cleanup() {
   if [ "$DRY_RUN" -eq 0 ] && [ "$UPGRADE_SUCCEEDED" -eq 0 ]; then
     if [ "$ROLLBACK_NEEDED" -eq 1 ]; then
       otto_warn "升级失败，开始回滚旧 release"
-      systemctl stop otto-enterprise >/dev/null 2>&1 || true
+      if ! otto_prove_compensation_stopped; then
+        # No current/DB/config/deploy/key restoration or restart may occur
+        # while any candidate process could still be using the live database.
+        # A failed proof is a recovery requirement, never a rollback receipt.
+        ( set -o noclobber
+          printf '%s\n' 'otto-enterprise-upgrade-recovery-required-v1' \
+            "reason=${COMPENSATION_STOP_REASON}" > "${TXN_DIR}/recovery-required"
+        ) || otto_warn "recovery-required 标记已存在或无法写入；保留原证据"
+        /usr/bin/sync -f "$TXN_DIR" \
+          || otto_warn "recovery-required 标记持久化失败；仍拒绝恢复任何业务文件"
+        otto_warn "recovery-required：候选服务未证实完全停止，未恢复业务文件；保留事务证据：${TXN_DIR}"
+        return 1
+      fi
       if ! ln -sfn "$CURRENT_REAL" "${INSTALL_ROOT}/current.rollback" \
         || ! mv -Tf "${INSTALL_ROOT}/current.rollback" "${INSTALL_ROOT}/current"; then
         rollback_ok=0

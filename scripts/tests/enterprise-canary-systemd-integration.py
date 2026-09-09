@@ -197,6 +197,11 @@ def main():
             if group.exists():
                 require('populated 0' in (group / 'cgroup.events').read_text() and not (group / 'cgroup.procs').read_text().strip(), 'unit has remaining processes')
             positive = mode in ['success','drain45']
+            report['cases'].append({'mode': mode, 'exit': result.returncode, 'seconds': round(elapsed, 2),
+                'observedUnit': run(['/usr/bin/systemctl','show',witness['unit'],
+                    '--property=LoadState,ActiveState,MainPID,Result,ExecMainCode,ExecMainStatus'],check=False).stdout,
+                'unitJournal': run(['/usr/bin/journalctl','--unit',witness['unit'],'--no-pager','--output=cat','--lines=12'],check=False).stdout[-4000:],
+                'delivered': (txn / 'canary-deliverable.json').exists(), 'passed': False})
             require((result.returncode == 0) == positive, f'{mode}: unexpected controller result: {result.stderr[:300]}')
             require((txn / 'canary-deliverable.json').exists() == positive, 'failed unit delivered a database')
             if positive:
@@ -207,7 +212,7 @@ def main():
             require(hashlib.sha256(rollback.read_bytes()).hexdigest() == rollback_hash and (txn.stat().st_mode & 0o777) == 0o700, 'rollback custody changed')
             require(elapsed < 250, 'fixed controller deadline exceeded')
             require('sms-secret-fixture' not in result.stderr + result.stdout and 'production-admin-fixture' not in result.stderr + result.stdout, 'credential leaked to controller output')
-            report['cases'].append({'mode':mode,'exit':result.returncode,'seconds':round(elapsed,2),'cgroupEmpty':True,'delivered':positive})
+            report['cases'][-1].update(cgroupEmpty=True, passed=True)
         report['passed'] = True
     finally:
         # Never delete evidence or the dedicated account while a cgroup may live.

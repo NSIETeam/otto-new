@@ -335,6 +335,10 @@ cleanup
             try:
                 receipt["finalServiceState"] = state()
                 receipt["finalCgroupState"] = group_state()
+                # This sole owned unit contains synthetic fixtures, never
+                # production data. Retain bounded systemd setup diagnostics.
+                receipt["unitJournal"] = run(["/usr/bin/journalctl", "--unit", UNIT,
+                    "--no-pager", "--output=cat", "--lines=12"], check=False).stdout[-4000:]
             finally:
                 self.cleanup_service()
 

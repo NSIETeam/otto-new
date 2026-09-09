@@ -662,7 +662,7 @@ it('opens local sample products when the enterprise backend is unreachable', asy
   Object.assign(window.otto, { enterpriseParkMarket: vi.fn(async () => { throw new Error('无法连接企业服务器：fetch failed'); }) });
   render(<ParkMarketDialog open accountId="demo-entry" onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '体验示例商品' }));
-  expect(await screen.findByText('本地演示 · 无需连接服务器')).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '园区跳蚤市场 演示' })).toBeTruthy();
   expect(screen.getByRole('button', { name: /查看 轻薄笔记本电脑/ })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '体验示例商品' })).toBeNull();
 });

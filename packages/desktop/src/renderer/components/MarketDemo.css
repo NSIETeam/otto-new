@@ -9,21 +9,11 @@
   border-radius: 20px;
   vertical-align: middle;
 }
-.market-demo__banner {
-  display: grid;
-  gap: 9px;
-  padding: 16px 20px;
-  margin: 16px 0;
-  background: var(--bg-secondary, #f0f6f2);
-  border: 1px solid #c4dbce;
-  border-radius: 10px;
-}
-.market-demo__banner span {
-  font-size: 13px;
-  opacity: 0.8;
-}
-.market-demo__banner button + button {
-  margin-left: 8px;
+.market-demo__tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .market-demo__filters {
   display: flex;

@@ -156,14 +156,7 @@ export function MarketDemo({
           </h2>
           <p>看看园区里的闲置好物，也试试管理自己的发布。</p>
         </div>
-        <button onClick={onClose}>关闭</button>
-      </header>
-      <div className="market-demo__banner">
-        <strong>本地演示 · 无需连接服务器</strong>
-        <span>
-          3件示例商品，图片为AI生成的示意图。可同时体验买家与卖家操作；不会真实发布、联系他人或产生交易。
-        </span>
-        <div>
+        <div className="market-demo__tools">
           <button onClick={onExit}>返回真实市场</button>
           <button
             onClick={() => {
@@ -179,8 +172,9 @@ export function MarketDemo({
           >
             重置演示数据
           </button>
+          <button onClick={onClose}>关闭</button>
         </div>
-      </div>
+      </header>
       <nav aria-label="演示市场页面">
         {(
           [

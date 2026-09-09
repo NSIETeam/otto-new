@@ -171,7 +171,7 @@ function PlacePicker({
         if (request !== revision.current) return;
         setResults([]); setLookupError(cause instanceof Error ? cause.message : String(cause));
       }).finally(() => { if (request === revision.current) setSearching(false); });
-    }, 300);
+    }, 150);
     return () => { window.clearTimeout(timer); revision.current += 1; };
   }, [query, composing, selected, expanded, disabled, retry]);
   useEffect(() => {

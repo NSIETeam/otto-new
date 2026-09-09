@@ -10,16 +10,16 @@ describe('createAmapParkCarpoolProvider', () => {
   it('keeps the key on the server and normalizes place and route responses', async () => {
     const fetchMock = vi.fn(async (url: string | URL) => {
       const value = String(url);
-      if (value.includes('/place/text')) {
+      if (value.includes('/assistant/inputtips')) {
         return new Response(
           JSON.stringify({
             status: '1',
-            pois: [
+            tips: [
               {
                 id: 'poi-1',
                 name: '回龙观地铁站',
                 address: '同成街',
-                adname: '昌平区',
+                district: '昌平区',
                 location: '116.320000,40.070000',
               },
             ],
@@ -192,4 +192,49 @@ describe('resolveAmapWebServiceKey', () => {
     expect(resolveAmapWebServiceKey({ OTTO_AMAP_WEB_SERVICE_KEY: '' })).toBe('');
     expect(resolveAmapWebServiceKey({ OTTO_AMAP_WEB_SERVICE_KEY: '  ' })).toBe('');
   });
+});
+
+
+it('deduplicates suggestions, separates cities and retries failed requests', async () => {
+  let finish!: (response: Response) => void;
+  const fetchMock = vi.fn((_url: string | URL | Request) => new Promise<Response>(resolve => { finish = resolve; }));
+  const provider = createAmapParkCarpoolProvider({ key: 'test', fetchImpl: fetchMock });
+  const first = provider.searchPlaces('北控', '北京');
+  const second = provider.searchPlaces('北控', '北京');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+  expect(url.pathname).toBe('/v3/assistant/inputtips');
+  expect(url.searchParams.get('datatype')).toBe('poi');
+  finish(new Response(JSON.stringify({status: '1', tips: [
+    {id:'valid',name:'北控园区',location:'116.3,40.1',district:'北京市'},
+    {id:'no-location',name:'北控',location:[]},
+  ]})));
+  expect(await first).toHaveLength(1);
+  expect(await second).toHaveLength(1);
+  expect(await provider.searchPlaces('北控', '北京')).toHaveLength(1);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const otherCity = provider.searchPlaces('北控', '上海');
+  finish(new Response(JSON.stringify({status:'0'})));
+  await expect(otherCity).rejects.toThrow();
+  const retry = provider.searchPlaces('北控', '上海');
+  finish(new Response(JSON.stringify({status:'1',tips:[]})));
+  await expect(retry).resolves.toEqual([]);
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
+it('expires and bounds the in-memory suggestion cache', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(1000);
+  try {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({status:'1',tips:[]})));
+    const provider = createAmapParkCarpoolProvider({key:'test',fetchImpl:fetchMock});
+    await provider.searchPlaces('首个地点');
+    await provider.searchPlaces('首个地点');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(31001);
+    await provider.searchPlaces('首个地点');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (let index=0;index<64;index++) await provider.searchPlaces(`地点${index}`);
+    await provider.searchPlaces('首个地点');
+    expect(fetchMock).toHaveBeenCalledTimes(67);
+  } finally { clock.mockRestore(); }
 });

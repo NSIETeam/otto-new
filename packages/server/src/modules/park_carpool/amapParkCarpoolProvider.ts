@@ -14,7 +14,7 @@ import type {
 interface AmapResponse {
   status?: unknown;
   info?: unknown;
-  pois?: unknown;
+  tips?: unknown;
   route?: unknown;
   locations?: unknown;
   regeocode?: unknown;
@@ -93,6 +93,8 @@ export function createAmapParkCarpoolProvider(input: {
   const key = input.key?.trim() || '';
   const fetchImpl = input.fetchImpl ?? fetch;
   const configured = Boolean(key);
+  // Public POI suggestions only: bounded, memory-only, never route or account data.
+  const suggestions = new Map<string, { expires: number; result: Promise<ParkCarpoolPlaceSuggestion[]> }>();
 
   function requireConfigured(): void {
     if (!configured) throw new Error('地图服务尚未配置');
@@ -201,34 +203,46 @@ export function createAmapParkCarpoolProvider(input: {
     },
     async searchPlaces(query, city): Promise<ParkCarpoolPlaceSuggestion[]> {
       requireConfigured();
-      const url = new URL('https://restapi.amap.com/v3/place/text');
-      url.search = new URLSearchParams({
-        key,
-        keywords: query,
-        offset: '12',
-        page: '1',
-        extensions: 'base',
-        ...(city ? { city, citylimit: 'true' } : {}),
-      }).toString();
-      const response = await request(fetchImpl, url);
-      const pois = Array.isArray(response.pois) ? response.pois : [];
-      return pois.flatMap((raw): ParkCarpoolPlaceSuggestion[] => {
-        if (!raw || typeof raw !== 'object') return [];
-        const poi = raw as Record<string, unknown>;
-        const id = string(poi.id);
-        const label = string(poi.name);
-        const coordinate = parseCoordinate(poi.location);
-        if (!id || !label || !coordinate) return [];
-        return [
-          {
-            id,
-            label,
-            coordinate,
-            address: string(poi.address),
-            district: string(poi.adname),
-          },
-        ];
+      const cacheKey = JSON.stringify([query, city ?? '']);
+      const cached = suggestions.get(cacheKey);
+      if (cached && cached.expires > Date.now()) return cached.result;
+      const lookup = async (): Promise<ParkCarpoolPlaceSuggestion[]> => {
+        const url = new URL('https://restapi.amap.com/v3/assistant/inputtips');
+        url.search = new URLSearchParams({
+          key,
+          keywords: query,
+          datatype: 'poi',
+          ...(city ? { city, citylimit: 'true' } : {}),
+        }).toString();
+        const response = await request(fetchImpl, url);
+        const pois = Array.isArray(response.tips) ? response.tips : [];
+        return pois.flatMap((raw): ParkCarpoolPlaceSuggestion[] => {
+          if (!raw || typeof raw !== 'object') return [];
+          const poi = raw as Record<string, unknown>;
+          const id = string(poi.id);
+          const label = string(poi.name);
+          const coordinate = parseCoordinate(poi.location);
+          if (!id || !label || !coordinate) return [];
+          return [
+            {
+              id,
+              label,
+              coordinate,
+              address: string(poi.address),
+              district: string(poi.district),
+            },
+          ];
+        });
+      };
+      const result = lookup();
+      const entry = { expires: Number.POSITIVE_INFINITY, result };
+      suggestions.delete(cacheKey);
+      suggestions.set(cacheKey, entry);
+      if (suggestions.size > 64) suggestions.delete(suggestions.keys().next().value!);
+      void result.then(() => { entry.expires = Date.now() + 30_000; }, () => {
+        if (suggestions.get(cacheKey) === entry) suggestions.delete(cacheKey);
       });
+      return result;
     },
     async planDrivingRoute(origin, destination): Promise<ParkCarpoolRoute> {
       requireConfigured();

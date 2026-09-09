@@ -256,7 +256,12 @@ describe('desktop packaging contract', () => {
     expect(files).toContain('!**/node_modules/@otto/native/Cargo.*');
     expect(files).toContain('!**/node_modules/@otto/native/bin/**');
     expect(files).toContain('node_modules/@otto/native/dist/index.js');
-    expect(packageJson.build).not.toHaveProperty('asarUnpack');
+    expect(packageJson.build.asarUnpack).toEqual([
+      '**/node_modules/sharp/**/*',
+      '**/node_modules/@img/sharp-*/**/*',
+    ]);
+    expect(packageJson.build.beforePack).toBe('scripts/before-pack.cjs');
+    expect(packageJson.build.files).toContain('!**/node_modules/@img/sharp-*/**');
     expect(packageJson.build.files).toContain(
       '!**/node_modules/pdf-parse/lib/pdf.js/v1.9.426/**',
     );
@@ -342,7 +347,10 @@ describe('desktop packaging contract', () => {
     expect(packageJson.build.files).toContain(
       'node_modules/@otto/native/dist/index.js',
     );
-    expect(packageJson.build).not.toHaveProperty('asarUnpack');
+    expect(packageJson.build.asarUnpack).toEqual([
+      '**/node_modules/sharp/**/*',
+      '**/node_modules/@img/sharp-*/**/*',
+    ]);
   });
 
   it('runs the shared app.asar content and size gate on every packaged platform', async () => {

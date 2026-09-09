@@ -272,6 +272,12 @@ jobs:
           path: native/otto-native/${{ matrix.target }}
           if-no-files-found: error
 
+  media-runtime:
+    needs: validate-source
+    permissions:
+      contents: read
+    uses: ./.github/workflows/media-runtime.yml
+
   build:
     name: Check, Build, Draft Release
     runs-on: macos-latest
@@ -281,6 +287,7 @@ jobs:
       - validate-source
       - linux-enterprise-deployment-integration
       - enterprise-upgrade-systemd
+      - media-runtime
       - sqlcipher-native
       - otto-native
     permissions:

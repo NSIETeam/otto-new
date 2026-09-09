@@ -1183,7 +1183,10 @@ export class EnterprisePolicyService {
       if (authorize && !(await authorize())) return doc;
       signal.throwIfAborted();
       let next = doc;
+      let providerReturned = false;
       try {
+        const extracted = await this.options.model.extract(doc, signal);
+        providerReturned = true;
         next = {
           ...doc,
           // Re-extraction replaces inferred metadata; omitted fields are unknown,
@@ -1198,7 +1201,7 @@ export class EnterprisePolicyService {
           supportEstimate: undefined,
           referenceOnly: false,
           error: undefined,
-          ...(await this.options.model.extract(doc, signal)),
+          ...extracted,
           id: doc.id,
           url: doc.url,
           sourceId: doc.sourceId,
@@ -1217,7 +1220,11 @@ export class EnterprisePolicyService {
           next.interpretationVersion !== POLICY_INTERPRETATION_VERSION
         )
           throw new Error('新版排除核验未完成');
-      } catch {
+      } catch (error) {
+        // A dispatched background request that rejects has an unknown paid
+        // outcome. Keep its durable cycle reservation; a received but invalid
+        // response remains a known validation failure. Preserve manual behavior.
+        if (boundedReads && !providerReturned) throw error;
         next = {
           ...doc,
           interpretationStatus: 'failed',

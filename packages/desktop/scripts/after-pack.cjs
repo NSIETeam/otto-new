@@ -324,6 +324,8 @@ function findNestedLibreOfficeBundles(appPath) {
 }
 
 async function afterPack(context) {
+  const { verifyDesktopSharpBeforeSigning } = await import('./sharp-packaging.mjs');
+  await verifyDesktopSharpBeforeSigning(context);
   verifyPackagedPayload(context);
   const ripgrepExecutablePath = verifyPackagedRipgrep(context);
   const sqlCipherBindingPath = copySqlCipherNativeAsset(context);

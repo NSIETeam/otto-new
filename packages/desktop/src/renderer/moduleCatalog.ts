@@ -69,7 +69,6 @@ export interface ParkModuleAuthorization {
   canViewStatistics: boolean;
   canViewStaffTasks: boolean;
   canUseCarpool?: boolean;
-  canUseMarket?: boolean;
   disabledReason?: string;
 }
 
@@ -99,7 +98,6 @@ type StaticAvailabilityRule =
   | 'park-statistics'
   | 'park-staff'
   | 'park-carpool'
-  | 'park-flea-market'
   | 'recruitment'
   | 'enterprise-memory'
   | 'auto-skill'
@@ -171,7 +169,7 @@ export const STATIC_MODULE_SPECS: readonly StaticModuleSpec[] = [
     id: 'park-flea-market', label: '跳蚤市场', category: 'park', icon: 'park-flea-market',
     description: '发现同园区个人闲置，带问题联系卖家，线下协商交接。',
     activation: { kind: 'dialog', dialog: 'park-flea-market' },
-    availabilityRule: 'park-flea-market',
+    availabilityRule: 'park',
   },
   {
     id: 'park-carpool', label: '拼车助手', category: 'park', icon: 'park-carpool',
@@ -309,7 +307,6 @@ function staticAvailability(
   if (rule === 'park-staff' && !context.parkAuthorization.canViewStaffTasks) {
     return 'hidden';
   }
-  if (rule === 'park-flea-market' && context.parkAuthorization.canUseMarket !== true) return 'hidden';
   if (rule === 'park-carpool' && context.parkAuthorization.canUseCarpool !== true) {
     return 'hidden';
   }

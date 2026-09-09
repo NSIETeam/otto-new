@@ -30,6 +30,25 @@ function fixture(run) {
 }
 
 describe('server third-party notice release contract', () => {
+  it('includes native sharp/libvips and the elected MPL combination, without claiming a native rebuild', () => {
+    const text = reviewedNotice.toString();
+    for (const required of ['sharp 0.35.4', 'libvips 8.18.6',
+      'LGPL-3.0-or-later', 'Mozilla Public License Version 2.0',
+      'sharp-libvips-corresponding-source-audit-20260909.md',
+      'BEGIN SHARP LIBVIPS-LICENSE', 'BEGIN SHARP THIRD-PARTY-NOTICES',
+      'BEGIN SHARP SHARP-LICENSE', 'BEGIN SHARP MOZILLA-MPL-2.0',
+    ]) expect(text.includes(required), required).toBe(true);
+  });
+  it('rejects interior edits or omission of every complete native license/notice block', () => fixture(root => {
+    for (const title of ['SHARP-LICENSE', 'LIBVIPS-LICENSE', 'THIRD-PARTY-NOTICES', 'MOZILLA-MPL-2.0']) {
+      const marker = `----- BEGIN SHARP ${title} -----\n`;
+      const original = reviewedNotice.toString().replaceAll('\r\n', '\n');
+      const offset = original.indexOf(marker) + marker.length;
+      expect(offset).toBeGreaterThan(marker.length);
+      writeFileSync(path.join(root, 'packages/server/NOTICE'), original.slice(0, offset + 100) + 'substitution' + original.slice(offset + 101));
+      expect(() => readServerNotice(root)).toThrow(/license|notice/i);
+    }
+  }));
   it('includes complete LGPL/GPL and HEIC provenance without inventing the missing ISC grant', () => {
     const text = reviewedNotice.toString();
     for (const required of [

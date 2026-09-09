@@ -14,9 +14,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   assertCleanSource,
   assertHeicLock,
+  assertSharpLock,
   buildCorrespondingSource,
   downloadSource,
   HEIC_SOURCE_INPUTS,
+  SHARP_RUNTIME_INPUTS,
   gitArchivePaths,
   readVerifiedCache,
   sourceAssetName,
@@ -39,7 +41,13 @@ const git = (root, ...args) =>
 const lock = () => ({
   lockfileVersion: 3,
   packages: {
-    'packages/server': { dependencies: { 'heic-decode': '2.1.0' } },
+    'packages/server': { dependencies: { 'heic-decode': '2.1.0', sharp: '0.35.4' } },
+    'node_modules/sharp': {
+      version: '0.35.4',
+      resolved: 'https://registry.npmjs.org/sharp/-/sharp-0.35.4.tgz',
+      integrity: 'sha512-n++8XWcj+jCOr2IOl7h8LbKnGBDY4aPbmprMONBNFdn0ImXqpGVv5zliDs0V9HbmbCQLpbuo2ej9rAoOQTvMDA==',
+    },
+    ...Object.fromEntries(Object.entries(SHARP_RUNTIME_INPUTS).map(([name, entry]) => [`node_modules/${name}`, { ...entry }])),
     'node_modules/heic-decode': {
       version: '2.1.0',
       resolved:
@@ -77,6 +85,39 @@ function repo() {
   return root;
 }
 describe('HEIC corresponding-source release inputs', () => {
+  it('rejects native version, origin or integrity drift on all five shipped targets', () => {
+    expect(assertSharpLock(lock())).toHaveLength(6);
+    for (const name of ['sharp', ...Object.keys(SHARP_RUNTIME_INPUTS)]) {
+      for (const property of ['version', 'resolved', 'integrity']) {
+        const changed = lock();
+        changed.packages[`node_modules/${name}`][property] = 'substituted';
+        expect(() => assertSharpLock(changed), `${name}:${property}`).toThrow(/locked/);
+      }
+      const missing = lock();
+      delete missing.packages[`node_modules/${name}`];
+      expect(() => assertSharpLock(missing)).toThrow(/locked/);
+    }
+    const ranged = lock();
+    ranged.packages['packages/server'].dependencies.sharp = '^0.35.4';
+    expect(() => assertSharpLock(ranged)).toThrow(/reviewed/);
+  });
+  it('also retains the reviewed sharp/libvips sources, build recipes, relinking inputs and elected MPL license', () => {
+    for (const file of [
+      'sharp-0.35.4.tgz', 'sharp-0.35.4-source.tar.gz',
+      'sharp-libvips-1.3.3-build-source.tar.gz', 'sharp-libvips-1.3.3-posix.sh',
+      'build-win64-mxe-8.18.6-source.tar.gz', 'libvips-8.18.6-source-release.tar.xz',
+      'glib-2.89.4-source.tar.xz', 'pango-1.58.2-source.tar.xz',
+      'librsvg-2.62.91-source.tar.xz', 'fribidi-1.0.16-source.tar.xz',
+      'libexif-0.6.26-source.tar.xz', 'proxy-libintl-0.5-source.tar.gz',
+      'cairo-1.18.4-source.tar.xz', 'glib-without-gregex.patch',
+      'libvips-cpp-soversion.patch', 'sharp-libvips-dev-1.3.3.tgz',
+      'sharp-libvips-win32-x64-1.3.3.tgz', 'vips-dev-x64-web-8.18.6-static.zip',
+      'mxe-observed-d973945-source.tar.gz',
+      'sharp-libvips-1.3.3-THIRD-PARTY-NOTICES.md', 'Mozilla-MPL-2.0.txt',
+    ]) expect(HEIC_SOURCE_INPUTS.some(input => input.file === file), file).toBe(true);
+    expect(new Set(HEIC_SOURCE_INPUTS.map(input => input.file)).size).toBe(HEIC_SOURCE_INPUTS.length);
+    expect(HEIC_SOURCE_INPUTS.every(input => input.bytes <= 64 * 1024 * 1024)).toBe(true);
+  });
   it('rejects arbitrary source URLs, unofficial redirects and oversized network bodies', async () => {
     const spec = HEIC_SOURCE_INPUTS.find(
       (source) => source.file === 'heic-decode-2.1.0-npm.tgz',

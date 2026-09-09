@@ -21,9 +21,9 @@ import { gunzipSync } from 'node:zlib';
 const manifestPath = fileURLToPath(
   new URL('./heic-corresponding-source-inputs.json', import.meta.url),
 );
-export const HEIC_SOURCE_INPUTS = Object.freeze(
-  JSON.parse(readFileSync(manifestPath, 'utf8')).sources,
-);
+const reviewedInputs = JSON.parse(readFileSync(manifestPath, 'utf8'));
+export const HEIC_SOURCE_INPUTS = Object.freeze(reviewedInputs.sources);
+export const SHARP_RUNTIME_INPUTS = Object.freeze(reviewedInputs.sharpRuntimeInputs);
 const requireThat = (condition, message) => {
   if (!condition) throw new Error(message);
 };
@@ -83,8 +83,26 @@ export function assertCleanSource(repoRoot) {
   const lockBytes = git(repoRoot, 'show', `${sourceCommit}:package-lock.json`);
   const version = JSON.parse(packageBytes).version;
   sourceAssetName(version);
-  const dependencies = assertHeicLock(JSON.parse(lockBytes));
+  const dependencies = [
+    ...assertHeicLock(JSON.parse(lockBytes)),
+    ...assertSharpLock(JSON.parse(lockBytes)),
+  ];
   return { sourceCommit, version, packageBytes, lockBytes, dependencies };
+}
+export function assertSharpLock(lock) {
+  const source = HEIC_SOURCE_INPUTS.find(input => input.file === 'sharp-0.35.4.tgz');
+  const reviewed = {
+    sharp: { version: '0.35.4', resolved: source.url, integrity: source.integrity },
+    ...SHARP_RUNTIME_INPUTS,
+  };
+  requireThat(lock?.packages?.['packages/server']?.dependencies?.sharp === '0.35.4',
+    'source sidecar requires the exact reviewed sharp lock');
+  return Object.entries(reviewed).map(([name, expected]) => {
+    const entry = lock.packages[`node_modules/${name}`];
+    requireThat(['version', 'resolved', 'integrity'].every(key => entry?.[key] === expected[key]),
+      `unreviewed locked ${name} source`);
+    return { name, ...entry };
+  });
 }
 export function verifyDownload(bytes, spec) {
   requireThat(
@@ -136,6 +154,10 @@ export async function downloadSource(spec, fetchImpl = globalThis.fetch) {
     'registry.npmjs.org',
     'www.gnu.org',
     'raw.githubusercontent.com',
+    'download.gnome.org',
+    'cairographics.org',
+    'gist.githubusercontent.com',
+    'www.mozilla.org',
   ]);
   let url = new URL(spec.url);
   const controller = new AbortController();
@@ -399,6 +421,7 @@ export async function buildCorrespondingSource({
     }
     for (const [from, to] of [
       ['docs/heic-corresponding-source.md', 'README.md'],
+      ['docs/sharp-libvips-corresponding-source-audit-20260909.md', 'SHARP-LIBVIPS.md'],
       ['packages/server/NOTICE', 'NOTICE'],
       ['scripts/heic-corresponding-source-inputs.json', 'upstream-inputs.json'],
     ]) {
@@ -431,6 +454,7 @@ export async function buildCorrespondingSource({
       packageLockSha256: sha256(snapshot.lockBytes),
       upstreamInputs: selected,
       codecLocks,
+      reviewedSharpRuntimeInputs: SHARP_RUNTIME_INPUTS,
       completeTrackedSource: source.files,
       buildEnvironment: {
         node: process.version,
@@ -440,6 +464,8 @@ export async function buildCorrespondingSource({
         tar: execFileSync('tar', ['--version']).toString().split(/\r?\n/)[0],
       },
       upstreamWasmRebuilt: false,
+      upstreamNativeRebuilt: false,
+      completeNativeBuildClosureAttested: false,
       legalComplianceAttestation: false,
     };
     writeFileSync(

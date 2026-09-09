@@ -1,4 +1,4 @@
-# HEIC library notices, corresponding source and recombination
+# HEIC and sharp/libvips source, notices and recombination
 
 This document accompanies Otto's separate `otto-<version>-corresponding-source.tar.gz`
 download. It is an engineering delivery description, not legal certification. The
@@ -28,6 +28,9 @@ the display copy's complete text, without a whitespace-gate exception.
   `upstream-inputs.json`. The libheif Git submodule source is supplied separately:
   GitHub's libheif-emscripten archive does not expand submodules.
 - `NOTICE` and this `README.md`: license/attribution texts and rebuild instructions.
+- `SHARP-LIBVIPS.md`: the native stack's reviewed source/build/relinking routes,
+  actual five-target component versions, and explicit upstream provenance limits.
+  The same full document is in `otto-source.tar.gz`.
 
 Publish the sidecar and its `.sha256` alongside **each binary release download**,
 with clear links and equivalent no-additional-charge access. The sidecar is not
@@ -159,10 +162,15 @@ the checkout. stdout is JSON with `archivePath`, `sha256Path`, `sourceCommit`,
 `version`, `sha256`; assets are never silently overwritten. Each installer/ASAR
 must independently retain NOTICE and the shipped dependency license files.
 
-The sidecar records sharp/libvips entries from the exact lock for traceability;
-this HEIC manifest alone does not assert complete corresponding-source delivery
-for another codec stack. Any additional LGPL runtime needs its own reviewed source
-inputs and notices before a broader compliance claim. The upstream ISC text gap,
+The shared manifest now also supplies 21 reviewed sharp/libvips source, build,
+patch, development/linking and license inputs. Its five shipped native-target
+records are checked against the exact release lock before construction. See
+`SHARP-LIBVIPS.md` (or `docs/sharp-libvips-corresponding-source-audit-20260909.md`
+in the full application source) for the native rebuild procedure and limits.
+This is not a native rebuild/replacement execution proof or an assertion that
+upstream's post-update Cargo lock, linked crate set, Windows MXE build revision
+or build image digest have been fully recovered. `source-inputs.json` explicitly
+records these non-attestations. The upstream ISC text gap,
 toolchain byte-reproduction limitations, final-installation testing and any
 applicable legal review remain explicitly distinguishable from these engineering
 checks. No codec patent analysis is claimed.

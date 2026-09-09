@@ -75,4 +75,6 @@ OTTO_AMAP_WEB_SERVICE_KEY=<管理员在服务器秘密配置中提供>
 
 ## 本次配置修复验证
 
+后续增量证据：2026-09-09 05:36:57Z，父任务使用实际重建的 provider 和 group planner 对公开杭州地标运行现有 live-map 验收，搜索、反查、静态地图、GPS 转换、139 点/7516 米路线及双人 groupDetour 均通过。脱敏收据 `D:/otto/diagnostics/live-map-product-20260909.json` 绑定三个执行模块 SHA。这已补上真实 provider 调用证据；没有运行 Windows 系统定位、没有真实三人完整通信旅程，也没有修改生产。上文历史交付报告的证据缺口不得据此全部标为关闭。
+
 新增配置测试先出现 3 个确定失败（白名单拒绝 flags、缺输出、清单缺键），修复后 4/4 通过；与旧 installer suite 合计 49 通过、4 个既有平台限定测试在 Windows 跳过。使用真实 Bash 执行解析/安装输出、未知键拒绝、值不执行、默认关闭/未设 pilot、显式空值不悄悄改为默认，以及实际升级脚本内嵌 env 转换。直接载入整合分支 `readCarpoolConfig` 核对了全部 15 个参数与 3 个非法输入拒绝。ESLint、diff-check、code-map:check 和 common/install Bash 语法通过。本机 doctor 唯一失败为 npm 命令 PATH 检测；Node/vitest 直接调用确实执行，未宣称 doctor 全通过。

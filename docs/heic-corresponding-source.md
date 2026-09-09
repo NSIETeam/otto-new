@@ -32,6 +32,17 @@ the display copy's complete text, without a whitespace-gate exception.
   actual five-target component versions, and explicit upstream provenance limits.
   The same full document is in `otto-source.tar.gz`.
 
+### Extracting the application source on Windows
+
+The Git source archive preserves long UTF-8 names using PAX metadata. In the
+2026-09-09 Windows check, built-in bsdtar 3.8.4 extracted the outer sidecar but
+failed to extract one long Chinese path from `otto-source.tar.gz`. GNU tar 1.35
+extracted all 3,434 files of the tested snapshot, and every file matched its Git
+blob. Use GNU tar (verify `tar --version`) or an isolated Linux environment for
+the inner archive; an extraction error is not permission to omit or rename source
+files. Verify the extracted inventory against `source-inputs.json`. These checks
+do not claim every Windows archive application is compatible.
+
 Publish the sidecar and its `.sha256` alongside **each binary release download**,
 with clear links and equivalent no-additional-charge access. The sidecar is not
 inside the installer and is not counted against the installer-size ceiling. Keep

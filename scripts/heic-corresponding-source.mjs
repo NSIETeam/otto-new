@@ -16,6 +16,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 
 const manifestPath = fileURLToPath(
   new URL('./heic-corresponding-source-inputs.json', import.meta.url),
@@ -207,6 +208,133 @@ function trackedFiles(repoRoot, sourceCommit) {
       return { path: name, mode, gitBlob: object };
     });
 }
+// Read names from Git's ustar/PAX bytes, not the locale-sensitive display of `tar -t`.
+// In particular Windows bsdtar can mix UTF-8 and octal display escapes in one name.
+export function gitArchivePaths(archive) {
+  const data = gunzipSync(archive, { maxOutputLength: 512 * 1024 * 1024 });
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const cString = (field) => {
+    const end = field.indexOf(0);
+    return decoder.decode(end < 0 ? field : field.subarray(0, end));
+  };
+  const octal = (field) => {
+    const value = field.toString('ascii').replaceAll('\0', '').trim();
+    requireThat(/^[0-7]+$/.test(value), 'invalid Git tar numeric field');
+    const number = Number.parseInt(value, 8);
+    requireThat(Number.isSafeInteger(number), 'Git tar numeric overflow');
+    return number;
+  };
+  const readPax = (bytes) => {
+    const result = {};
+    for (let offset = 0; offset < bytes.length;) {
+      const space = bytes.indexOf(32, offset);
+      requireThat(
+        space > offset && space - offset <= 10,
+        'invalid Git PAX length',
+      );
+      const lengthText = bytes.subarray(offset, space).toString('ascii');
+      requireThat(/^[1-9]\d*$/.test(lengthText), 'invalid Git PAX length');
+      const end = offset + Number(lengthText);
+      requireThat(
+        end > space + 2 && end <= bytes.length && bytes[end - 1] === 10,
+        'truncated Git PAX record',
+      );
+      const equals = bytes.indexOf(61, space + 1);
+      requireThat(
+        equals > space + 1 && equals < end - 1,
+        'invalid Git PAX field',
+      );
+      const key = bytes.subarray(space + 1, equals).toString('ascii');
+      requireThat(
+        /^[A-Za-z0-9_.-]+$/.test(key) && !Object.hasOwn(result, key),
+        'duplicate or invalid Git PAX field',
+      );
+      Object.defineProperty(result, key, {
+        value: decoder.decode(bytes.subarray(equals + 1, end - 1)),
+        enumerable: true,
+      });
+      offset = end;
+    }
+    return result;
+  };
+  let global = {};
+  let local = {};
+  let offset = 0;
+  let ended = false;
+  const seen = new Set();
+  const files = [];
+  while (offset + 512 <= data.length) {
+    const header = data.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) {
+      requireThat(
+        data.length - offset >= 1024 &&
+          data.subarray(offset).every((byte) => byte === 0),
+        'invalid Git tar terminator',
+      );
+      ended = true;
+      break;
+    }
+    let checksum = 0;
+    for (let index = 0; index < 512; index++)
+      checksum += index >= 148 && index < 156 ? 32 : header[index];
+    requireThat(
+      checksum === octal(header.subarray(148, 156)),
+      'Git tar checksum mismatch',
+    );
+    requireThat(
+      header.subarray(257, 262).toString('ascii') === 'ustar',
+      'unsupported Git tar format',
+    );
+    const size = octal(header.subarray(124, 136));
+    const next = offset + 512 + Math.ceil(size / 512) * 512;
+    requireThat(next <= data.length, 'truncated Git tar member');
+    const payload = data.subarray(offset + 512, offset + 512 + size);
+    const type = String.fromCharCode(header[156]);
+    offset = next;
+    if (type === 'g' || type === 'x') {
+      if (type === 'g') global = { ...global, ...readPax(payload) };
+      else local = { ...local, ...readPax(payload) };
+      continue;
+    }
+    requireThat(
+      ['0', '\0', '2', '5'].includes(type),
+      'unsupported Git tar member type',
+    );
+    const attributes = { ...global, ...local };
+    local = {};
+    if (attributes.size !== undefined)
+      requireThat(
+        /^\d+$/.test(attributes.size) && Number(attributes.size) === size,
+        'unsupported Git PAX size override',
+      );
+    let name = attributes.path;
+    if (name === undefined) {
+      const prefix = cString(header.subarray(345, 500));
+      name = `${prefix ? `${prefix}/` : ''}${cString(header.subarray(0, 100))}`;
+    }
+    requireThat(
+      name.startsWith('otto-source/') && !/[\r\n\0]/.test(name),
+      'unexpected Git source archive path',
+    );
+    requireThat(!seen.has(name), 'duplicate Git source archive path');
+    seen.add(name);
+    if (type === '5')
+      requireThat(
+        name.endsWith('/') && size === 0,
+        'invalid Git source directory',
+      );
+    else {
+      requireThat(!name.endsWith('/'), 'invalid Git source file');
+      files.push(name.slice('otto-source/'.length));
+    }
+  }
+  requireThat(
+    ended && Object.keys(local).length === 0,
+    'incomplete Git tar archive',
+  );
+  return files.sort();
+}
+
 export function writeGitSourceArchive(repoRoot, output, sourceCommit) {
   requireThat(!existsSync(output), 'refusing to overwrite source archive');
   const files = trackedFiles(repoRoot, sourceCommit);
@@ -218,20 +346,7 @@ export function writeGitSourceArchive(repoRoot, output, sourceCommit) {
     `--output=${output}`,
     sourceCommit,
   );
-  const listed = execFileSync('tar', ['-tzf', output], {
-    maxBuffer: 32 * 1024 * 1024,
-  })
-    .toString()
-    .split(/\r?\n/)
-    .filter((name) => name && !name.endsWith('/'))
-    .map((name) => {
-      requireThat(
-        name.startsWith('otto-source/'),
-        'unexpected source archive root',
-      );
-      return name.slice('otto-source/'.length);
-    })
-    .sort();
+  const listed = gitArchivePaths(readFileSync(output));
   requireThat(
     JSON.stringify(listed) ===
       JSON.stringify(files.map((file) => file.path).sort()),

@@ -9,6 +9,7 @@ import {
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   assertCleanSource,
@@ -16,6 +17,7 @@ import {
   buildCorrespondingSource,
   downloadSource,
   HEIC_SOURCE_INPUTS,
+  gitArchivePaths,
   readVerifiedCache,
   sourceAssetName,
   verifyDownload,
@@ -225,5 +227,46 @@ describe('HEIC corresponding-source release inputs', () => {
         assertCleanSource(root).sourceCommit,
       ),
     ).toThrow(/complete|omitted/);
+  });
+
+  it('preserves real UTF-8 Chinese names and long PAX paths without parsing bsdtar display escaping', () => {
+    const root = repo();
+    const names = [
+      'docs/Otto-政策智能服务-PRD-v1.3-修订版.md',
+      `docs/${'政策'.repeat(30)}/对应源码-${'构建'.repeat(15)}.md`,
+    ];
+    for (const name of names) {
+      const target = path.join(root, name);
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, 'real UTF-8 source');
+    }
+    git(root, 'add', '.');
+    git(
+      root,
+      '-c',
+      'user.name=Source test',
+      '-c',
+      'user.email=source-test@invalid.example',
+      'commit',
+      '-qm',
+      'unicode and PAX source paths',
+    );
+    const archive = path.join(temp(), 'unicode-source.tar.gz');
+    const receipt = writeGitSourceArchive(
+      root,
+      archive,
+      assertCleanSource(root).sourceCommit,
+    );
+    expect(receipt.fileCount).toBe(4);
+    expect(receipt.files.map((file) => file.path)).toEqual(
+      expect.arrayContaining(names),
+    );
+    const raw = gunzipSync(readFileSync(archive));
+    const changed = Buffer.from(raw);
+    changed[0] ^= 1;
+    expect(() => gitArchivePaths(gzipSync(changed))).toThrow('checksum');
+    expect(() => gitArchivePaths(gzipSync(raw.subarray(0, 513)))).toThrow(
+      /truncated|incomplete/,
+    );
   });
 });

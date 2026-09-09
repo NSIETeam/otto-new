@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import asar from '@electron/asar';
 import { testMediaRuntime } from './test-media-runtime.mjs';
 import { collectEnterpriseRuntimeDependencies } from './enterprise-runtime-dependencies.mjs';
-import { probePackagedSharp, verifyPackagedSharp } from '../packages/desktop/scripts/sharp-packaging.mjs';
+import { probePackagedSharp, verifyPackagedSharp, includeDesktopMediaRuntimeFile } from '../packages/desktop/scripts/sharp-packaging.mjs';
 
 // Narrow real-ASAR acceptance fixture, not a substitute for the full desktop
 // builder's afterPack source-byte and native-host executable probes.
@@ -21,7 +21,8 @@ export async function testDesktopMediaRuntime({ repoRoot, workDirectory, target,
     const selected = new Set(['sharp', 'heic-decode', 'libheif-js', 'detect-libc', 'semver', '@img/colour']);
     const closure = collectEnterpriseRuntimeDependencies({ repoRoot, sharpTargets: [target] });
     const keepFile = candidate => !/\.(?:ts|map|h|cc|cpp|c)$/.test(candidate)
-      && !/[/\\]sharp[/\\](?:src|install)[/\\]/.test(candidate) && path.basename(candidate) !== 'README.md';
+      && !/[/\\]sharp[/\\](?:src|install)[/\\]/.test(candidate) && path.basename(candidate) !== 'README.md'
+      && includeDesktopMediaRuntimeFile(candidate);
     for (const pkg of closure.dependencies.filter(pkg => selected.has(pkg.name) || pkg.name.startsWith('@img/sharp-'))) {
       cpSync(path.join(source, pkg.target), path.join(fixtureRoot, pkg.target), { recursive: true, filter: keepFile });
     }

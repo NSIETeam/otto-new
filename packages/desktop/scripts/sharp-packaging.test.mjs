@@ -6,12 +6,30 @@ import os from 'node:os';
 import path from 'node:path';
 import asar from '@electron/asar';
 import { describe, expect, it } from 'vitest';
-import { desktopSharpTarget, sharpTargetFileSet, SHARP_UNPACK_PATTERNS, verifyPackagedSharp } from './sharp-packaging.mjs';
+import { desktopSharpTarget, sharpTargetFileSet, SHARP_UNPACK_PATTERNS, verifyPackagedSharp, LIBHEIF_UNUSED_DESKTOP_FILES, includeDesktopMediaRuntimeFile } from './sharp-packaging.mjs';
 
 const require = createRequire(import.meta.url);
 const { getFileMatchers } = require('app-builder-lib/out/fileMatcher.js');
 const desktopRoot = path.resolve(import.meta.dirname, '..');
 const packageJson = JSON.parse(readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'));
+
+it('prunes only three unused libheif variants with the real builder filter, preserving both supported entries and every license', () => {
+  const { FileMatcher } = require('app-builder-lib/out/fileMatcher.js');
+  const filter = new FileMatcher(desktopRoot, desktopRoot, value => value, ['**/*', ...packageJson.build.files.filter(value => typeof value === 'string' && value.startsWith('!'))]).createFilter();
+  const metadata = { isDirectory: () => false };
+  expect(LIBHEIF_UNUSED_DESKTOP_FILES).toEqual(['libheif-wasm/libheif-bundle.mjs', 'libheif-wasm/libheif.wasm', 'libheif-wasm/libheif.js']);
+  for (const relative of LIBHEIF_UNUSED_DESKTOP_FILES) {
+    const file = path.join(desktopRoot, 'node_modules/libheif-js', relative);
+    expect(filter(file, metadata), relative).toBe(false);
+    expect(includeDesktopMediaRuntimeFile(file), relative).toBe(false);
+  }
+  for (const relative of ['index.js', 'libheif/libheif.js', 'wasm-bundle.js', 'libheif-wasm/libheif-bundle.js', 'package.json', 'LICENSE', 'libheif/LICENSE', 'libheif-wasm/LICENSE']) {
+    const file = path.join(desktopRoot, 'node_modules/libheif-js', relative);
+    expect(filter(file, metadata), relative).toBe(true);
+    expect(includeDesktopMediaRuntimeFile(file), relative).toBe(true);
+  }
+  expect(includeDesktopMediaRuntimeFile(path.join(desktopRoot, 'node_modules/different-runtime/libheif-wasm/libheif.js'))).toBe(true);
+});
 
 it('matches only the per-target copied FileSet while the installed host-native packages stay excluded', () => {
   const staging = path.resolve(os.tmpdir(), 'otto-sharp-matcher-fixture');
@@ -67,6 +85,7 @@ async function packagedFixture(variant, operation) {
     if (variant === 'missing-wasm') delete files['node_modules/libheif-js/libheif-wasm/libheif-bundle.js'];
     if (variant === 'wrong-platform') files['node_modules/@img/sharp-linux-x64/package.json'] = '{}';
     if (variant === 'missing-native') delete files['node_modules/@img/sharp-win32-x64/lib/sharp.node'];
+    if (variant === 'unused-heif') files['node_modules/libheif-js/libheif-wasm/libheif.wasm'] = 'unused duplicate';
     for (const [relative, value] of Object.entries(files)) {
       const target = path.join(appRoot, relative);
       mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, value);
@@ -81,7 +100,7 @@ describe('real ASAR structural boundary (native execution is a separate smoke)',
   it('accepts only matching unpacked native and complete JS/WASM runtime files', () => packagedFixture('valid', (archive, sourceRoot) => {
     expect(verifyPackagedSharp(archive, { target: 'win32-x64', sourceRoot })).toMatchObject({ applicable: true, packages: ['@img/sharp-win32-x64'] });
   }));
-  it.each(['wrong-native', 'wrong-js', 'missing-wasm', 'wrong-platform', 'missing-native', 'packed-native'])('rejects %s', variant => packagedFixture(variant, (archive, sourceRoot) => {
+  it.each(['wrong-native', 'wrong-js', 'missing-wasm', 'wrong-platform', 'missing-native', 'packed-native', 'unused-heif'])('rejects %s', variant => packagedFixture(variant, (archive, sourceRoot) => {
     expect(() => verifyPackagedSharp(archive, { target: 'win32-x64', sourceRoot })).toThrow();
   }));
 });

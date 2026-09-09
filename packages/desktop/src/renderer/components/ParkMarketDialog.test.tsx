@@ -700,3 +700,23 @@ it('uses server ownership when opening an owned item from the market list', asyn
   expect(await screen.findByRole('button', { name: '编辑' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '联系卖家' })).toBeNull();
 });
+
+it('shows a retry after list failure instead of claiming the market is empty', async () => {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+  let fail = true;
+  Object.assign(window.otto, {
+    enterpriseMarketDrafts: vi.fn(async () => []),
+    enterpriseParkMarket: vi.fn(async ({ path }: { path: string }) => {
+      if (path === '/settings') return { enabled: true, ready: true, search: { state: 'ready' } };
+      if (fail) throw new Error('连接失败，请重试');
+      return { items: [] };
+    }),
+  });
+  render(<ParkMarketDialog open accountId="retry-buyer" onClose={() => {}} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('连接失败');
+  expect(screen.queryByText('园区还没有在售闲置，可以发布第一件物品。')).toBeNull();
+  fail = false;
+  fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
+  expect(await screen.findByText('园区还没有在售闲置，可以发布第一件物品。')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '发布闲置' }).hasAttribute('disabled')).toBe(false);
+});

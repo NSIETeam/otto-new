@@ -8,7 +8,7 @@ import {
   createMarketReadiness,
   assertLocalMarketPostgres,
 } from './fleaMarketReadiness.js';
-it('requires explicit isolated local acceptance, completed probes and a live worker; never enables production with an environment toggle', async () => {
+it('keeps acceptance isolation separate from normal service health', async () => {
   const root = mkdtempSync(join(tmpdir(), 'otto-market-acceptance-'));
   try {
     const env = { NODE_ENV: 'development', OTTO_MARKET_LOCAL_ACCEPTANCE: '1' };
@@ -68,8 +68,9 @@ it('requires explicit isolated local acceptance, completed probes and a live wor
     production.worker(true);
     await production.initialize();
     expect(production.status()).toMatchObject({
-      ready: false,
-      blocked: ['production-release'],
+      ready: true,
+      mode: 'standard',
+      blocked: [],
     });
   } finally {
     rmSync(root, { recursive: true });

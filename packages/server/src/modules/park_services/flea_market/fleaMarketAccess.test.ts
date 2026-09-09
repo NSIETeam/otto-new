@@ -59,3 +59,11 @@ it('requires per-listing grant and revokes history detail on membership loss, re
   );
   expect(canReadHistory(actor, { ...listing, cleanedAt: 1 }, true)).toBe(false);
 });
+
+it('allows an unconfigured module without weakening membership or explicit pause checks', () => {
+  const defaults = { ...config, rules: '', responsibleAccountId: '', contact: '' };
+  expect(canDiscover(actor, defaults, 'P')).toBe(true);
+  expect(canDiscover(actor, { ...defaults, enabled: false }, 'P')).toBe(false);
+  expect(canDiscover({ ...actor, enterpriseEnabled: false }, defaults, 'P')).toBe(false);
+  expect(canDiscover({ ...actor, parkActive: false }, defaults, 'P')).toBe(false);
+});

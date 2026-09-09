@@ -79,19 +79,9 @@ for (const [backend, harness] of [
       });
     try {
       expect((await call('/mine', '')).status).toBe(401);
-      expect((await call('', 'buyer')).status).toBe(403);
-      expect(
-        (
-          await call('/settings/P', 'stranger', 'PUT', {
-            requestId: 'config',
-            expectedVersion: 0,
-            enabled: true,
-            rules: '个人闲置实物，禁止广告',
-            responsibleAccountId: 'stranger',
-            contact: '园区运营',
-          })
-        ).status,
-      ).toBe(200);
+      const empty = await call('', 'buyer');
+      expect(empty.status).toBe(200);
+      expect(await empty.json()).toMatchObject({ items: [] });
       const bytes = await sharp({
         create: { width: 32, height: 24, channels: 3, background: 'blue' },
       })
@@ -117,6 +107,18 @@ for (const [backend, harness] of [
         requestId: 'publish',
       });
       expect(publish.status).toBe(200);
+      expect(
+        (
+          await call('/settings/P', 'stranger', 'PUT', {
+            requestId: 'config',
+            expectedVersion: 0,
+            enabled: true,
+            rules: '个人闲置实物，禁止广告',
+            responsibleAccountId: 'stranger',
+            contact: '园区运营',
+          })
+        ).status,
+      ).toBe(200);
       const item = (await publish.json()) as { id: string; version: number };
       expect((await call(`/images/${image.id}`, 'buyer')).status).toBe(200);
       expect((await call(`/images/${image.id}`, 'outsider')).status).toBe(404);

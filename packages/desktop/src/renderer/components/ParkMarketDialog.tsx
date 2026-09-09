@@ -940,13 +940,19 @@ function MarketContent({
           {error}
         </p>
       )}
+      {error && ['market', 'mine', 'favorites'].includes(view) && (
+        <button type="button" disabled={busy} onClick={() => {
+          void marketRequest<Settings>('/settings').then(setSettings).catch((e) => setError(reasonText(e)));
+          void load();
+        }}>重新加载</button>
+      )}
       {notice && <p role="status">{notice}</p>}
       {settings?.search?.state === 'backfilling' && (
         <p role="status">搜索正在准备中，请稍后重试；仍可管理本人发布记录。</p>
       )}
       {settings && (!settings.enabled || !settings.ready) && (
         <p role="status">
-          {settings.ready ? '园区市场已暂停。' : '市场服务尚未就绪。'}
+          {settings.ready ? '园区市场已暂停。' : '商品服务暂时无法使用，请稍后重新加载。'}
           本人发布记录仍可管理。
         </p>
       )}
@@ -1104,12 +1110,15 @@ function MarketContent({
           ))}
           {!visibleItems.length &&
             !busy &&
+            !error &&
             (view !== 'mine' || ownFilter !== 'draft') && (
               <p>
                 {view === 'market'
                   ? appliedQuery || category || free || unreserved || min || max
                     ? '没有符合当前搜索与筛选条件的商品，可调整条件后重试。'
-                    : '园区还没有在售闲置，可以发布第一件物品。'
+                    : settings?.enabled && settings.ready
+                      ? '园区还没有在售闲置，可以发布第一件物品。'
+                      : '暂无可展示的商品。'
                   : '当前分类暂无记录'}
               </p>
             )}

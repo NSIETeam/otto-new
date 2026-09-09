@@ -67,12 +67,11 @@ export function createMarketReadiness(input: {
     status() {
       const blocked = [...checks].filter(([, ok]) => !ok).map(([name]) => name);
       if (!active) blocked.push('maintenance-worker');
-      if (!input.localAcceptance) blocked.push('production-release');
       return {
         protocol: 'park_flea_market_protocol_v1',
         mode: input.localAcceptance
           ? 'isolated-local-acceptance'
-          : 'production-closed',
+          : 'standard',
         ready: blocked.length === 0,
         blocked,
       };

@@ -27,6 +27,7 @@ it('configuration requires explicit market role, valid responsible member and se
       },
     };
     const settings = createMarketSettings(deps, () => false);
+    expect(await createMarketSettings(deps, () => true).read('buyer')).toMatchObject({ enabled: true, ready: true, version: 0 });
     const input = {
       requestId: 'config',
       expectedVersion: 0,

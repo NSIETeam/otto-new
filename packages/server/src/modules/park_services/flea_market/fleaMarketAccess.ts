@@ -25,10 +25,7 @@ export function canDiscover(
   return (
     samePark(actor, parkId) &&
     config.enabled &&
-    config.ready &&
-    !!config.rules &&
-    !!config.responsibleAccountId &&
-    !!config.contact
+    config.ready
   );
 }
 export function canManageOwn(

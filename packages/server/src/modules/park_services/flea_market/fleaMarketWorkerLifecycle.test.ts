@@ -10,7 +10,7 @@ for(const [backend,harness] of [['sqlite',sqliteMarketHarness],['postgres',postg
   const h=await harness();const root=mkdtempSync(join(tmpdir(),'market-worker-'));
   try{
    const base=await marketServiceFixture(h.repository);
-   const app=createMarketApplication({...base,localAcceptance:true,objects:createEncryptedObjectStore({root,keyProvider:{getKey:()=>Buffer.alloc(32,17),clear(){}}})});
+   const app=createMarketApplication({...base,localAcceptance:false,objects:createEncryptedObjectStore({root,keyProvider:{getKey:()=>Buffer.alloc(32,17),clear(){}}})});
    let registrations=0; let stops=0;
    const registry={register:()=>{registrations++;return()=>{stops++;};}};
    const stop=app.start(registry as never);expect(app.start(registry as never)).toBe(stop);

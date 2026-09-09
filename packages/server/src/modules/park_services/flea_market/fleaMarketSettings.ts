@@ -37,7 +37,7 @@ export function createMarketSettings(
           ),
         )
       : {
-          enabled: false,
+          enabled: true,
           timezone: 'Asia/Shanghai',
           rules: '',
           responsibleAccountId: '',

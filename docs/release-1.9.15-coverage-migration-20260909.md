@@ -126,7 +126,17 @@ waits for the reloaded ticket and unread counts, with three additional cases for
 read timestamps before, equal to, and after the reply. All 65 focused park
 service cases pass; actual line 148 and its enclosing false arm are now observed.
 Product code, baseline maps and gate rules are unchanged. The second complete
-Windows run is in progress; focused success is not full-suite approval.
+Windows run `dc842ac3-b59f-4727-8602-b4a778de5bdb` then passed all 2,077 tests
+with native exit 0 but correctly rejected a separate, previously incidental
+equal-file-mtime comparison in account synchronization. Its coverage SHA-256 is
+`560d7692ca72cbb0f18c7c08a1390ca5302b926e4711b8647fe20bee9d0b519c`.
+The new real-filesystem test explicitly fixes file modification times and
+checks newest-file priority, deterministic equal-time ordering, the 8 MiB
+payload limit, hashes and preservation of files omitted from the upload.
+All six focused account-sync cases pass. A complete scan of the three retained
+maps identified no other newly uncovered baseline sites; this is not a guarantee
+against all future timing variation. Neither baseline nor gate was relaxed.
+Another complete Windows run and the final-source Mac CI are still required.
 
 The runner/wiring and reviewed baseline import are implemented. Resolve the
 actual `ParkServicesPlugin` site rejection without hiding the missed observation

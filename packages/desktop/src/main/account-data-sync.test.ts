@@ -128,6 +128,45 @@ afterEach(async () => {
 });
 
 describe('account data sync', () => {
+  it('keeps newest files first and breaks identical mtimes by path when the payload is full', async () => {
+    const device = await makeDevice('stable-capture-order');
+    const service = new AccountDataSyncService({
+      userRoot: device.userRoot,
+      worklogRoot: device.worklogRoot,
+      deviceId: 'stable-capture-order',
+      now: () => new Date('2026-07-26T09:00:00.000Z'),
+    });
+    const sharedTime = new Date('2026-07-26T08:00:00.000Z');
+    const newestTime = new Date('2026-07-26T08:01:00.000Z');
+    const content = 'x'.repeat(1024 * 1024);
+    // Set real filesystem mtimes explicitly: filesystem clock resolution and
+    // scheduling must not decide whether the equal-time comparator is tested.
+    for (const name of ['i', 'h', 'g', 'f', 'e', 'd', 'c', 'b', 'a']) {
+      const file = path.join(device.worklogRoot, `${name}.md`);
+      await writeText(file, content);
+      const modified = name === 'i' ? newestTime : sharedTime;
+      await fs.utimes(file, modified, modified);
+      expect((await fs.stat(file)).mtimeMs).toBe(modified.getTime());
+    }
+
+    const remote = new MemoryAccountSyncRemote();
+    const summary = await service.sync(remote, IDENTITY);
+    const captured = remote.snapshots.get('worklog')!.payload;
+    expect(summary.truncatedScopes).toEqual(['worklog']);
+    expect(captured.truncated).toBe(true);
+    // Seven 1 MiB bodies plus their paths fit; an eighth exceeds 8 MiB.
+    expect(captured.files.map(file => file.path)).toEqual([
+      'a.md', 'b.md', 'c.md', 'd.md', 'e.md', 'f.md', 'i.md',
+    ]);
+    expect(captured.files.reduce((bytes, file) => bytes
+      + Buffer.byteLength(file.content) + Buffer.byteLength(file.path), 0)).toBeLessThan(8 * 1024 * 1024);
+    expect(captured.files.every(file => file.sha256 === digest(content))).toBe(true);
+    expect(captured.files.find(file => file.path === 'i.md')?.modifiedAtMs).toBe(newestTime.getTime());
+    // Truncating an upload must not delete the files omitted from the payload.
+    expect(await fs.readFile(path.join(device.worklogRoot, 'g.md'), 'utf8')).toBe(content);
+    expect(await fs.readFile(path.join(device.worklogRoot, 'h.md'), 'utf8')).toBe(content);
+  });
+
   it('protects account mirrors and never writes plaintext when protection is unavailable', async () => {
     const device = await makeDevice('protected-mirror');
     const memoryPath = path.join(device.userRoot, 'memory', 'global.md');

@@ -26,3 +26,6 @@ Makefile eol=lf
 # Historical raw test receipts contain diff excerpts and terminal blank lines.
 # Preserve their original contents; this does not exempt source or new test code.
 docs/research/carpool-delivery/evidence/*.log whitespace=-blank-at-eol,-blank-at-eof
+
+# Byte-pinned diagnostic primitive: preserve only this frozen draft verbatim.
+scripts/diagnostics/carpool-config/carpool-config-transaction-draft.py -text

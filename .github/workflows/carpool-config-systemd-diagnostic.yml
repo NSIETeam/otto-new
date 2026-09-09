@@ -1,0 +1,60 @@
+name: Diagnostic carpool configuration real systemd
+
+on:
+  push:
+    branches: [diagnostics/carpool-config-systemd-20260909]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nonce-systemd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact diagnostic revision without credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+
+      - name: Local transaction and process-bound fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -I -S scripts/diagnostics/carpool-config/carpool-config-activation.test.py
+
+      - name: Run real systemd with nonce fixture paths and no network
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          evidence="$RUNNER_TEMP/otto-config-systemd-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -m 700 -- "$evidence"
+          printf '%s\n' '{"passed":false,"phase":"not-started","productionTouched":false}' > "$evidence/receipt.json"
+          sudo -n unshare --net -- /usr/bin/env -i \
+            PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C HOME=/root \
+            GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted RUNNER_OS=Linux \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            GITHUB_SHA="$GITHUB_SHA" OTTO_DISPOSABLE_CONFIG_ACCEPTANCE=1 \
+            /usr/bin/python3 -I -S \
+            "$GITHUB_WORKSPACE/scripts/diagnostics/carpool-config/carpool-config-systemd-fixture.py"
+
+      - name: Retain synthetic evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: carpool-config-systemd-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/otto-config-systemd-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+          retention-days: 14

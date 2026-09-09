@@ -16,8 +16,9 @@ import {
 import { CustomAgentIconPicker } from './CustomAgentIconPicker.js';
 import { ModuleIcon } from './ModuleIcon.js';
 
-export function DialogFrame({ title, onClose, children, size = 'standard' }: {
+export function DialogFrame({ title, onClose, children, size = 'standard', className = '', icon, subtitle }: {
   title: string; onClose(): void; children: React.ReactNode; size?: 'compact' | 'standard' | 'wide';
+  className?: string; icon?: React.ReactNode; subtitle?: string;
 }): React.JSX.Element {
   const ref = useRef<HTMLElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
@@ -43,8 +44,8 @@ export function DialogFrame({ title, onClose, children, size = 'standard' }: {
   }, []);
   return createPortal(
     <div className="otto-workspace-dialog-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section ref={ref} className={`otto-workspace-dialog otto-workspace-dialog--${size}`} role="dialog" aria-modal="true" aria-label={title}>
-        <header><h2>{title}</h2><button type="button" aria-label={`关闭${title}`} onClick={onClose}>×</button></header>
+      <section ref={ref} className={`otto-workspace-dialog otto-workspace-dialog--${size} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
+        <header>{icon || subtitle ? <div className="otto-workspace-dialog__heading">{icon ? <span className="otto-workspace-dialog__icon" aria-hidden="true">{icon}</span> : null}<div><h2>{title}</h2>{subtitle ? <p>{subtitle}</p> : null}</div></div> : <h2>{title}</h2>}<button type="button" aria-label={`关闭${title}`} onClick={onClose}>×</button></header>
         <div className="otto-workspace-dialog__body">{children}</div>
       </section>
     </div>, document.body,

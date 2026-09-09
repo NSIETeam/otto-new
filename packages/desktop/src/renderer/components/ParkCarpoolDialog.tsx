@@ -23,6 +23,7 @@ import type {
   EnterpriseParkCarpoolState,
   EnterpriseParkCarpoolTravelOption,
 } from '../../preload/index.js';
+import { IconCar } from './icons.js';
 import { DialogFrame } from './WorkspaceDialogs.js';
 
 const EMPTY_STATE: EnterpriseParkCarpoolState = {
@@ -194,7 +195,7 @@ function PlacePicker({
       <legend>{label}</legend>
       <p id={`${inputId}-hint`}>{hint}</p>
       {meetingPoints.length ? (
-        <div aria-label={`${label}公共集合点`}>
+        <div className="otto-carpool__meeting-points" aria-label={`${label}公共集合点`}>
           {meetingPoints.map((point) => (
             <button
               key={point.id}
@@ -214,8 +215,8 @@ function PlacePicker({
           ))}
         </div>
       ) : null}
-      <div>
-        <label htmlFor={inputId}>{label}搜索</label>
+      <div className="otto-carpool__search">
+        <label className="otto-carpool__search-label" htmlFor={inputId}>{label}搜索</label>
         <input
           id={inputId}
           aria-label={`${label}搜索`}
@@ -235,6 +236,7 @@ function PlacePicker({
           {searching ? '搜索中…' : '搜索'}
         </button>
       </div>
+      <div className="otto-carpool__place-tools">
       <button type="button" disabled={locating} onClick={() => void locate()}>
         {locating ? '正在定位…' : '使用当前位置'}
       </button>
@@ -243,6 +245,7 @@ function PlacePicker({
           在地图上调整选点
         </button>
       ) : null}
+      </div>
       {showMap && selected ? (
         <CarpoolPointPicker
           place={selected}
@@ -594,6 +597,9 @@ export function ParkCarpoolDialog({
   return (
     <DialogFrame
       title="拼车助手" size="standard"
+      className="otto-carpool-dialog"
+      icon={<IconCar size={22} />}
+      subtitle="发布通勤意向，寻找同园区的同路伙伴。"
       onClose={() => {
         if (dirty) setConfirmClose(true);
         else onClose();
@@ -743,7 +749,7 @@ export function ParkCarpoolDialog({
           提交后，你的通勤意向将对同园区且路线、时间符合条件的用户可见。你可以随时修改或停止寻找。
         </p>
         <div className="otto-carpool__actions">
-          <button type="submit" disabled={!state.mapConfigured || state.availability?.canPublish === false || loading}>
+          <button type="submit" className="otto-park-demo__primary" disabled={!state.mapConfigured || state.availability?.canPublish === false || loading}>
             {loading
               ? '正在处理…'
               : active

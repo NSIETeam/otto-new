@@ -26,14 +26,26 @@ export type StarMapData = Omit<
   relationType?: string;
 };
 export const demoMap: StarMapData = bundledDemo;
+export type RelationMode = 'same_industry' | 'supply_demand';
+export interface SupplyMatch {
+  providerId: string;
+  consumerId: string;
+  product: string;
+  need: string;
+}
 export type SizeMode = 'uniform' | 'degree';
 export interface GraphIndex {
+  relationMode?: RelationMode;
+  matches?: SupplyMatch[];
   nodes: EnterpriseNode[];
   byId: Map<string, EnterpriseNode>;
   peers: Map<string, string[]>;
   groups: NonNullable<StarMapData['industryGroups']>;
 }
-export function graphIndex(data: StarMapData): GraphIndex {
+export function graphIndex(
+  data: StarMapData,
+  relationMode: RelationMode = 'same_industry',
+): GraphIndex {
   const byId = new Map(
     data.nodes
       .filter((node) => node.isPublic)
@@ -59,7 +71,48 @@ export function graphIndex(data: StarMapData): GraphIndex {
         id,
         group.memberOrganizationIds.filter((peer) => peer !== id),
       );
-  return { nodes, byId, peers, groups };
+  const matches: SupplyMatch[] = [];
+  if (relationMode === 'supply_demand') {
+    for (const id of peers.keys()) peers.set(id, []);
+    // Conservative explicit terms only, never infer links from a broad industry or substring.
+    const normalize = (text: string) =>
+      text
+        .normalize('NFKC')
+        .trim()
+        .toLocaleLowerCase()
+        .replace(/^(?:希望|需要|寻找|采购|求购|提供|供应)\s*/u, '')
+        .replace(/[\s，,。.!！]+$/u, '')
+        .trim();
+    const supplies = new Map<string, Array<{ id: string; product: string }>>();
+    for (const node of nodes)
+      for (const product of new Set(node.productsServices)) {
+        const key = normalize(product);
+        if (key)
+          supplies.set(key, [
+            ...(supplies.get(key) ?? []),
+            { id: node.organizationId, product },
+          ]);
+      }
+    for (const consumer of nodes)
+      for (const need of new Set(consumer.cooperationNeeds)) {
+        for (const provider of supplies.get(normalize(need)) ?? []) {
+          if (provider.id === consumer.organizationId) continue;
+          matches.push({
+            providerId: provider.id,
+            consumerId: consumer.organizationId,
+            product: provider.product,
+            need,
+          });
+          const add = (a: string, b: string) => {
+            const values = peers.get(a)!;
+            if (!values.includes(b)) values.push(b);
+          };
+          add(provider.id, consumer.organizationId);
+          add(consumer.organizationId, provider.id);
+        }
+      }
+  }
+  return { nodes, byId, peers, groups, matches, relationMode };
 }
 export function searchEnterprises(
   nodes: EnterpriseNode[],
@@ -94,6 +147,15 @@ export function visibleEdges(
   focus: string | null,
 ): Array<[string, string]> {
   if (focus) return (index.peers.get(focus) ?? []).map((id) => [focus, id]);
+  if (index.relationMode === 'supply_demand') {
+    // Dense graphs expand all direct neighbours only on focus, avoiding a wall of lines.
+    const edges = [...index.peers].flatMap(([id, peers]) =>
+      peers
+        .filter((other) => id < other)
+        .map((other) => [id, other] as [string, string]),
+    );
+    return edges.length > 600 ? [] : edges;
+  }
   return index.groups.flatMap((group) =>
     group.memberOrganizationIds.length > 12
       ? []

@@ -11,13 +11,14 @@ export type StarMapEvent =
 export function emitStarMapEvent(
   event: StarMapEvent,
   source: 'real' | 'demo',
+  relationType: 'same_industry' | 'supply_demand' = 'same_industry',
 ): void {
   window.dispatchEvent(
     new CustomEvent('otto:star-map-usage', {
       detail: {
         event,
         dataSource: source,
-        relationType: 'same_industry',
+        relationType,
         entry: 'park_services',
         schemaVersion: 1,
       },

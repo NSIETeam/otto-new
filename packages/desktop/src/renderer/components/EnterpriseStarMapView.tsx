@@ -1,3 +1,4 @@
+import { supplyDemo } from '../starMap/supplyDemo.js';
 import { useModuleReadCache } from '../state/ModuleReadProvider.js';
 import { loadStarMapCanvas } from '../starMap/loadCanvas.js';
 import { EnterpriseList } from '../starMap/EnterpriseList.js';
@@ -20,6 +21,7 @@ import {
   graphIndex,
   safeWebsite,
   searchEnterprises,
+  type RelationMode,
   type SizeMode,
   type StarMapData,
 } from '../starMap/model.js';
@@ -52,13 +54,7 @@ class GraphBoundary extends Component<
     );
   }
 }
-const planned = [
-  '供需匹配',
-  '上下游',
-  '能力互补',
-  '共同服务领域',
-  '已确认合作',
-];
+const planned = ['上下游', '能力互补', '共同服务领域', '已确认合作'];
 const messageOf = (error: unknown) =>
   String(error instanceof Error ? error.message : error)
     .replace(/^Error invoking remote method '[^']+':\s*/, '')
@@ -73,7 +69,16 @@ export function EnterpriseStarMapView({
 }): React.JSX.Element {
   const cache = useModuleReadCache();
   const [source, setSource] = useState(initialSource);
-  const [data, setData] = useState<StarMapData | null>(() => initialSource === 'real' ? cache.peek<StarMapData>('star-map') ?? null : null);
+  const [demoKind, setDemoKind] = useState<'beikong' | 'supply'>('beikong');
+  const [relation, setRelation] = useState<RelationMode>('same_industry');
+  const relationRef = useRef(relation);
+  relationRef.current = relation;
+  const [closedNeeds, setClosedNeeds] = useState<Set<string>>(new Set());
+  const [data, setData] = useState<StarMapData | null>(() =>
+    initialSource === 'real'
+      ? (cache.peek<StarMapData>('star-map') ?? null)
+      : null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -95,7 +100,7 @@ export function EnterpriseStarMapView({
   const [search, setSearch] = useState('');
   const [listOpen, setListOpen] = useState(() => window.innerWidth < 768);
   const [settings, setSettings] = useState(false);
-  const [sizeMode, setSizeMode] = useState<SizeMode>('uniform');
+  const [sizeMode, setSizeMode] = useState<SizeMode>('degree');
   const [showIndustries, setShowIndustries] = useState(true);
   const [motion, setMotion] = useState<'system' | 'reduce'>('system');
   const [systemReduce, setSystemReduce] = useState(
@@ -124,8 +129,8 @@ export function EnterpriseStarMapView({
     if (selected) detailTitle.current?.focus({ preventScroll: true });
   }, [selected]);
   useEffect(() => {
-    emitStarMapEvent('star_map_open', source);
-  }, [source]);
+    emitStarMapEvent('star_map_open', source, relation);
+  }, [source, relation]);
   const frame = useRef<number>();
   const reduced = motion === 'reduce' || systemReduce;
   const schedule = useCallback((fn: () => void) => {
@@ -166,8 +171,12 @@ export function EnterpriseStarMapView({
       }
       const next: StarMapData =
         source === 'demo'
-          ? structuredClone(demoMap)
-          : await cache.read('star-map', () => window.otto.enterpriseParkStarMap(), 0);
+          ? structuredClone(demoKind === 'supply' ? supplyDemo : demoMap)
+          : await cache.read(
+              'star-map',
+              () => window.otto.enterpriseParkStarMap(),
+              0,
+            );
       if (!active.current || id !== requestId.current) return;
       if (next.dataSource === 'demo' && source === 'real') {
         setSource('demo');
@@ -215,11 +224,11 @@ export function EnterpriseStarMapView({
         setEditor(false);
       }
       setError(messageOf(cause));
-      emitStarMapEvent('star_map_error', source);
+      emitStarMapEvent('star_map_error', source, relationRef.current);
     } finally {
       if (active.current && id === requestId.current) setLoading(false);
     }
-  }, [cache, source, resetExploration]);
+  }, [cache, source, demoKind, resetExploration]);
   useEffect(() => {
     active.current = true;
     void load();
@@ -293,7 +302,7 @@ export function EnterpriseStarMapView({
     if (!preferenceKey) return;
     try {
       const value = JSON.parse(localStorage.getItem(preferenceKey) ?? '{}');
-      setSizeMode(value.sizeMode === 'degree' ? 'degree' : 'uniform');
+      setSizeMode(value.sizeMode === 'uniform' ? 'uniform' : 'degree');
       setMotion(value.motion === 'reduce' ? 'reduce' : 'system');
       setShowIndustries(value.showIndustries !== false);
     } catch {
@@ -311,10 +320,27 @@ export function EnterpriseStarMapView({
       /* Storage is optional. */
     }
   };
+  const isSupplyDemo = source === 'demo' && data?.parkId === supplyDemo.parkId;
+  const activeData = useMemo(
+    () =>
+      !data || !isSupplyDemo
+        ? data
+        : {
+            ...data,
+            nodes: data.nodes.map((node) => ({
+              ...node,
+              cooperationNeeds: node.cooperationNeeds.filter(
+                (need) =>
+                  !closedNeeds.has(JSON.stringify([node.organizationId, need])),
+              ),
+            })),
+          },
+    [data, isSupplyDemo, closedNeeds],
+  );
   const index = useMemo(
     () =>
       graphIndex(
-        data ?? {
+        activeData ?? {
           parkId: '',
           parkName: '',
           currentOrganizationId: '',
@@ -322,8 +348,9 @@ export function EnterpriseStarMapView({
           nodes: [],
           edges: [],
         },
+        relation,
       ),
-    [data],
+    [activeData, relation],
   );
   const scope = useMemo(
     () =>
@@ -379,6 +406,7 @@ export function EnterpriseStarMapView({
           ? 'search_result_selected'
           : 'enterprise_detail_open',
         source,
+        relation,
       );
     setNotice('');
     if (id && scope && !scope.has(id)) {
@@ -390,7 +418,7 @@ export function EnterpriseStarMapView({
   };
   const onlyPeers = () => {
     if (!selected) return;
-    emitStarMapEvent('peer_view_open', source);
+    emitStarMapEvent('peer_view_open', source, relation);
     if (!localRoot) beforeLocal.current = canvas.current?.camera() ?? null;
     setLocalRoot(selected);
     schedule(() => canvas.current?.fit());
@@ -401,6 +429,8 @@ export function EnterpriseStarMapView({
     resetExploration();
     setEditor(false);
     setNotice('');
+    setDemoKind('beikong');
+    setClosedNeeds(new Set());
     setSource(source === 'real' ? 'demo' : 'real');
   };
   const closeEditor = () => {
@@ -417,7 +447,7 @@ export function EnterpriseStarMapView({
     if (!url) return;
     try {
       await window.otto.openExternal(url);
-      emitStarMapEvent('website_open', source);
+      emitStarMapEvent('website_open', source, relation);
     } catch {
       setNotice('打开链接失败，请重试');
     }
@@ -426,7 +456,7 @@ export function EnterpriseStarMapView({
     try {
       if (!(await window.otto.writeClipboard(value))) throw new Error('copy');
       setNotice('已复制');
-      emitStarMapEvent('public_contact_copy', source);
+      emitStarMapEvent('public_contact_copy', source, relation);
     } catch {
       setNotice('复制失败，请重试');
     }
@@ -476,10 +506,22 @@ export function EnterpriseStarMapView({
           连接方式
           <select
             aria-label="连接方式"
-            value="same_industry"
-            onChange={() => undefined}
+            value={relation}
+            onChange={(event) => {
+              setRelation(event.target.value as RelationMode);
+              emitStarMapEvent(
+                'relation_mode_changed',
+                source,
+                event.target.value as RelationMode,
+              );
+              setLocalRoot(null);
+              setHover(null);
+              beforeLocal.current = null;
+              setNotice('连接方式已切换，节点大小按当前模式的关联企业数计算。');
+            }}
           >
             <option value="same_industry">同行业</option>
+            <option value="supply_demand">供需匹配</option>
             {planned.map((name) => (
               <option key={name} disabled>
                 {name} · 规划中
@@ -547,8 +589,26 @@ export function EnterpriseStarMapView({
         </button>
         <div className="star-toolbar-spacer" />
         {source === 'demo' ? (
-          <span className="star-demo-badge">公开资料演示数据</span>
+          <span className="star-demo-badge">
+            {isSupplyDemo ? '虚拟供需演示 · 非真实采购' : '公开资料演示数据'}
+          </span>
         ) : null}
+        <button
+          onClick={() => {
+            ++requestId.current;
+            setData(null);
+            resetExploration();
+            setEditor(false);
+            setClosedNeeds(new Set());
+            setDemoKind('supply');
+            setSource('demo');
+            setRelation('supply_demand');
+            if (source === 'demo' && demoKind === 'supply')
+              setData(structuredClone(supplyDemo));
+          }}
+        >
+          供需虚拟演示
+        </button>
         <button onClick={switchSource}>
           {source === 'real' ? '北控宏创演示' : '返回真实园区'}
         </button>
@@ -624,6 +684,14 @@ export function EnterpriseStarMapView({
           当前离线，展示上次加载的资料；联网后自动刷新。
         </div>
       ) : null}
+      {relation === 'supply_demand' ? (
+        <div className="star-own-notice">
+          按公开产品与有效需求的词条匹配，箭头从提供方指向需求方，表示潜在机会，不代表已合作。点击企业查看供需方向与具体条目。
+          {isSupplyDemo
+            ? ' 可在详情中演示完成或恢复需求。'
+            : ' 在企业资料中维护产品与服务、合作需求；已完成需求请移除并保存。'}
+        </div>
+      ) : null}
       {notice ? (
         <div className="star-feedback" role="status">
           {notice}
@@ -648,7 +716,8 @@ export function EnterpriseStarMapView({
             仅看{' '}
             {index.byId.get(localRoot)?.displayName ||
               index.byId.get(localRoot)?.organizationName}{' '}
-            及同行 · {scope?.size} 家
+            及{relation === 'supply_demand' ? '供需关联企业' : '同行'} ·{' '}
+            {scope?.size} 家
           </span>
         </div>
       ) : null}
@@ -689,11 +758,12 @@ export function EnterpriseStarMapView({
           ) : overCapacity ? (
             <div className="star-empty">
               当前共 {index.nodes.length}{' '}
-              家企业，超过全图展示容量。请在列表选择企业，再点击“仅看同行”。
+              家企业，超过全图展示容量。请在列表选择企业，再点击“
+              {relation === 'supply_demand' ? '仅看供需关联' : '仅看同行'}”。
             </div>
           ) : scope && scope.size > 300 ? (
             <div className="star-empty">
-              该行业有 {scope.size} 家企业，请使用完整同行列表浏览。
+              当前范围有 {scope.size} 家企业，请使用完整企业列表浏览。
             </div>
           ) : (
             <GraphBoundary
@@ -708,7 +778,7 @@ export function EnterpriseStarMapView({
               >
                 <Canvas
                   ref={canvas}
-                  cacheKey={`${source}:${accountKey}:${data.parkId}:same_industry`}
+                  cacheKey={`${source}:${accountKey}:${data.parkId}:${relation}`}
                   index={index}
                   selected={selected}
                   hover={hover}
@@ -717,7 +787,9 @@ export function EnterpriseStarMapView({
                   scope={scope}
                   sizeMode={sizeMode}
                   reducedMotion={reduced}
-                  showIndustries={showIndustries}
+                  showIndustries={
+                    showIndustries && relation === 'same_industry'
+                  }
                   onSelect={select}
                   onHover={setHover}
                 />
@@ -761,8 +833,15 @@ export function EnterpriseStarMapView({
             </button>
           </div>
           <div className="star-canvas-caption">
-            {scope?.size ?? index.nodes.length} 家企业 · 同行业连接
-            {index.groups.some((g) => g.memberOrganizationIds.length > 12)
+            {scope?.size ?? index.nodes.length} 家企业 ·{' '}
+            {relation === 'supply_demand' ? '供需匹配' : '同行业连接'}·{' '}
+            {Array.from(index.peers.values()).reduce(
+              (sum, peers) => sum + peers.length,
+              0,
+            ) / 2}{' '}
+            对关系
+            {relation === 'same_industry' &&
+            index.groups.some((g) => g.memberOrganizationIds.length > 12)
               ? ' · 密集行业的连线在聚焦企业时显示'
               : ''}
           </div>
@@ -810,6 +889,81 @@ export function EnterpriseStarMapView({
                 </section>
               ) : null,
             )}
+            {isSupplyDemo ? (
+              <section>
+                <h4>需求状态演示</h4>
+                <p className="star-muted">
+                  仅影响本次虚拟演示，重新进入演示恢复初始需求。
+                </p>
+                {data?.nodes
+                  .find((node) => node.organizationId === detail.organizationId)
+                  ?.cooperationNeeds.map((need) => {
+                    const key = JSON.stringify([detail.organizationId, need]);
+                    const closed = closedNeeds.has(key);
+                    return (
+                      <p key={need}>
+                        {need} · {closed ? '已完成' : '进行中'}{' '}
+                        <button
+                          aria-label={`演示${closed ? '恢复' : '完成'}需求：${need}`}
+                          onClick={() =>
+                            setClosedNeeds((current) => {
+                              const next = new Set(current);
+                              if (closed) next.delete(key);
+                              else next.add(key);
+                              return next;
+                            })
+                          }
+                        >
+                          {closed ? '恢复需求' : '标记已完成'}
+                        </button>
+                      </p>
+                    );
+                  })}
+              </section>
+            ) : null}
+            {relation === 'supply_demand' ? (
+              <section>
+                {(['incoming', 'outgoing'] as const).map((direction) => {
+                  const matches = (index.matches ?? []).filter(
+                    (match) =>
+                      (direction === 'incoming'
+                        ? match.consumerId
+                        : match.providerId) === detail.organizationId,
+                  );
+                  return (
+                    <section key={direction}>
+                      <h4>
+                        {direction === 'incoming'
+                          ? '谁能满足我的需求'
+                          : '谁可能需要我'}
+                      </h4>
+                      {matches.length ? (
+                        matches.map((match, i) => {
+                          const other =
+                            direction === 'incoming'
+                              ? match.providerId
+                              : match.consumerId;
+                          return (
+                            <p key={`${other}:${i}`}>
+                              <button onClick={() => select(other, true)}>
+                                {index.byId.get(other)?.organizationName}
+                              </button>{' '}
+                              {direction === 'incoming' ? '提供' : '需要'}「
+                              {direction === 'incoming'
+                                ? match.product
+                                : match.need}
+                              」
+                            </p>
+                          );
+                        })
+                      ) : (
+                        <p className="star-muted">暂无匹配</p>
+                      )}
+                    </section>
+                  );
+                })}
+              </section>
+            ) : null}
             {detail.officeAddress ? (
               <section>
                 <h4>
@@ -842,16 +996,23 @@ export function EnterpriseStarMapView({
             </section>
             <section>
               <div className="star-peer-heading">
-                <h4>同行企业 {peers.length} 家</h4>
-                <button onClick={onlyPeers}>仅看同行</button>
+                <h4>
+                  {relation === 'supply_demand' ? '供需关联企业' : '同行企业'}{' '}
+                  {peers.length} 家
+                </h4>
+                <button onClick={onlyPeers}>
+                  {relation === 'supply_demand' ? '仅看供需关联' : '仅看同行'}
+                </button>
               </div>
               {!peers.length ? (
                 <p className="star-muted">
-                  {!detail.primaryIndustryCode
-                    ? '主营行业待完善'
-                    : source === 'real' && !detail.industryConfirmedByCompany
-                      ? '主营行业待确认'
-                      : '暂未发现其他同行'}
+                  {relation === 'supply_demand'
+                    ? '暂无明确的有效供需匹配；可完善具体产品与需求。'
+                    : !detail.primaryIndustryCode
+                      ? '主营行业待完善'
+                      : source === 'real' && !detail.industryConfirmedByCompany
+                        ? '主营行业待确认'
+                        : '暂未发现其他同行'}
                 </p>
               ) : (
                 <div className="star-peers">
@@ -874,7 +1035,7 @@ export function EnterpriseStarMapView({
                 完善主营行业与企业资料
               </button>
             ) : null}
-            {source === 'demo' ? (
+            {source === 'demo' && !isSupplyDemo ? (
               <details className="star-provenance">
                 <summary>资料来源与核查说明</summary>
                 <p>核查日期：{detail.retrievedAt || '未提供'}</p>

@@ -250,3 +250,32 @@ it('shows offline status and clears it when connection returns', async () => {
   fireEvent(window, new Event('online'));
   await waitFor(() => expect(screen.queryByText(/当前离线/)).toBeNull());
 });
+
+it('explores fictional supply relationships and closes a demo need without calling update APIs', async () => {
+  window.otto.enterprisePublicProfileUpdate = vi.fn();
+  render(
+    <EnterpriseStarMapView onBack={() => undefined} initialSource="demo" />,
+  );
+  await screen.findByTestId('graph');
+  fireEvent.click(screen.getByRole('button', { name: '供需虚拟演示' }));
+  await screen.findByText('供需体验园区（虚拟）');
+  expect(
+    (screen.getByRole('combobox', { name: '连接方式' }) as HTMLSelectElement)
+      .value,
+  ).toBe('supply_demand');
+  fireEvent.click(
+    screen.getByRole('button', { name: '节点 精工制造（虚拟）' }),
+  );
+  expect(await screen.findByText('谁能满足我的需求')).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole('button', { name: '演示完成需求：工业检测设备' }),
+  );
+  expect(
+    await screen.findByRole('button', { name: '演示恢复需求：工业检测设备' }),
+  ).toBeTruthy();
+  fireEvent.change(screen.getByRole('combobox', { name: '连接方式' }), {
+    target: { value: 'same_industry' },
+  });
+  expect(screen.getByRole('button', { name: '仅看同行' })).toBeTruthy();
+  expect(window.otto.enterprisePublicProfileUpdate).not.toHaveBeenCalled();
+});

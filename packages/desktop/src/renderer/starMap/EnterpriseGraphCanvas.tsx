@@ -100,6 +100,8 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
     const topology = JSON.stringify([
       props.index.nodes.map((node) => node.organizationId),
       props.index.groups,
+      props.index.relationMode,
+      [...props.index.peers],
     ]);
     const graph = useMemo(() => {
       const { index } = current.current;
@@ -128,12 +130,32 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
         return node;
       });
       // O(n) physical scaffold; these are layout constraints, never rendered as business evidence.
-      const links = index.groups.flatMap((group) =>
+      let links = index.groups.flatMap((group) =>
         group.memberOrganizationIds.slice(1).map((id, i) => ({
           source: group.memberOrganizationIds[i],
           target: id,
         })),
       );
+      if (index.relationMode === 'supply_demand') {
+        // A spanning forest retains actual supply connectivity with at most n-1 springs.
+        const parents = new Map(nodes.map((node) => [node.id, node.id]));
+        const root = (id: string): string => {
+          let current = id;
+          while (parents.get(current) !== current)
+            current = parents.get(current)!;
+          return current;
+        };
+        links = [];
+        for (const [id, peers] of index.peers)
+          for (const other of peers) {
+            const a = root(id);
+            const b = root(other);
+            if (a !== b) {
+              parents.set(a, b);
+              links.push({ source: id, target: other });
+            }
+          }
+      }
       return { nodes, links };
     }, [topology]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -212,6 +234,7 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
       instance.d3Force('link')?.distance?.(65);
       // Pairwise repulsion is handled by the engine's spatial tree. Group attraction is linear.
       const cluster = (alpha: number) => {
+        if (current.current.index.relationMode === 'supply_demand') return;
         for (let i = 0; i < current.current.index.groups.length; i++) {
           const group = current.current.index.groups[i];
           const angle = i * 2.399963;
@@ -307,6 +330,15 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
       [props.scope, props.reducedMotion],
     );
 
+    const directions = useMemo(
+      () =>
+        new Set(
+          (props.index.matches ?? []).map((match) =>
+            JSON.stringify([match.providerId, match.consumerId]),
+          ),
+        ),
+      [props.index.matches],
+    );
     const focus = props.hover ?? props.selected;
     const related = useMemo(
       () =>
@@ -485,6 +517,37 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
               }
             }
             ctx.stroke();
+            if (props.index.relationMode === 'supply_demand') {
+              ctx.fillStyle = focus ? palette.accent : palette.text;
+              for (const [a, b] of edges) {
+                if (!isVisible(a) || !isVisible(b)) continue;
+                for (const [from, to] of [
+                  [a, b],
+                  [b, a],
+                ]) {
+                  if (!directions.has(JSON.stringify([from, to]))) continue;
+                  const start = cache.current.get(from);
+                  const end = cache.current.get(to);
+                  if (!start || !end) continue;
+                  const dx = (end.x ?? 0) - (start.x ?? 0);
+                  const dy = (end.y ?? 0) - (start.y ?? 0);
+                  if (Math.hypot(dx, dy) * scale < 25) continue;
+                  const angle = Math.atan2(dy, dx);
+                  const x = (start.x ?? 0) + dx * 0.65;
+                  const y = (start.y ?? 0) + dy * 0.65;
+                  ctx.save();
+                  ctx.translate(x, y);
+                  ctx.rotate(angle);
+                  ctx.beginPath();
+                  ctx.moveTo(4 / scale, 0);
+                  ctx.lineTo(-3 / scale, -2.5 / scale);
+                  ctx.lineTo(-3 / scale, 2.5 / scale);
+                  ctx.closePath();
+                  ctx.fill();
+                  ctx.restore();
+                }
+              }
+            }
             ctx.globalAlpha = 1;
           }}
           onRenderFramePost={(ctx, scale) => {
@@ -574,7 +637,8 @@ export const EnterpriseGraphCanvas = forwardRef<GraphControls, Props>(
         />
         {focus && props.index.byId.get(focus) ? (
           <div className="star-hover-name" role="tooltip">
-            {props.index.byId.get(focus)!.organizationName}
+            {props.index.byId.get(focus)!.organizationName} · 关联{' '}
+            {props.index.peers.get(focus)?.length ?? 0} 家企业
           </div>
         ) : null}
       </div>

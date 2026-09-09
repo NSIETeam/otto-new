@@ -1,0 +1,93 @@
+/** Fictional companies only: never attach invented needs to researched companies. */
+import type { StarMapData } from './model.js';
+const companies = [
+  [
+    'manufacturing',
+    '精工制造（虚拟）',
+    'manufacturing',
+    '精密制造',
+    ['精密零部件加工'],
+    ['工业检测设备', '生产管理软件'],
+  ],
+  [
+    'inspection',
+    '明眸检测（虚拟）',
+    'equipment',
+    '装备制造',
+    ['工业检测设备'],
+    ['精密零部件加工', '官网建设'],
+  ],
+  [
+    'software',
+    '云桥软件（虚拟）',
+    'software',
+    '软件服务',
+    ['生产管理软件', '官网建设'],
+    ['财税服务'],
+  ],
+  [
+    'tax',
+    '安信财税（虚拟）',
+    'business',
+    '商务服务',
+    ['财税服务'],
+    ['官网建设'],
+  ],
+  [
+    'logistics',
+    '远航物流（虚拟）',
+    'logistics',
+    '物流服务',
+    ['企业运输服务'],
+    ['生产管理软件', '财税服务'],
+  ],
+  [
+    'equipment',
+    '智造装备（虚拟）',
+    'equipment',
+    '装备制造',
+    ['自动化设备'],
+    ['精密零部件加工', '工业检测设备', '企业运输服务', '官网建设', '财税服务'],
+  ],
+  [
+    'design',
+    '澄光设计（虚拟）',
+    'design',
+    '设计服务',
+    ['品牌设计'],
+    ['官网建设'],
+  ],
+  ['garden', '绿境园艺（虚拟）', 'garden', '园林服务', ['园林设计'], []],
+] as const;
+export const supplyDemo: StarMapData = {
+  parkId: 'synthetic:supply-demo',
+  parkName: '供需体验园区（虚拟）',
+  currentOrganizationId: '',
+  generatedAt: '',
+  dataSource: 'demo',
+  nodes: companies.map(([id, name, code, industry, products, needs]) => ({
+    organizationId: `synthetic:${id}`,
+    organizationName: name,
+    displayName: name,
+    summary: '虚拟演示企业，仅用于体验供需匹配，不代表真实企业或采购意向。',
+    isPublic: true,
+    updatedAt: null,
+    website: '',
+    publicContact: '',
+    industryTags: [],
+    capabilities: [],
+    primaryIndustryCode: code,
+    primaryIndustryName: industry,
+    industryConfirmedByCompany: true,
+    productsServices: [...products],
+    cooperationNeeds: [...needs],
+  })),
+  edges: [],
+  industryGroups: [...new Set(companies.map((c) => c[2]))].map((code) => ({
+    code,
+    name: companies.find((c) => c[2] === code)![3],
+    memberOrganizationIds: companies
+      .filter((c) => c[2] === code)
+      .map((c) => `synthetic:${c[0]}`),
+  })),
+};

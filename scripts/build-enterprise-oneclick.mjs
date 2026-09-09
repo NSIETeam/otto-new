@@ -431,7 +431,7 @@ try {
 
   const serverDist = path.join(repoRoot, 'packages', 'server', 'dist');
   copyEnterpriseServerNotice(repoRoot, releaseRoot);
-  copyEnterpriseWorkflowRuntime({ repoRoot, releaseRoot });
+  const workflowRuntime = copyEnterpriseWorkflowRuntime({ repoRoot, releaseRoot });
   const serverFiles = [
     ...filesBelow(path.join(serverDist, 'src'))
       .filter((relative) => relative.endsWith('.js'))
@@ -611,6 +611,7 @@ export class FeatureFlagManager {
           ...runtimeDependencies.directVersions,
           'better-sqlite3': '12.11.1',
           'otto-core': '1.1.0-enterprise-adapter',
+          'otto-workflow': workflowRuntime.version,
         },
       },
       null,

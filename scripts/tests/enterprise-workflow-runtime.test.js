@@ -12,6 +12,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { copyEnterpriseWorkflowRuntime } from '../enterprise-workflow-runtime.mjs';
 
@@ -25,6 +26,64 @@ function fixture(run) {
   }
 }
 describe('explicit enterprise workflow runtime', () => {
+  it.each(['1.0.0', '2.3.4'])(
+    'declares the copied workflow version %s in the generated production package',
+    (workflowVersion) =>
+      fixture((root) => {
+        const dist = path.join(root, 'packages/workflow/dist');
+        mkdirSync(dist, { recursive: true });
+        writeFileSync(
+          path.join(root, 'packages/workflow/package.json'),
+          JSON.stringify({
+            name: 'otto-workflow',
+            version: workflowVersion,
+            type: 'module',
+          }),
+        );
+        writeFileSync(path.join(dist, 'index.js'), 'export {};');
+        const releaseRoot = path.join(root, 'release');
+        const workflowRuntime = copyEnterpriseWorkflowRuntime({
+          repoRoot: root,
+          releaseRoot,
+        });
+        const build = readFileSync(
+          path.join(repoRoot, 'scripts/build-enterprise-oneclick.mjs'),
+          'utf8',
+        ).replaceAll('\r\n', '\n');
+        const start = build.indexOf(
+          "writeFileSync(\n    path.join(releaseRoot, 'package.json'),",
+        );
+        expect(start).toBeGreaterThan(0);
+        const end = build.indexOf('\n  );', start);
+        expect(end).toBeGreaterThan(start);
+        // Execute the real generated-package statement with only local fixture
+        // values. No signing, native downloads or full builder side effects.
+        runInNewContext(build.slice(start, end + '\n  );'.length), {
+          path,
+          writeFileSync,
+          releaseRoot,
+          version: '1.9.15',
+          workflowRuntime,
+          runtimeDependencies: { directVersions: { pg: '8.22.0' } },
+        });
+        const generated = JSON.parse(
+          readFileSync(path.join(releaseRoot, 'package.json'), 'utf8'),
+        );
+        const vendored = JSON.parse(
+          readFileSync(
+            path.join(releaseRoot, 'node_modules/otto-workflow/package.json'),
+            'utf8',
+          ),
+        );
+        expect(generated.dependencies).toMatchObject({
+          pg: '8.22.0',
+          'otto-workflow': vendored.version,
+          'better-sqlite3': '12.11.1',
+          'otto-core': '1.1.0-enterprise-adapter',
+        });
+      }),
+  );
+
   it('loads the actual copied workflow without repository module resolution', () =>
     fixture((releaseRoot) => {
       copyEnterpriseWorkflowRuntime({ repoRoot, releaseRoot });

@@ -71,6 +71,31 @@ function harness() {
   return { store, ports, add, actors };
 }
 describe('bounded durable policy notification traversal', () => {
+  it('does not announce cached verified documents while failure reconciliation is still pending', async () => {
+    const h = harness();
+    const user = await h.add('user');
+    await h.store.update('source-status:national', () => ({
+      status: 'unavailable',
+      checkedAt: h.ports.now().toISOString(),
+      documentCount: 0,
+    }));
+    await refreshPolicyNotifications(h.ports);
+    expect(
+      (await h.store.get<OfficialPolicyDocument>('document:p'))?.sourceStatus,
+    ).toBe('verified');
+    expect(
+      (await h.store.get<PolicyMailbox>(policyMailboxKey(user)))?.notices,
+    ).toHaveLength(0);
+    await h.store.update('source-status:national', () => ({
+      status: 'available',
+      checkedAt: h.ports.now().toISOString(),
+      documentCount: 1,
+    }));
+    await refreshPolicyNotifications(h.ports);
+    expect(
+      (await h.store.get<PolicyMailbox>(policyMailboxKey(user)))?.notices,
+    ).toHaveLength(1);
+  });
   it('visits 70 enterprises fairly over 32-mailbox ticks without loading all bodies', async () => {
     const h = harness();
     for (let i = 0; i < 70; i++) await h.add(`user-${i}`);

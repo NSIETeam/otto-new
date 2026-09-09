@@ -6,6 +6,7 @@ import type {
   PolicyRegion,
 } from './contracts.js';
 import { sourceMatchesRegion } from './policyDomain.js';
+import { policyDocumentSourceStatus } from './policySourceStatus.js';
 import {
   advancePolicyMailbox,
   policyMailboxKey,
@@ -180,10 +181,12 @@ export async function refreshPolicyNotifications(ports: Ports): Promise<void> {
               // feature authorization, and only the current watched ID is read.
               documents++;
               try {
-                const doc = await store.getBounded<OfficialPolicyDocument>(
+                const cached = await store.getBounded<OfficialPolicyDocument>(
                   `document:${id}`,
                   POLICY_BACKGROUND_RECORD_BYTES,
                 );
+                const doc =
+                  cached && (await policyDocumentSourceStatus(store, cached));
                 if (doc && sourceMatchesRegion(doc, workspace.region)) {
                   const latest = await authorized(mailbox, key);
                   if (!latest || !sourceMatchesRegion(doc, latest.region)) {

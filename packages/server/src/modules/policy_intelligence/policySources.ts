@@ -242,13 +242,17 @@ function policyAttachmentContent(html: string, main: string): string {
   }
   return blocks.join('\n');
 }
+export type PolicyRecheckDocument = Pick<
+  OfficialPolicyDocument,
+  'id' | 'url' | 'title' | 'sourceId' | 'deadline' | 'fetchedAt'
+>;
 export async function collectPolicySource(
   source: PolicySource,
   fetcher: typeof fetch,
   signal: AbortSignal,
   now = new Date(),
   onDetailFailure?: (url: string) => void,
-  knownDocuments: readonly OfficialPolicyDocument[] = [],
+  knownDocuments: readonly PolicyRecheckDocument[] = [],
   priorityIds: ReadonlySet<string> = new Set(),
 ): Promise<OfficialPolicyDocument[]> {
   validatePolicySources([source]);
@@ -469,11 +473,11 @@ export async function collectPolicySource(
 }
 
 /** A bounded rotating review, not a claim of comprehensive historical coverage. */
-export function policyRecheckCandidates(
-  documents: readonly OfficialPolicyDocument[],
+export function policyRecheckCandidates<T extends PolicyRecheckDocument>(
+  documents: readonly T[],
   now: Date,
   priorityIds: ReadonlySet<string> = new Set(),
-): OfficialPolicyDocument[] {
+): T[] {
   return documents
     .filter((doc) => {
       const deadline = policyDate(doc.deadline, true);

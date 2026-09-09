@@ -42,6 +42,7 @@ import type {
 } from './postgresCoreRepository.js';
 import {
   createAmapParkCarpoolProvider,
+  resolveAmapWebServiceKey,
   createParkCarpoolService,
   type ParkCarpoolPrincipal,
 } from '../modules/park_carpool/index.js';
@@ -1287,7 +1288,7 @@ export function createClusteredCarpoolService(repository:BusinessRepository) {
     config: carpoolRuntimeConfig,
     store: createParkCarpoolPostgresStore({ repository, getPrincipal: accountId => clusteredCarpoolPrincipal(repository, accountId) }),
     mapProvider: createAmapParkCarpoolProvider({
-      key: process.env.OTTO_AMAP_WEB_SERVICE_KEY,
+      key: resolveAmapWebServiceKey(),
     }),
     createId: (accountId, travelDate) => `carpool_intent_${createHash('sha256')
       .update(`${accountId}\0${travelDate}`, 'utf8')

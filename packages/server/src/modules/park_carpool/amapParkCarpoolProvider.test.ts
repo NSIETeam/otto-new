@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { createAmapParkCarpoolProvider } from './amapParkCarpoolProvider.js';
+import { createAmapParkCarpoolProvider, resolveAmapWebServiceKey } from './amapParkCarpoolProvider.js';
 
 describe('createAmapParkCarpoolProvider', () => {
   it('keeps the key on the server and normalizes place and route responses', async () => {
@@ -181,4 +181,15 @@ it('uses an eight second abort deadline and returns a controlled timeout',async(
    throw new DOMException('timed out','TimeoutError');
  }});
  await expect(provider.searchPlaces('公共站点','杭州')).rejects.toThrow('地图服务连接失败，请稍后重试');
+});
+
+describe('resolveAmapWebServiceKey', () => {
+  it('provides the bundled testing key when configuration is absent', () => {
+    expect(resolveAmapWebServiceKey({})).toMatch(/^[a-f0-9]{32}$/);
+  });
+  it('prefers an explicit deployment key and allows explicit disabling', () => {
+    expect(resolveAmapWebServiceKey({ OTTO_AMAP_WEB_SERVICE_KEY: ' own-key ' })).toBe('own-key');
+    expect(resolveAmapWebServiceKey({ OTTO_AMAP_WEB_SERVICE_KEY: '' })).toBe('');
+    expect(resolveAmapWebServiceKey({ OTTO_AMAP_WEB_SERVICE_KEY: '  ' })).toBe('');
+  });
 });

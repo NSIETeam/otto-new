@@ -85,6 +85,7 @@ import {
 } from '../modules/park_services/index.js';
 import {
   createAmapParkCarpoolProvider,
+  resolveAmapWebServiceKey,
   createParkCarpoolService,
   createParkCarpoolSqliteStore,
   PARK_CARPOOL_SCHEMA_CONTRIBUTOR,
@@ -1262,7 +1263,7 @@ const parkCarpoolService = createParkCarpoolService({
     config: carpoolRuntimeConfig,
   store: parkCarpoolStore,
   mapProvider: createAmapParkCarpoolProvider({
-    key: process.env.OTTO_AMAP_WEB_SERVICE_KEY,
+    key: resolveAmapWebServiceKey(),
   }),
   createId: (accountId, travelDate) => `carpool_intent_${createHash('sha256')
     .update(`${accountId}\0${travelDate}`, 'utf8')

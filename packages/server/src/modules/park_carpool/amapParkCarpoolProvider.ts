@@ -74,6 +74,13 @@ async function request(
   return body;
 }
 
+/** Shared test credential, bundled at the project owner's explicit request.
+ * Set OTTO_AMAP_WEB_SERVICE_KEY to override it; an explicit empty value disables maps.
+ */
+export function resolveAmapWebServiceKey(env: NodeJS.ProcessEnv = process.env): string {
+  return env.OTTO_AMAP_WEB_SERVICE_KEY?.trim() ?? 'd2617028f52a7f2fdb7c222f36762e3d';
+}
+
 /**
  * Server-only AMap Web Service adapter. The key never crosses IPC/renderer.
  * Route-derived caching must remain disabled until the deployment operator has

@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {
   buildUnitArguments,
+  systemdRunDiagnostic,
   cleanStopProof,
   runtimeEnvironment,
   validateMounts,
@@ -114,6 +115,36 @@ cleanup
     uid: 991,
     gid: 991,
   };
+  it('uses a host-resolvable exec trampoline for the namespace-only Node path, never a shell', () => {
+    const args = buildUnitArguments(request);
+    expect(args.slice(-5)).toEqual([
+      '/usr/bin/env',
+      '--',
+      '/run/otto-canary/node',
+      '/run/otto-canary/package/tools/canary-worker.mjs',
+      '_worker',
+    ]);
+    expect(args).not.toContain('-c');
+    expect(args).not.toContain('-i'); // systemd's CREDENTIALS_DIRECTORY must survive exec.
+  });
+  it('retains only bounded enum diagnostics, never raw systemd stderr or credentials', () => {
+    expect(
+      systemdRunDiagnostic(
+        'Failed to find executable /run/otto-canary/node: No such file or directory',
+      ),
+    ).toBe('executable-unavailable');
+    expect(
+      systemdRunDiagnostic(
+        'Failed to start transient service unit: secret-value',
+      ),
+    ).toBe('unit-start-rejected');
+    expect(systemdRunDiagnostic('secret-value')).toBe('unclassified');
+    expect(
+      systemdRunDiagnostic(
+        'x'.repeat(8192) + 'Failed to find executable secret',
+      ),
+    ).toBe('unclassified');
+  });
   it('fixes resource limits and exposes only the canary work subtree writable', () => {
     const args = buildUnitArguments(request).join('\n');
     for (const property of [

@@ -21,9 +21,15 @@ UNIT = "otto-enterprise.service"
 UNIT_FILE = Path("/run/systemd/system") / UNIT
 CGROUP = Path("/sys/fs/cgroup/system.slice") / UNIT
 OWNED_PREFIX = "otto-systemd-acceptance-"
+SERVICE_VIEW = "/run/otto-compensation-fixture"
 SERVICE_SOURCE = r'''import os, pathlib, signal, sys, time
 mode, directory = sys.argv[1:]
 directory = pathlib.Path(directory)
+status = dict(line.split(':', 1) for line in pathlib.Path('/proc/self/status').read_text().splitlines() if ':' in line)
+assert os.geteuid() == 0 and status['NoNewPrivs'].strip() == '1'
+assert all(int(status[name].strip(), 16) == 0 for name in ['CapEff', 'CapPrm', 'CapBnd', 'CapAmb'])
+assert str(directory) == '/run/otto-compensation-fixture/work'
+(directory / 'isolation-probe').write_text('root-cap0-nnp1-bound-view')
 if mode == 'exit7':
     sys.exit(7)
 if mode == 'residual':
@@ -47,6 +53,40 @@ while time.monotonic() < end:
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)
+
+
+def service_unit(case, mode, run_id):
+    """Keep runner-owned private ancestors closed; systemd binds before cap drop."""
+    require(mode in {'exit7', 'residual', 'timeout'} and re.fullmatch(r'[1-9][0-9]*', run_id),
+            'invalid service fixture identity')
+    require(case.is_absolute() and re.fullmatch(r'/[A-Za-z0-9_./-]+', str(case)),
+            'invalid service fixture path')
+    return f"""# Owned only by disposable Otto test {run_id}
+[Unit]
+Description=Disposable Otto compensation regression
+[Service]
+Type=exec
+ExecStart=/usr/bin/python3 -I -S {SERVICE_VIEW}/service.py {mode} {SERVICE_VIEW}/work
+Restart=no
+KillMode={'process' if mode == 'residual' else 'control-group'}
+TimeoutStopSec={'120' if mode == 'timeout' else '5'}
+SendSIGKILL={'no' if mode == 'timeout' else 'yes'}
+RuntimeMaxSec=150
+MemoryMax=64M
+CPUQuota=10%
+TasksMax=8
+PrivateNetwork=yes
+ProtectSystem=strict
+ProtectHome=yes
+TemporaryFileSystem=/run:ro
+BindReadOnlyPaths={case}/service.py:{SERVICE_VIEW}/service.py
+BindPaths={case}/service-work:{SERVICE_VIEW}/work
+ReadWritePaths={SERVICE_VIEW}/work
+WorkingDirectory={SERVICE_VIEW}/work
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+"""
 
 
 def run(argv, *, timeout=10, check=True, input_text=None):
@@ -189,27 +229,10 @@ class Acceptance:
         require(self.unit_digest is None and not UNIT_FILE.exists(), "test service already owned")
         script = case / "service.py"
         script.write_text(SERVICE_SOURCE)
-        content = f"""# Owned only by disposable Otto test {os.environ['GITHUB_RUN_ID']}
-[Unit]
-Description=Disposable Otto compensation regression
-[Service]
-Type=exec
-ExecStart=/usr/bin/python3 -I -S {script} {mode} {case}
-Restart=no
-KillMode={'process' if mode == 'residual' else 'control-group'}
-TimeoutStopSec={'120' if mode == 'timeout' else '5'}
-SendSIGKILL={'no' if mode == 'timeout' else 'yes'}
-RuntimeMaxSec=150
-MemoryMax=64M
-CPUQuota=10%
-TasksMax=8
-PrivateNetwork=yes
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths={case}
-NoNewPrivileges=yes
-CapabilityBoundingSet=
-"""
+        script.chmod(0o600)
+        service_work = case / "service-work"
+        service_work.mkdir(mode=0o700)
+        content = service_unit(case, mode, os.environ['GITHUB_RUN_ID'])
         with UNIT_FILE.open("x") as handle:
             handle.write(content)
         UNIT_FILE.chmod(0o644)
@@ -220,12 +243,14 @@ CapabilityBoundingSet=
             wait_until(lambda: state().get("ActiveState") == "failed")
             require(state().get("ExecMainStatus") == "7", "fixture did not actually exit 7")
         else:
-            wait_until(lambda: (case / "service.ready").is_file())
+            wait_until(lambda: (service_work / "service.ready").is_file())
             if mode == "residual":
-                wait_until(lambda: (case / "child.pid").is_file())
+                wait_until(lambda: (service_work / "child.pid").is_file())
                 run(["/usr/bin/systemctl", "stop", UNIT])
                 require(state().get("MainPID") == "0" and group_state()["populated"] == "1",
                         "real residual-process precondition was not reached")
+        require((service_work / 'isolation-probe').read_text() == 'root-cap0-nnp1-bound-view'
+                and self.root.stat().st_mode & 0o777 == 0o700, 'service isolation or private ancestor changed')
 
     def cleanup_service(self):
         if self.unit_digest is None:

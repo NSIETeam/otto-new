@@ -162,10 +162,30 @@ export function buildUnitArguments({
     '--wait',
     `--unit=${unit}`,
     ...properties.flatMap((p) => ['--property', p]),
+    // systemd-run v255 checks argv[0] in the host filesystem before creating
+    // the unit. env exists on both sides and execs the bound Node in-place:
+    // no shell, no extra supervisor PID, no loss of CREDENTIALS_DIRECTORY.
+    '/usr/bin/env',
+    '--',
     `${VIEW}/node`,
     `${VIEW}/package/tools/canary-worker.mjs`,
     '_worker',
   ];
+}
+
+export function systemdRunDiagnostic(stderr) {
+  // Never persist/print raw stderr: the root runner can mention credential
+  // source paths. These fixed enums are diagnostic only, never stop proof.
+  const bounded = stderr.slice(0, 8192);
+  if (/^Failed to find executable /m.test(bounded))
+    return 'executable-unavailable';
+  if (
+    /^Failed to (?:start transient service unit|set unit properties):/m.test(
+      bounded,
+    )
+  )
+    return 'unit-start-rejected';
+  return 'unclassified';
 }
 
 export function runtimeEnvironment(config, credentials, adminToken) {
@@ -578,13 +598,23 @@ async function launch(transaction) {
   controlDeadline = deadline + 65_000;
   const runner = spawn('systemd-run', buildUnitArguments(request), {
     env: systemEnv,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  const runnerError = Buffer.alloc(8192);
+  let runnerErrorBytes = 0;
+  runner.stderr.on('data', (chunk) => {
+    runnerErrorBytes += chunk.copy(
+      runnerError,
+      runnerErrorBytes,
+      0,
+      Math.min(chunk.length, runnerError.length - runnerErrorBytes),
+    );
   });
   let runnerExit;
   runner.on('error', () => {
     runnerExit = -1;
   });
-  runner.on('exit', (code) => {
+  runner.on('close', (code) => {
     runnerExit = code ?? -1;
   });
   try {
@@ -650,6 +680,16 @@ async function launch(transaction) {
         false,
       );
     }
+    writeJson(
+      `${transaction}/canary-launch-diagnostic.json`,
+      {
+        runnerExit: runnerExit ?? null,
+        kind: systemdRunDiagnostic(
+          runnerError.subarray(0, runnerErrorBytes).toString('utf8'),
+        ),
+      },
+      false,
+    );
     throw error;
   }
 }

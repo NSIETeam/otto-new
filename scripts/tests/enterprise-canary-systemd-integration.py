@@ -71,7 +71,7 @@ await connectionDenied({path: fixture.hostSocket});
 await connectionDenied({host: '127.0.0.1', port: fixture.hostPort});
 // Also test an otherwise accessible pathname socket outside /run: AF_UNIX is disabled.
 await connectionDenied({path: fixture.otherSocket});
-fs.writeFileSync(work + '/isolation-probe.json', JSON.stringify({passed:true,pid:process.pid,cgroup:fs.readFileSync('/proc/self/cgroup','utf8')}));
+fs.writeFileSync(work + '/isolation-probe.json', JSON.stringify({passed:true,pid:process.pid,parentPid:process.ppid,cgroup:fs.readFileSync('/proc/self/cgroup','utf8')}));
 fs.appendFileSync(work + '/data.db', '\nmigrated-to-schema-41');
 if (fixture.mode === 'migration-exit7') process.exit(7);
 '''
@@ -122,6 +122,8 @@ def main():
     require(os.readlink('/proc/self/ns/net') != os.readlink('/proc/1/ns/net'), 'harness must be network isolated')
     require(run(['/usr/bin/stat','-f','-c','%T','/sys/fs/cgroup']).stdout.strip() == 'cgroup2fs', 'cgroup v2 required')
     require(not Path('/var/lib/otto-enterprise').exists() and not Path('/opt/otto-enterprise').exists(), 'production paths present')
+    require(not Path('/run/otto-canary').exists() and not Path('/run/otto-canary').is_symlink(),
+            'worker view must exist only inside the unit namespace')
     workspace = Path(os.environ['GITHUB_WORKSPACE']).resolve(strict=True)
     temporary = Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
     require(workspace.is_relative_to('/home/runner/work') and temporary.is_relative_to('/home/runner/work'), 'hosted paths required')
@@ -198,6 +200,9 @@ def main():
                 require('populated 0' in (group / 'cgroup.events').read_text() and not (group / 'cgroup.procs').read_text().strip(), 'unit has remaining processes')
             positive = mode in ['success','drain45']
             report['cases'].append({'mode': mode, 'exit': result.returncode, 'seconds': round(elapsed, 2),
+                # Only root-produced fixed enums, never raw runner stderr or config.
+                'launchDiagnostic': json.loads((txn / 'canary-launch-diagnostic.json').read_text())
+                    if (txn / 'canary-launch-diagnostic.json').exists() else None,
                 'observedUnit': run(['/usr/bin/systemctl','show',witness['unit'],
                     '--property=LoadState,ActiveState,MainPID,Result,ExecMainCode,ExecMainStatus'],check=False).stdout,
                 'unitJournal': run(['/usr/bin/journalctl','--unit',witness['unit'],'--no-pager','--output=cat','--lines=12'],check=False).stdout[-4000:],
@@ -207,9 +212,12 @@ def main():
             if positive:
                 run([str(node),str(package / 'tools/canary-worker.mjs'),'verify-deliverable','--transaction',str(txn)],env=env)
                 probe = json.loads((work / 'isolation-probe.json').read_text()); require(probe['passed'] and witness['cgroup'] in probe['cgroup'], 'migration outside attested cgroup')
+                require(probe['parentPid'] == witness['pid'], 'exec trampoline did not preserve worker MainPID')
                 with (work / 'data.db').open('a') as stream: stream.write('tamper')
                 require(run([str(node),str(package / 'tools/canary-worker.mjs'),'verify-deliverable','--transaction',str(txn)],env=env,check=False).returncode != 0,'changed database accepted')
-            require(hashlib.sha256(rollback.read_bytes()).hexdigest() == rollback_hash and (txn.stat().st_mode & 0o777) == 0o700, 'rollback custody changed')
+            require(hashlib.sha256(rollback.read_bytes()).hexdigest() == rollback_hash
+                    and (txn.stat().st_mode & 0o777) == 0o700
+                    and (root.stat().st_mode & 0o777) == 0o700, 'rollback custody changed')
             require(elapsed < 250, 'fixed controller deadline exceeded')
             require('sms-secret-fixture' not in result.stderr + result.stdout and 'production-admin-fixture' not in result.stderr + result.stdout, 'credential leaked to controller output')
             report['cases'][-1].update(cgroupEmpty=True, passed=True)

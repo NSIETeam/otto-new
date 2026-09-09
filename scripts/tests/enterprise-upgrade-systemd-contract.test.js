@@ -43,6 +43,43 @@ function checkArguments(command, makeArguments, { linkOutside = false } = {}) {
 }
 
 describe('disposable real-systemd workflow boundary (not a Linux acceptance substitute)', () => {
+  it('binds only service code and scratch into the cap-zero service without opening private ancestors', () => {
+    const result = spawnSync(
+      python,
+      [
+        '-I',
+        '-S',
+        '-B',
+        '-c',
+        `import importlib.util,pathlib,sys
+spec=importlib.util.spec_from_file_location('acceptance',sys.argv[1])
+module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+print(module.service_unit(pathlib.PurePosixPath('/home/runner/work/_temp/private/case-test'), 'residual', '123'))
+`,
+        harnessPath,
+      ],
+      { encoding: 'utf8', timeout: 10_000 },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    const unit = result.stdout;
+    expect(unit).toContain(
+      'ExecStart=/usr/bin/python3 -I -S /run/otto-compensation-fixture/service.py residual /run/otto-compensation-fixture/work',
+    );
+    expect(unit).toContain(
+      'BindReadOnlyPaths=/home/runner/work/_temp/private/case-test/service.py:/run/otto-compensation-fixture/service.py',
+    );
+    expect(unit).toContain(
+      'BindPaths=/home/runner/work/_temp/private/case-test/service-work:/run/otto-compensation-fixture/work',
+    );
+    expect(unit).toContain(
+      'ReadWritePaths=/run/otto-compensation-fixture/work',
+    );
+    expect(unit).not.toContain('ReadWritePaths=/home/runner');
+    expect(unit).toContain('ProtectHome=yes');
+    expect(unit).toContain('TemporaryFileSystem=/run:ro');
+    expect(unit).toMatch(/^CapabilityBoundingSet=$/m);
+    expect(unit).toContain('NoNewPrivileges=yes');
+  });
   it('uses only this checkout, read permission, a hosted runner and bounded runtime', () => {
     expect(workflow).toContain('workflow_call:');
     expect(workflow).toContain('runs-on: ubuntu-24.04');

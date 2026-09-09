@@ -119,7 +119,12 @@ describe('server integration baseline', () => {
   });
 
   it('fails when the candidate does not contain the authoritative internal baseline', () => {
-    const candidate = ledger.authority.integratedSources[0].tip;
+    // A source list can legitimately gain newer descendants at any position.
+    // The authority's own parent is a stable negative ancestry fixture.
+    const candidate = execFileSync('git', ['rev-parse', `${ledger.authority.baselineCommit}^`], {
+      cwd: rootDir,
+      encoding: 'utf8',
+    }).trim();
 
     expect(
       validateServerIntegrationBaseline({

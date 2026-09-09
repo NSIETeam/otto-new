@@ -4,16 +4,26 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { EnterpriseGraphCanvas } from './EnterpriseGraphCanvas.js';
 import { clearLayouts, layoutGeneration, saveLayout } from './layoutCache.js';
 import { demoMap, graphIndex } from './model.js';
+type CanvasNode = { id: string; x: number; y: number };
+interface MockCanvasProps {
+  graphData: { nodes: CanvasNode[] };
+  cooldownTicks: number;
+  cooldownTime: number;
+  onEngineStop(): void;
+  onNodeDrag(node: CanvasNode, translation: { x: number; y: number }): void;
+  onNodeDragEnd(node: CanvasNode): void;
+  onRenderFramePost(context: Partial<CanvasRenderingContext2D>, scale: number): void;
+}
 const mock = vi.hoisted(() => ({
   stop: () => {},
-  props: {} as any,
+  props: {} as MockCanvasProps,
   fit: vi.fn(),
   pause: vi.fn(),
   center: vi.fn(() => ({ x: 12, y: 20 })),
   zoom: vi.fn(() => 1.7),
 }));
-vi.mock('react-force-graph-2d', () => ({
-  default: forwardRef(function Graph(props: { onEngineStop: () => void }, ref) {
+vi.mock('react-force-graph-2d', () => {
+  const MockGraph = forwardRef((props: MockCanvasProps, ref) => {
     mock.stop = props.onEngineStop;
     mock.props = props;
     useImperativeHandle(ref, () => ({
@@ -26,8 +36,10 @@ vi.mock('react-force-graph-2d', () => ({
       d3Force: () => ({ strength: vi.fn(), distance: vi.fn() }),
     }));
     return <div data-testid="force-canvas" />;
-  }),
-}));
+  });
+  MockGraph.displayName = 'MockForceGraph';
+  return { default: MockGraph };
+});
 beforeEach(() => {
   vi.stubGlobal(
     'ResizeObserver',
@@ -117,7 +129,7 @@ function renderLabels(scale = 1.2, positions: number[][] = []) {
     moveTo: vi.fn(),
     lineTo: vi.fn(),
     stroke: vi.fn(),
-    measureText: () => ({ width: 40 }),
+    measureText: () => ({ width: 40 }) as TextMetrics,
     fillText: (value: string, x: number, y: number) => {
       text.push(value);
       positions.push([x, y]);
@@ -197,7 +209,7 @@ it('always names isolated nodes even when their label areas overlap', () => {
 });
 it('keeps isolated enterprise names when zoomed out in a large graph', () => {
   const nodes = mountIsolatedNodes(false, 51);
-  nodes.forEach((node: any, i: number) => {
+  nodes.forEach((node, i) => {
     node.x = i * 200;
     node.y = 0;
   });
@@ -229,7 +241,7 @@ it('settles the hidden initial layout even when reduced motion is enabled', asyn
 
 it('draws every connected company name in a crowded cluster', () => {
   const nodes = mountIsolatedNodes(true, 4);
-  nodes.forEach((node: any, i: number) => {
+  nodes.forEach((node, i) => {
     node.x = i * 4;
     node.y = 0;
   });
@@ -246,7 +258,7 @@ it('draws every connected company name in a crowded cluster', () => {
 });
 it('never drops connected company labels at low zoom', () => {
   const nodes = mountIsolatedNodes(true, 51);
-  nodes.forEach((node: any, i: number) => {
+  nodes.forEach((node, i) => {
     node.x = i * 200;
     node.y = 0;
   });

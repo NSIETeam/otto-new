@@ -8,6 +8,19 @@
     "releaseRule": "The latest origin/internal commit must be an ancestor of a release source. Additional commits are allowed only on reviewed release branches or version tags.",
     "integratedSources": [
       {
+        "name": "origin/codex/blue-heron-7f3a9c",
+        "tip": "e7cf417da63b331d96099a0eb5d634f9fc2b2654",
+        "disposition": "integrated",
+        "integrationCommits": ["071fa0b6040fbd01a1f1474a8bbe8eb2b7cbcaf1"],
+        "capabilities": [
+          "park carpool and team-provided map service",
+          "park flea-market protocol and image processing",
+          "enterprise public profiles and industry graph",
+          "shared official channel and workflow runtime"
+        ],
+        "reason": "All 37 source commits are ancestors of the reviewed integration merge. Release fixes preserve candidate authorization, account-scoped UI state, bounded background lifecycle and packaging gates. This source record is not a production-deployment attestation."
+      },
+      {
         "name": "origin/codex/sqlcipher",
         "tip": "c625bc8672875d8b17d2f7b8db131b06c7c34eda",
         "disposition": "integrated",
@@ -122,6 +135,7 @@
       "policy_intelligence_v2",
       "policy_intelligence_v3",
       "policy_intelligence_inbox_v1",
+      "park_flea_market_protocol_v1",
       "password_auth",
       "sms_login",
       "sms_registration",

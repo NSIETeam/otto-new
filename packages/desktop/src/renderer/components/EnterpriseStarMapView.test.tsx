@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle } from 'react';
+import { forwardRef, useImperativeHandle, type ComponentProps } from 'react';
 import {
   act,
   cleanup,
@@ -11,8 +11,10 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EnterpriseStarMapView } from './EnterpriseStarMapView.js';
 import { demoMap } from '../starMap/model.js';
-vi.mock('../starMap/EnterpriseGraphCanvas.js', () => ({
-  EnterpriseGraphCanvas: forwardRef(function MockGraph(props: any, ref) {
+type CanvasProps = ComponentProps<typeof import('../starMap/EnterpriseGraphCanvas.js').EnterpriseGraphCanvas>;
+type StarMapResponse = Awaited<ReturnType<typeof window.otto.enterpriseParkStarMap>>;
+vi.mock('../starMap/EnterpriseGraphCanvas.js', () => {
+  const MockGraph = forwardRef((props: CanvasProps, ref) => {
     useImperativeHandle(ref, () => ({
       fit: vi.fn(),
       locate: vi.fn(),
@@ -27,7 +29,7 @@ vi.mock('../starMap/EnterpriseGraphCanvas.js', () => ({
         data-size-mode={props.sizeMode}
         data-reduced-motion={String(props.reducedMotion)}
       >
-        {props.index.nodes.map((node: any) => (
+        {props.index.nodes.map((node) => (
           <button
             key={node.organizationId}
             aria-label={`节点 ${node.organizationName}`}
@@ -40,15 +42,19 @@ vi.mock('../starMap/EnterpriseGraphCanvas.js', () => ({
         ))}
       </div>
     );
-  }),
-}));
-const real = () => ({
+  });
+  MockGraph.displayName = 'MockGraph';
+  return { EnterpriseGraphCanvas: MockGraph };
+});
+const real = (): StarMapResponse => ({
   ...structuredClone(demoMap),
   dataSource: 'real',
+  relationType: 'same_industry',
   currentOrganizationId: 'demo:bhc-demo-018',
   nodes: demoMap.nodes.map((node) => ({
     ...node,
     industryConfirmedByCompany: true,
+    industryClassificationBasis: 'company_selected',
   })),
 });
 beforeEach(() => {
@@ -259,7 +265,7 @@ describe('enterprise star map exploration', () => {
     next.nodes = next.nodes.filter(
       (n) => n.organizationId !== 'demo:bhc-demo-018',
     );
-    loader.mockResolvedValueOnce(next as any);
+    loader.mockResolvedValueOnce(next);
     fireEvent(window, new Event('otto:enterprise-profile-updated'));
     await waitFor(() =>
       expect(
@@ -269,7 +275,7 @@ describe('enterprise star map exploration', () => {
     expect(screen.getByText('该企业资料已不可查看')).toBeTruthy();
   });
   it('ignores an old real request after switching data sources', async () => {
-    let resolve!: (value: any) => void;
+    let resolve!: (value: StarMapResponse) => void;
     vi.mocked(window.otto.enterpriseParkStarMap).mockImplementationOnce(
       () =>
         new Promise((r) => {
@@ -308,7 +314,7 @@ describe('enterprise star map exploration', () => {
       ...real(),
       nodes: [],
       industryGroups: [],
-    } as any);
+    });
     const view = render(<EnterpriseStarMapView onBack={() => undefined} />);
     expect(await screen.findByText('园区暂无已公开资料的企业')).toBeTruthy();
     expect(screen.queryByTestId('graph')).toBeNull();

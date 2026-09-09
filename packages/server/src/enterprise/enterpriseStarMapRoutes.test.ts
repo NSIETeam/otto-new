@@ -3,16 +3,20 @@ import {
   handleClusteredBusinessRoute,
   type ClusteredBusinessRouteInput,
 } from './clusteredBusinessRoutes.js';
+import type { PostgresBusinessRecord } from './postgresBusinessRepository.js';
+import type { EnterpriseParkStarMap, EnterprisePublicProfile } from '../modules/park_services/parkPartnershipTypes.js';
+type Repository = ClusteredBusinessRouteInput['repository'];
+type RouteResult = { status: number; data: { starMap: EnterpriseParkStarMap; profile: EnterprisePublicProfile } };
 function fixture() {
-  const records = new Map<string, any>();
+  const records = new Map<string, PostgresBusinessRecord>();
   const record = (
     org: string,
     type: string,
     id: string,
-    payload: any,
+    payload: Record<string, unknown>,
     status = 'active',
   ) => {
-    const r = {
+    const r: PostgresBusinessRecord = {
       organizationId: org,
       resourceType: type,
       resourceId: id,
@@ -20,6 +24,8 @@ function fixture() {
       status,
       payload,
       version: 1,
+      ownerAccountId: null,
+      createdAt: '2026-09-08',
       updatedAt: '2026-09-08',
     };
     records.set(`${org}:${type}:${id}`, r);
@@ -52,7 +58,7 @@ function fixture() {
     adminOrganizationId: 'operator',
   });
   record('other', 'public_profile', 'public_profile_other', {
-    ...records.get('a:public_profile:public_profile_a').payload,
+    ...records.get('a:public_profile:public_profile_a')!.payload,
   });
   const repository = {
     getOrganizationFeatures: vi.fn(async () => ({ park_services: true })),
@@ -62,14 +68,14 @@ function fixture() {
       status: 'active',
     })),
     getBusinessRecord: vi.fn(
-      async (q: any) =>
+      async (q: Parameters<Repository['getBusinessRecord']>[0]) =>
         records.get(`${q.organizationId}:${q.resourceType}:${q.resourceId}`) ??
         null,
     ),
     listParkTenantMemberships: vi.fn(async () =>
       [...records.values()].filter((r) => r.resourceType === 'membership'),
     ),
-    updateBusinessRecord: vi.fn(async (q: any) =>
+    updateBusinessRecord: vi.fn(async (q: Parameters<Repository['updateBusinessRecord']>[0]) =>
       record(
         q.organizationId,
         q.resourceType,
@@ -83,26 +89,26 @@ function fixture() {
   const run = async (
     path = '/enterprise/park/star-map',
     method = 'GET',
-    body: any = {},
+    body: Record<string, unknown> = {},
     isAdmin = true,
   ) => {
-    let result: any;
+    let result!: RouteResult;
     await handleClusteredBusinessRoute({
       path,
       method,
       url: new URL('https://local' + path),
-      req: {} as any,
-      res: {} as any,
+      req: {} as ClusteredBusinessRouteInput['req'],
+      res: {} as ClusteredBusinessRouteInput['res'],
       member: {
         id: 'admin',
         organizationId: 'a',
         isAdmin,
         status: 'active',
-      } as any,
-      repository: repository as any,
+      } as ClusteredBusinessRouteInput['member'],
+      repository: repository as unknown as Repository,
       readBody: async () => body,
       sendJson: (_res, status, data) => {
-        result = { status, data };
+        result = { status, data: data as RouteResult['data'] };
       },
       requireCommercialFeature: async () => true,
       commercialFeatureAvailable: async () => true,
@@ -116,10 +122,10 @@ describe('clustered enterprise star-map contract', () => {
     const { run } = fixture();
     const { status, data } = await run();
     expect(status).toBe(200);
-    expect(data.starMap.nodes.map((n: any) => n.organizationId).sort()).toEqual(
+    expect(data.starMap.nodes.map((n) => n.organizationId).sort()).toEqual(
       ['a', 'b', 'unconfirmed'],
     );
-    expect(data.starMap.industryGroups[0].memberOrganizationIds).toEqual([
+    expect(data.starMap.industryGroups![0].memberOrganizationIds).toEqual([
       'a',
       'b',
     ]);
@@ -128,7 +134,7 @@ describe('clustered enterprise star-map contract', () => {
   });
   it('confirms only administrator-selected standard industry, rejects unknown codes, and preserves legacy updates', async () => {
     const { run, records } = fixture();
-    const body = records.get('a:public_profile:public_profile_a').payload;
+    const body = records.get('a:public_profile:public_profile_a')!.payload;
     expect(
       (
         await run('/enterprise/organization/public-profile', 'PUT', {
@@ -166,16 +172,16 @@ describe('clustered enterprise star-map contract', () => {
   });
   it('removes withdrawn public profiles on the next request', async () => {
     const { run, records } = fixture();
-    records.get('b:public_profile:public_profile_b').payload.isPublic = false;
+    records.get('b:public_profile:public_profile_b')!.payload.isPublic = false;
     const result = await run();
     expect(result.data.starMap.relationshipCount).toBe(0);
     expect(
-      result.data.starMap.nodes.map((n: any) => n.organizationId),
+      result.data.starMap.nodes.map((n) => n.organizationId),
     ).not.toContain('b');
   });
   it('does not return a disabled park', async () => {
     const { run, records } = fixture();
-    records.get('operator:park:park_operator').status = 'disabled';
+    records.get('operator:park:park_operator')!.status = 'disabled';
     expect((await run()).status).not.toBe(200);
   });
 });

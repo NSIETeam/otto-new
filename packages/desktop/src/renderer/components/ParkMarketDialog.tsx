@@ -593,9 +593,15 @@ function MarketContent({
       if (cached) cached.scroll = dialog.current?.scrollTop ?? 0;
     }
     try {
-      const detail = isOwn
+      let detail = isOwn
         ? item
         : await marketRequest<Item>(`/listings/${item.id}`);
+      const owner = isOwn || detail.isOwner === true;
+      if (owner && !isOwn) {
+        const mine = await marketRequest<{ items: Item[] }>('/mine');
+        detail = mine.items.find((entry) => entry.id === detail.id) ?? detail;
+      }
+      setOwn(owner);
       setSelected(detail);
       setReserveNote(detail.reservation?.note ?? '');
       setReserveTime('');
@@ -611,12 +617,13 @@ function MarketContent({
     let active = true;
     void marketRequest<Item>(`/listings/${initialListingId}`)
       .then(async (detail) => {
-        if (detail.isOwner) {
+        const owner = detail.isOwner === true;
+        if (owner) {
           const mine = await marketRequest<{ items: Item[] }>('/mine');
           detail = mine.items.find((item) => item.id === detail.id) ?? detail;
         }
         if (!active) return;
-        setOwn(detail.isOwner === true || !!detail.parkId);
+        setOwn(owner);
         setSelected(detail);
         setView('detail');
       })
@@ -1716,6 +1723,18 @@ function MarketContent({
               >
                 分享
               </button>
+              {selected.state !== 'active' && (
+                <div>
+                  <button type="button" disabled>
+                    联系卖家
+                  </button>
+                  <p>
+                    {selected.state === 'reserved'
+                      ? '商品已预留，暂不接受新咨询。已有咨询可在“我的消息”的“商品咨询”中继续。'
+                      : '商品当前不在售，暂不接受新咨询。已有咨询可在“我的消息”的“商品咨询”中查看。'}
+                  </p>
+                </div>
+              )}
               {selected.state === 'active' && (
                 <MarketContactComposer
                   key={selected.id}

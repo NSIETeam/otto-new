@@ -666,3 +666,37 @@ it('opens local sample products when the enterprise backend is unreachable', asy
   expect(screen.getByRole('button', { name: /查看 轻薄笔记本电脑/ })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '体验示例商品' })).toBeNull();
 });
+
+it('explains reserved buyer contact restrictions without treating park membership as ownership', async () => {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+  Object.assign(window.otto, {
+    enterpriseMarketDrafts: vi.fn(async () => []),
+    enterpriseParkMarket: vi.fn(async ({ path }: { path: string }) => {
+      if (path === '/settings') return { enabled: true, ready: true, search: { state: 'ready' } };
+      if (path === '/listings/reserved') return { id: 'reserved', parkId: 'P', isOwner: false, title: '预留电脑', state: 'reserved', imageIds: [], priceCents: 100, version: 1 };
+      return { items: [] };
+    }),
+  });
+  render(<ParkMarketDialog open accountId="buyer" initialListingId="reserved" onClose={() => {}} />);
+  expect(await screen.findByText('商品已预留，暂不接受新咨询。已有咨询可在“我的消息”的“商品咨询”中继续。')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '联系卖家' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.queryByRole('button', { name: '编辑' })).toBeNull();
+});
+
+it('uses server ownership when opening an owned item from the market list', async () => {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+  const item = { id: 'owned', title: '自己的电脑', state: 'active', imageIds: [], priceCents: 100, version: 1 };
+  Object.assign(window.otto, {
+    enterpriseMarketDrafts: vi.fn(async () => []),
+    enterpriseParkMarket: vi.fn(async ({ path }: { path: string }) => {
+      if (path === '/settings') return { enabled: true, ready: true, search: { state: 'ready' } };
+      if (path === '/listings/owned') return { ...item, isOwner: true };
+      if (path === '/mine') return { items: [{ ...item, parkId: 'P' }] };
+      return { items: [item] };
+    }),
+  });
+  render(<ParkMarketDialog open accountId="seller" onClose={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: /自己的电脑/ }));
+  expect(await screen.findByRole('button', { name: '编辑' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '联系卖家' })).toBeNull();
+});

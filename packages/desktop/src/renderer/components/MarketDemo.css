@@ -159,3 +159,49 @@
     grid-template-columns: 1fr;
   }
 }
+.market-demo button.market-demo__contact {
+  background: #286b58;
+  border-color: #286b58;
+  color: white;
+  font-weight: 600;
+  padding: 10px 24px;
+  order: -1;
+}
+.market-demo__conversation {
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid #c5ceca;
+  border-radius: 10px;
+}
+.market-demo__conversation small {
+  font-size: 12px;
+  font-weight: normal;
+  opacity: 0.7;
+}
+.market-demo__conversation textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 80px;
+  margin: 8px 0;
+}
+.market-demo__conversation button + button {
+  margin-left: 8px;
+}
+.market-demo__context {
+  font-size: 13px;
+  opacity: 0.8;
+}
+.market-demo__bubble {
+  margin: 8px 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--bg-primary, white);
+  max-width: 80%;
+}
+.market-demo__bubble.is-buyer {
+  margin-left: auto;
+}
+.market-demo__bubble p {
+  margin: 5px 0 0;
+}

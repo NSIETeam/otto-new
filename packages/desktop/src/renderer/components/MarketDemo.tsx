@@ -6,7 +6,16 @@ import keyboard from '../assets/market-demo/keyboard.jpg';
 import './ParkMarketDialog.css';
 import './MarketDemo.css';
 type Status = 'active' | 'reserved' | 'offline' | 'sold';
+const SELF = 'demo-self';
+type Inquiry = {
+  state: 'pending' | 'accepted' | 'withdrawn';
+  snapshot: string;
+  messages: Array<{ role: 'buyer' | 'seller'; text: string }>;
+};
 type Product = {
+  sellerId: string;
+  sellerName: string;
+  inquiry?: Inquiry;
   id: string;
   title: string;
   description: string;
@@ -26,6 +35,8 @@ function seed(): Product[] {
   return [
     {
       id: 'laptop',
+      sellerId: 'demo-lin',
+      sellerName: '林同学',
       title: '轻薄笔记本电脑 · 16GB / 512GB',
       description:
         '换新电脑后闲置，日常办公使用，屏幕和键盘功能正常，外壳有轻微使用痕迹。附原装充电器，可在园区当面检查。\n交接地点：园区一楼大厅；工作日18:00后。',
@@ -36,6 +47,8 @@ function seed(): Product[] {
     },
     {
       id: 'monitor',
+      sellerId: 'demo-chen',
+      sellerName: '陈先生',
       title: '24英寸办公显示器 · 带支架',
       description:
         '双屏办公换下来的显示器，屏幕无明显坏点，支架完整，附电源线。已与一位园区邻居约好交接，当前为预留状态。\n交接地点：园区咖啡厅。',
@@ -46,6 +59,8 @@ function seed(): Product[] {
     },
     {
       id: 'keyboard',
+      sellerId: SELF,
+      sellerName: '我',
       title: '机械键盘与鼠标 · 桌面升级闲置',
       description:
         '键盘按键正常，已清洁。因最近不方便交接暂时下架，可以在这里体验重新上架、编辑和免费赠送。\n交接地点：园区前台，时间另约。',
@@ -68,6 +83,18 @@ function restore(key: string): Product[] {
         (p) =>
           p &&
           typeof p.id === 'string' &&
+          typeof p.sellerId === 'string' &&
+          typeof p.sellerName === 'string' &&
+          (!p.inquiry ||
+            (['pending', 'accepted', 'withdrawn'].includes(p.inquiry.state) &&
+              typeof p.inquiry.snapshot === 'string' &&
+              Array.isArray(p.inquiry.messages) &&
+              p.inquiry.messages.length <= 40 &&
+              p.inquiry.messages.every(
+                (m: { role?: unknown; text?: unknown }) =>
+                  (m.role === 'buyer' || m.role === 'seller') &&
+                  typeof m.text === 'string',
+              ))) &&
           typeof p.title === 'string' &&
           typeof p.description === 'string' &&
           typeof p.favorite === 'boolean' &&
@@ -92,7 +119,7 @@ export function MarketDemo({
   onClose(): void;
   onExit(): void;
 }) {
-  const key = `otto:market-demo:v1:${scope}`;
+  const key = `otto:market-demo:v2:${scope}`;
   const [products, setProducts] = useState(() => restore(key));
   const [view, setView] = useState<'market' | 'mine' | 'favorites'>('market');
   const [selected, select] = useState<string | null>(null);
@@ -102,7 +129,7 @@ export function MarketDemo({
   const [notice, setNotice] = useState('');
   const [form, setForm] = useState<Product | null>(null);
   const [message, setMessage] = useState('');
-  const [messages, setMessages] = useState<Record<string, string[]>>({});
+  const [chatOpen, setChatOpen] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     dialog.current?.showModal();
@@ -116,6 +143,12 @@ export function MarketDemo({
   }, [key, products]);
   const current = products.find((p) => p.id === selected);
   const change = (patch: Partial<Product>) => {
+    if (
+      !current ||
+      (current.sellerId !== SELF &&
+        Object.keys(patch).some((k) => !['favorite', 'inquiry'].includes(k)))
+    )
+      return;
     setProducts((rows) =>
       rows.map((p) => (p.id === selected ? { ...p, ...patch } : p)),
     );
@@ -124,10 +157,11 @@ export function MarketDemo({
   const shown = products
     .filter(
       (p) =>
-        (view === 'mine' ||
-          (view === 'favorites'
+        (view === 'mine'
+          ? p.sellerId === SELF
+          : view === 'favorites'
             ? p.favorite
-            : p.state === 'active' || p.state === 'reserved')) &&
+            : p.state === 'active' || p.state === 'reserved') &&
         (!free || p.price === 0) &&
         `${p.title} ${p.description}`.includes(query.trim()),
     )
@@ -163,7 +197,7 @@ export function MarketDemo({
               setProducts(seed());
               select(null);
               setForm(null);
-              setMessages({});
+              setChatOpen(false);
               setQuery('');
               setFree(false);
               setView('market');
@@ -200,6 +234,8 @@ export function MarketDemo({
             select(null);
             setForm({
               id: crypto.randomUUID(),
+              sellerId: SELF,
+              sellerName: '我',
               title: '',
               price: 0,
               description: '',
@@ -219,6 +255,7 @@ export function MarketDemo({
           onSubmit={(event) => {
             event.preventDefault();
             if (
+              form.sellerId !== SELF ||
               !form.title.trim() ||
               !Number.isFinite(form.price) ||
               form.price < 0
@@ -327,76 +364,195 @@ export function MarketDemo({
                 {current.price ? `¥${current.price}` : '免费送'}
               </strong>
               <p>{current.description}</p>
-              <p>演示卖家 · 同园区成员 · 当面交接</p>
+              <p>
+                {current.sellerName} ·{' '}
+                {current.sellerId === SELF ? '这是你发布的商品' : '同园区卖家'}{' '}
+                · 当面交接
+              </p>
               <div className="market-demo__actions">
                 <button onClick={() => change({ favorite: !current.favorite })}>
                   {current.favorite ? '取消收藏' : '收藏'}
                 </button>
-                <button onClick={() => setForm({ ...current })}>
-                  编辑商品
-                </button>
-                {current.state === 'active' && (
-                  <button onClick={() => change({ state: 'reserved' })}>
-                    预留
-                  </button>
-                )}
-                {current.state === 'reserved' && (
-                  <button onClick={() => change({ state: 'active' })}>
-                    取消预留
-                  </button>
-                )}
-                {current.state === 'active' || current.state === 'reserved' ? (
+                {current.sellerId === SELF ? (
                   <>
-                    <button onClick={() => change({ state: 'offline' })}>
-                      下架
+                    <button onClick={() => setForm({ ...current })}>
+                      编辑商品
                     </button>
-                    <button onClick={() => change({ state: 'sold' })}>
-                      标记售出
-                    </button>
+                    {current.state === 'active' && (
+                      <button onClick={() => change({ state: 'reserved' })}>
+                        预留
+                      </button>
+                    )}
+                    {current.state === 'reserved' && (
+                      <button onClick={() => change({ state: 'active' })}>
+                        取消预留
+                      </button>
+                    )}
+                    {current.state === 'active' ||
+                    current.state === 'reserved' ? (
+                      <>
+                        <button onClick={() => change({ state: 'offline' })}>
+                          下架
+                        </button>
+                        <button onClick={() => change({ state: 'sold' })}>
+                          标记售出
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={() => change({ state: 'active' })}>
+                        重新上架
+                      </button>
+                    )}
                   </>
                 ) : (
-                  <button onClick={() => change({ state: 'active' })}>
-                    重新上架
-                  </button>
+                  <>
+                    <button
+                      className="market-demo__contact"
+                      disabled={!current.inquiry && current.state !== 'active'}
+                      onClick={() => {
+                        setChatOpen(true);
+                        setMessage('');
+                      }}
+                    >
+                      {current.inquiry?.state === 'accepted'
+                        ? '继续聊天'
+                        : current.inquiry
+                          ? '查看咨询'
+                          : '联系卖家'}
+                    </button>
+                    {!current.inquiry && current.state !== 'active' && (
+                      <p>
+                        {current.state === 'reserved'
+                          ? '商品已预留，暂不接受新咨询。'
+                          : '商品已结束展示，暂不接受新咨询。'}
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             </div>
           </div>
-          <details>
-            <summary>体验咨询与回复（本地模拟）</summary>
-            <p>仅展示会话样式，真实聊天的权限、加密和通知不在此模拟。</p>
-            <div className="market-demo__chat">
-              <p>买家：你好，这件商品还在吗？可以当面看看吗？</p>
-              <p>卖家：还在的，工作日下班后可以在园区大厅见面。</p>
-              {(messages[current.id] ?? []).map((text, i) => (
-                <p key={i}>你：{text}</p>
-              ))}
-            </div>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!message.trim()) return;
-                setMessages((old) => ({
-                  ...old,
-                  [current.id]: [
-                    ...(old[current.id] ?? []),
-                    message.trim(),
-                  ].slice(-20),
-                }));
-                setMessage('');
-              }}
+          {current.sellerId !== SELF && chatOpen && (
+            <section
+              className="market-demo__conversation"
+              aria-label="与卖家咨询"
             >
-              <label>
-                模拟消息
-                <input
-                  maxLength={500}
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                />
-              </label>
-              <button>发送演示消息</button>
-            </form>
-          </details>
+              <header>
+                <h3>
+                  与{current.sellerName}的咨询 <small>本地模拟</small>
+                </h3>
+                <button onClick={() => setChatOpen(false)}>收起咨询</button>
+              </header>
+              <p className="market-demo__context">
+                {current.inquiry?.snapshot ??
+                  `${current.title} · ¥${current.price}`}
+                <br />
+                首次发送会附上商品信息，发送不代表购买承诺。
+              </p>
+              <div
+                className="market-demo__chat"
+                role="log"
+                aria-label="咨询消息"
+              >
+                {current.inquiry?.messages.map((entry, index) => (
+                  <div
+                    key={index}
+                    className={`market-demo__bubble is-${entry.role}`}
+                  >
+                    <small>
+                      {entry.role === 'buyer' ? '我' : current.sellerName}
+                    </small>
+                    <p>{entry.text}</p>
+                  </div>
+                ))}
+              </div>
+              {current.inquiry?.state === 'pending' ? (
+                <>
+                  <p role="status">等待卖家回复</p>
+                  <p>对方接受或回复前，不能追加消息。</p>
+                  <button
+                    onClick={() =>
+                      change({
+                        inquiry: { ...current.inquiry!, state: 'withdrawn' },
+                      })
+                    }
+                  >
+                    撤回咨询
+                  </button>
+                  <button
+                    onClick={() =>
+                      change({
+                        inquiry: {
+                          ...current.inquiry!,
+                          state: 'accepted',
+                          messages: [
+                            ...current.inquiry!.messages,
+                            {
+                              role: 'seller',
+                              text: '你好，商品还在，可以当面检查。你什么时候方便到园区大厅？',
+                            },
+                          ],
+                        },
+                      })
+                    }
+                  >
+                    模拟卖家回复并接受
+                  </button>
+                </>
+              ) : current.inquiry?.state === 'withdrawn' ? (
+                <p>本次咨询已撤回。可以重置演示数据重新体验。</p>
+              ) : (
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const text = message.trim();
+                    if (
+                      !text ||
+                      text.length > 500 ||
+                      (!current.inquiry && current.state !== 'active')
+                    )
+                      return;
+                    change({
+                      inquiry: current.inquiry
+                        ? {
+                            ...current.inquiry,
+                            messages: [
+                              ...current.inquiry.messages,
+                              { role: 'buyer' as const, text },
+                            ].slice(-40),
+                          }
+                        : {
+                            state: 'pending',
+                            snapshot: `${current.title} · ¥${current.price}`,
+                            messages: [{ role: 'buyer', text }],
+                          },
+                    });
+                    setMessage('');
+                  }}
+                >
+                  <label>
+                    {current.inquiry ? '消息内容' : '你的问题（1–500字）'}
+                    <textarea
+                      maxLength={500}
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                    />
+                  </label>
+                  {!current.inquiry && (
+                    <button
+                      type="button"
+                      onClick={() => setMessage('还在吗？可以当面看看吗？')}
+                    >
+                      填入“还在吗？”
+                    </button>
+                  )}
+                  <button disabled={!message.trim()}>
+                    {current.inquiry ? '发送消息' : '发送问题'}
+                  </button>
+                </form>
+              )}
+            </section>
+          )}
         </section>
       ) : (
         <>
@@ -434,6 +590,8 @@ export function MarketDemo({
                 aria-label={`查看 ${p.title}`}
                 onClick={() => {
                   select(p.id);
+                  setChatOpen(false);
+                  setMessage('');
                   setNotice('');
                 }}
               >

@@ -1,3 +1,4 @@
+import { MarketDemo } from './MarketDemo.js';
 import { ModuleReadProvider, useModuleReadCache } from '../state/ModuleReadProvider.js';
 import { MarketMutation } from '../parkMarketMutation.js';
 import { MarketImageViewer } from './MarketImageViewer.js';
@@ -194,8 +195,12 @@ function ParkMarketLauncher({
   initialError?: string;
   onClose(): void;
 }) {
+  const [demo, setDemo] = useState(false);
+  const demoScope = JSON.stringify([draftScope?.server, draftScope?.organization, accountId]);
+  if (open && demo) return <MarketDemo key={demoScope} scope={demoScope} onClose={onClose} onExit={() => setDemo(false)} />;
   return open ? (
     <MarketContent
+      onDemo={() => setDemo(true)}
       key={JSON.stringify([
         draftScope?.server,
         draftScope?.organization,
@@ -212,6 +217,7 @@ function ParkMarketLauncher({
   ) : null;
 }
 function MarketContent({
+  onDemo,
   accountId,
   draftScope,
   initialListingId,
@@ -219,6 +225,7 @@ function MarketContent({
   initialView,
   onClose,
 }: {
+  onDemo(): void;
   accountId: string;
   draftScope?: MarketDraftScope;
   initialView: 'market' | 'mine';
@@ -888,6 +895,7 @@ function MarketContent({
           <h2 id="park-market-title">园区跳蚤市场</h2>
           <p>仅本园区成员可见，交易由双方线下协商</p>
         </div>
+        <button type="button" disabled={view === 'form'} onClick={onDemo}>体验示例商品</button>
         <button type="button" onClick={requestClose} aria-label="关闭跳蚤市场">
           关闭
         </button>

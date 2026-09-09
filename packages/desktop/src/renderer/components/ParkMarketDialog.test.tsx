@@ -656,3 +656,13 @@ it('reopening preserves the previous list while settings refresh is pending', as
   view.rerender(<ParkMarketDialog open accountId="another-account" onClose={props.onClose} />);
   expect(screen.queryByText('保留的办公桌')).toBeNull();
 });
+
+it('opens local sample products when the enterprise backend is unreachable', async () => {
+  HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+  Object.assign(window.otto, { enterpriseParkMarket: vi.fn(async () => { throw new Error('无法连接企业服务器：fetch failed'); }) });
+  render(<ParkMarketDialog open accountId="demo-entry" onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '体验示例商品' }));
+  expect(await screen.findByText('本地演示 · 无需连接服务器')).toBeTruthy();
+  expect(screen.getByRole('button', { name: /查看 轻薄笔记本电脑/ })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '体验示例商品' })).toBeNull();
+});

@@ -19,7 +19,7 @@ const binSuffix = isWindows ? '.cmd' : '';
 const checks = [];
 // Whole checkout, including audit evidence; independent of installer budgets.
 // See docs/release-1.9.15-source-budget.md for the measured scope change.
-const SOURCE_SIZE_BUDGET_MB = Number(process.env.OTTO_DOCTOR_SOURCE_SIZE_BUDGET_MB || 52);
+const SOURCE_SIZE_BUDGET_MB = Number(process.env.OTTO_DOCTOR_SOURCE_SIZE_BUDGET_MB || 55);
 const DISTRIBUTION_SIZE_BUDGET_MB = Number(process.env.OTTO_DOCTOR_DISTRIBUTION_SIZE_BUDGET_MB || 10);
 const DISTRIBUTION_ARTIFACT_PATHS = [
   process.env.OTTO_DOCTOR_RELEASE_ARTIFACT_DIR,

@@ -188,11 +188,17 @@ jobs:
         run: npm run test:coverage --workspace=packages/desktop
 
       - name: Preserve desktop coverage measurement
-        if: ${{ always() && (steps.desktop_tests.outcome == 'success' || steps.desktop_tests.outcome == 'failure') && hashFiles('packages/desktop/coverage/coverage-final.json') != '' }}
+        if: ${{ always() && (steps.desktop_tests.outcome == 'success' || steps.desktop_tests.outcome == 'failure') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-coverage-${{ github.sha }}
-          path: packages/desktop/coverage/coverage-final.json
+          path: |
+            packages/desktop/coverage/desktop-coverage-latest.json
+            packages/desktop/coverage/desktop-runs/*/coverage/coverage-final.json
+            packages/desktop/coverage/desktop-runs/*/test-results.json
+            packages/desktop/coverage/desktop-runs/*/receipt.json
+            packages/desktop/coverage/desktop-runs/*/stdout.txt
+            packages/desktop/coverage/desktop-runs/*/stderr.txt
           if-no-files-found: error
           retention-days: 14
 

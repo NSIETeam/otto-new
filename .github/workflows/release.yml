@@ -558,6 +558,7 @@ jobs:
           git diff --exit-code -- otto-native/Cargo.lock
 
       - name: Release quality gates
+        id: release_quality
         run: |
           npm run lint:ci
           npm run build
@@ -567,6 +568,21 @@ jobs:
             scripts/tests/enterprise-runtime-dependencies.test.js \
             scripts/tests/release-mode.test.js \
             scripts/tests/legacy-release-mutability.test.js
+
+      - name: Preserve release desktop coverage evidence
+        if: ${{ always() && (steps.release_quality.outcome == 'success' || steps.release_quality.outcome == 'failure') && hashFiles('packages/desktop/coverage/desktop-coverage-latest.json') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-desktop-coverage-${{ github.sha }}
+          path: |
+            packages/desktop/coverage/desktop-coverage-latest.json
+            packages/desktop/coverage/desktop-runs/*/coverage/coverage-final.json
+            packages/desktop/coverage/desktop-runs/*/test-results.json
+            packages/desktop/coverage/desktop-runs/*/receipt.json
+            packages/desktop/coverage/desktop-runs/*/stdout.txt
+            packages/desktop/coverage/desktop-runs/*/stderr.txt
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Focused regression tests
         run: |

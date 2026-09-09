@@ -23,11 +23,34 @@ Measured changed-file inventory (not cumulative repository totals):
 The increase includes carpool, marketplace, enterprise matching and associated
 evidence. We retain the feature code and review evidence rather than deleting
 them or excluding the evidence solely to pass the previous ceiling. The
-source-like budget is now 44 MiB; doctor is 52 MiB. Existing excluded generated
+source-like budget at that checkpoint was 44 MiB; doctor was 52 MiB. Existing excluded generated
 directories, the 300 KiB individual-text guard and 100 KiB duplicate detection
 are unchanged. A focused regression checks the exact source ceiling and rejects
 one byte over it. Reassess unexpected subsequent growth instead of incrementing
 these limits automatically.
+
+## Reviewed AST measurement evidence increment
+
+The separate Vitest 4 measurement migration retains two raw-derived reviewed
+platform baselines, rather than hiding untested functions or deleting evidence.
+Their gzip sizes are **1,323,532 bytes** (Windows) and **1,323,709 bytes** (Mac).
+The reconstructed source manifest is **347,998 bytes**. The complete baseline
+directory also contains the small explicit adoption record. This is review
+data, not executable runtime code, a generated installer, or a successful test
+receipt. The historical process failures remain recorded.
+
+After this evidence was imported, the source report actually measured **46.21
+MiB**, exceeding 44 MiB. Its scope now explicitly includes `config` and `.gz` so
+these files are counted; `config/test-baselines` avoids the existing generated
+`coverage` directory exclusion. The current reviewed source ceiling is **47 MiB**
+and the separate whole-checkout doctor ceiling is **55 MiB**. The exact limit
+and one-byte-over negative tests also cover a gzip file in this configuration
+directory. No size environment override, additional directory exclusion or
+installer allowance was introduced.
+
+This approximately 2.86 MiB evidence increment belongs only to the repository
+and corresponding-source archive. Desktop and enterprise package allowlists do
+not include it. Windows and macOS installer ceilings below remain unchanged.
 
 Historical `docs/research/carpool-delivery/evidence/*.log` receipts are kept
 verbatim, including terminal blank lines and spaces in failure diff excerpts.

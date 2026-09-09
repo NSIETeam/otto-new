@@ -79,8 +79,10 @@ export default defineConfig({
       thresholds: {
         lines: 62,
         statements: 62,
-        functions: 65,
-        branches: 74,
+        // V4 AST maps expose previously synthetic function/branch counts.
+        // Mandatory test:coverage runner applies the reviewed per-file gate in
+        // scripts/verify-desktop-coverage-ratchet.mjs; no replacement percentage.
+        // See docs/release-1.9.15-coverage-migration-20260909.md.
       },
     },
     // 把 RTL 强制内联，让上面的 alias 对其内部 `react-dom/client` import 也生效，

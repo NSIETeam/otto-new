@@ -184,7 +184,17 @@ jobs:
         run: npm run test --workspace=packages/server
 
       - name: 🧪 Test desktop
+        id: desktop_tests
         run: npm run test:coverage --workspace=packages/desktop
+
+      - name: Preserve desktop coverage measurement
+        if: ${{ always() && (steps.desktop_tests.outcome == 'success' || steps.desktop_tests.outcome == 'failure') && hashFiles('packages/desktop/coverage/coverage-final.json') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-coverage-${{ github.sha }}
+          path: packages/desktop/coverage/coverage-final.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: 🧪 Test durable workflow and RPA runtime
         run: npm run test --workspace=packages/workflow && npm run test --workspace=packages/rpa

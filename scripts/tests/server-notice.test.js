@@ -30,6 +30,35 @@ function fixture(run) {
 }
 
 describe('server third-party notice release contract', () => {
+  it('includes complete LGPL/GPL and HEIC provenance without inventing the missing ISC grant', () => {
+    const text = reviewedNotice.toString();
+    for (const required of [
+      'heic-decode 2.1.0',
+      'libheif-js 1.23.2',
+      'libde265 1.0.15',
+      'GNU LESSER GENERAL PUBLIC LICENSE',
+      'GNU GENERAL PUBLIC LICENSE',
+      'Corresponding Application Code',
+      'ISC declaration',
+      'corresponding-source.tar.gz',
+    ])
+      expect(text).toContain(required);
+  });
+
+  it('rejects even an interior one-word change to the full reviewed HEIC license text', () =>
+    fixture((root) => {
+      writeFileSync(
+        path.join(root, 'packages/server/NOTICE'),
+        reviewedNotice
+          .toString()
+          .replace(
+            'Corresponding Application Code',
+            'Changed Application Code',
+          ),
+      );
+      expect(() => readServerNotice(root)).toThrow(/license|notice/i);
+    }));
+
   it('copies the complete reviewed NOTICE into the enterprise release byte-for-byte', () =>
     fixture((root) => {
       writeFileSync(path.join(root, 'packages/server/NOTICE'), reviewedNotice);

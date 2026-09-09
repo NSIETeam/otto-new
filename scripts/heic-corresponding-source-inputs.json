@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "scope": "HEIC sources and toolchain evidence; not a legal-compliance attestation",
+  "sources": [
+    {
+      "file": "heic-decode-2.1.0-source.tar.gz",
+      "commit": "47773f7b17acc22bfb8bb7869b6ef087d24c0ca9",
+      "url": "https://codeload.github.com/catdad-experiments/heic-decode/tar.gz/47773f7b17acc22bfb8bb7869b6ef087d24c0ca9",
+      "sha256": "9abe45633cf5f04e8f269ec37dd7dfb2a5ebc2a97ae09654ae43bafc22cfa5e5",
+      "bytes": 6486
+    },
+    {
+      "file": "libheif-js-1.23.2-source.tar.gz",
+      "commit": "6ca00b818c0ff51cb2a5c75b9ce97d708083335a",
+      "url": "https://codeload.github.com/catdad-experiments/libheif-js/tar.gz/6ca00b818c0ff51cb2a5c75b9ce97d708083335a",
+      "sha256": "6dc502839526b5c2073efde3686817d9a63c077a6bea6026fedb9857f5414a71",
+      "bytes": 10267
+    },
+    {
+      "file": "libheif-emscripten-1.23.2-source.tar.gz",
+      "commit": "dd5a19b878149437a5a427f6e1afa8bac624a714",
+      "url": "https://codeload.github.com/catdad-experiments/libheif-emscripten/tar.gz/dd5a19b878149437a5a427f6e1afa8bac624a714",
+      "sha256": "645155062d329afff7d2f4ebcc3ea52c23179f3f0ca7e4a7abdd48ef3264b759",
+      "bytes": 3123
+    },
+    {
+      "file": "libheif-1.23.2-source.tar.gz",
+      "commit": "ac1cb05c39008f01525c991ff8b88f84ddf70fd2",
+      "url": "https://codeload.github.com/strukturag/libheif/tar.gz/ac1cb05c39008f01525c991ff8b88f84ddf70fd2",
+      "sha256": "36c9b259386f1ffb3ed12d7ca01664fde8ef03802ded750de17db53303b099e7",
+      "bytes": 2066097
+    },
+    {
+      "file": "libde265-1.0.15-source-release.tar.gz",
+      "version": "1.0.15",
+      "url": "https://github.com/strukturag/libde265/releases/download/v1.0.15/libde265-1.0.15.tar.gz",
+      "sha256": "00251986c29d34d3af7117ed05874950c875dd9292d016be29d3b3762666511d",
+      "bytes": 846016
+    },
+    {
+      "file": "libde265-1.0.15-source-git.tar.gz",
+      "commit": "17bb8d9fcea62db8cdeb0fc7ef8d15dbd19a22e4",
+      "url": "https://codeload.github.com/strukturag/libde265/tar.gz/17bb8d9fcea62db8cdeb0fc7ef8d15dbd19a22e4",
+      "sha256": "84c331a8a5a397eba6dcf36dc0378b685eb82885ee08042f0071ef008bad2092",
+      "bytes": 438741
+    },
+    {
+      "file": "emsdk-3.1.61-source.tar.gz",
+      "commit": "ca7b40ae222a2d8763b6ac845388744b0e57cfb7",
+      "url": "https://codeload.github.com/emscripten-core/emsdk/tar.gz/ca7b40ae222a2d8763b6ac845388744b0e57cfb7",
+      "sha256": "a0ac78c77c711834147711c24a4548f64170c22a140d1bccbc618d64e61cad2a",
+      "bytes": 105746
+    },
+    {
+      "file": "emscripten-3.1.61-source.tar.gz",
+      "commit": "67fa4c16496b157a7fc3377afd69ee0445e8a6e3",
+      "url": "https://codeload.github.com/emscripten-core/emscripten/tar.gz/67fa4c16496b157a7fc3377afd69ee0445e8a6e3",
+      "sha256": "88232dd77f0efe45327c29091c39e260d69469d2128b752c61e4c8c98d47a6ef",
+      "bytes": 29358795
+    },
+    {
+      "file": "libheif-emscripten-v1.23.2-dist.tar.gz",
+      "version": "v1.23.2",
+      "url": "https://github.com/catdad-experiments/libheif-emscripten/releases/download/v1.23.2/libheif.tar.gz",
+      "sha256": "dc71ba33c68e6aee5fe159ac933d49427e159db7ea73ad477ce3717784efacd0",
+      "upstreamAssetDigestMatches": true,
+      "bytes": 1322143
+    },
+    {
+      "file": "heic-decode-2.1.0-npm.tgz",
+      "url": "https://registry.npmjs.org/heic-decode/-/heic-decode-2.1.0.tgz",
+      "sha256": "e7a8c4c1f0dbb57144d02abac9139da5d46922854b08ab34d08b34bde4f8771c",
+      "integrity": "sha512-0fB3O3WMk38+PScbHLVp66jcNhsZ/ErtQ6u2lMYu/YxXgbBtl+oKOhGQHa4RpvE68k8IzbWkABzHnyAIjR758A==",
+      "bytes": 2665
+    },
+    {
+      "file": "libheif-js-1.23.2-npm.tgz",
+      "url": "https://registry.npmjs.org/libheif-js/-/libheif-js-1.23.2.tgz",
+      "sha256": "728cf3795a94b18039ac07c6d38c089b72f1eeae12c37bc9f18b0925fc709daa",
+      "integrity": "sha512-qvHIXtggEsw1lCNCWBYKloL2Z36DJBm0R9ThGiH2JnhKYdeZFLPFkP30Lw4yMskxxhx0bKg1gLrBHX1D2w2pSw==",
+      "bytes": 2677058
+    },
+    {
+      "file": "GNU-LGPL-3.0.txt",
+      "url": "https://www.gnu.org/licenses/lgpl-3.0.txt",
+      "sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",
+      "bytes": 7652
+    },
+    {
+      "file": "GNU-GPL-3.0.txt",
+      "url": "https://www.gnu.org/licenses/gpl-3.0.txt",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "bytes": 35149
+    },
+    {
+      "file": "Emscripten-3.1.61-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/emscripten-core/emscripten/67fa4c16496b157a7fc3377afd69ee0445e8a6e3/LICENSE",
+      "sha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86",
+      "bytes": 5093
+    }
+  ]
+}

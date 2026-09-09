@@ -27,7 +27,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import * as os from 'node:os';
+import { resolveServerUserDirectory } from '../../userDataRoot.js';
 import * as crypto from 'node:crypto';
 
 export interface FeishuCredentials {
@@ -63,7 +63,7 @@ const ENCRYPTION_KEY_FILE = 'feishu-key';
  * 飞书 Bot 凭证不区分项目，固定走全局，因此不接受 projectRoot 形参。
  */
 function credDir(): string {
-  return path.join(os.homedir(), '.otto-user');
+  return resolveServerUserDirectory();
 }
 
 function credPath(): string {
@@ -178,9 +178,12 @@ export async function loadCredentials(): Promise<FeishuCredentials | null> {
 
 export async function saveCredentials(
   creds: FeishuCredentials,
+  assertActive: () => void = () => undefined,
 ): Promise<void> {
+  assertActive();
   await fs.mkdir(credDir(), { recursive: true });
   const key = await loadOrCreateKey();
+  assertActive();
   const json = JSON.stringify(creds);
   const encrypted = encryptGcm(json, key);
   await fs.writeFile(credPath(), encrypted, { mode: 0o600 });

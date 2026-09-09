@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "osSecureStorage": true,
+  "received": [
+    "Electron 与 OS 密钥链保护的真实加密消息"
+  ],
+  "map": "explicit local provider fixture",
+  "authentication": "isolated test bearer identities",
+  "surface": "real Electron React components, isolated IPC, device-signed HTTP and native MLS"
+}

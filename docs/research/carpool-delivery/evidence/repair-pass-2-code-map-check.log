@@ -1,0 +1,9 @@
+COMMAND=npm run code-map:check
+CWD=/Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+> otto-ai@1.9.14 code-map:check
+> node scripts/generate-code-map.mjs --check
+
+Code map is current.
+
+EXIT_CODE=0

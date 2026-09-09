@@ -11,7 +11,6 @@
 
 import fs from 'fs-extra';
 import path from 'path';
-import os from 'os';
 import matter from 'gray-matter';
 import {
   Skill,
@@ -30,7 +29,7 @@ import { isDirentDirectoryFollowingSymlinks } from './utils/fs-helpers.js';
 import { MarketplaceManager } from './marketplace-manager.js';
 import { MarketplaceLoader } from './loaders/marketplace-loader.js';
 import { UnifiedComponent, ComponentType } from './models/unified.js';
-import { getProjectSkillsDir } from '../utils/paths.js';
+import { getProjectSkillsDir, resolveOttoUserDir } from '../utils/paths.js';
 
 /**
  * Skill 缓存项
@@ -82,9 +81,7 @@ export class SkillLoader {
    */
   private initializeCustomSkillPaths() {
     // 用户全局技能路径
-    // 用 os.homedir() 而非 process.env.HOME：Windows 无 HOME(用 USERPROFILE)，
-    // 否则会退化成相对路径 .otto-user/skills，导致用户级技能失效/作用域错乱。
-    this.customSkillPaths.set(SkillSource.USER_GLOBAL, path.join(os.homedir(), '.otto-user', 'skills'));
+    this.customSkillPaths.set(SkillSource.USER_GLOBAL, path.join(resolveOttoUserDir(), 'skills'));
 
     // 项目技能路径（使用工具函数，与命令处理保持一致）
     this.customSkillPaths.set(SkillSource.USER_PROJECT, getProjectSkillsDir(this.projectRoot));

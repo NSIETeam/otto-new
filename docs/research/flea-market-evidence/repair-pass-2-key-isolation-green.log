@@ -1,0 +1,15 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+ ✓ src/modules/park_services/flea_market/fleaMarketReadiness.test.ts (1 test) 6ms
+(node:11595) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts (6 tests) 4505ms
+   ✓ postgres: persists private substring candidates atomically, updates on edit, and recovers search after restart  1788ms
+   ✓ postgres: preserves literal substring semantics and caches sellers only within one request  1184ms
+   ✓ postgres: backfill is bounded, restartable and rollback-safe  1404ms
+
+ Test Files  2 passed (2)
+      Tests  7 passed (7)
+   Start at  23:07:41
+   Duration  8.57s (transform 1.75s, setup 0ms, collect 3.85s, tests 4.51s, environment 0ms, prepare 151ms)

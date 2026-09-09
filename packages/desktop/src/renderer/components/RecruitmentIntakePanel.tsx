@@ -19,18 +19,18 @@ export function RecruitmentIntakePanel({ store, scopeId, disabled, onImport, onV
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const [confirmed, setConfirmed] = useState(false); const [removeId, setRemoveId] = useState('');
   const [resetId, setResetId] = useState('');
-  const [interval, setInterval] = useState(60); const [retention, setRetention] = useState(7); const [limit, setLimit] = useState(5);
+  const [interval, setIntervalMinutes] = useState(60); const [retention, setRetention] = useState(7); const [limit, setLimit] = useState(5);
   const controller = useRef(new AbortController());
   const binding = state.sharedJob; const config = binding?.base?.intake;
   const inbox = (binding?.base?.incomingMaterials ?? []).filter((item) => Date.parse(item.expiresAt) > Date.now());
   const epoch = store.getWorkspaceEpoch();
   useEffect(() => {
     controller.current = new AbortController(); setBusy(false); setError(''); setConfirmed(false); setRemoveId('');
-    setInterval(60); setRetention(7); setLimit(5); setResetId('');
+    setIntervalMinutes(60); setRetention(7); setLimit(5); setResetId('');
     return () => controller.current.abort();
   }, [scopeId, store, binding?.id, binding?.sync?.scopeToken, epoch]);
   useEffect(() => {
-    setInterval(config?.intervalMinutes ?? 60); setRetention(config?.retentionDays ?? 7); setLimit(config?.maxMaterials ?? 5);
+    setIntervalMinutes(config?.intervalMinutes ?? 60); setRetention(config?.retentionDays ?? 7); setLimit(config?.maxMaterials ?? 5);
   }, [config?.generation, config?.intervalMinutes, config?.retentionDays, config?.maxMaterials]);
   const locked = busy || disabled || Boolean(autosave.pending) || !scopeId || !binding?.revision;
   const run = async (action: Extract<RecruitmentJobAction, { kind: 'configure_intake' | 'dismiss_intake' | 'configure_background_analysis' | 'configure_auto_archive' | 'reset_intake_analysis' | 'analyze_intake_once' | 'get' }>): Promise<void> => {
@@ -53,7 +53,7 @@ export function RecruitmentIntakePanel({ store, scopeId, disabled, onImport, onV
         onConfigure={(enabled, days) => run({ kind: 'configure_auto_archive', jobId: binding.id, expectedRevision: binding.revision, enabled, confirmed: true, ...(enabled ? { retentionDays: days } : {}) })} />
       {binding.canManage ? <>
         <p>开启使用操作者自己的 Workable 授权；资料共享给当前岗位创建者、企业管理员和本岗位授权同事。未通过真实账号验收或授权范围不足时，服务器会拒绝开启。</p>
-        <label>接收间隔<select aria-label="接收间隔" disabled={locked} value={interval} onChange={(event) => setInterval(Number(event.target.value))}>{[[30, '30 分钟'], [60, '1 小时'], [360, '6 小时'], [1440, '每天']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label>接收间隔<select aria-label="接收间隔" disabled={locked} value={interval} onChange={(event) => setIntervalMinutes(Number(event.target.value))}>{[[30, '30 分钟'], [60, '1 小时'], [360, '6 小时'], [1440, '每天']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label>待处理保存期限<select aria-label="待处理保存期限" disabled={locked} value={retention} onChange={(event) => setRetention(Number(event.target.value))}>{[7, 30, 90].map((days) => <option key={days} value={days}>{days} 天</option>)}</select></label>
         <label>单次最多读取<select aria-label="单次最多读取" disabled={locked} value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[5, 10, 20].map((count) => <option key={count} value={count}>{count} 份</option>)}</select></label>
         <label><input type="checkbox" disabled={locked} checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我确认有权后台读取、限期保存，并向当前岗位授权同事共享这些材料</label>

@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ✓ src/renderer/components/MarketAssociatedItems.test.tsx (2 tests) 58ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  12:39:26
+   Duration  593ms (transform 42ms, setup 68ms, collect 38ms, tests 58ms, environment 253ms, prepare 48ms)

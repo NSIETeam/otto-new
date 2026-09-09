@@ -52,7 +52,7 @@ export function usePolicyInbox(
       }
     }, 15_000);
     return () => {
-      epoch.current++;
+      epoch.current = current + 1;
       stop();
     };
   }, [scopeId, enabled, activationKey]);

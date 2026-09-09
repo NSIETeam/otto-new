@@ -1,12 +1,28 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 import {
   advanceDesktopPetDrag,
   clampDesktopPetToWorkArea,
   createDesktopPetDragState,
   rebaseDesktopPetDrag,
+  startDesktopPetDragPolling,
 } from './desktop-pet-drag.js';
 
 describe('desktop pet native drag tracking', () => {
+  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
+  it('registers free drag polling and stops all subsequent samples on release', async () => {
+    vi.useFakeTimers();
+    const registry = new RecurringTaskRegistry();
+    const update = vi.fn();
+    const stop = startDesktopPetDragPolling(registry, update);
+    expect(registry.list()).toMatchObject([{ intervalMs: 16, paid: false }]);
+    await vi.advanceTimersByTimeAsync(32);
+    expect(update).toHaveBeenCalledTimes(2);
+    stop();
+    await vi.advanceTimersByTimeAsync(64);
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(registry.list()).toEqual([]);
+  });
   const createState = () => createDesktopPetDragState(
     { x: 320, y: 180 },
     { x: 900, y: 500 },

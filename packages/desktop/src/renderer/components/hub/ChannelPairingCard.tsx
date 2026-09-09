@@ -4,6 +4,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import type { ChannelPairingPublic, ChannelProvider } from '../../../preload/index.js';
+import type { ChannelInstallationResult } from '../../../preload/index.js';
 import { createQrMatrix } from '../../lib/qrMatrix.js';
 import { startNonOverlappingPoll } from '../../lib/nonOverlappingPoll.js';
 import { Card, Badge } from './HubUI.js';
@@ -12,6 +13,7 @@ const PROVIDER_LABEL: Record<ChannelProvider, string> = {
   feishu: '飞书',
   lark: 'Lark',
   wecom: '企业微信',
+  dingtalk: '钉钉',
 };
 
 const TERMINAL = new Set(['connected', 'expired', 'denied', 'failed', 'revoked']);
@@ -36,7 +38,7 @@ function pairingMessage(pairing: ChannelPairingPublic): string {
   }
 }
 
-function QrCode({ value, label }: { value: string; label: string }): React.JSX.Element | null {
+export function QrCode({ value, label }: { value: string; label: string }): React.JSX.Element | null {
   const matrix = useMemo(() => createQrMatrix(value), [value]);
   if (!matrix) return null;
   const pathParts: string[] = [];
@@ -68,6 +70,7 @@ export function ChannelPairingCard({ provider }: { provider: ChannelProvider }):
   const [pairing, setPairing] = useState<ChannelPairingPublic | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [installationNotice, setInstallationNotice] = useState<string | null>(null);
   const pairingId = pairing?.pairingId;
   const pairingStatus = pairing?.status;
 
@@ -96,6 +99,7 @@ export function ChannelPairingCard({ provider }: { provider: ChannelProvider }):
     if (busy) return;
     setBusy(true);
     setError(null);
+    setInstallationNotice(null);
     try {
       const response = await window.otto?.channelPairingBegin(provider);
       if (response?.ok && response.pairing) setPairing(response.pairing);
@@ -122,6 +126,12 @@ export function ChannelPairingCard({ provider }: { provider: ChannelProvider }):
         return;
       }
       if (kind === 'install') {
+        const installation = response.data as ChannelInstallationResult | null;
+        if (installation?.ownerBindingState === 'bound') {
+          setInstallationNotice('扫码账号已绑定为本机控制账号。');
+        } else if (installation?.ownerBindingState === 'manual_required') {
+          setError('机器人已安装，但远程控制仍被阻止：请在身份管理中手动绑定扫码账号。');
+        }
         setPairing({ ...pairing, status: 'connected', qrPayload: '' });
       } else if (response.data && typeof response.data === 'object' && 'status' in response.data) {
         setPairing(response.data as ChannelPairingPublic);
@@ -172,6 +182,7 @@ export function ChannelPairingCard({ provider }: { provider: ChannelProvider }):
         </div>
       )}
       {error ? <div className="otto-hub__feishu-message" role="alert">{error}</div> : null}
+      {installationNotice ? <div className="otto-hub__field-hint" role="status">{installationNotice}</div> : null}
     </Card>
   );
 }

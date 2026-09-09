@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 
 import { RecruitmentWorkbenchDialog } from './RecruitmentWorkbenchDialog.js';
 import { RecruitmentWorkspaceStore } from '../recruitmentWorkspaceStore.js';
@@ -11,6 +12,20 @@ const resumeText = `李明
 2022-2026 星河科技 前端工程师
 使用 React 和 TypeScript 开发企业系统
 负责性能优化，最终首屏时间降低 30%`;
+
+it('owns retention polling only while the populated dialog is mounted', async () => {
+  const register = vi.spyOn(RecurringTaskRegistry.prototype, 'register');
+  const dialog = renderDialog();
+  try {
+    await importResume();
+    const retention = register.mock.calls.map(([definition], index) => ({ definition, registry: register.mock.contexts[index] as RecurringTaskRegistry }))
+      .filter(({ definition }) => definition.name === 'desktop.recruitment-retention');
+    expect(retention.length).toBeGreaterThan(0);
+    expect(retention[0].definition).toMatchObject({ estimatedCostUsdPerRun: 0, intervalMs: 60_000 });
+    dialog.unmount();
+    expect(retention.every(({ registry }) => registry.list().length === 0)).toBe(true);
+  } finally { dialog.unmount(); register.mockRestore(); }
+});
 
 beforeEach(() => {
   Object.assign(window.otto, {

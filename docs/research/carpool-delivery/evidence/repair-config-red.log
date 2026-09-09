@@ -1,0 +1,64 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-repair-91bc4e
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts (2 tests | 2 failed) 6ms
+   × validates independent rollout flags and bounded request/capacity settings 5ms
+     → expected { requestLimitPerHour: 6, …(12) } to match object { groupsEnabled: false, …(3) }
+(9 matching properties omitted from actual)
+   × keeps production and unspecified environments closed unless explicitly enabled 1ms
+     → expected { requestLimitPerHour: 10, …(12) } to match object { requestsEnabled: false, …(2) }
+(10 matching properties omitted from actual)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts > validates independent rollout flags and bounded request/capacity settings
+AssertionError: expected { requestLimitPerHour: 6, …(12) } to match object { groupsEnabled: false, …(3) }
+(9 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "groupsEnabled": false,
+-   "invitationsEnabled": false,
++   "invitationsEnabled": true,
+    "maxTaxiMembers": 3,
+    "requestLimitPerHour": 6,
+  }
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts:5:156
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts > keeps production and unspecified environments closed unless explicitly enabled
+AssertionError: expected { requestLimitPerHour: 10, …(12) } to match object { requestsEnabled: false, …(2) }
+(10 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "groupsEnabled": false,
+-   "invitationsEnabled": false,
+-   "requestsEnabled": false,
++   "groupsEnabled": true,
++   "invitationsEnabled": true,
++   "requestsEnabled": true,
+  }
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts:10:87
+      8|
+      9| it('keeps production and unspecified environments closed unless explic…
+     10|  for(const NODE_ENV of [undefined,'production'])expect(readCarpoolConf…
+       |                                                                                       ^
+     11|  expect(readCarpoolConfig({NODE_ENV:'production',OTTO_PARK_CARPOOL_REQ…
+     12|  expect(readCarpoolConfig({NODE_ENV:'test'}).requestsEnabled).toBe(tru…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  12:45:24
+   Duration  176ms (transform 24ms, setup 0ms, collect 22ms, tests 6ms, environment 0ms, prepare 37ms)

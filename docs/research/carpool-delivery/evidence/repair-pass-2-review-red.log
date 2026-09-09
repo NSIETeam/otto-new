@@ -1,0 +1,95 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:47751) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts (5 tests | 1 failed) 9ms
+   ✓ continues scheduled maintenance after lease release fails 3ms
+   ✓ renews a long-running lease so a second worker cannot repeat effective work 1ms
+   ✓ aborts outstanding work when renewal fails: false 0ms
+   ✓ aborts outstanding work when renewal fails: throws 0ms
+   × does not start work from a successful lease response delivered after its TTL 4ms
+     → expected "spy" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      AbortSignal {
+        Symbol(kEvents): Map {},
+        Symbol(events.maxEventTargetListeners): 0,
+        Symbol(events.maxEventTargetListenersWarned): false,
+        Symbol(kHandlers): Map {},
+        Symbol(kAborted): true,
+        Symbol(kReason): [AbortError: This operation was aborted],
+        Symbol(kComposite): false,
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolConfig.integration.test.ts (2 tests | 2 failed) 1014ms
+   × SQLite: injected rollout snapshot survives env drift and restart preserves historical management 20ms
+     → expected [ { candidateVersion: 1, …(16) } ] to have a length of +0 but got 1
+   × PostgreSQL: injected rollout snapshot survives env drift and restart preserves historical management 993ms
+     → expected [ { candidateVersion: 1, …(16) } ] to have a length of +0 but got 1
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolConfig.integration.test.ts > SQLite: injected rollout snapshot survives env drift and restart preserves historical management
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolConfig.integration.test.ts > PostgreSQL: injected rollout snapshot survives env drift and restart preserves historical management
+AssertionError: expected [ { candidateVersion: 1, …(16) } ] to have a length of +0 but got 1
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolConfig.integration.test.ts:23:49
+     21|    const paused=make(readCarpoolConfig({}), {...provider,configured:fa…
+     22|    expect((await paused.getState('a')).capabilities).toEqual([]);
+     23|    expect((await paused.getState('a')).matches).toHaveLength(0);
+       |                                                 ^
+     24|    await expect(paused.routePreview('a','intent-b')).rejects.toThrow(/…
+     25|    expect((await paused.getWorkflow('a')).capabilities).toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts > does not start work from a successful lease response delivered after its TTL
+AssertionError: expected "spy" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st spy call:
+
+    Array [
+      AbortSignal {
+        Symbol(kEvents): Map {},
+        Symbol(events.maxEventTargetListeners): 0,
+        Symbol(events.maxEventTargetListenersWarned): false,
+        Symbol(kHandlers): Map {},
+        Symbol(kAborted): true,
+        Symbol(kReason): [AbortError: This operation was aborted],
+        Symbol(kComposite): false,
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts:78:112
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 4 passed (7)
+   Start at  21:39:01
+   Duration  3.66s (transform 1.24s, setup 0ms, collect 4.53s, tests 1.02s, environment 0ms, prepare 73ms)
+
+
+EXIT_CODE=1

@@ -1,0 +1,27 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-validation-7f3a9c/packages/desktop
+
+ ✓ src/renderer/parkCarpoolConversationBridge.test.ts (8 tests) 34ms
+ ✓ src/renderer/components/CarpoolConfirmation.test.tsx (1 test) 66ms
+ ✓ src/renderer/components/CarpoolPointPicker.test.ts (1 test) 2ms
+ ✓ src/renderer/components/ParkCarpoolDialog.test.tsx (4 tests) 372ms
+(node:76810) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:76804) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:76808) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/renderer/parkCarpoolContract.integration.test.ts (3 tests) 473ms
+   ✓ real UI can restart after stop and confirmation cannot carry forward another device’s stale fields  400ms
+ ✓ src/main/enterprise-e2ee.test.ts (14 tests) 9024ms
+   ✓ enterprise private-chat E2EE > streams federation attachments, verifies ciphertext and decrypts only on the recipient device  8514ms
+   ✓ enterprise private-chat E2EE > imports a passphrase recovery bundle as historical keys on a new device  322ms
+ ✓ src/main/park-carpool-chat.integration.test.ts (1 test) 3927ms
+   ✓ desktop coordinators exchange, retry after lost response, and restore actual MLS ciphertext from SQLite  3926ms
+ ✓ src/renderer/components/CarpoolFlow.integration.test.tsx (1 test) 7066ms
+   ✓ real UI publishes, previews, requests, chats, groups, admits and leaves through SQLite and native MLS  7064ms
+
+ Test Files  8 passed (8)
+      Tests  33 passed (33)
+   Start at  12:08:32
+   Duration  15.93s (transform 4.91s, setup 453ms, collect 25.24s, tests 20.96s, environment 2.89s, prepare 519ms)

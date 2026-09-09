@@ -1,0 +1,10 @@
+
+> otto-ai@1.9.14 code-map
+> node scripts/generate-code-map.mjs
+
+Updated docs/code-map.md.
+
+> otto-ai@1.9.14 code-map:check
+> node scripts/generate-code-map.mjs --check
+
+Code map is current.

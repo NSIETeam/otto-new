@@ -1,0 +1,664 @@
+{
+  "parkId": "demo:bhc-public-2026-09-08",
+  "parkName": "北控宏创科技园",
+  "currentOrganizationId": "",
+  "generatedAt": "2026-09-08T00:00:00.000Z",
+  "dataSource": "demo",
+  "relationType": "same_industry",
+  "taxonomyVersion": "park-industry-v1",
+  "nodes": [
+    {
+      "organizationName": "盈科视控（北京）科技有限公司",
+      "displayName": "盈科视控",
+      "summary": "提供数字化工厂智能物流、仓储与自动化搬运解决方案。",
+      "website": "https://www.wiiss.com/",
+      "publicContact": "010-56232404；sales@wiiss.com",
+      "primaryIndustryCode": "industrial_automation",
+      "primaryIndustryName": "工业自动化与机器人",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区北控宏创科技园区15号楼801室",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市昌平区北控宏创科技园区15号楼801室",
+      "parkSourceUrl": "https://www.wiiss.com/lxwm.html",
+      "profileSourceUrl": "https://www.wiiss.com/",
+      "retrievedAt": "2026-09-08",
+      "notes": "官网标注北京总部及软件研发中心。",
+      "industryTags": [
+        "工业自动化与机器人",
+        "智能物流",
+        "数字孪生"
+      ],
+      "productsServices": [
+        "智能仓储与搬运",
+        "数字孪生平台"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-002",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "广网数据服务（北京）有限公司",
+      "displayName": "广网数据",
+      "summary": "运营北控数据中心，提供服务器托管和互联网服务。",
+      "website": "https://www.gonn0101.com.cn/",
+      "publicContact": "010-56337666",
+      "primaryIndustryCode": "it_services",
+      "primaryIndustryName": "软件与信息技术服务",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区超前路甲1号北控宏创科技园9号楼",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市昌平区超前路甲1号北控宏创科技园9号楼",
+      "parkSourceUrl": "https://www.gonn0101.com.cn/",
+      "profileSourceUrl": "https://www.gonn0101.com.cn/",
+      "retrievedAt": "2026-09-08",
+      "notes": "官网联系地址与北控数据中心机房位置一致。 2016园区历史资料出现“广网互联（北京）数据服务有限公司”；未核实更名关系，本数据仅采用现官网主体，不重复创建历史名称。",
+      "industryTags": [
+        "软件与信息技术服务",
+        "数据中心",
+        "服务器托管"
+      ],
+      "productsServices": [
+        "服务器托管",
+        "数据中心服务"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-003",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京航研射频科技有限公司",
+      "displayName": "航研射频",
+      "summary": "研发生产射频电缆组件、同轴连接器和射频无源器件。",
+      "website": "https://www.hyrftech.com/",
+      "publicContact": "010-57325027；sales@hyrftech.com",
+      "primaryIndustryCode": "electronics_communications",
+      "primaryIndustryName": "电子与通信设备",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区超前路甲1号北控宏创科技园11号楼7层",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市昌平区超前路甲1号北控宏创科技园11号楼7层",
+      "parkSourceUrl": "https://hyrftech.com/hykj/",
+      "profileSourceUrl": "https://www.hyrftech.com/",
+      "retrievedAt": "2026-09-08",
+      "notes": "公司简介列明园区地址；页面未注明更新时间。",
+      "industryTags": [
+        "电子与通信设备",
+        "射频器件",
+        "同轴连接器"
+      ],
+      "productsServices": [
+        "射频电缆组件",
+        "同轴连接器",
+        "射频无源器件"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-004",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "联众集群（北京）科技有限责任公司",
+      "displayName": "联众集群",
+      "summary": "提供服务器、高性能计算工作站、存储设备和集群软件。",
+      "website": "https://www.linkzol.com/",
+      "publicContact": "400-630-7530；sales@linkzol.com",
+      "primaryIndustryCode": "electronics_communications",
+      "primaryIndustryName": "电子与通信设备",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区科技园区超前路甲1号6号楼7层701室",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市昌平区科技园区超前路甲1号6号楼7层701室",
+      "parkSourceUrl": "https://www.linkzol.com/pro.asp?classid=4",
+      "profileSourceUrl": "https://www.linkzol.com/pro.asp?classid=4",
+      "retrievedAt": "2026-09-08",
+      "notes": "",
+      "industryTags": [
+        "电子与通信设备",
+        "服务器",
+        "高性能计算"
+      ],
+      "productsServices": [
+        "GPU服务器",
+        "高性能计算工作站",
+        "存储服务器"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-005",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京杰创永恒科技有限公司",
+      "displayName": "杰创永恒",
+      "summary": "面向高校和职业院校提供电子电路实验与智能硬件实训产品。",
+      "website": "https://www.bj-jc.com/",
+      "publicContact": "010-63860679；Sales@bj-jc.net",
+      "primaryIndustryCode": "education_equipment",
+      "primaryIndustryName": "教育教学设备",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区科技园区超前路甲1号17号楼5层",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市昌平区科技园区超前路甲1号17号楼5层",
+      "parkSourceUrl": "https://www.bj-jc.com/lxwm",
+      "profileSourceUrl": "https://www.bj-jc.com/",
+      "retrievedAt": "2026-09-08",
+      "notes": "官网标注北京总部；地址原文重复“北京市”，本字段已规范化。",
+      "industryTags": [
+        "教育教学设备",
+        "电子实验",
+        "实训平台"
+      ],
+      "productsServices": [
+        "STM32与FPGA口袋机",
+        "电子电路实验平台",
+        "智能硬件实训平台"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-006",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京圣钧科技发展有限公司",
+      "displayName": "圣钧科技",
+      "summary": "提供工业通信设备、协议转换器与PCM综合复用设备。",
+      "website": "https://www.shengjunkj.com/",
+      "publicContact": "010-57325036",
+      "primaryIndustryCode": "electronics_communications",
+      "primaryIndustryName": "电子与通信设备",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区科技园区超前路甲1号北控宏创科技园7号楼3层",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市昌平区科技园区超前路甲1号北控宏创科技园7号楼3层",
+      "parkSourceUrl": "https://www.shengjunkj.com/",
+      "profileSourceUrl": "https://www.shengjunkj.com/",
+      "retrievedAt": "2026-09-08",
+      "notes": "",
+      "industryTags": [
+        "电子与通信设备",
+        "工业通信",
+        "协议转换"
+      ],
+      "productsServices": [
+        "协议转换器",
+        "工业级通信设备",
+        "PCM综合复用设备"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-007",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京清晖翔科技有限公司",
+      "displayName": "清晖翔",
+      "summary": "提供电能质量治理、储能及微网与多能互补方案。",
+      "website": "https://www.titee.com.cn/",
+      "publicContact": "010-57325766；market@thxenergy.com.cn",
+      "primaryIndustryCode": "energy_technology",
+      "primaryIndustryName": "能源技术",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区超前路甲1号北控宏创科技园11号楼502",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市昌平区超前路甲1号北控宏创科技园11号楼502",
+      "parkSourceUrl": "https://www.titee.com.cn/",
+      "profileSourceUrl": "https://www.titee.com.cn/",
+      "retrievedAt": "2026-09-08",
+      "notes": "",
+      "industryTags": [
+        "能源技术",
+        "电能质量",
+        "储能",
+        "微网"
+      ],
+      "productsServices": [
+        "电能质量治理",
+        "储能系统",
+        "微网解决方案"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-008",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京清博华科技有限公司",
+      "displayName": "清博华",
+      "summary": "研发生产液相色谱仪器及核心部件。",
+      "website": "https://www.prehplc.com/",
+      "publicContact": "010-62966298 / 010-57325030；sale@prehplc.com",
+      "primaryIndustryCode": "analytical_instruments",
+      "primaryIndustryName": "分析与生命科学仪器",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区超前路甲一号北控宏创科技园3号楼7层",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市昌平区超前路甲一号北控宏创科技园3号楼7层",
+      "parkSourceUrl": "https://www.prehplc.com/contact.html",
+      "profileSourceUrl": "https://www.prehplc.com/aboutus.html",
+      "retrievedAt": "2026-09-08",
+      "notes": "",
+      "industryTags": [
+        "分析与生命科学仪器",
+        "液相色谱",
+        "仪器核心部件"
+      ],
+      "productsServices": [
+        "分析液相色谱仪",
+        "制备液相色谱仪",
+        "泵阀模块",
+        "色谱软件"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-009",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京企安安科技有限公司",
+      "displayName": "企安安",
+      "summary": "提供残疾人招聘、培训管理及企业相关政策咨询服务。",
+      "website": "https://www.qanan.cn/",
+      "publicContact": "support@qanan.cn",
+      "primaryIndustryCode": "business_services",
+      "primaryIndustryName": "人力资源与企业服务",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区超前路甲1号北控宏创科技园13号楼6层611",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市昌平区超前路甲1号北控宏创科技园13号楼6层611",
+      "parkSourceUrl": "https://www.qanan.cn/about-us/",
+      "profileSourceUrl": "https://www.qanan.cn/about-us/",
+      "retrievedAt": "2026-09-08",
+      "notes": "",
+      "industryTags": [
+        "人力资源与企业服务",
+        "残疾人就业",
+        "企业管理平台"
+      ],
+      "productsServices": [
+        "残疾人招聘与培训管理",
+        "残保金政策咨询",
+        "残疾人综合管理平台"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-010",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京金钢科技有限公司",
+      "displayName": "金钢科技",
+      "summary": "提供机器人编码器、触觉舵机及小机器人产品。",
+      "website": "https://kingkong.tech/",
+      "publicContact": "010-80111669；contact@kingkong.tech",
+      "primaryIndustryCode": "industrial_automation",
+      "primaryIndustryName": "工业自动化与机器人",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区科技园区超前路甲1号17号楼2层",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_document_address",
+      "parkEvidence": "北京市昌平区科技园区超前路甲1号17号楼2层",
+      "parkSourceUrl": "https://kingkong.tech/files/MBS%E7%A3%81%E7%BC%96%E7%A0%81%E5%99%A8%E6%95%B0%E6%8D%AE%E6%89%8B%E5%86%8Cv2.6.pdf",
+      "profileSourceUrl": "https://kingkong.tech/",
+      "retrievedAt": "2026-09-08",
+      "notes": "地址来自官网产品手册；手册发布日期未知。",
+      "industryTags": [
+        "工业自动化与机器人",
+        "编码器",
+        "机器人部件"
+      ],
+      "productsServices": [
+        "磁编码器",
+        "触觉舵机",
+        "小机器人"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-011",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京市特智诚科技有限公司",
+      "displayName": "特智诚",
+      "summary": "运营旅游年票相关服务，提供京津冀旅游年卡与旅游会员服务。",
+      "website": "https://www.bjlynp.com/",
+      "publicContact": "400-0606-032；bjlynp@163.com",
+      "primaryIndustryCode": "tourism_services",
+      "primaryIndustryName": "旅游服务",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市中关村科技园区昌平园超前路甲1号10号楼406",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市中关村科技园区昌平园超前路甲1号10号楼406",
+      "parkSourceUrl": "https://www.bjlynp.com/html/lxwm/index.html",
+      "profileSourceUrl": "https://www.bjlynp.com/html/lxwm/index.html",
+      "retrievedAt": "2026-09-08",
+      "notes": "采用旅游年票网公开运营主体名称，不将协会主办方作为该企业。",
+      "industryTags": [
+        "旅游服务",
+        "旅游年卡",
+        "景区合作"
+      ],
+      "productsServices": [
+        "京津冀旅游年卡",
+        "旅游会员服务"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-012",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京丰科卓辰电子技术有限公司",
+      "displayName": "丰科卓辰",
+      "summary": "提供高速存储、光纤存储及协议转换产品与定制开发服务。",
+      "website": "https://fkzctech.com/",
+      "publicContact": "010-57325880",
+      "primaryIndustryCode": "electronics_communications",
+      "primaryIndustryName": "电子与通信设备",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区科技园区超前路甲1号6号楼401室",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市昌平区科技园区超前路甲1号6号楼401室",
+      "parkSourceUrl": "https://fkzctech.com/",
+      "profileSourceUrl": "https://fkzctech.com/",
+      "retrievedAt": "2026-09-08",
+      "notes": "采用现官网401室；第三方旧目录308室不作为现地址。",
+      "industryTags": [
+        "电子与通信设备",
+        "数据存储",
+        "协议转换"
+      ],
+      "productsServices": [
+        "高速存储产品",
+        "光纤存储产品",
+        "协议转换产品"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-016",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京鑫汇迈科生物科技有限公司",
+      "displayName": "鑫汇迈科",
+      "summary": "提供食品、水、饲料及部分卫生用品等微生物检测服务。",
+      "website": "https://micro.xhpr.net/",
+      "publicContact": "010-57325126",
+      "primaryIndustryCode": "testing_services",
+      "primaryIndustryName": "检验检测服务",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市中关村科技园区昌平园超前路甲1号5号楼2层",
+      "addressType": "public_contact",
+      "parkRelationStatus": "official_contact_address",
+      "parkEvidence": "北京市中关村科技园区昌平园超前路甲1号5号楼2层",
+      "parkSourceUrl": "https://micro.xhpr.net/",
+      "profileSourceUrl": "https://micro.xhpr.net/assay.aspx",
+      "retrievedAt": "2026-09-08",
+      "notes": "官网关于我们说明其为鑫汇普瑞子公司；未将母公司产品和资质直接归到本公司。",
+      "industryTags": [
+        "检验检测服务",
+        "微生物检测"
+      ],
+      "productsServices": [
+        "食品微生物检测",
+        "水质微生物检测",
+        "饲料微生物检测"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-017",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京国金源富科技有限公司",
+      "displayName": "国金源富",
+      "summary": "提供电力信息化与物联网产品及解决方案，业务覆盖计量管理和智慧城市。",
+      "website": "https://www.suresource.com.cn/",
+      "publicContact": "",
+      "primaryIndustryCode": "it_services",
+      "primaryIndustryName": "软件与信息技术服务",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区超前路甲一号北控宏创科技园10号楼6层",
+      "addressType": "public_contact",
+      "parkRelationStatus": "university_employer_profile_address",
+      "parkEvidence": "北京市昌平区超前路甲一号北控宏创科技园10号楼6层",
+      "parkSourceUrl": "https://career.cup.edu.cn/company/view/id/315141",
+      "profileSourceUrl": "https://www.suresource.com.cn/",
+      "retrievedAt": "2026-09-08",
+      "notes": "地址来自中国石油大学就业平台用人单位页，并获招聘网站园区10号楼地址交叉印证；不是租赁在驻确认。工商注册地址另在未来科学城，未混作办公地址。",
+      "industryTags": [
+        "软件与信息技术服务",
+        "电力信息化",
+        "物联网",
+        "RFID"
+      ],
+      "productsServices": [
+        "电网计量智慧平台",
+        "RFID物联网产品",
+        "智慧城市解决方案"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-018",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "新羿制造科技（北京）有限公司",
+      "displayName": "新羿制造",
+      "summary": "研发生产全自动数字PCR仪。",
+      "website": "",
+      "publicContact": "",
+      "primaryIndustryCode": "medical_devices",
+      "primaryIndustryName": "医疗器械",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北控宏创科技园（具体楼栋未核实）",
+      "addressType": "park_only",
+      "parkRelationStatus": "government_reported_tenant",
+      "parkEvidence": "2024年政府报道明确将新羿制造称为园区入驻企业。",
+      "parkSourceUrl": "https://www.beijing.gov.cn/ywdt/gqrd/202403/t20240312_3587129.html",
+      "profileSourceUrl": "https://yjj.beijing.gov.cn/yjj/zwgk20/yjxw/543519295/index.html",
+      "retrievedAt": "2026-09-08",
+      "notes": "2024政府报道明确称入驻企业；2026-07-09园区专题仍提及培育关系，但未核实当日租赁在驻状态。官网与联系方式留空。",
+      "industryTags": [
+        "医疗器械",
+        "数字PCR",
+        "体外诊断"
+      ],
+      "productsServices": [
+        "全自动数字PCR仪"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-019",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "超目科技（北京）股份有限公司",
+      "displayName": "超目科技",
+      "summary": "从事有源植入器械业务；药监公开生产许可列明其园区生产场所。",
+      "website": "",
+      "publicContact": "",
+      "primaryIndustryCode": "medical_devices",
+      "primaryIndustryName": "医疗器械",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区超前路甲1号院4号1层101、5号1层101",
+      "addressType": "production",
+      "parkRelationStatus": "regulator_production_address",
+      "parkEvidence": "北京市昌平区超前路甲1号院4号1层101、5号1层101",
+      "parkSourceUrl": "https://xxcx.yjj.beijing.gov.cn/eportal/ui?artileId=55f35181aece4bcdbfbd618942fdeae1&pageId=723897",
+      "profileSourceUrl": "https://xxcx.yjj.beijing.gov.cn/eportal/ui?artileId=55f35181aece4bcdbfbd618942fdeae1&pageId=723897",
+      "retrievedAt": "2026-09-08",
+      "notes": "当日药监记录由有限公司更名为股份有限公司；住所位于生命科学园，CSV地址为生产场所，不是总部；许可生产范围不等于每一具体产品已上市。",
+      "industryTags": [
+        "医疗器械",
+        "有源植入器械"
+      ],
+      "productsServices": [
+        "有源植入器械（许可生产范围）"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-020",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    },
+    {
+      "organizationName": "北京瑞健高科生物科技有限公司",
+      "displayName": "瑞健高科",
+      "summary": "公开生产许可范围包括无源植入器械及口腔植入与组织重建材料。",
+      "website": "",
+      "publicContact": "",
+      "primaryIndustryCode": "medical_devices",
+      "primaryIndustryName": "医疗器械",
+      "industryClassificationBasis": "researcher_classified_from_public_business",
+      "officeAddress": "北京市昌平区科技园区超前路甲1号15号楼1层、2层",
+      "addressType": "registered",
+      "parkRelationStatus": "regulator_registered_and_production_address",
+      "parkEvidence": "北京市昌平区科技园区超前路甲1号15号楼1层、2层",
+      "parkSourceUrl": "https://xxcx.yjj.beijing.gov.cn/eportal/ui?artileId=03540192a82b4f749161e4226d5e36b5&pageId=723897",
+      "profileSourceUrl": "https://xxcx.yjj.beijing.gov.cn/eportal/ui?artileId=03540192a82b4f749161e4226d5e36b5&pageId=723897",
+      "retrievedAt": "2026-09-08",
+      "notes": "地址字段为许可住所；生产地址另列同楼102、103、202、203、503室。许可生产范围不等于每一具体产品已上市。",
+      "industryTags": [
+        "医疗器械",
+        "无源植入器械",
+        "口腔植入材料"
+      ],
+      "productsServices": [
+        "无源植入器械（许可生产范围）",
+        "口腔植入及组织重建材料（许可生产范围）"
+      ],
+      "capabilities": [],
+      "cooperationNeeds": [],
+      "organizationId": "demo:bhc-demo-021",
+      "isPublic": true,
+      "industryConfirmedByCompany": false,
+      "updatedAt": null
+    }
+  ],
+  "edges": [],
+  "industryGroups": [
+    {
+      "code": "analytical_instruments",
+      "name": "分析与生命科学仪器",
+      "memberOrganizationIds": [
+        "demo:bhc-demo-009"
+      ]
+    },
+    {
+      "code": "business_services",
+      "name": "人力资源与企业服务",
+      "memberOrganizationIds": [
+        "demo:bhc-demo-010"
+      ]
+    },
+    {
+      "code": "education_equipment",
+      "name": "教育教学设备",
+      "memberOrganizationIds": [
+        "demo:bhc-demo-006"
+      ]
+    },
+    {
+      "code": "electronics_communications",
+      "name": "电子与通信设备",
+      "memberOrganizationIds": [
+        "demo:bhc-demo-004",
+        "demo:bhc-demo-005",
+        "demo:bhc-demo-007",
+        "demo:bhc-demo-016"
+      ]
+    },
+    {
+      "code": "energy_technology",
+      "name": "能源技术",
+      "memberOrganizationIds": [
+        "demo:bhc-demo-008"
+      ]
+    },
+    {
+      "code": "industrial_automation",
+      "name": "工业自动化与机器人",
+      "memberOrganizationIds": [
+        "demo:bhc-demo-002",
+        "demo:bhc-demo-011"
+      ]
+    },
+    {
+      "code": "it_services",
+      "name": "软件与信息技术服务",
+      "memberOrganizationIds": [
+        "demo:bhc-demo-003",
+        "demo:bhc-demo-018"
+      ]
+    },
+    {
+      "code": "medical_devices",
+      "name": "医疗器械",
+      "memberOrganizationIds": [
+        "demo:bhc-demo-019",
+        "demo:bhc-demo-020",
+        "demo:bhc-demo-021"
+      ]
+    },
+    {
+      "code": "testing_services",
+      "name": "检验检测服务",
+      "memberOrganizationIds": [
+        "demo:bhc-demo-017"
+      ]
+    },
+    {
+      "code": "tourism_services",
+      "name": "旅游服务",
+      "memberOrganizationIds": [
+        "demo:bhc-demo-012"
+      ]
+    }
+  ],
+  "unclassifiedNodeIds": [],
+  "relationshipCount": 11
+}

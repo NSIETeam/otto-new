@@ -731,21 +731,60 @@ describe('企业常驻任务注册', () => {
     const database: DatabaseModule = await import('./db.js');
     closeDatabases.push(database.closeEnterpriseDatabase);
     const registry = new RecurringTaskRegistry({ allowPaidBackground: true });
+    const register = vi.spyOn(registry, 'register');
+    const sendVerificationCode = vi.fn(async () => true);
+    const sendSms = vi.fn(async () => true);
+    const sendFeishu = vi.fn(async () => true);
+    const processNotifications = vi.spyOn(database, 'processTicketNotificationTasks');
+    const startPolicy = vi.spyOn(database, 'startPolicyIntelligenceRuntime');
+    const externalRequests: string[] = [];
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.hostname !== '127.0.0.1') {
+        externalRequests.push(url.origin);
+        return Promise.reject(new Error('canary regression blocked an external request'));
+      }
+      return realFetch(input, init);
+    });
     const server = mod.startEnterpriseServer({
       host: '127.0.0.1',
       port: 0,
       adminToken: ADMIN_TOKEN,
-      smsSender: null,
-      repairSmsSender: null,
-      repairFeishuSender: null,
+      smsSender: { sendVerificationCode },
+      repairSmsSender: { channel: 'sms', send: sendSms },
+      repairFeishuSender: { channel: 'feishu', send: sendFeishu },
       taskRegistry: registry,
     });
     servers.push(server);
-    expect(registry.list()).toEqual([]);
-    await new Promise<void>((resolve, reject) => {
-      server.close((error?: Error) => (error ? reject(error) : resolve()));
-    });
-    servers = servers.filter((item) => item !== server);
+    try {
+      if (!server.listening) await new Promise<void>((resolve) => server.once('listening', resolve));
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      for (const route of ['/enterprise/health', '/enterprise/legal', '/enterprise/deployment/status']) {
+        const response = await fetch(`${base}${route}`, {
+          headers: { 'x-otto-admin-token': ADMIN_TOKEN },
+        });
+        expect(response.status).toBe(200);
+        await response.json();
+      }
+      expect(registry.list()).toEqual([]);
+      expect(register).not.toHaveBeenCalled();
+      expect(processNotifications).not.toHaveBeenCalled();
+      expect(startPolicy).not.toHaveBeenCalled();
+      expect(sendVerificationCode).not.toHaveBeenCalled();
+      expect(sendSms).not.toHaveBeenCalled();
+      expect(sendFeishu).not.toHaveBeenCalled();
+      expect(externalRequests).toEqual([]);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error?: Error) => (error ? reject(error) : resolve()));
+      });
+      servers = servers.filter((item) => item !== server);
+      fetchSpy.mockRestore();
+      register.mockRestore();
+      processNotifications.mockRestore();
+      startPolicy.mockRestore();
+    }
   });
 
   it('rejects canary task suppression without loopback and absolute readiness', async () => {
@@ -837,15 +876,47 @@ describe('企业常驻任务注册', () => {
       'enterprise.data-protection-backup',
       'enterprise.local-mls-resource-maintenance',
       'enterprise.ticket-notification-delivery',
+      'enterprise.policy-intelligence.notifications',
       'enterprise.policy-intelligence.collection',
       'enterprise.recruitment-cache-maintenance',
       'enterprise.recruitment-material-intake',
       'enterprise.recruitment-auto-archive',
       'enterprise.recruitment-background-analysis',
+      'enterprise.park-carpool-maintenance',
+      'enterprise.park-flea-market.maintenance',
     ]);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     servers = servers.filter((item) => item !== server);
     expect(registry.list()).toEqual([]);
+  });
+
+  it('waits for market readiness IO before handing a stopped server back to database cleanup', async () => {
+    process.env.OTTO_ENTERPRISE_DIR = tmpDir;
+    vi.resetModules();
+    const mod: ServerModule = await import('./server.js');
+    const database: DatabaseModule = await import('./db.js');
+    closeDatabases.push(database.closeEnterpriseDatabase);
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const app = database.getFleaMarketApplication();
+    const initialization = vi.spyOn(app, 'initialize').mockReturnValue(pending);
+    const server = mod.startEnterpriseServer({ host: '127.0.0.1', port: 0,
+      adminToken: ADMIN_TOKEN, smsSender: null, repairSmsSender: null, repairFeishuSender: null,
+      taskRegistry: new RecurringTaskRegistry({ allowPaidBackground: true }) });
+    servers.push(server);
+    let closed = false;
+    const closing = new Promise<void>((resolve, reject) => server.close(error => {
+      closed = true;
+      if (error) reject(error); else resolve();
+    }));
+    try {
+      await new Promise(resolve => setTimeout(resolve, 25));
+      expect(initialization).toHaveBeenCalledOnce();
+      expect(closed).toBe(false);
+    } finally {
+      finish(); await closing; initialization.mockRestore();
+      servers = servers.filter(item => item !== server);
+    }
   });
 
   it('waits for an accepted external write to be marked before close resolves', async () => {
@@ -2278,6 +2349,34 @@ describe('受保护 vs 公开路由边界', () => {
       },
     });
 
+    const chunkedContent = '中文账号同步内容\n';
+    const chunkedBody = Buffer.from(JSON.stringify({
+      scope: 'worklog', expectedVersion: 0,
+      payload: {
+        schemaVersion: 1, generatedAt: '2026-07-26T10:31:00.000Z',
+        files: [{ path: 'daily.md', content: chunkedContent,
+          modifiedAtMs: Date.parse('2026-07-26T10:31:00.000Z'),
+          sha256: createHash('sha256').update(chunkedContent).digest('hex') }],
+      },
+    }));
+    const splitAt = chunkedBody.indexOf(Buffer.from('中')) + 1;
+    const chunkedStatus = await new Promise<number>((resolve, reject) => {
+      const request = httpRequest(base + '/enterprise/account-sync', {
+        method: 'PUT', headers: {
+          authorization: 'Bearer ' + firstToken,
+          'content-type': 'application/json',
+          'content-length': String(chunkedBody.length),
+        },
+      }, (response) => {
+        response.resume();
+        response.on('end', () => resolve(response.statusCode ?? 0));
+      });
+      request.on('error', reject);
+      request.write(chunkedBody.subarray(0, splitAt));
+      setTimeout(() => request.end(chunkedBody.subarray(splitAt)), 20);
+    });
+    expect(chunkedStatus).toBe(200);
+
     const restored = await fetch(base + '/enterprise/account-sync', {
       headers: { authorization: 'Bearer ' + firstToken },
     });
@@ -2289,6 +2388,10 @@ describe('受保护 vs 公开路由边界', () => {
           scope: 'personal_memory',
           version: 1,
           payload,
+        }),
+        expect.objectContaining({
+          scope: 'worklog', version: 1,
+          payload: expect.objectContaining({ files: [expect.objectContaining({ content: chunkedContent })] }),
         }),
       ],
     });
@@ -2407,6 +2510,25 @@ describe('受保护 vs 公开路由边界', () => {
     });
     expect(sameOrigin.status).toBe(201);
     expect(db.getOrganizationInvite(db.DEFAULT_ORGANIZATION_ID)).not.toBeNull();
+  });
+
+  it('limits request bodies by UTF-8 bytes rather than decoded character count', async () => {
+    const { base } = await startIsolated(ADMIN_TOKEN);
+    const db = await import('./db.js');
+    db.createAccount({ username: 'byte-limit-user', password: 'byte-limit-password', name: '字节限制' });
+    const credentials = { identifier: 'byte-limit-user', password: 'byte-limit-password' };
+    const login = (body: object) => fetch(`${base}/enterprise/auth/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    expect((await login(credentials)).status).toBe(200);
+    const oversized = { ...credentials, padding: '中'.repeat(400_000) };
+    expect(JSON.stringify(oversized).length).toBeLessThan(1_000_000);
+    expect(Buffer.byteLength(JSON.stringify(oversized))).toBeGreaterThan(1_000_000);
+    const rejected = await login(oversized);
+    // The existing login contract returns the same generic auth failure for an
+    // empty/rejected body; it must not issue a session from an oversized body.
+    expect(rejected.status).toBe(401);
+    expect(await rejected.json()).not.toHaveProperty('token');
   });
 
   it('未知路由 → 404', async () => {

@@ -1,0 +1,71 @@
+{
+  "serverUrl": "http://127.0.0.1:63026",
+  "legacy": false,
+  "readiness": {
+    "state": "blocked",
+    "canAuthenticate": false,
+    "canUseLicensedFeatures": true,
+    "bootstrap": {
+      "phase": "activated",
+      "lastAttemptAt": null,
+      "lastSuccessAt": "2026-09-08T13:44:40.280Z",
+      "errorCode": null
+    },
+    "steps": [
+      {
+        "id": "deployment_identity",
+        "state": "action_required",
+        "required": true,
+        "message": "部署尚未完成安全注册"
+      },
+      {
+        "id": "license",
+        "state": "ready",
+        "required": true,
+        "message": "授权已生效，套餐为 development-open"
+      },
+      {
+        "id": "modules",
+        "state": "ready",
+        "required": true,
+        "message": "已按套餐启用 8 项功能模块"
+      },
+      {
+        "id": "model_and_credits",
+        "state": "disabled",
+        "required": false,
+        "message": "当前套餐未启用集中模型与积分网关"
+      },
+      {
+        "id": "storage",
+        "state": "ready",
+        "required": true,
+        "message": "数据库、附件存储与数据隔离已就绪"
+      },
+      {
+        "id": "federation",
+        "state": "disabled",
+        "required": false,
+        "message": "当前部署未启用跨服务器协作"
+      },
+      {
+        "id": "updates",
+        "state": "disabled",
+        "required": false,
+        "message": "当前部署未启用集中更新通道"
+      },
+      {
+        "id": "telemetry",
+        "state": "disabled",
+        "required": false,
+        "message": "运行数据上报已按套餐或客户策略关闭"
+      },
+      {
+        "id": "account_identity",
+        "state": "ready",
+        "required": true,
+        "message": "企业与管理员身份已就绪，可直接登录"
+      }
+    ]
+  }
+}

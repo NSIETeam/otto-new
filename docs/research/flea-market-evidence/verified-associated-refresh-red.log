@@ -1,0 +1,36 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ❯ src/renderer/components/MarketAssociatedItems.test.tsx (2 tests | 1 failed) 63ms
+   ✓ loads consulted items independently from the visible message page and locates their original messages 53ms
+   × refreshes removed item placeholders on older loaded pages even without new messages 10ms
+     → expected <button></button> to be null
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/components/MarketAssociatedItems.test.tsx > refreshes removed item placeholders on older loaded pages even without new messages
+AssertionError: expected <button></button> to be null
+
+- Expected:
+null
+
++ Received:
+<button>
+  旧商品
+</button>
+
+ ❯ src/renderer/components/MarketAssociatedItems.test.tsx:66:53
+     64|   removed=true;
+     65|   await act(async()=>{await vi.advanceTimersByTimeAsync(8001);});
+     66|   expect(screen.queryByRole('button',{name:'旧商品'})).toBeNull();
+       |                                                     ^
+     67|   expect(screen.getByRole('button',{name:'商品不可用'})).toBeTruthy();
+     68|   unmount();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  12:38:52
+   Duration  631ms (transform 39ms, setup 72ms, collect 37ms, tests 63ms, environment 274ms, prepare 53ms)

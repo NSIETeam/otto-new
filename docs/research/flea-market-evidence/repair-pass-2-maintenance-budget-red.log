@@ -1,0 +1,40 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+(node:84842) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/modules/park_services/flea_market/fleaMarketJobs.test.ts (2 tests | 1 failed) 79ms
+   ✓ expires once across two workers, persists notification across restart and cleans content at 180 days 33ms
+   × prioritizes due listings without decrypting an entire history backlog and resumes its bounded scan after restart 45ms
+     → expected [ { state: 'active' } ] to deeply equal [ { state: 'offline' } ]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketJobs.test.ts > prioritizes due listings without decrypting an entire history backlog and resumes its bounded scan after restart
+AssertionError: expected [ { state: 'active' } ] to deeply equal [ { state: 'offline' } ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "state": "offline",
++     "state": "active",
+    },
+  ]
+
+ ❯ src/modules/park_services/flea_market/fleaMarketJobs.test.ts:67:107
+     65|   await runMarketJobs(deps);
+     66|   expect(decrypted).toBeLessThanOrEqual(250);
+     67|   expect(await h.repository.read(tx=>tx.all("SELECT state FROM park_ma…
+       |                                                                                                           ^
+     68|   const progress=await h.repository.read(tx=>tx.all("SELECT cursor FRO…
+     69|   expect(progress[0].cursor).not.toBe('');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  22:51:34
+   Duration  2.52s (transform 1.11s, setup 0ms, collect 2.30s, tests 79ms, environment 0ms, prepare 33ms)

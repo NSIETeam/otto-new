@@ -1,0 +1,15 @@
+[Otto Enterprise] 服务端运行于 http://127.0.0.1:0
+[Otto Enterprise] 账号管理: http://localhost:0/enterprise/admin
+[Otto Enterprise] 企业引入: http://127.0.0.1/enterprise/join/{邀请码}
+[Otto Enterprise] 老板看板: http://localhost:0/enterprise/dashboard
+[Otto Enterprise] 数据: ~/.otto-enterprise/data.db（本地，零云端）
+[Otto Enterprise] 已使用环境中配置的平台管理令牌（不会输出令牌内容）
+[Otto Enterprise] 积分管理: http://localhost:0/enterprise/admin/credits
+[Otto Enterprise] Ctrl+C 停止
+{"serverUrl":"http://127.0.0.1:49212"}
+{"request":"/enterprise/model-gateway/access-token","status":503}
+{"request":"/enterprise/park-carpool/workflow","status":401}
+locator.waitFor: Timeout 60000ms exceeded.
+Call log:
+[2m  - waiting for getByText('欢迎回来', { exact: true }) to be hidden[22m
+[2m    122 × locator resolved to visible <h2>欢迎回来</h2>[22m

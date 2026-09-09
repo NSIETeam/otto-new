@@ -24,6 +24,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { supportedEnterpriseSchemaVersions } from './enterprise-release-contract.mjs';
 import { copyEnterpriseRuntimeDependencies } from './enterprise-runtime-dependencies.mjs';
+import { materializeSharpRuntimeAssets } from './sharp-runtime-assets.mjs';
+import { copyEnterpriseServerNotice } from './server-notice.mjs';
+import { copyEnterpriseWorkflowRuntime } from './enterprise-workflow-runtime.mjs';
 import {
   REQUIRED_SQLCIPHER_NODE_TARGETS,
   verifySqlCipherMatrixManifest,
@@ -285,14 +288,17 @@ function filesBelow(root, current = root) {
   return output.sort();
 }
 
-const enterpriseBuildWorkspaces = ['otto-core', 'otto-server'];
-console.log('[bundle] 清理并构建 otto-core 与 otto-server');
+const enterpriseBuildWorkspaces = ['otto-workflow', 'otto-core', 'otto-server'];
+console.log('[bundle] 清理并构建 otto-workflow、otto-core 与 otto-server');
 for (const workspace of enterpriseBuildWorkspaces) {
   const packageDirectory = workspace.slice('otto-'.length);
   rmSync(path.join(repoRoot, 'packages', packageDirectory, 'dist'), {
     recursive: true,
     force: true,
   });
+  if (workspace === 'otto-workflow') {
+    rmSync(path.join(repoRoot, 'packages', packageDirectory, 'tsconfig.build.tsbuildinfo'), { force: true });
+  }
   run(npmCommand, ['run', 'build', '--workspace', workspace], {
     shell: process.platform === 'win32',
   });
@@ -316,7 +322,12 @@ const sourceScope = [
   'package-lock.json',
   'tsconfig.json',
   'packages/server/package.json',
+  'packages/server/NOTICE',
   'packages/server/tsconfig.json',
+  'packages/workflow/package.json',
+  'packages/workflow/tsconfig.build.json',
+  'packages/workflow/src',
+  'scripts/enterprise-workflow-runtime.mjs',
   'scripts/build_package.js',
   'scripts/copy_files.js',
   'packages/server/src',
@@ -329,6 +340,8 @@ const sourceScope = [
   'deployment/enterprise-oneclick',
   'scripts/build-enterprise-oneclick.mjs',
   'scripts/enterprise-runtime-dependencies.mjs',
+  'scripts/sharp-runtime-assets.mjs',
+  'scripts/server-notice.mjs',
   'scripts/verify-enterprise-package-signature.mjs',
   'scripts/verify-sqlcipher-native-assets.mjs',
 ];
@@ -343,7 +356,12 @@ const sourceInputFiles = [
   'package-lock.json',
   'tsconfig.json',
   'packages/server/package.json',
+  'packages/server/NOTICE',
   'packages/server/tsconfig.json',
+  'packages/workflow/package.json',
+  'packages/workflow/tsconfig.build.json',
+  ...filesBelow(path.join(repoRoot, 'packages/workflow/src')).map((relative) => path.join('packages/workflow/src', relative)),
+  'scripts/enterprise-workflow-runtime.mjs',
   'scripts/build_package.js',
   'scripts/copy_files.js',
   ...filesBelow(path.join(repoRoot, 'packages', 'server', 'src')).map(
@@ -361,6 +379,8 @@ const sourceInputFiles = [
   ),
   'scripts/build-enterprise-oneclick.mjs',
   'scripts/enterprise-runtime-dependencies.mjs',
+  'scripts/sharp-runtime-assets.mjs',
+  'scripts/server-notice.mjs',
   'scripts/verify-enterprise-package-signature.mjs',
   'scripts/verify-sqlcipher-native-assets.mjs',
   ...filesBelow(sqlCipherNodeRoot).map((relative) =>
@@ -410,6 +430,8 @@ try {
   );
 
   const serverDist = path.join(repoRoot, 'packages', 'server', 'dist');
+  copyEnterpriseServerNotice(repoRoot, releaseRoot);
+  const workflowRuntime = copyEnterpriseWorkflowRuntime({ repoRoot, releaseRoot });
   const serverFiles = [
     ...filesBelow(path.join(serverDist, 'src'))
       .filter((relative) => relative.endsWith('.js'))
@@ -567,9 +589,14 @@ export class FeatureFlagManager {
     path.join(betterSqliteSource, 'package.json'),
     path.join(betterSqliteTarget, 'package.json'),
   );
+  const sharpAssets = await materializeSharpRuntimeAssets({
+    repoRoot,
+    destination: path.join(temporaryRoot, 'sharp-runtime-assets'),
+  });
   const runtimeDependencies = copyEnterpriseRuntimeDependencies({
     repoRoot,
     releaseRoot,
+    sharpAssetRoot: sharpAssets.root,
   });
   writeFileSync(
     path.join(releaseRoot, 'package.json'),
@@ -584,6 +611,7 @@ export class FeatureFlagManager {
           ...runtimeDependencies.directVersions,
           'better-sqlite3': '12.11.1',
           'otto-core': '1.1.0-enterprise-adapter',
+          'otto-workflow': workflowRuntime.version,
         },
       },
       null,

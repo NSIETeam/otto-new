@@ -1,0 +1,14 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new-carpool
+
+(node:85372) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ integration/park-market/encrypted-flow.test.ts (4 tests) 5199ms
+   ✓ postgres/envelope: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server  1178ms
+   ✓ sqlite/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server  1422ms
+   ✓ postgres/native MLS: real device encryption survives lost response, offline seller, reply and database restart without plaintext on server  2534ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  12:10:03
+   Duration  7.36s (transform 1.03s, setup 0ms, collect 1.94s, tests 5.20s, environment 0ms, prepare 47ms)

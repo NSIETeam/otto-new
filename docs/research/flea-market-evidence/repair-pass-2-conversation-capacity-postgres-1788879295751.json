@@ -1,0 +1,10 @@
+{
+  "backend": "postgres",
+  "conversations": 100,
+  "concurrentWrites": 100,
+  "concurrentReads": 100,
+  "maintenanceWorkers": 2,
+  "writeP95Ms": 70.2130830000001,
+  "readP95Ms": 65.3866250000001,
+  "scope": "Real database business operations with injected transport; no network or encryption throughput claim"
+}

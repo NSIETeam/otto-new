@@ -2,8 +2,8 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -17,8 +17,26 @@ import {
   saveMcpCreationDraft,
 } from './mcpManagement.js';
 
+const writeBoundary = vi.hoisted(() => ({ afterClose: undefined as (() => void) | undefined }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    closeSync(fd: number) {
+      actual.closeSync(fd);
+      // Windows refuses renaming an ancestor while its file is open. Perform
+      // the real filesystem swap immediately after close, before the caller's
+      // awaited save resumes; all reads/writes and identity checks remain real.
+      const mutate = writeBoundary.afterClose;
+      writeBoundary.afterClose = undefined;
+      mutate?.();
+    },
+  };
+});
+
 const roots: string[] = [];
 afterEach(() => {
+  writeBoundary.afterClose = undefined;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -259,6 +277,105 @@ describe('MCP management safety boundary', () => {
     expect(readFileSync(join(saved.directory, 'draft-manifest.json'), 'utf8')).toContain('"trust": false');
   });
 
+  it.each([false, true])('accepts a pinned host parent alias with a missing root: %s', async (missingRoot) => {
+    const parent = mkdtempSync(join(tmpdir(), 'otto-mcp-host-alias-'));
+    roots.push(parent);
+    const host = join(parent, 'host');
+    const alias = join(parent, 'alias');
+    mkdirSync(host);
+    symlinkSync(host, alias, 'junction');
+    if (!missingRoot) mkdirSync(join(host, 'drafts'));
+    const draft = simpleDraft();
+
+    const saved = await saveMcpCreationDraft(draft, join(alias, 'drafts'));
+
+    expect(realpathSync(saved.directory)).toBe(realpathSync(join(host, 'drafts', draft.id)));
+    expect(readFileSync(join(saved.directory, 'draft-manifest.json'), 'utf8')).toContain('"trust": false');
+  });
+
+  it('rejects a same-path root inode replacement across a write await', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'otto-mcp-root-swap-'));
+    roots.push(parent);
+    const root = join(parent, 'drafts');
+    mkdirSync(root);
+    const draft = simpleDraft();
+    writeBoundary.afterClose = () => {
+      renameSync(root, join(parent, 'original'));
+      mkdirSync(root);
+    };
+    const saving = saveMcpCreationDraft(draft, root);
+
+    await expect(saving).rejects.toThrow(/identity|changed|root/i);
+    expect(existsSync(join(root, draft.id))).toBe(false);
+    expect(existsSync(join(parent, 'original', draft.id, 'draft-manifest.json'))).toBe(false);
+  });
+
+  it('rejects retargeting the trusted host alias across a write await', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'otto-mcp-alias-swap-'));
+    roots.push(parent);
+    const host = join(parent, 'host');
+    const outside = join(parent, 'outside');
+    const alias = join(parent, 'alias');
+    mkdirSync(join(host, 'drafts'), { recursive: true });
+    mkdirSync(join(outside, 'drafts'), { recursive: true });
+    symlinkSync(host, alias, 'junction');
+    const draft = simpleDraft();
+    const saving = saveMcpCreationDraft(draft, join(alias, 'drafts'));
+    renameSync(alias, join(parent, 'original-alias'));
+    symlinkSync(outside, alias, 'junction');
+
+    await expect(saving).rejects.toThrow(/identity|changed|root/i);
+    expect(existsSync(join(outside, 'drafts', draft.id))).toBe(false);
+    expect(existsSync(join(host, 'drafts', draft.id, 'draft-manifest.json'))).toBe(false);
+  });
+
+  it.each(['link', 'directory'])('rejects a draft descendant %s replacement across a write await', async (replacement) => {
+    const parent = mkdtempSync(join(tmpdir(), 'otto-mcp-descendant-swap-'));
+    roots.push(parent);
+    const root = join(parent, 'drafts');
+    const outside = join(parent, 'outside');
+    mkdirSync(root);
+    mkdirSync(outside);
+    const draft = simpleDraft();
+    draft.files = [
+      { path: 'src/first.txt', content: 'first' },
+      { path: 'src/second.txt', content: 'second' },
+    ];
+    const child = join(root, draft.id, 'src');
+    writeBoundary.afterClose = () => {
+      renameSync(child, join(root, draft.id, 'original-src'));
+      if (replacement === 'link') symlinkSync(outside, child, 'junction');
+      else mkdirSync(child);
+    };
+    const saving = saveMcpCreationDraft(draft, root);
+
+    await expect(saving).rejects.toThrow(/identity|changed|link/i);
+    expect(existsSync(join(child, 'second.txt'))).toBe(false);
+    expect(existsSync(join(outside, 'second.txt'))).toBe(false);
+    expect(existsSync(join(root, draft.id, 'draft-manifest.json'))).toBe(false);
+  });
+
+  it('does not authorize a previously unseen model descendant through a link', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'otto-mcp-new-link-'));
+    roots.push(parent);
+    const root = join(parent, 'drafts');
+    const outside = join(parent, 'outside');
+    mkdirSync(root);
+    mkdirSync(outside);
+    const draft = simpleDraft();
+    draft.files = [
+      { path: 'first.txt', content: 'first' },
+      { path: 'nested/payload.txt', content: 'must stay inside' },
+    ];
+    writeBoundary.afterClose = () => {
+      symlinkSync(outside, join(root, draft.id, 'nested'), 'junction');
+    };
+
+    await expect(saveMcpCreationDraft(draft, root)).rejects.toThrow(/link/i);
+    expect(existsSync(join(outside, 'payload.txt'))).toBe(false);
+    expect(existsSync(join(root, draft.id, 'draft-manifest.json'))).toBe(false);
+  });
+
   it('remote probe only initializes and lists tools', async () => {
     const methods: string[] = [];
     const fakeFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
@@ -371,7 +488,7 @@ describe('MCP management safety boundary', () => {
     await expect(searchOfficialMcpRegistry('calendar', fakeFetch)).rejects.toThrow(/large|size|bytes/i);
   });
 
-  it.each(['../escape.ts', 'nested/../../escape.ts', '/absolute.ts', 'C:\\escape.ts']) (
+  it.each(['../escape.ts', 'nested/../../escape.ts', '/absolute.ts', 'C:\\escape.ts', 'C:escape.ts', '\\rooted.ts', '\\\\host\\share\\escape.ts']) (
     'rejects a malicious generated draft path: %s',
     async (maliciousPath) => {
       const root = mkdtempSync(join(tmpdir(), 'otto-mcp-draft-'));
@@ -447,4 +564,11 @@ function safeRemoteCandidate() {
     commitSha: 'a'.repeat(40), license: 'MIT', remoteUrl: 'https://mcp.example.com/mcp',
     environmentVariables: [], permissions: ['network' as const], installed: false as const, trust: false as const,
   };
+}
+
+function simpleDraft() {
+  return generateTypeScriptMcpDraft({
+    name: 'safe-draft', description: 'safe', inputKind: 'natural_language',
+    sourceText: 'safe', transport: 'stdio',
+  });
 }

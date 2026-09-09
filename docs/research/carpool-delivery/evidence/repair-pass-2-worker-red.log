@@ -1,0 +1,54 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts (4 tests | 3 failed) 8ms
+   ✓ continues scheduled maintenance after lease release fails 3ms
+   × renews a long-running lease so a second worker cannot repeat effective work 3ms
+     → expected "spy" to be called 1 times, but got 2 times
+   × aborts outstanding work when renewal fails: false 1ms
+     → expected undefined to be true // Object.is equality
+   × aborts outstanding work when renewal fails: throws 0ms
+     → expected undefined to be true // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts > renews a long-running lease so a second worker cannot repeat effective work
+AssertionError: expected "spy" to be called 1 times, but got 2 times
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts:56:18
+     54|   try {
+     55|     await vi.advanceTimersByTimeAsync(180_001);
+     56|     expect(work).toHaveBeenCalledTimes(1);
+       |                  ^
+     57|   } finally { finish(); stopA();stopB();await vi.advanceTimersByTimeAs…
+     58| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts > aborts outstanding work when renewal fails: false
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts > aborts outstanding work when renewal fails: throws
+AssertionError: expected undefined to be true // Object.is equality
+
+- Expected: 
+true
+
++ Received: 
+undefined
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts:68:74
+     66|     onError:error=>errors.push(error),
+     67|   });
+     68|   try {await vi.advanceTimersByTimeAsync(40_001);expect(signal?.aborte…
+       |                                                                          ^
+     69|   finally {stop();vi.useRealTimers();}
+     70| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 1 passed (4)
+   Start at  20:14:54
+   Duration  2.54s (transform 1.15s, setup 0ms, collect 2.38s, tests 8ms, environment 0ms, prepare 35ms)
+
+
+EXIT_CODE=1

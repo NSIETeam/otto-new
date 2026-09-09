@@ -13,7 +13,19 @@ import {
   unescapePath,
   needsLegacyMigration,
   migrateLegacyDirectories,
+  resolveOttoUserDir,
 } from './paths.js';
+
+describe('resolveOttoUserDir', () => {
+  it('resolves an explicit isolated root and keeps the platform home fallback', () => {
+    const home = path.resolve('fixture-home');
+    const isolated = path.resolve('fixture-isolated');
+    expect(resolveOttoUserDir({ OTTO_USER_DIR: ` ${isolated} ` }, home)).toBe(isolated);
+    expect(resolveOttoUserDir({ OTTO_USER_DIR: 'relative-profile' }, home)).toBe(path.resolve('relative-profile'));
+    expect(resolveOttoUserDir({ OTTO_USER_DIR: '  ' }, home)).toBe(path.join(home, '.otto-user'));
+    expect(resolveOttoUserDir({}, home)).toBe(path.join(home, '.otto-user'));
+  });
+});
 
 describe('escapePath', () => {
   const originalPlatform = process.platform;

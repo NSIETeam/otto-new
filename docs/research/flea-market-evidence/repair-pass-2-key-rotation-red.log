@@ -1,0 +1,35 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+(node:9203) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts (6 tests | 2 failed) 4187ms
+   × sqlite: persists private substring candidates atomically, updates on edit, and recovers search after restart 50ms
+     → (0 , rotateMarketSearchKey) is not a function
+   × postgres: persists private substring candidates atomically, updates on edit, and recovers search after restart 1455ms
+     → (0 , rotateMarketSearchKey) is not a function
+   ✓ sqlite: preserves literal substring semantics and caches sellers only within one request 37ms
+   ✓ sqlite: backfill is bounded, restartable and rollback-safe 41ms
+   ✓ postgres: preserves literal substring semantics and caches sellers only within one request  1184ms
+   ✓ postgres: backfill is bounded, restartable and rollback-safe  1418ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts > sqlite: persists private substring candidates atomically, updates on edit, and recovers search after restart
+ FAIL  src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts > postgres: persists private substring candidates atomically, updates on edit, and recovers search after restart
+TypeError: (0 , rotateMarketSearchKey) is not a function
+ ❯ src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts:62:13
+     60|       expect((await service.discover('buyer', { query: '书架' })).items)…
+     61|       const before=await h.repository.read(tx=>marketSearchKey(tx,deps…
+     62|       await rotateMarketSearchKey({...deps,repository:h.repository},'P…
+       |             ^
+     63|       const after=await h.repository.read(tx=>marketSearchKey(tx,deps.…
+     64|       expect(after).not.toEqual(before);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 4 passed (6)
+   Start at  23:07:03
+   Duration  8.14s (transform 1.73s, setup 0ms, collect 3.75s, tests 4.19s, environment 0ms, prepare 53ms)

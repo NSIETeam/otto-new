@@ -7,6 +7,11 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import asar from '@electron/asar';
+import {
+  readServerNotice,
+  SERVER_NOTICE_ASAR_PATH,
+  verifyServerNoticeContent,
+} from '../../../scripts/server-notice.mjs';
 
 export const MAX_APP_ASAR_BYTES = 120 * 1024 * 1024;
 
@@ -64,6 +69,7 @@ const FORBIDDEN_BUILD_FILES = new Set([
   'binding.gyp',
   'cargo.lock',
   'cargo.toml',
+  'junit.xml',
 ]);
 
 function normalizeAsarEntry(entry) {
@@ -91,6 +97,14 @@ export function findForbiddenAsarEntries(entries) {
     }
     if (lowerEntry.endsWith('.map')) {
       violations.push({ entry, reason: 'source map' });
+      continue;
+    }
+    if (/\.(?:test|spec)\.[^.]+$/u.test(basename)) {
+      violations.push({ entry, reason: 'test/spec file' });
+      continue;
+    }
+    if (/\.(?:ts|tsx|mts|cts|tsbuildinfo)$/u.test(basename)) {
+      violations.push({ entry, reason: 'TypeScript source/build metadata' });
       continue;
     }
     if (segments.some((segment) => FORBIDDEN_DIRECTORY_NAMES.has(segment))) {
@@ -159,6 +173,22 @@ export function verifyPackagedContent(
       `app.asar contains ${violations.length} forbidden entries:\n- ${preview}${remainder}`,
     );
   }
+
+  if (
+    !entries.some(
+      (entry) => normalizeAsarEntry(entry) === SERVER_NOTICE_ASAR_PATH,
+    )
+  ) {
+    throw new Error(
+      `app.asar is missing required third-party NOTICE: ${SERVER_NOTICE_ASAR_PATH}`,
+    );
+  }
+  verifyServerNoticeContent(
+    asar.extractFile(archivePath, path.normalize(SERVER_NOTICE_ASAR_PATH)),
+    readServerNotice(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..'),
+    ),
+  );
 
   return { size, entryCount: entries.length };
 }

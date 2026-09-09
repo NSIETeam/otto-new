@@ -207,6 +207,31 @@ const API_V2_HEALTH = {
   ],
 };
 
+describe('federation capability admission', () => {
+  it('requires current-server negotiation and a signed-in session', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, {
+      ...API_V2_HEALTH,
+      capabilities: [...API_V2_HEALTH.capabilities, 'federation_chat_v1'],
+    }));
+    const client = new EnterpriseClient(fetchMock as typeof fetch);
+    client.restore({ serverUrl: 'https://enterprise.otto.test', token: 'member-session' });
+    expect(client.supportsFederationGateway()).toBe(false);
+    await client.prepareServer('https://enterprise.otto.test');
+    expect(client.supportsFederationGateway()).toBe(false);
+    client.restore({ serverUrl: 'https://enterprise.otto.test', token: 'member-session' });
+    expect(client.supportsFederationGateway()).toBe(true);
+    client.restore({ serverUrl: 'https://other.otto.test', token: 'other-session' });
+    expect(client.supportsFederationGateway()).toBe(false);
+  });
+
+  it('does not enable federation for an authenticated server without the capability', async () => {
+    const client = new EnterpriseClient(vi.fn().mockResolvedValue(jsonResponse(200, API_V2_HEALTH)) as typeof fetch);
+    await client.prepareServer('https://enterprise.otto.test');
+    client.restore({ serverUrl: 'https://enterprise.otto.test', token: 'member-session' });
+    expect(client.supportsFederationGateway()).toBe(false);
+  });
+});
+
 describe('recruitment archive session binding', () => {
   it('does not send Workable authorization codes to a plaintext remote enterprise server', async () => {
     const fetchMock = vi.fn(); const client = new EnterpriseClient(fetchMock as typeof fetch);

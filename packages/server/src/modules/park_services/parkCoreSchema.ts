@@ -95,5 +95,13 @@ export const PARK_CORE_SCHEMA_CONTRIBUTOR: DatabaseSchemaContributor = {
       CREATE INDEX IF NOT EXISTS idx_enterprise_public_profiles_visibility
         ON enterprise_public_profiles(is_public, updated_at);
     `);
+    const columns = database
+      .prepare('PRAGMA table_info(enterprise_public_profiles)')
+      .all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'primary_industry_json')) {
+      database.exec(
+        "ALTER TABLE enterprise_public_profiles ADD COLUMN primary_industry_json TEXT NOT NULL DEFAULT '{}'",
+      );
+    }
   },
 };

@@ -9,12 +9,19 @@ import { finished } from 'node:stream/promises';
 import asar from '@electron/asar';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  readServerNotice,
+  SERVER_NOTICE_ASAR_PATH,
+} from '../../../scripts/server-notice.mjs';
+import {
   findForbiddenAsarEntries,
   MAX_APP_ASAR_BYTES,
   verifyPackagedContent,
 } from './verify-packaged-content.mjs';
 
 const temporaryDirectories = [];
+const reviewedNotice = readServerNotice(
+  path.resolve(import.meta.dirname, '../../..'),
+);
 
 afterEach(async () => {
   await Promise.all(
@@ -65,6 +72,14 @@ describe('packaged content gate', () => {
       '/node_modules/example/index.d.mts',
       '/node_modules/example/tsconfig.build.json',
       '/node_modules/otto-core/dist/.last_build',
+      '/dist/main/update-core.test.js',
+      '/node_modules/runtime-lib/parser.spec.cjs',
+      '/dist/main/index.ts',
+      '/dist/renderer/App.tsx',
+      '/node_modules/runtime-lib/index.mts',
+      '/node_modules/runtime-lib/index.cts',
+      '/node_modules/runtime-lib/tsconfig.tsbuildinfo',
+      '/junit.xml',
     ];
 
     const violations = findForbiddenAsarEntries(entries);
@@ -81,6 +96,11 @@ describe('packaged content gate', () => {
       '/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
       '/node_modules/pdf-parse/lib/pdf.js/v1.10.100/build/pdf.js',
       '/node_modules/playwright-core/lib/server/browserType.js',
+      '/node_modules/otto-server/dist/src/taskRequirements.js',
+      '/node_modules/otto-server/NOTICE',
+      '/node_modules/runtime-lib/LICENSE.md',
+      '/node_modules/otto-core/skills-seed/writing/SKILL.md',
+      '/node_modules/otto-core/skills-seed/writing/references/guide.md',
     ];
 
     expect(findForbiddenAsarEntries(entries)).toEqual([]);
@@ -90,6 +110,7 @@ describe('packaged content gate', () => {
   it('audits a real asar archive and enforces its byte budget', async () => {
     const archive = await createArchive({
       'dist/main/index.js': 'console.log("otto")',
+      [SERVER_NOTICE_ASAR_PATH]: reviewedNotice,
       'node_modules/better-sqlite3/build/Release/better_sqlite3.node':
         'native-placeholder',
     });
@@ -111,5 +132,32 @@ describe('packaged content gate', () => {
     expect(() => verifyPackagedContent(archive)).toThrow(
       'app.asar contains 1 forbidden entries',
     );
+  });
+
+  it('blocks a real asar archive missing the server third-party notice', async () => {
+    const archive = await createArchive({
+      'dist/main/index.js': 'console.log("otto")',
+    });
+    expect(() => verifyPackagedContent(archive)).toThrow(
+      'missing required third-party NOTICE',
+    );
+  });
+
+  it('blocks a real asar archive with a truncated or substituted notice', async () => {
+    const archive = await createArchive({
+      [SERVER_NOTICE_ASAR_PATH]: 'MIT License',
+    });
+    expect(() => verifyPackagedContent(archive)).toThrow(
+      'differs from the reviewed source',
+    );
+  });
+
+  it('accepts the complete notice across Windows and Unix checkout line endings', async () => {
+    const archive = await createArchive({
+      [SERVER_NOTICE_ASAR_PATH]: reviewedNotice
+        .toString('utf8')
+        .replace(/\r?\n/g, '\r\n'),
+    });
+    expect(verifyPackagedContent(archive).entryCount).toBeGreaterThan(0);
   });
 });

@@ -1,0 +1,22 @@
+
+> otto-ai@1.18.0 doctor
+> node scripts/doctor.cjs
+
+Otto repository doctor
+
+✓ Node.js version: v24.4.0 (required: >=22.16.0)
+✓ npm available: npm 11.5.2
+✓ package-lock present: package-lock.json is required for reproducible installs
+✗ source payload size: 61.47 MB (budget: 50 MB; top: packages 40.91 MB, native 12.16 MB, resources 3.87 MB, docs 2.04 MB, package-lock.json 0.78 MB)
+  fix: Remove stale generated assets/dead code or raise OTTO_DOCTOR_SOURCE_SIZE_BUDGET_MB with a release note.
+✓ release distribution size: 0.05 MB (budget: 10 MB; paths: bundle)
+✓ host memory profile: 16.0 GB RAM detected
+✓ agent-critical text encoding: no mojibake markers found in docs/core/tools/prompts
+✓ workspace packages/core: packages/core/package.json
+✓ workspace packages/server: packages/server/package.json
+✓ workspace packages/desktop: packages/desktop/package.json
+✓ local bin vitest: node_modules/.bin/vitest
+✓ local bin tsc: node_modules/.bin/tsc
+✓ local bin eslint: node_modules/.bin/eslint
+
+1 check(s) failed. Fix the items above before trusting test/typecheck results.

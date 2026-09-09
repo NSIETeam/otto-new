@@ -7,10 +7,10 @@ import {
   closeSync,
   realpathSync,
   lstatSync,
-  existsSync,
 } from 'node:fs';
 import path from 'node:path';
 import { ToolCallStatus, type ToolCall } from './protocol.js';
+import { WorkspacePathIdentity } from './workspacePathIdentity.js';
 import {
   verificationKind,
   hasFailedVerificationReceipt,
@@ -69,14 +69,6 @@ const MAX_FILE = 2_000_000;
 const MAX_BATCHES = 2;
 const normalize = (file: string) =>
   process.platform === 'win32' ? file.toLowerCase() : file;
-function target(tool: ToolCall): string | undefined {
-  const value =
-    tool.parameters.file_path ??
-    tool.parameters.path ??
-    tool.parameters.absolute_path;
-  if (typeof value !== 'string' || !path.isAbsolute(value)) return;
-  return normalize(path.resolve(value));
-}
 function fileState(
   file: string,
   allowAbsent = false,
@@ -84,22 +76,41 @@ function fileState(
   let fd: number | undefined;
   try {
     if (!path.isAbsolute(file) || /[\0]|^\\\\|^\/\//u.test(file)) return;
+    let absent = false;
     for (let p = file; ; p = path.dirname(p)) {
-      if (existsSync(p)) {
-        const s = lstatSync(p);
+      try {
+        const s = lstatSync(p, { bigint: true });
         if (
           s.isSymbolicLink() ||
-          (s.isFile() && s.nlink > 1) ||
+          (s.isFile() && s.nlink > 1n) ||
           normalize(realpathSync(p)) !== normalize(p)
         )
           return;
-      } else if (p !== file || !allowAbsent) return;
+      } catch (error) {
+        // lstat observes dangling links; only a truly absent final file may be
+        // proposed as a new regression. Missing/linked parents are never scope.
+        if (
+          (error as NodeJS.ErrnoException).code !== 'ENOENT' ||
+          p !== file ||
+          !allowAbsent
+        )
+          return;
+        absent = true;
+      }
       if (p === path.dirname(p)) break;
     }
-    if (!existsSync(file)) return { hash: 'absent', data: Buffer.alloc(0) };
+    if (absent) return { hash: 'absent', data: Buffer.alloc(0) };
+    const before = lstatSync(file, { bigint: true });
     fd = openSync(file, 'r');
     const stat = fstatSync(fd, { bigint: true });
-    if (!stat.isFile() || stat.nlink > 1n || stat.size > BigInt(MAX_FILE))
+    if (
+      !before.isFile() ||
+      !stat.isFile() ||
+      stat.dev !== before.dev ||
+      stat.ino !== before.ino ||
+      stat.nlink > 1n ||
+      stat.size > BigInt(MAX_FILE)
+    )
       return;
     const buffer = Buffer.alloc(MAX_FILE + 1);
     let size = 0;
@@ -108,7 +119,18 @@ function fileState(
       count = readSync(fd, buffer, size, buffer.length - size, null);
       size += count;
     } while (count && size < buffer.length);
-    if (size > MAX_FILE) return;
+    const after = lstatSync(file, { bigint: true });
+    if (
+      size > MAX_FILE ||
+      !after.isFile() ||
+      after.nlink > 1n ||
+      after.dev !== stat.dev ||
+      after.ino !== stat.ino ||
+      after.size !== stat.size ||
+      after.mtimeNs !== stat.mtimeNs ||
+      after.ctimeNs !== stat.ctimeNs
+    )
+      return;
     const data = buffer.subarray(0, size);
     return {
       data,
@@ -195,6 +217,7 @@ function object(value: unknown): Record<string, unknown> {
  * shell repairs, dependency installation, automatic rollback or external replay. */
 export class DeliveryRepairGuard {
   private context: RepairContext;
+  private workspaceIdentity?: WorkspacePathIdentity;
   private touched = new Set<string>();
   private inspected = new Set<string>();
   private reads = new Map<string, string>();
@@ -223,6 +246,46 @@ export class DeliveryRepairGuard {
     },
   ) {
     this.context = { ...context };
+    if (context.workspacePath)
+      this.workspaceIdentity = new WorkspacePathIdentity(context.workspacePath);
+  }
+
+  private root(): string | undefined {
+    const root = this.workspaceIdentity?.currentPath();
+    return root && normalize(root);
+  }
+  private resolveFile(raw: unknown): string | undefined {
+    if (
+      typeof raw !== 'string' ||
+      !path.isAbsolute(raw) ||
+      /[\0]|^\\\\|^\/\//u.test(raw) ||
+      raw.split(/[\\/]/u).includes('..')
+    )
+      return;
+    try {
+      // Only the host-selected root can supply an alias mapping. Descendants
+      // remain lexical and must pass the no-link checks in fileState.
+      return normalize(
+        this.workspaceIdentity
+          ? this.workspaceIdentity.resolveTarget(raw)
+          : path.resolve(raw),
+      );
+    } catch {
+      return;
+    }
+  }
+  private target(tool: ToolCall): string | undefined {
+    return this.resolveFile(
+      tool.parameters.file_path ??
+        tool.parameters.path ??
+        tool.parameters.absolute_path,
+    );
+  }
+  private fileState(file: string, allowAbsent = false) {
+    if (this.workspaceIdentity && !this.root()) return;
+    const state = fileState(file, allowAbsent);
+    if (this.workspaceIdentity && !this.root()) return;
+    return state;
   }
 
   budgetSnapshot(): RepairBudget {
@@ -249,6 +312,10 @@ export class DeliveryRepairGuard {
     const authorityChanged =
       this.context.requestRevision !== context.requestRevision ||
       this.context.workspacePath !== context.workspacePath;
+    if (this.context.workspacePath !== context.workspacePath)
+      this.workspaceIdentity = context.workspacePath
+        ? new WorkspacePathIdentity(context.workspacePath)
+        : undefined;
     this.context = { ...context };
     this.generation++;
     this.selected = undefined;
@@ -267,7 +334,11 @@ export class DeliveryRepairGuard {
       this.fastPathConsumed = false;
       this.failure = {
         id: tool.id,
-        inputs: new Set(inputPaths.map((p) => normalize(path.resolve(p)))),
+        inputs: new Set(
+          inputPaths
+            .map((p) => this.resolveFile(p))
+            .filter((p): p is string => p !== undefined),
+        ),
         command: receipt.command,
         directory: receipt.directory,
       };
@@ -295,10 +366,10 @@ export class DeliveryRepairGuard {
     }
     if (tool.status !== ToolCallStatus.Success || tool.result?.success !== true)
       return;
-    const file = target(tool);
+    const file = this.target(tool);
     if (!file) return;
     if (['write_file', 'replace'].includes(tool.toolName)) {
-      const state = fileState(file);
+      const state = this.fileState(file);
       if (!closing && state && this.touched.size < 128) this.touched.add(file);
       this.reads.delete(file);
       const selected = this.selected?.get(file);
@@ -306,22 +377,20 @@ export class DeliveryRepairGuard {
     } else if (tool.toolName === 'read_file') {
       if (this.inspected.size < 256) this.inspected.add(file);
       if (this.failure || this.selected) {
-        const state = fileState(file);
+        const state = this.fileState(file);
         if (state) this.reads.set(file, state.hash);
       }
     }
   }
   private eligible(file: string): { hash: string; data: Buffer } | undefined {
-    const root =
-      this.context.workspacePath &&
-      normalize(path.resolve(this.context.workspacePath));
+    const root = this.root();
     if (!root || !within(root, file) || !sourceFile(path.relative(root, file)))
       return;
     if (this.protectedTests.has(file)) return;
-    const state = fileState(file, true);
+    const state = this.fileState(file, true);
     if (!state) return;
     const anchors = [...this.touched].filter(
-      (p) => within(root, p) && !!fileState(p),
+      (p) => within(root, p) && !!this.fileState(p),
     );
     if (state.hash === 'absent') {
       // A failing, freshly read direct dependency is already eligible for local
@@ -334,7 +403,7 @@ export class DeliveryRepairGuard {
           !this.inspected.has(p)
         )
           return false;
-        const current = fileState(p);
+        const current = this.fileState(p);
         return (
           current &&
           this.reads.get(p) === current.hash &&
@@ -407,7 +476,12 @@ export class DeliveryRepairGuard {
       const files = item.files.map((p) => {
         if (typeof p !== 'string' || p.length > 1000 || !path.isAbsolute(p))
           throw new Error('Repair requires exact absolute files');
-        return normalize(path.resolve(p));
+        const file = this.resolveFile(p);
+        if (!file)
+          throw new Error(
+            'Repair requires a safe file and stable workspace identity',
+          );
+        return file;
       });
       if (new Set(files).size !== files.length)
         throw new Error('Duplicate repair file');
@@ -492,21 +566,17 @@ export class DeliveryRepairGuard {
   }
   reserve(tool: ToolCall): boolean {
     if (!['write_file', 'replace'].includes(tool.toolName)) return false;
-    const file = target(tool);
+    const file = this.target(tool);
     if (!file) return false;
+    const root = this.root();
     // The fast path is not a bypass of the explicit plan's scope restrictions.
     if (
       this.protectedTests.has(file) ||
-      !sourceFile(
-        this.context.workspacePath
-          ? path.relative(this.context.workspacePath, file)
-          : file,
-      ) ||
-      (this.context.workspacePath &&
-        !within(normalize(path.resolve(this.context.workspacePath)), file))
+      !sourceFile(root ? path.relative(root, file) : file) ||
+      (this.workspaceIdentity && (!root || !within(root, file)))
     )
       return false;
-    const state = fileState(file, true);
+    const state = this.fileState(file, true);
     if (!state) return false;
     for (const key of ['content', 'new_string'])
       if (
@@ -572,7 +642,7 @@ export class DeliveryRepairGuard {
     return (
       !reservation ||
       (reservation.generation === this.generation &&
-        fileState(reservation.file, true)?.hash === reservation.hash &&
+        this.fileState(reservation.file, true)?.hash === reservation.hash &&
         (!call ||
           reservation.callHash ===
             createHash('sha256')
@@ -586,12 +656,9 @@ export class DeliveryRepairGuard {
     written: false;
     formatter: string;
   }> {
-    const file =
-      typeof raw === 'string' && path.isAbsolute(raw)
-        ? normalize(path.resolve(raw))
-        : '';
+    const file = this.resolveFile(raw) ?? '';
     const selected = this.selected?.get(file);
-    const state = fileState(file);
+    const state = this.fileState(file);
     if (
       !selected ||
       !state ||
@@ -628,7 +695,7 @@ export class DeliveryRepairGuard {
     });
     if (
       generation !== this.generation ||
-      fileState(file)?.hash !== state.hash ||
+      this.fileState(file)?.hash !== state.hash ||
       Buffer.byteLength(content) > MAX_FILE
     )
       throw new Error('Formatting became stale; reread the file');

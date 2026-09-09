@@ -1,0 +1,18 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+(node:25911) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:25908) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:25904) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/data_platform/attachmentStorageService.test.ts (11 tests) 22ms
+ ✓ src/modules/park_services/parkMembershipRepository.test.ts (2 tests) 4ms
+ ✓ src/modules/collaboration/collaborationComposition.test.ts (1 test) 9ms
+ ✓ src/modules/collaboration/mlsTransportRepository.test.ts (14 tests) 96ms
+
+ Test Files  4 passed (4)
+      Tests  28 passed (28)
+   Start at  09:44:37
+   Duration  7.70s (transform 3.76s, setup 0ms, collect 21.73s, tests 130ms, environment 1ms, prepare 355ms)

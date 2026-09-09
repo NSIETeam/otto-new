@@ -1,6 +1,6 @@
 {
   "name": "otto-desktop",
-  "version": "1.9.14",
+  "version": "1.9.15",
   "description": "Otto Desktop - Electron app shell (main + preload + renderer reusing webview DOM UI)",
   "author": "Otto",
   "license": "Apache-2.0",
@@ -47,7 +47,8 @@
     "otto-workflow": "file:../workflow",
     "qrcode-terminal": "^0.12.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-force-graph-2d": "1.29.1"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.1",
@@ -88,6 +89,7 @@
     ],
     "electronVersion": "43.2.0",
     "afterPack": "scripts/after-pack.cjs",
+    "beforePack": "scripts/before-pack.cjs",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -97,8 +99,13 @@
       "package.json",
       "node_modules/@otto/native/dist/index.js",
       "!**/*.map",
-      "!**/*.md",
-      "!**/*.markdown",
+      "!**/!(*LICENSE*|*license*|*License*|*LICENCE*|*licence*|*Licence*|*NOTICE*|*notice*|*Notice*|*COPYING*|*copying*|*Copying*).md",
+      "!**/!(*LICENSE*|*license*|*License*|*LICENCE*|*licence*|*Licence*|*NOTICE*|*notice*|*Notice*|*COPYING*|*copying*|*Copying*).markdown",
+      {
+        "from": "../server",
+        "to": "node_modules/otto-server",
+        "filter": ["NOTICE"]
+      },
       {
         "from": "../core/skills-seed",
         "to": "node_modules/otto-core/skills-seed",
@@ -110,6 +117,9 @@
         ]
       },
       "!**/*.ts",
+      "!**/*.tsx",
+      "!**/*.mts",
+      "!**/*.cts",
       "!**/*.d.ts",
       "!**/*.d.cts",
       "!**/*.d.mts",
@@ -133,6 +143,12 @@
       "!**/node_modules/better-sqlite3/src/**",
       "!**/node_modules/better-sqlite3/binding.gyp",
       "!**/node_modules/better-sqlite3/build/**",
+      "!**/node_modules/@img/sharp-*/**",
+      "!**/node_modules/sharp/src/**",
+      "!**/node_modules/sharp/install/**",
+      "!**/node_modules/libheif-js/libheif-wasm/libheif-bundle.mjs",
+      "!**/node_modules/libheif-js/libheif-wasm/libheif.wasm",
+      "!**/node_modules/libheif-js/libheif-wasm/libheif.js",
       "!**/node_modules/pdf-parse/lib/pdf.js/v1.10.88/**",
       "!**/node_modules/pdf-parse/lib/pdf.js/v1.9.426/**",
       "!**/node_modules/pdf-parse/lib/pdf.js/v2.0.550/**",
@@ -165,6 +181,7 @@
       "!**/junit.xml",
       "!**/*.tsbuildinfo",
       "!**/*.test.*",
+      "!**/*.spec.*",
       "!**/tsconfig*.json",
       "!**/.last_build",
       "!**/__tests__/**"
@@ -173,6 +190,10 @@
       "main": "dist/main/index.js"
     },
     "asar": true,
+    "asarUnpack": [
+      "**/node_modules/sharp/**/*",
+      "**/node_modules/@img/sharp-*/**/*"
+    ],
     "npmRebuild": false,
     "mac": {
       "electronLanguages": [
@@ -205,6 +226,8 @@
         "/Contents/Resources/otto-native/"
       ],
       "extendInfo": {
+        "NSLocationWhenInUseUsageDescription": "仅当你点击使用当前位置时，Otto 使用位置帮助选择本次同行出发点。",
+        "NSLocationUsageDescription": "仅当你点击使用当前位置时，Otto 使用位置帮助选择本次同行出发点。",
         "NSMicrophoneUsageDescription": "Otto 使用麦克风将语音转换为聊天输入文字。"
       },
       "extraResources": [

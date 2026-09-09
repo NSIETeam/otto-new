@@ -8,6 +8,12 @@ if redis.call('get', KEYS[1]) == ARGV[1] then
 end
 return 0`;
 
+const RENEW_OWNED_LEASE_SCRIPT = `
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('pexpire', KEYS[1], ARGV[2])
+end
+return 0`;
+
 export interface EnterpriseSharedCacheReadiness {
   ready: true;
   backend: 'redis';
@@ -20,6 +26,7 @@ export interface EnterpriseSharedCache {
   set(key: string, value: string, ttlMs?: number): Promise<void>;
   delete(key: string): Promise<void>;
   acquireLease(key: string, owner: string, ttlMs: number): Promise<boolean>;
+  renewLease(key: string, owner: string, ttlMs: number): Promise<boolean>;
   releaseLease(key: string, owner: string): Promise<boolean>;
   close(): Promise<void>;
 }
@@ -107,6 +114,12 @@ export function createRedisEnterpriseSharedCache(input: {
           PX: positiveTtl(ttlMs),
         })) === 'OK'
       );
+    },
+    async renewLease(key, owner, ttlMs) {
+      if (!owner.trim() || owner.length > 512) throw new Error('enterprise cache lease owner is invalid');
+      return Number(await input.client.eval(RENEW_OWNED_LEASE_SCRIPT, {
+        keys: [cacheKey(keyPrefix, key)], arguments: [owner, String(positiveTtl(ttlMs))],
+      })) === 1;
     },
     async releaseLease(key, owner) {
       const released = await input.client.eval(RELEASE_OWNED_LEASE_SCRIPT, {

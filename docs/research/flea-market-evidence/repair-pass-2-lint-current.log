@@ -1,0 +1,23 @@
+
+/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/src/shared/park-market.d.ts
+  0:0  warning  File ignored because of a matching ignore pattern. Use "--no-ignore" to disable file ignore settings or use "--no-warn-ignored" to suppress this warning
+
+/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/collaboration/parkContactAttachments.test.ts
+  18:5  error  Split 'const' declarations into multiple statements  one-var
+  23:9  error  Expected property shorthand                          object-shorthand
+
+/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketApplication.ts
+  80:9  error  Split 'const' declarations into multiple statements  one-var
+
+/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketJobs.test.ts
+  54:5  error  Split 'const' declarations into multiple statements  one-var
+
+/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketReadiness.ts
+  45:3  error  Split 'let' declarations into multiple statements  one-var
+
+/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server/src/modules/park_services/flea_market/fleaMarketRepairRaces.test.ts
+  24:5  error  Split 'const' declarations into multiple statements  one-var
+  68:5  error  Split 'const' declarations into multiple statements  one-var
+
+✖ 8 problems (7 errors, 1 warning)
+  7 errors and 0 warnings potentially fixable with the `--fix` option.

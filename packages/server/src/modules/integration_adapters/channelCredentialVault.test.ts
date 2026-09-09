@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   JsonChannelCredentialVaultV1,
+  FileKeyChannelCredentialProtectorV1,
   type ChannelCredentialProtectorV1,
 } from './channelCredentialVault.js';
 
@@ -34,6 +35,7 @@ function fixture() {
     tenantId: 'tenant-1',
     tenantName: 'Acme',
     botName: 'Otto',
+    requestedScopes: ['im:message', 'im:resource'],
     grantedScopes: ['im:message'],
     connectedAtMs: 100,
   };
@@ -46,6 +48,19 @@ afterEach(() => {
 });
 
 describe('JsonChannelCredentialVaultV1', () => {
+  it('encrypts with an owner-only persistent key and rejects tampering', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-channel-key-'));
+    roots.push(root);
+    const keyPath = path.join(root, 'channel-key');
+    const protector = new FileKeyChannelCredentialProtectorV1(keyPath);
+    const encrypted = protector.protect('bot-secret');
+    expect(encrypted).not.toContain('bot-secret');
+    expect(protector.unprotect(encrypted)).toBe('bot-secret');
+    if (process.platform !== 'win32') expect(fs.statSync(keyPath).mode & 0o777).toBe(0o600);
+    const replacement = encrypted.endsWith('0') ? '1' : '0';
+    expect(() => protector.unprotect(`${encrypted.slice(0, -1)}${replacement}`)).toThrow();
+  });
+
   it('persists only protected data and makes repeated commits idempotent', async () => {
     const { root, protector, vault, installation } = fixture();
     await vault.commit(installation, 'refresh-token-secret');

@@ -1,0 +1,38 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:75134) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ packages/server/src/modules/collaboration/parkContactAttachments.test.ts (2 tests | 2 failed) 1509ms
+   × sqlite: private attachment stages once, binds atomically, survives restart and never uses listing grants 35ms
+     → expected [ …(2) ] to have a length of 1 but got 2
+   × postgres: private attachment stages once, binds atomically, survives restart and never uses listing grants 1474ms
+     → expected [ …(2) ] to have a length of 1 but got 2
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/collaboration/parkContactAttachments.test.ts > sqlite: private attachment stages once, binds atomically, survives restart and never uses listing grants
+ FAIL  packages/server/src/modules/collaboration/parkContactAttachments.test.ts > postgres: private attachment stages once, binds atomically, survives restart and never uses listing grants
+AssertionError: expected [ …(2) ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ packages/server/src/modules/collaboration/parkContactAttachments.test.ts:46:31
+     44|    await h.restart();time+=86400001;
+     45|    await createParkContactAttachments({...options,repository:h.reposit…
+     46|    expect(objects.listKeys()).toHaveLength(1);
+       |                               ^
+     47|   } finally {await h.close();rmSync(root,{recursive:true});}
+     48|  },30000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  22:48:44
+   Duration  4.08s (transform 1.10s, setup 0ms, collect 2.42s, tests 1.51s, environment 0ms, prepare 34ms)

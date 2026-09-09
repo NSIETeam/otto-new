@@ -1,3 +1,8 @@
+import { localMarketAcceptance } from '../modules/park_services/flea_market/fleaMarketReadiness.js';
+import { E2EE_PRODUCTION_RELEASE_POLICY } from './e2eeProductionReleasePolicy.js';
+import { createMarketPostgresRuntime } from '../modules/park_services/flea_market/fleaMarketPostgresRuntime.js';
+import { createMarketRemoteObjects, marketRemoteKeyReferenced } from '../modules/park_services/flea_market/fleaMarketObjectStore.js';
+import { createEncryptedFieldCipher } from '../modules/data_platform/encryptedFieldCipher.js';
 
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
@@ -190,10 +195,14 @@ export async function createClusteredEnterpriseInfrastructure(input: {
       accountSyncKeyProvider,
     });
     const attachmentStorage = createAttachmentStorageService({
-      metadata: createPostgresAttachmentMetadataRepository({
-        pool,
-        defaultQuotaBytes,
-      }),
+      metadata: (() => {
+        const metadata = createPostgresAttachmentMetadataRepository({ pool, defaultQuotaBytes });
+        return { ...metadata, async isStorageKeyReferenced(location) {
+          if (await metadata.isStorageKeyReferenced(location)) return true;
+          if (location.backend !== 's3') return false;
+          return marketRemoteKeyReferenced(pool, location.key);
+        } };
+      })(),
       stores: {
         s3: attachmentRuntime.store,
         ...(legacyStore
@@ -209,6 +218,7 @@ export async function createClusteredEnterpriseInfrastructure(input: {
       repository,
       cache,
       sharedState: createClusteredEnterpriseSharedState({ repository, cache }),
+      fleaMarketApplication: createMarketPostgresRuntime({ pool, defaultQuotaBytes, cipher: createEncryptedFieldCipher({ keyProvider: accountSyncKeyProvider }), objects: createMarketRemoteObjects(attachmentRuntime.store, createEncryptedFieldCipher({ keyProvider: accountSyncKeyProvider })), localAcceptance: localMarketAcceptance(dataDirectory), requiresMls: () => E2EE_PRODUCTION_RELEASE_POLICY.enabled }),
       attachmentStorage,
       attachmentStore: attachmentRuntime.store,
       legacyAttachmentReadEnabled: Boolean(legacyStore),

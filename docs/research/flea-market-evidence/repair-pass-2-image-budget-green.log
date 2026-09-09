@@ -1,0 +1,11 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+(node:34624) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketAttachments.test.ts (3 tests) 105ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  23:13:31
+   Duration  2.55s (transform 1.13s, setup 0ms, collect 2.31s, tests 105ms, environment 0ms, prepare 33ms)

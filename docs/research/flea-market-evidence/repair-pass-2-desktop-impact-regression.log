@@ -1,0 +1,45 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ✓ src/main/park-carpool-startup.test.ts (5 tests) 89ms
+ ✓ src/main/enterprise-mls-private-messages.test.ts (6 tests) 572ms
+ ✓ src/renderer/components/MarketNotifications.test.tsx (3 tests) 617ms
+   ✓ loads older pages while preserving locally confirmed read receipts  364ms
+ ✓ src/main/enterprise-mls.test.ts (32 tests) 1454ms
+ ✓ src/main/enterprise-client.test.ts (78 tests) 2345ms
+   ✓ EnterpriseClient > streams and verifies an MLS object download before local decryption  301ms
+ ✓ src/renderer/moduleWorkspace.test.ts (23 tests) 216ms
+ ✓ src/renderer/parkMarketMutation.test.ts (2 tests) 138ms
+ ✓ src/main/park-market-mls.test.ts (1 test) 5ms
+ ❯ src/main/enterprise-mls-attachments.test.ts (4 tests | 1 failed) 11526ms
+   × MLS private-message attachment files > round-trips a multi-chunk file with a random per-file DEK and bound AAD 11280ms
+     → Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ MLS private-message attachment files > fails closed on object tampering or a cross-generation binding 96ms
+   ✓ MLS private-message attachment files > represents a zero-byte file as one authenticated empty chunk 131ms
+   ✓ MLS private-message attachment files > rejects oversized files before creating ciphertext 3ms
+(node:50975) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/main/park-carpool-chat.integration.test.ts (1 test) 15050ms
+   ✓ desktop coordinators exchange, retry after lost response, and restore actual MLS ciphertext from SQLite  15044ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/enterprise-mls-attachments.test.ts > MLS private-message attachment files > round-trips a multi-chunk file with a random per-file DEK and bound AAD
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/main/enterprise-mls-attachments.test.ts:44:3
+     42|
+     43| describe('MLS private-message attachment files', () => {
+     44|   it('round-trips a multi-chunk file with a random per-file DEK and bo…
+       |   ^
+     45|     const directory = temporaryDirectory();
+     46|     const sourcePath = path.join(directory, 'source.bin');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 9 passed (10)
+      Tests  1 failed | 154 passed (155)
+   Start at  23:16:28
+   Duration  61.65s (transform 32.49s, setup 5.94s, collect 62.53s, tests 32.01s, environment 37.75s, prepare 6.34s)

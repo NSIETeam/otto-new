@@ -120,3 +120,21 @@ describe('commercial enterprise route policy', () => {
     expect(commercialFeatureForEnterpriseRoute('/enterprise/messaging')).toBeNull();
   });
 });
+
+it('keeps existing market MLS history reachable when discovery is unavailable, while new publications remain gated', () => {
+  expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/mls')).toBeNull();
+  expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/listings')).toBe('park_service');
+});
+
+it('keeps associated history and controlled historical images reachable after the market module is removed', () => {
+  expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/conversations/c/items', {method:'GET'})).toBeNull();
+  expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/images/i', {method:'GET'})).toBeNull();
+  expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/images', {method:'POST'})).toBe('park_service');
+  expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/listings/i/renew', {method:'POST'})).toBe('park_service');
+});
+
+it('keeps independently authorized chat attachments reachable after removing the market module',()=>{
+ expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/chat-attachments/file',{method:'POST'})).toBeNull();
+ expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/chat-attachments/file/read',{method:'POST'})).toBeNull();
+ expect(commercialFeatureForEnterpriseRoute('/enterprise/park-market/images',{method:'POST'})).toBe('park_service');
+});

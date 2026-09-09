@@ -6,9 +6,10 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  probeOttoNativeBinary,
   OTTO_NATIVE_RELEASE_TOOLCHAIN,
   OTTO_NATIVE_TARGETS,
   verifyStagedOttoNativeAsset,
@@ -165,4 +166,24 @@ describe('Otto native release runtime', () => {
       verifyStagedOttoNativeAsset({ root, target: 'win32-x64' }),
     ).toThrow(/not Windows x64/u);
   });
+});
+
+it.each([false, true])('requires both ping and park MLS from an actual child process (MLS=%s)', hasMls => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-native-protocol-probe-'));
+  temporaryDirectories.push(root);
+  const preloader = path.join(root, 'fixture.cjs');
+  const replies = [{ id: 1, result: { pong: true } }];
+  if (hasMls) replies.push({ id: 2, result: { generations: [] } });
+  const output = replies.map(reply => JSON.stringify(reply)).join('\n') + '\n';
+  // A real executable on every supported OS; Windows cannot execute a /bin/sh
+  // shebang fixture. The preload is scoped to this child launch and restored.
+  fs.writeFileSync(preloader, `require('node:fs').writeSync(1, ${JSON.stringify(output)}); process.exit(0);`);
+  vi.stubEnv('NODE_OPTIONS', `--require="${preloader.replaceAll('\\', '/')}"`);
+  try {
+    const probe = () => probeOttoNativeBinary(process.execPath);
+    if (hasMls) expect(probe).not.toThrow();
+    else expect(probe).toThrow(/park.*MLS/i);
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

@@ -1,6 +1,6 @@
 # GitHub Actions Workflows
 
-1.9.14 的生产部署工作流只部署并验收 `enterprise-oneclick` 单机企业服务；它不部署、
+1.9.15 的生产部署工作流只部署并验收 `enterprise-oneclick` 单机企业服务；它不部署、
 也不为 PostgreSQL/Redis/S3 集群配置提供稳定版生产背书。集群提升必须使用独立迁移与
 兼容性验收流程，不能复用这里的单机健康检查作为放行依据。
 
@@ -14,14 +14,15 @@ GitHub Release 草稿，最后预提交企业服务器事务，并依次公开�
 
 - 发布源 `HEAD` 必须与远端 `origin/internal` 的最新提交精确相等；`release/*` 上的额外提交、旧 tag、落后分支和未合并功能分支都不能生成正式版本。
 - 根目录与桌面端版本号必须一致，企业运行时 schema、清单、构建信息均从同一提交生成。
-- macOS 必须通过 Developer ID 签名、公证和 stapler 验证；Windows 必须通过 Authenticode 验证。
+- 默认 macOS 必须通过 Developer ID 签名、公证和 stapler 验证；Windows 必须通过 Authenticode 验证。1.9.15 的产品所有者已明确授权无平台签名桌面发布，必须手动显式选择 `unsigned_desktop_stable=true`（stable、非 prerelease，且 `unsigned_mac_transition=false`）。该开关只豁免平台分发签名；macOS ad-hoc 封印、DMG 完整性、Windows 实际安装与运行时探针、企业包与发布清单 Ed25519 签名及所有事务门禁仍然执行。
 - 企业一键部署包必须带外置可信公钥可验证的 Ed25519 `.sig`，只有 SHA-256 不允许发布。
-- 独立的 `prepare-release-creation-intent` 作业会在任何 tag/Release 写入前连续读取并锁定双仓状态，把 run id、tag、两仓、完整源码 commit、兼容仓 `main` commit、两仓 tag 是否预先存在、Release 不存在、名称/正文/预发布标志、完整 14 资产向量和发布前 `latest` 写入创建意图。`creation-intent.json` 与 `pre-public-latest.json` 的 SHA-256 在第一次写入前作为不可变 workflow artifact 上传；`create-release-drafts` 必须下载、验摘要并连续两次复核远端状态后才可创建草稿。
+- 独立的 `prepare-release-creation-intent` 作业会在任何 tag/Release 写入前连续读取并锁定双仓状态，把 run id、tag、两仓、完整源码 commit、兼容仓 `main` commit、两仓 tag 是否预先存在、Release 不存在、名称/正文/预发布标志、完整 16 资产向量和发布前 `latest` 写入创建意图。`creation-intent.json` 与 `pre-public-latest.json` 的 SHA-256 在第一次写入前作为不可变 workflow artifact 上传；`create-release-drafts` 必须下载、验摘要并连续两次复核远端状态后才可创建草稿。
 - 若 `create-release-drafts` 失败或取消，`cleanup-partial-release-drafts` 会在同一 DAG 中以 `always()` 运行。只有 Release 仍是身份、正文、target、预发布标志完全一致的 draft，已有资产是锁定向量的严格子集（含名称锁定且 size=0、digest 为空的 `starter` 上传），tag commit 未漂移且两仓 `latest` 仍等于发布前值时，才删除本 run 的部分草稿和本 run 新建的 tag。正式 tag push 触发前已经存在的正式仓源码 tag 永远保留；任何公开 Release 或歧义状态都停止并交由人工事故处理。清理算法可幂等续跑。
 - 正式发布顺序是：构建并验签草稿 -> 预提交企业服务事务（延迟最终确认） -> 公开 `NSIETeam/otto-new` 并复核 -> 事务性更新国内镜像并复核 -> 最后公开旧客户端兼容仓并复核 -> 最终确认企业服务事务。兼容仓是 Release 公开阶段的最后一次公共变更，不能先于正式仓或镜像暴露。任一后续步骤失败时，必须先完成镜像与 Release 指针补偿，成功后才允许回滚企业服务事务。
 - 任何已公开并可能被客户端观察到的 Release 都绝不改回 draft，也不删除或覆盖资产。补偿后目标 Release 保持原公开/预发布可见性，只是不再是 `latest`；该版本号视为永久烧毁，事故闭环后必须使用新的 patch 版本重新发布。
 - 从创建草稿前到流程完全结束，必须冻结 `internal`、两仓 immutable releases 设置、tag、Release 资产和镜像的人工修改。工作流会在建草稿和企业部署前重新读取 `internal`；企业部署开始后，以已锁定提交作为事务提交点，不能因新提交制造半发布状态。
-- 两个 Release 仓必须关闭 immutable releases。工作流先通过 `/actions/permissions` 证明令牌具备 `Administration: read`，再要求 `/immutable-releases` 明确返回未启用；无法证明时一律停止。
+- 默认两个 Release 仓都执行管理设置核验：先通过 `/actions/permissions` 证明令牌具备 `Administration: read`，再要求 `/immutable-releases` 明确返回未启用。正式仓核验不可豁免。本次用户明确取消旧仓管理员核验，手动运行可显式设置 `allow_unverified_legacy_mutability=true`，只跳过旧仓管理 API 并在工作流摘要及来源绑定的 Release 说明中记录 `unknown`；默认值仍为 `false`，不能把不可见的 404 当作已关闭。
+- [GitHub.com 当前不可变 Release 规则](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)锁定已公开资产及 tag，仍允许修改 latest/prerelease。因此上述旧仓例外保留精确 latest 指针补偿；任何已公开资产/tag 都不删除、不覆盖、不回撤为 draft。若指针恢复不能核实，现有门禁会阻止继续回滚企业服务器并要求事故处理，不能以例外开关冒充补偿成功。
 
 ## CI
 
@@ -60,6 +61,13 @@ GitHub Release 草稿，最后预提交企业服务器事务，并依次公开�
 - `otto-enterprise-oneclick-v<version>-<build>.tar.gz`
 - `.sha256`
 - `.sig`
+- `otto-<version>-corresponding-source.tar.gz` 及同名 `.sha256`
+
+对应源码旁车从最终干净 HEAD 在 checkout 外构造；固定上游输入与实际 WASM 重组
+探针通过后，与安装包一起证明来源并纳入生产签名 `SHA256SUMS`。正式双仓各有
+16 件资产，隔离 transition 测试草稿为 10 件。创建、公开、补偿均锁定完整集合，
+并在公开后匿名下载双仓源码旁车验字节。源码不增加安装包体积，固定镜像仍为 7 件；
+镜像更新清单的已有 `notes` 与双仓正文链接免费 GitHub 对应源码，不更改更新 schema。
 
 规则：
 
@@ -120,9 +128,9 @@ root 管理目录的正式包安装网关、固定 Ed25519 信任公钥、镜像
 
 `production-approval`（有审批人）：
 
-- `MAC_CSC_LINK`、`MAC_CSC_KEY_PASSWORD`
-- `WIN_CSC_LINK`、`WIN_CSC_KEY_PASSWORD`
-- `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`
+- `MAC_CSC_LINK`、`MAC_CSC_KEY_PASSWORD`（默认签名桌面模式必需）
+- `WIN_CSC_LINK`、`WIN_CSC_KEY_PASSWORD`（默认签名桌面模式必需）
+- `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`（默认签名桌面模式必需）
 - `OTTO_ENTERPRISE_SIGNING_PRIVATE_KEY`、`OTTO_ENTERPRISE_SIGNING_PUBLIC_KEY`
 - `OTTO_LICENSE_PUBLIC_KEYS`（JSON 数组或单个 Ed25519 SPKI 公钥；私钥不得进入仓库或客户服务器）
 
@@ -130,7 +138,7 @@ root 管理目录的正式包安装网关、固定 Ed25519 信任公钥、镜像
 
 - `OTTO_LEGACY_RELEASES_TOKEN`（仅需对 `Felix201209/otto-releases` 的 Contents 写权限；用于迁移期兼容旧客户端）
 - `OTTO_CANONICAL_ADMIN_READ_TOKEN`（仅授予 `NSIETeam/otto-new` 的 Metadata read 与 Administration read；用于证明 immutable releases 已关闭）
-- `OTTO_LEGACY_ADMIN_READ_TOKEN`（仅授予 `Felix201209/otto-releases` 的 Metadata read 与 Administration read；用于证明 immutable releases 已关闭）
+- `OTTO_LEGACY_ADMIN_READ_TOKEN`（默认必需；仅授予 `Felix201209/otto-releases` 的 Metadata read 与 Administration read。显式选择 `allow_unverified_legacy_mutability=true` 后不调用旧仓管理核验接口，状态记录为未知，此令牌可不配置；Contents-write 令牌仍必需）
 - `OTTO_ENTERPRISE_PUBLIC_URL`（企业服务对外 HTTPS origin，例如 `https://enterprise.example.com`；不得包含凭据、路径、查询或片段）
 - `DEPLOY_HOST`
 - `DEPLOY_USER`（仅部署/发布账号；不能执行镜像回滚）
@@ -154,6 +162,23 @@ GitHub Secret，也不能由一次发布临时改写。
 
 ## Manual Release
 
+1.9.15 的已授权未签名桌面正式发布：在最新且已锁定的 `internal` 上手动运行
+`Release Build`，设置 `unsigned_desktop_stable=true`、`release_channel=stable`、
+`prerelease=false`、`unsigned_mac_transition=false`、`draft=false`。只设置
+`draft=true` 会保留完整企业签名候选草稿，不公开更新。普通 tag push 不携带该授权开关，
+仍执行平台签名门禁。无论桌面模式如何，企业签名私钥/公钥、许可证公钥和
+`production-approval`、`production-automation` 的既有保护都不可缺少。
+Release 说明会披露 Windows SmartScreen/macOS Gatekeeper 提示和设备策略限制，
+不能承诺全部老客户端无提示自动安装。
+
+本次用户还明确取消旧仓管理员核验，运行时同时设置
+`allow_unverified_legacy_mutability=true`。该输入只支持手动 stable、非 prerelease，
+与桌面签名开关独立；正式仓核验、旧仓 Contents-write/public/资产身份检查、
+创建意图及 latest 快照、镜像和企业事务都保持原有门禁。出现旧仓指针补偿失败时，
+保留公开包和服务器当前状态，停止进一步自动回滚并按事故恢复流程处理。
+
+默认签名发布仍可使用 tag：
+
 ```bash
 VERSION="$(node -p "require('./package.json').version")"
 git tag "v${VERSION}"
@@ -175,7 +200,7 @@ git push origin "v${VERSION}"
 5. 读取 root-only 的 `/opt/otto-website/transactions/<transaction_id>/UPDATE-MIRROR-SHA256SUMS`、同目录签名 envelope 和 `published-latest.json`，以前者逐项记录全部六个版本化资产（包括三个 blockmap）的名称和 SHA-256，并与 `/opt/otto-website/downloads/` 中已出现的同名普通文件核对。发布器会在第一个版本化资产公开前先持久化这三份审计材料和 `claiming`；从该标记出现起版本即永久烧毁，服务端也会拒绝其他 run-id 再用同一版本。中断时已出现的已验证资产会永久保留：它们可能已被客户端缓存，不能安全删除；恢复后的公开 `latest.json` 不得再引用它们，后续发布也不得复用该版本或覆盖同名文件。文件缺失、hash 不同、路径越界或无法证明是否曾公开时，立即升级为人工事故处理。
 6. 从公网 HTTPS 更新入口重新下载 `latest.json`，禁止重定向，并确认其 SHA-256 精确等于第 4 步的 digest；若返回 `absent`，公网必须为 404。同时确认它不引用第 5 步记录的孤立资产。公网尚未收敛时不得修改 GitHub Release 的可见性或 `latest` 指针。
 7. 下载本次 run 在第一次 GitHub 写入前由 `prepare-release-creation-intent` 上传的 `otto-release-creation-intent-<tag>` artifact，并将 `creation-intent.json` 与 `pre-public-latest.json` 的 SHA-256 分别与该 job 输出的摘要精确比较；嵌入创建意图的 `prePublicLatest` 还必须与独立快照逐字段一致。禁止根据当前 `/releases/latest` 猜测“上一个版本”。
-8. 公网镜像恢复且第 7 步校验通过后，使用锁定提交中的补偿工具让目标 Release `make_latest=false`，并按快照中的 Release id + tag 分别精确恢复两个仓此前的 `latest`（此前为 `null` 时仍须验证为 `null`）。补偿前后都要核对 Release 身份、14 个资产、正文摘要和目标提交。已经公开的 Release 绝不改回 draft，资产不得删除或覆盖；不能证明精确恢复时停止操作并升级为人工事故处理。
+8. 公网镜像恢复且第 7 步校验通过后，使用锁定提交中的补偿工具让目标 Release `make_latest=false`，并按快照中的 Release id + tag 分别精确恢复两个仓此前的 `latest`（此前为 `null` 时仍须验证为 `null`）。补偿前后都要核对 Release 身份、16 个资产（包括两个对应源码旁车）、正文摘要和目标提交。已经公开的 Release 绝不改回 draft，资产不得删除或覆盖；不能证明精确恢复时停止操作并升级为人工事故处理。
 9. 核对公网 `/enterprise/health.appVersion`，再通过管理员令牌核对 `/enterprise/deployment/status.runtime.version` 与 `runtime.buildCommit` 的精确身份、数据库写入与备份状态。不得对原运行点击 **Re-run jobs**；只要任一端点曾公开或镜像进入 `claiming`，同版本永久烧毁。事故处理完成后应修订为新的 patch 版本，从届时最新且完全锁定的 `origin/internal` 提交启动全新发布。
 
 自动恢复 job 使用无人工等待的 `production-automation`；若该 Environment 被错误配置为需要审批，应先视为发布阻断项修正配置，不能在故障后临时绕过保护规则。

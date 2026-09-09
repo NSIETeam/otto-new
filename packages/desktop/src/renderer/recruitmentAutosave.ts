@@ -1,6 +1,8 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { recruitmentArchiveFingerprint, refreshRecruitmentArchive, saveRecruitmentArchive, type RecruitmentArchiveCall } from './recruitmentArchive.js';
 import type { RecruitmentWorkspaceStore } from './recruitmentWorkspaceStore.js';
+// Import only the browser-safe lifecycle service, never Core's Node entry point.
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 
 export interface RecruitmentAutosaveStatus {
   enabled: boolean; phase: 'off' | 'watching' | 'queued' | 'saving' | 'refreshing' | 'paused' | 'error'; message: string;
@@ -12,13 +14,13 @@ export class RecruitmentAutosave {
   private readonly listeners = new Set<() => void>();
   private lifecycle?: { call: RecruitmentArchiveCall; abort: AbortController; unsubscribe: () => void; busy: boolean };
   private timer?: ReturnType<typeof setTimeout>;
-  private poll?: ReturnType<typeof setInterval>;
+  private stopPoll?: () => void;
   private consent?: { jobId: string; scopeToken: string; epoch: number };
   constructor(private readonly store: RecruitmentWorkspaceStore, private readonly delay = 800, private readonly pollInterval = 30_000) {}
   getSnapshot = (): RecruitmentAutosaveStatus => this.status;
   subscribe = (fn: () => void): (() => void) => { this.listeners.add(fn); return () => this.listeners.delete(fn); };
   private emit(status: RecruitmentAutosaveStatus): void { this.status = { ...status, pending: Boolean(this.lifecycle?.busy) }; this.listeners.forEach((fn) => fn()); }
-  private clear(): void { clearTimeout(this.timer); clearInterval(this.poll); this.timer = undefined; this.poll = undefined; }
+  private clear(): void { clearTimeout(this.timer); this.stopPoll?.(); this.timer = undefined; this.stopPoll = undefined; }
   start(call: RecruitmentArchiveCall): () => void {
     this.stop();
     const lifecycle = { call, abort: new AbortController(), unsubscribe: this.store.subscribe(() => this.changed()), busy: false };
@@ -36,7 +38,14 @@ export class RecruitmentAutosave {
     if (!binding?.revision || !binding.sync || !binding.base) throw new Error('请先保存或加载岗位，并升级到支持候选人级协作的服务器');
     this.consent = { jobId: binding.id, scopeToken: binding.sync.scopeToken, epoch: this.store.getWorkspaceEpoch() };
     this.clear(); this.emit({ enabled: true, phase: 'watching', message: '自动保存已开启 · 仅同步档案，不调用模型' });
-    this.poll = setInterval(() => { if (!this.lifecycle?.busy && !this.timer) void this.execute(true); }, this.pollInterval);
+    this.stopPoll = new RecurringTaskRegistry().register({
+      name: 'desktop.recruitment-autosave',
+      source: 'packages/desktop/src/renderer/recruitmentAutosave.ts',
+      intervalMs: this.pollInterval,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => String(Date.now()),
+      run: async () => { if (!this.lifecycle?.busy && !this.timer) await this.execute(true); },
+    });
     this.changed();
   }
   pause(message = '自动保存已暂停；本地修改仍保留'): void {

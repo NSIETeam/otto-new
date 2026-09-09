@@ -1,6 +1,6 @@
 /** Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0 */
 import { expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync, unlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -17,10 +17,20 @@ it.each([
   'unsupported-helper',
   'replaced-assertion',
   'short-circuit',
+  'aliased-workspace',
+  'retargeted-workspace',
+  'outside-workspace',
 ])(
   'real node:test receipt plus current test-source audit: %s',
   async (mode) => {
-    const root = mkdtempSync(path.join(tmpdir(), 'otto-stage5-native-'));
+    const fixture = mkdtempSync(path.join(tmpdir(), 'otto-stage5-native-'));
+    const aliased = mode === 'aliased-workspace' || mode === 'retargeted-workspace';
+    const alias = path.join(fixture, 'alias');
+    if (aliased) {
+      mkdirSync(path.join(fixture, 'physical/workspace'), { recursive: true });
+      symlinkSync(path.join(fixture, 'physical'), alias, 'junction');
+    }
+    const root = aliased ? path.join(alias, 'workspace') : fixture;
     try {
       const file = path.join(root, 'acceptance.test.cjs');
       const data = path.join(root, 'result.json');
@@ -45,7 +55,9 @@ it.each([
         file,
         `const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');function helper(){assert.equal(JSON.parse(fs.readFileSync('result.json','utf8')).value,2)};test('data value',()=>${body});`,
       );
-      const ledger = new TaskContractLedger('验证数据', undefined, root);
+      const workspace = mode === 'outside-workspace' ? path.join(root, 'scope') : root;
+      if (workspace !== root) mkdirSync(workspace);
+      const ledger = new TaskContractLedger('验证数据', undefined, workspace);
       const command = 'node --test --test-reporter=tap acceptance.test.cjs';
       ledger.update({
         expectedRevision: 0,
@@ -116,6 +128,12 @@ it.each([
       );
       expect(ledger.checks()[0].status).toBe('passed');
       await ledger.prepareSemanticReview();
+      if (mode === 'retargeted-workspace') {
+        expect(ledger.semanticChecks()[0].status).toBe('passed');
+        mkdirSync(path.join(fixture, 'other/workspace'), { recursive: true });
+        unlinkSync(alias);
+        symlinkSync(path.join(fixture, 'other'), alias, 'junction');
+      }
       if (mode === 'modified-after-review')
         writeFileSync(file, "test('data value',()=>{});");
       expect(ledger.semanticChecks()[0].status).toBe(
@@ -124,12 +142,13 @@ it.each([
           'throw-match',
           'async-return',
           'destructured',
+          'aliased-workspace',
         ].includes(mode)
           ? 'passed'
           : 'not_run',
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(fixture, { recursive: true, force: true });
     }
   },
 );

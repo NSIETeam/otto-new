@@ -1,0 +1,21 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-repair-91bc4e/packages/desktop
+
+ ✓ src/main/federation-atoa-tasks.test.ts (3 tests) 9ms
+ ✓ src/renderer/moduleWorkspace.test.ts (23 tests) 16ms
+ ✓ src/main/enterprise-mls-private-messages.test.ts (6 tests) 116ms
+ ✓ src/main/enterprise-mls.test.ts (32 tests) 228ms
+ ✓ src/main/enterprise-client.test.ts (78 tests) 483ms
+ ✓ src/main/federation-atoa-protocol.test.ts (3 tests) 3ms
+ ✓ src/renderer/federationAtoaProtocol.test.ts (3 tests) 7ms
+ ✓ src/renderer/components/InboxPage.test.tsx (12 tests) 508ms
+ ✓ src/renderer/moduleModal.test.ts (2 tests) 6ms
+ ✓ src/main/enterprise-mls-attachments.test.ts (4 tests) 840ms
+   ✓ MLS private-message attachment files > round-trips a multi-chunk file with a random per-file DEK and bound AAD  804ms
+ ✓ src/main/enterprise-e2ee.test.ts (14 tests) 6125ms
+   ✓ enterprise private-chat E2EE > streams federation attachments, verifies ciphertext and decrypts only on the recipient device  5823ms
+
+ Test Files  11 passed (11)
+      Tests  180 passed (180)
+   Start at  12:50:04
+   Duration  7.08s (transform 1.16s, setup 670ms, collect 2.07s, tests 8.34s, environment 4.49s, prepare 835ms)

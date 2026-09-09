@@ -1,0 +1,12 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c
+
+(node:73992) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_services/flea_market/fleaMarketContactPages.test.ts (2 tests) 976ms
+   ✓ postgres: pages all same-timestamp contact history without duplicates or another account's records  927ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  12:49:35
+   Duration  3.07s (transform 965ms, setup 0ms, collect 1.90s, tests 976ms, environment 0ms, prepare 45ms)

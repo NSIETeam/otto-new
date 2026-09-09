@@ -1,3 +1,10 @@
+import { MarketLinkIntents, marketLink } from './park-market-links.js';
+import { MarketUploadManager } from './park-market-uploads.js';
+import { ParkMarketMls } from './park-market-mls.js';
+import { ParkMarketMessaging } from './park-market-messaging.js';
+import { MarketDraftStore, assertMarketDraftScope, renewMarketDraftLeases } from './park-market.js';
+import { ParkCarpoolChat } from './park-carpool-chat.js';
+import { ParkCarpoolStartup } from './park-carpool-startup.js';
 /**
  * @license
  * Copyright 2025 Otto
@@ -78,6 +85,7 @@ import {
   clampDesktopPetToWorkArea,
   createDesktopPetDragState,
   rebaseDesktopPetDrag,
+  startDesktopPetDragPolling,
   type DesktopPetDragState,
 } from './desktop-pet-drag.js';
 import {
@@ -363,7 +371,7 @@ import {
 } from './enterprise-auth-sync.js';
 import {
   defaultEnterpriseServerUrl,
-  migrateEnterpriseServerUrl,
+  restoreEnterpriseServerTarget,
 } from './enterprise-server-url.js';
 import {
   decodeEnterpriseSession,
@@ -653,7 +661,7 @@ let videoEditorWindow: BrowserWindow | undefined;
 let desktopPetWindow: BrowserWindow | undefined;
 let desktopPetEnabled = false;
 let desktopPetMoveSaveTimer: ReturnType<typeof setTimeout> | undefined;
-let desktopPetDragTimer: ReturnType<typeof setInterval> | undefined;
+let stopDesktopPetDragPoll: (() => void) | undefined;
 let desktopPetDragState: DesktopPetDragState | undefined;
 let desktopPetDragMoved = false;
 let desktopPetNativeReleaseMoved: boolean | undefined;
@@ -696,6 +704,9 @@ const IPC = {
   feishuGetConfig: 'otto:feishu-get-config',
   feishuSaveConfig: 'otto:feishu-save-config',
   feishuClearConfig: 'otto:feishu-clear-config',
+  feishuDeviceRegistrationBegin: 'otto:feishu-device-registration-begin',
+  feishuDeviceRegistrationStatus: 'otto:feishu-device-registration-status',
+  feishuDeviceRegistrationCancel: 'otto:feishu-device-registration-cancel',
   channelPairingBegin: 'otto:channel-pairing-begin',
   channelPairingStatus: 'otto:channel-pairing-status',
   channelPairingInstall: 'otto:channel-pairing-install',
@@ -867,11 +878,27 @@ const IPC = {
   enterpriseAtoaInbox: 'otto:enterprise-atoa-inbox',
   enterpriseParkServicePush: 'otto:enterprise-park-service-push',
   enterpriseParkView: 'otto:enterprise-park-view',
+  enterpriseParkCarpoolChanged: 'otto:enterprise-park-carpool-changed',
+  enterpriseParkCarpoolDeleteData: 'otto:enterprise-park-carpool-delete-data',
+  enterpriseParkCarpoolRoutePreview: 'otto:enterprise-park-carpool-route-preview',
+  enterpriseParkCarpoolReverse: 'otto:enterprise-park-carpool-reverse',
+  enterpriseParkCarpoolMap: 'otto:enterprise-park-carpool-map',
+  enterpriseParkCarpoolLocate: 'otto:enterprise-park-carpool-locate',
+  enterpriseParkCarpoolChatRecover: 'otto:enterprise-park-carpool-chat-recover',
+  enterpriseParkCarpoolChatRead: 'otto:enterprise-park-carpool-chat-read',
+  enterpriseParkCarpoolChatSend: 'otto:enterprise-park-carpool-chat-send',
+  enterpriseParkCarpoolWorkflowGet: 'otto:enterprise-park-carpool-workflow-get',
+  enterpriseParkCarpoolWorkflowExecute: 'otto:enterprise-park-carpool-workflow-execute',
+  enterpriseMarketSend: 'otto:enterprise-market-send',
+  enterpriseMarketMessages: 'otto:enterprise-market-messages',
+  enterpriseParkMarket: 'otto:enterprise-park-market',
+  enterpriseMarketDrafts: 'otto:enterprise-market-drafts',
   enterpriseParkCarpoolGet: 'otto:enterprise-park-carpool-get',
   enterpriseParkCarpoolSearchPlaces: 'otto:enterprise-park-carpool-search-places',
   enterpriseParkCarpoolPublish: 'otto:enterprise-park-carpool-publish',
   enterpriseParkCarpoolRefresh: 'otto:enterprise-park-carpool-refresh',
   enterpriseParkCarpoolStop: 'otto:enterprise-park-carpool-stop',
+  enterpriseParkCarpoolConfirm: 'otto:enterprise-park-carpool-confirm',
   enterpriseParkRegister: 'otto:enterprise-park-register',
   enterpriseParkJoin: 'otto:enterprise-park-join',
   enterpriseParkProfileUpdate: 'otto:enterprise-park-profile-update',
@@ -1020,11 +1047,22 @@ async function synchronizeAuthenticatedEnterpriseAccount(
   await enterpriseNotificationIdentityBoundary.synchronize(account, (next) =>
     serverManager.setAuthenticatedEnterpriseAccount(next),
   );
+  parkCarpoolStartup.update(null);
+  marketUploadManager.cancelAll();
   if (!account) {
+    await parkMarketMls.close();
     await enterpriseMlsOutboxRetry.stop();
     await enterpriseMlsInboundPoll.stop();
     await enterpriseMls.close();
     return;
+  }
+  await parkMarketMls.close();
+  const marketScope = {server: enterpriseClient.snapshot().serverUrl, organization: account.organizationId, account: account.id};
+  if (safeStorage.isEncryptionAvailable()) {
+    void renewMarketDraftLeases(createMarketDraftStore(), marketScope, () => {
+      const current = enterpriseClient.authenticatedAccountSnapshot();
+      return current?.id === marketScope.account && current.organizationId === marketScope.organization && enterpriseClient.snapshot().serverUrl === marketScope.server;
+    }, (id, imageIds) => enterpriseClient.requestParkMarket({path:`/drafts/${id}`,method:'PUT',body:{imageIds}})).catch(() => undefined);
   }
   let e2eeDevice: Awaited<
     ReturnType<EnterpriseClient['ensureE2eeDeviceReady']>
@@ -1038,6 +1076,10 @@ async function synchronizeAuthenticatedEnterpriseAccount(
     console.warn('[otto-desktop] E2EE device registration failed:', error);
   }
   if (e2eeDevice) {
+    if (e2eeDevice.approvalState === 'approved' && enterpriseClient.marketMessagingContext().requiresMls) {
+      try { await parkMarketMls.activate(); }
+      catch { await parkMarketMls.close(); /* Foreground contact reports unavailable encryption. */ }
+    }
     if (enterpriseClient.supportsMlsTransportFoundation()) {
       await enterpriseMlsOutboxRetry.stop();
       await enterpriseMlsInboundPoll.stop();
@@ -1074,6 +1116,7 @@ async function synchronizeAuthenticatedEnterpriseAccount(
     await enterpriseMlsInboundPoll.stop();
     await enterpriseMls.close();
   }
+  if(e2eeDevice)parkCarpoolStartup.update({serverUrl:enterpriseClient.snapshot().serverUrl,organizationId:account.organizationId,accountId:account.id,deviceId:e2eeDevice.deviceId,approvalState:e2eeDevice.approvalState});
   const identity = accountDataSyncIdentity(account);
   if (!identity) return;
   try {
@@ -1127,7 +1170,10 @@ const enterpriseE2eeVault = new EnterpriseE2eeKeyVault({
 const enterpriseE2ee = new EnterpriseE2eeCrypto(enterpriseE2eeVault);
 
 function packagedOpenMlsBinaryPath(): string | undefined {
-  if (!app.isPackaged) return undefined;
+  if (!app.isPackaged) {
+    const built=path.join(path.dirname(require.resolve('@otto/native')),'..','target','release',process.platform==='win32'?'otto-native.exe':'otto-native');
+    return fs.existsSync(built)?built:undefined;
+  }
   return path.join(
     process.resourcesPath,
     'otto-native',
@@ -1177,6 +1223,38 @@ const enterpriseClient = new EnterpriseClient(
   },
   enterpriseE2ee,
 );
+let carpoolLocationGrantUntil = 0;
+function createParkCarpoolChat(): ParkCarpoolChat { return new ParkCarpoolChat({
+  onWorkflow(workflow){
+    if(enterpriseClient.authenticatedAccountSnapshot()?.id!==workflow.accountId)return;
+    const unread=workflow.notices.filter(notice=>!notice.readAt);const latest=unread.at(-1);
+    if(latest)notificationService.show({sessionId:'enterprise:carpool',messageId:`carpool:${latest.id}`,source:'enterprise',title:'拼车助手',preview:latest.text,persistent:true});
+    else notificationService.markRead('enterprise:carpool');
+    mainWindow?.webContents.send(IPC.enterpriseParkCarpoolChanged,{accountId:workflow.accountId,unreadCount:unread.length});
+  },
+  client: enterpriseClient, stateDirectory: path.join(app.getPath('userData'), 'park-carpool-mls'), binaryPath: packagedOpenMlsBinaryPath(),
+  secureStorage: { assertAvailable: assertEnterpriseE2eeSecureStorage,
+    protect(value) { assertEnterpriseE2eeSecureStorage(); return safeStorage.encryptString(value).toString('base64'); },
+    unprotect(value) { assertEnterpriseE2eeSecureStorage(); return safeStorage.decryptString(Buffer.from(value, 'base64')); },
+  },
+}); }
+let parkCarpoolChat = createParkCarpoolChat();
+const parkCarpoolStartup = new ParkCarpoolStartup(() => (parkCarpoolChat = createParkCarpoolChat()), async () => {
+  const workflow = await enterpriseClient.getParkCarpoolWorkflow();
+  return workflow.capabilities.includes('park_carpool_mls_v1') || workflow.conversations.length > 0;
+}, error => console.warn('[otto-desktop] Park carpool encryption unavailable:', error));
+const parkMarketMls = new ParkMarketMls({
+  directory: path.join(app.getPath('userData'), 'park-market-mls'),
+  binaryPath: packagedOpenMlsBinaryPath(),
+  context: () => enterpriseClient.marketMessagingContext(),
+  request: body => enterpriseClient.requestParkMarket({ path: '/mls', method: 'POST', body }),
+  protect(value) { assertEnterpriseE2eeSecureStorage(); return safeStorage.encryptString(value).toString('base64'); },
+  unprotect(value) { assertEnterpriseE2eeSecureStorage(); return safeStorage.decryptString(Buffer.from(value, 'base64')); },
+});
+const marketUploadManager = new MarketUploadManager(() => {
+  const account = enterpriseClient.authenticatedAccountSnapshot();
+  return account ? JSON.stringify([enterpriseClient.snapshot().serverUrl, account.organizationId, account.id]) : '';
+}, (input, options) => enterpriseClient.requestParkMarket(input, options));
 const enterpriseMlsCoordinator = new EnterpriseMlsSessionCoordinator(
   enterpriseMls,
   enterpriseClient,
@@ -1251,6 +1329,7 @@ const enterpriseSkillUsageReporter = new EnterpriseSkillUsageReporter({
     );
   },
 });
+const marketLinkIntents = new MarketLinkIntents();
 const enterpriseRegistrationIntents = new EnterpriseRegistrationIntentStore();
 let enterpriseSessionLoaded = false;
 let enterpriseIntentRendererReady = false;
@@ -1346,9 +1425,17 @@ function loadEnterpriseSession(): void {
           throw new Error('系统安全存储不可用');
         return safeStorage.decryptString(Buffer.from(encryptedToken, 'base64'));
       },
-      (serverUrl) =>
-        migrateEnterpriseServerUrl(serverUrl, DEFAULT_ENTERPRISE_SERVER_URL),
+      (serverUrl) => serverUrl,
     );
+    const target = restoreEnterpriseServerTarget(
+      restored.serverUrl,
+      DEFAULT_ENTERPRISE_SERVER_URL,
+      Boolean(process.env.OTTO_ENTERPRISE_SERVER_URL?.trim()),
+    );
+    restored = {
+      serverUrl: target.serverUrl,
+      token: target.endpointChanged ? null : restored.token,
+    };
   } catch {
     // 首次启动、存储损坏或系统密钥链不可用时安全地保持未登录。
   }
@@ -1705,56 +1792,7 @@ function requestChannelPairing(
   requestPath: string,
   body?: unknown,
 ): Promise<{ ok: boolean; data: unknown; error: string | null } | null> {
-  const ep = endpoint;
-  if (!ep?.controlToken) return Promise.resolve(null);
-  const payload = body === undefined ? undefined : JSON.stringify(body);
-  return new Promise((resolve) => {
-    const req = http.request(
-      {
-        host: ep.host,
-        port: ep.port,
-        path: requestPath,
-        method,
-        timeout: FEISHU_OP_TIMEOUT_MS,
-        headers: {
-          authorization: `Bearer ${ep.controlToken}`,
-          ...(payload === undefined
-            ? {}
-            : {
-                'content-type': 'application/json',
-                'content-length': Buffer.byteLength(payload),
-              }),
-        },
-      },
-      (res) => {
-        let text = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk: string) => {
-          text += chunk;
-        });
-        res.on('end', () => {
-          try {
-            resolve(
-              JSON.parse(text) as {
-                ok: boolean;
-                data: unknown;
-                error: string | null;
-              },
-            );
-          } catch {
-            resolve(null);
-          }
-        });
-        res.on('error', () => resolve(null));
-      },
-    );
-    req.on('timeout', () => {
-      req.destroy();
-      resolve(null);
-    });
-    req.on('error', () => resolve(null));
-    req.end(payload);
-  });
+  return serverManager.requestControlApi(method, requestPath, body);
 }
 
 /** 查询当前 server 的 /health（信封 {ok,data,error}），失败/未就绪返回 null。 */
@@ -2577,9 +2615,8 @@ function saveDesktopPetPosition(win: BrowserWindow): void {
 }
 
 function stopDesktopPetDragTracking(): void {
-  if (!desktopPetDragTimer) return;
-  clearInterval(desktopPetDragTimer);
-  desktopPetDragTimer = undefined;
+  stopDesktopPetDragPoll?.();
+  stopDesktopPetDragPoll = undefined;
 }
 
 function updateDesktopPetDragPosition(): void {
@@ -2952,14 +2989,20 @@ function applyCsp(): void {
     });
   });
 
-  // 仅放行本地 renderer 的音频录制；摄像头/地理位置等继续拒绝。
+  // Location is a short, explicit main-window grant. Other surfaces stay denied.
+  session.defaultSession.setPermissionCheckHandler((wc, permission, _origin, details) => {
+    if(permission==='geolocation')return wc===mainWindow?.webContents&&details.isMainFrame&&Date.now()<carpoolLocationGrantUntil;
+    return wc===mainWindow?.webContents&&permission==='media'&&details.mediaType!=='video';
+  });
   session.defaultSession.setPermissionRequestHandler(
     (wc, perm, cb, details) => {
       const trusted = wc === mainWindow?.webContents;
       const mediaTypes = 'mediaTypes' in details ? details.mediaTypes : [];
       const wantsAudio = perm === 'media' && mediaTypes?.includes('audio');
       const wantsVideo = perm === 'media' && mediaTypes?.includes('video');
-      cb(Boolean(trusted && wantsAudio && !wantsVideo));
+      const location = trusted && perm === 'geolocation' && Date.now() < carpoolLocationGrantUntil && details.isMainFrame;
+      if(location)carpoolLocationGrantUntil=0;
+      cb(Boolean(location || (trusted && wantsAudio && !wantsVideo)));
     },
   );
 }
@@ -3069,6 +3112,11 @@ async function authenticatedSkillScope(): Promise<EnterpriseSkillScope | null> {
   return teamId ? { teamId } : null;
 }
 
+function createMarketDraftStore() {
+  return new MarketDraftStore(path.join(app.getPath('userData'), 'park-market-drafts'),
+    text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，草稿尚未保存'); return safeStorage.encryptString(text); },
+    bytes => safeStorage.decryptString(bytes));
+}
 function registerIpc(): void {
   const enterpriseSkillLibrary = new EnterpriseSkillLibrary(
     path.join(process.cwd(), '.otto', 'org', 'skill-shares.json'),
@@ -3996,6 +4044,7 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.enterpriseFederationContacts, async () => {
     loadEnterpriseSession();
+    if (!enterpriseClient.supportsFederationGateway()) return [];
     return enterpriseClient.listFederationContacts();
   });
   ipcMain.handle(
@@ -4099,6 +4148,7 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.enterpriseFederationAtoaTasks, async () => {
     loadEnterpriseSession();
+    if (!enterpriseClient.supportsFederationGateway()) return [];
     return enterpriseClient.listFederationAtoaTasks();
   });
   ipcMain.handle(
@@ -4352,6 +4402,95 @@ function registerIpc(): void {
     if (scope !== JSON.stringify(enterpriseClient.snapshot())) throw new Error('企业账号已变化');
     return planParkConversation(value);
   });
+  ipcMain.handle(IPC.enterpriseParkCarpoolLocate, async (event) => {
+    if(event.sender!==mainWindow?.webContents||event.senderFrame!==mainWindow.webContents.mainFrame)throw new Error('仅主窗口允许请求定位');
+    loadEnterpriseSession();await enterpriseClient.getParkCarpoolWorkflow();carpoolLocationGrantUntil=Date.now()+15_000;
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolDeleteData, async () => {
+    loadEnterpriseSession();await enterpriseClient.deleteParkCarpoolData();
+    try{await parkCarpoolChat.clearLocalData();}catch{throw new Error('服务器同行数据已删除，但本机密钥清理或重建失败，请重新登录后重试清理');}
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolRoutePreview, async (_event, intentId:string, groupId?:string) => {loadEnterpriseSession();return enterpriseClient.getParkCarpoolRoutePreview(intentId,groupId);});
+  ipcMain.handle(IPC.enterpriseParkCarpoolReverse, async (_event, coordinate: {longitude:number;latitude:number}, system: 'gps'|'autonavi') => {loadEnterpriseSession();return enterpriseClient.reverseParkCarpoolPlace(coordinate,system);});
+  ipcMain.handle(IPC.enterpriseParkCarpoolMap, async (_event, coordinate: {longitude:number;latitude:number}, zoom: number) => {loadEnterpriseSession();return enterpriseClient.getParkCarpoolMap(coordinate,zoom);});
+  ipcMain.handle(IPC.enterpriseParkCarpoolChatRecover, async (_event, conversationId: string, generation: number) => {
+    loadEnterpriseSession();
+    if (typeof conversationId !== 'string' || !Number.isSafeInteger(generation)) throw new Error('同行会话无效');
+    return parkCarpoolChat.recover(conversationId, generation);
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolChatRead, async (_event, conversationId: string) => {
+    loadEnterpriseSession();
+    if (typeof conversationId !== 'string') throw new Error('同行会话无效');
+    return parkCarpoolChat.read(conversationId);
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolChatSend, async (_event, conversationId: string, text: string, eventId: string) => {
+    loadEnterpriseSession();
+    if (typeof conversationId !== 'string' || typeof text !== 'string' || typeof eventId !== 'string') throw new Error('同行消息无效');
+    return parkCarpoolChat.send(conversationId, text, eventId);
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolWorkflowGet, async () => {
+    loadEnterpriseSession();
+    return enterpriseClient.getParkCarpoolWorkflow();
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolWorkflowExecute, async (_event, command: unknown) => {
+    loadEnterpriseSession();
+    if (!command || typeof command !== 'object' || typeof (command as {type?: unknown}).type !== 'string') throw new Error('同行操作无效');
+    return enterpriseClient.executeParkCarpoolWorkflow(command as Parameters<EnterpriseClient['executeParkCarpoolWorkflow']>[0]);
+  });
+  const marketDraftStore = createMarketDraftStore();
+  ipcMain.handle('otto:enterprise-market-link', async (event, listingId?: string) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow?.webContents.mainFrame) throw new Error('市场窗口无效');
+    loadEnterpriseSession();
+    const account = enterpriseClient.authenticatedAccountSnapshot();
+    if (!account) throw new Error('请先登录');
+    const server = enterpriseClient.snapshot().serverUrl;
+    if (listingId === undefined) return marketLinkIntents.take(server);
+    await enterpriseClient.requestParkMarket({ path: `/listings/${listingId}`, method: 'GET' });
+    const link = marketLink(server, listingId); clipboard.writeText(link); return { copied: true };
+  });
+  const marketMessaging = new ParkMarketMessaging({ uploadAttachment: input => enterpriseClient.requestParkMarket(input, {onProgress:(loaded,total)=>mainWindow?.webContents.send('otto:enterprise-market-attachment-progress',{messageId:input.attachmentProof.payload.messageId,id:input.attachmentProof.payload.id,loaded,total})}), mls: parkMarketMls, context: () => enterpriseClient.marketMessagingContext(), ensureDevice: () => enterpriseClient.ensureE2eeDeviceReady(), request: (path, method = 'GET', body) => enterpriseClient.requestParkMarket({ path, method, body }), pending: new MarketDraftStore(path.join(app.getPath('userData'), 'park-market-pending'), text => { if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，消息未发送'); return safeStorage.encryptString(text); }, bytes => safeStorage.decryptString(bytes), 50) });
+  ipcMain.handle(IPC.enterpriseMarketSend, async (event, input: Parameters<ParkMarketMessaging['send']>[0]) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许发送市场消息');
+    loadEnterpriseSession(); return marketMessaging.send(input);
+  });
+  ipcMain.handle('otto:enterprise-market-download', async (event, conversationId:string, messageId:string, sequence:number, attachmentId:string) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许下载市场附件');
+    loadEnterpriseSession();
+    const attachment=await marketMessaging.download(conversationId,messageId,sequence,attachmentId);
+    const selected=await dialog.showSaveDialog(mainWindow,{defaultPath:path.basename(attachment.fileName)});
+    if(selected.canceled || !selected.filePath)return {canceled:true};
+    await fs.promises.writeFile(selected.filePath,Buffer.from(attachment.data,'base64'),{mode:0o600});
+    return {canceled:false};
+  });
+  ipcMain.handle('otto:enterprise-market-recover', async (event, id: string) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许恢复市场会话');
+    loadEnterpriseSession(); return marketMessaging.recover(id);
+  });
+  ipcMain.handle(IPC.enterpriseMarketMessages, async (event, id: string, beforeSequence?: number) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许读取市场消息');
+    loadEnterpriseSession(); return marketMessaging.messages(id, beforeSequence);
+  });
+  ipcMain.handle(IPC.enterpriseParkMarket, async (event, input: unknown) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许访问市场');
+    loadEnterpriseSession();
+    const upload = input as {imageBase64?: unknown; uploadId?: string};
+    if (upload?.imageBase64 !== undefined && upload.uploadId !== undefined)
+      return marketUploadManager.start(upload.uploadId, input, progress => {if(!event.sender.isDestroyed())event.sender.send('otto:enterprise-market-upload-progress',progress);});
+    return enterpriseClient.requestParkMarket(input);
+  });
+  ipcMain.handle('otto:enterprise-market-upload-cancel', (event, id: string) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许取消图片上传');
+    return marketUploadManager.cancel(id);
+  });
+  ipcMain.handle(IPC.enterpriseMarketDrafts, async (event, drafts?: unknown, expectedScope?: unknown) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('仅主窗口允许访问草稿');
+    loadEnterpriseSession(); const session = enterpriseClient.snapshot();
+    const account = enterpriseClient.authenticatedAccountSnapshot();
+    if (!account) throw new Error('请先登录账号');
+    const scope = { server: session.serverUrl, organization: account.organizationId, account: account.id };
+    if (drafts !== undefined) { assertMarketDraftScope(scope, expectedScope); marketDraftStore.save(scope, drafts); }
+    return marketDraftStore.load(scope);
+  });
   ipcMain.handle(IPC.enterpriseParkCarpoolGet, async () => {
     loadEnterpriseSession();
     return enterpriseClient.getParkCarpoolState();
@@ -4388,9 +4527,10 @@ function registerIpc(): void {
       );
     },
   );
-  ipcMain.handle(IPC.enterpriseParkCarpoolRefresh, async () => {
+  ipcMain.handle(IPC.enterpriseParkCarpoolRefresh, async (_event,query:unknown) => {
     loadEnterpriseSession();
-    return enterpriseClient.refreshParkCarpoolMatches();
+    if(query!==undefined&&(typeof query!=='object'||query===null||Array.isArray(query)))throw new Error('同行分页参数无效');
+    return enterpriseClient.refreshParkCarpoolMatches(query as {cursor?:string;filter?:string}|undefined);
   });
   ipcMain.handle(IPC.enterpriseParkCarpoolStop, async (_event, intentId: unknown) => {
     loadEnterpriseSession();
@@ -4398,6 +4538,13 @@ function registerIpc(): void {
       throw new Error('同行意向编号不正确');
     }
     return enterpriseClient.stopParkCarpoolIntent(intentId);
+  });
+  ipcMain.handle(IPC.enterpriseParkCarpoolConfirm, async (_event, intentId: unknown) => {
+    loadEnterpriseSession();
+    if (typeof intentId !== 'string' || !intentId.trim()) {
+      throw new Error('同行意向编号不正确');
+    }
+    return enterpriseClient.confirmParkCarpoolIntent(intentId);
   });
   ipcMain.handle(IPC.enterpriseParkRegister, async (_event, input: unknown) => {
     loadEnterpriseSession();
@@ -4910,10 +5057,38 @@ function registerIpc(): void {
     if (!r) return { ok: false, config: null, error: '本地 server 未就绪。' };
     return { ok: r.ok, config: r.data, error: r.error };
   });
+  ipcMain.handle(IPC.feishuDeviceRegistrationBegin, async (_event, domain: unknown) => {
+    if (domain !== 'feishu' && domain !== 'lark') {
+      return { ok: false, data: null, error: '不支持的飞书域。' };
+    }
+    const response = await requestChannelPairing('POST', '/feishu/device-registration', { domain });
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  });
+  ipcMain.handle(IPC.feishuDeviceRegistrationStatus, async (_event, registrationId: unknown) => {
+    if (typeof registrationId !== 'string' || !/^fdr_[a-f0-9]{24}$/u.test(registrationId)) {
+      return { ok: false, data: null, error: '飞书扫码编号不合法。' };
+    }
+    const response = await requestChannelPairing(
+      'GET',
+      `/feishu/device-registration?registrationId=${encodeURIComponent(registrationId)}`,
+    );
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  });
+  ipcMain.handle(IPC.feishuDeviceRegistrationCancel, async (_event, registrationId: unknown) => {
+    if (typeof registrationId !== 'string' || !/^fdr_[a-f0-9]{24}$/u.test(registrationId)) {
+      return { ok: false, data: null, error: '飞书扫码编号不合法。' };
+    }
+    const response = await requestChannelPairing(
+      'DELETE',
+      `/feishu/device-registration?registrationId=${encodeURIComponent(registrationId)}`,
+    );
+    return response ?? { ok: false, data: null, error: '本地 server 未就绪。' };
+  });
   const channelScopes: Record<ChannelProvider, readonly string[]> = {
     feishu: ['im:message', 'contact:user.base:readonly'],
     lark: ['im:message', 'contact:user.base:readonly'],
     wecom: ['message.send', 'contacts.read.basic'],
+    dingtalk: ['im:message', 'im:chat'],
   };
   ipcMain.handle(
     IPC.channelPairingBegin,
@@ -4921,7 +5096,8 @@ function registerIpc(): void {
       if (
         provider !== 'feishu' &&
         provider !== 'lark' &&
-        provider !== 'wecom'
+        provider !== 'wecom' &&
+        provider !== 'dingtalk'
       ) {
         return { ok: false, pairing: null, error: '不支持的连接类型。' };
       }
@@ -5019,7 +5195,7 @@ function registerIpc(): void {
     async (_event, installationId: unknown, action: unknown) => {
       if (
         typeof installationId !== 'string' ||
-        !/^channel_(feishu|lark|wecom)_[a-f0-9]{24}$/.test(installationId)
+        !/^channel_(feishu|lark|wecom|dingtalk)_[a-f0-9]{24}$/.test(installationId)
       ) {
         return { ok: false, data: null, error: '安装编号不合法。' };
       }
@@ -5214,7 +5390,7 @@ function registerIpc(): void {
     // Poll the native cursor while the button is held. Renderer pointer events
     // can pause when a transparent BrowserWindow crosses its old bounds; native
     // polling keeps the pet attached to the cursor across the whole work area.
-    desktopPetDragTimer = setInterval(updateDesktopPetDragPosition, 16);
+    stopDesktopPetDragPoll = startDesktopPetDragPolling(desktopRecurringTasks, updateDesktopPetDragPosition);
   });
   ipcMain.handle(IPC.desktopPetDragEnd, (event) => {
     if (!isDesktopPetSender(event.sender)) return false;
@@ -6562,9 +6738,11 @@ if (isolatedUserDataDir) app.setPath('userData', isolatedUserDataDir);
 // Windows/Linux cold start 会把协议 URL 放进 argv；macOS 则通过 open-url 事件送达。
 // 解析器只接受中心企业邀请码链接，旧 token+key 链接不会改变登录状态。
 enterpriseRegistrationIntents.acceptArgv(process.argv);
+for (const argument of process.argv) marketLinkIntents.accept(argument);
 app.on('open-url', (event, url) => {
   event.preventDefault();
-  acceptEnterpriseRegistrationUrl(url);
+  if (marketLinkIntents.accept(url)) { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); } }
+  else acceptEnterpriseRegistrationUrl(url);
 });
 
 // 在窗口、托盘和 Notification 创建前注册稳定 AUMID。部分 Windows 机器若注册过晚，
@@ -6589,6 +6767,7 @@ if (!gotLock) {
   let quitCleanupStarted = false;
   let quitCleanupFinished = false;
   app.on('second-instance', (_event, commandLine) => {
+    for (const argument of commandLine) marketLinkIntents.accept(argument);
     const accepted = enterpriseRegistrationIntents.acceptArgv(commandLine);
     if (
       accepted &&

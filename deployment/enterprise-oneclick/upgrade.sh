@@ -89,6 +89,7 @@ fi
 otto_load_config "$CONFIG_PATH"
 OTTO_ALLOW_SMS_DISABLED="${OTTO_ALLOW_SMS_DISABLED:-0}"
 OTTO_DATABASE_ENCRYPTION_KEY_FILE="${OTTO_DATABASE_ENCRYPTION_KEY_FILE:-}"
+OTTO_DATABASE_ENCRYPTION_KEY_ID="${OTTO_DATABASE_ENCRYPTION_KEY_ID:-offline-database-key}"
 case "$OTTO_ALLOW_SMS_DISABLED" in
   0|1) ;;
   *) otto_die "OTTO_ALLOW_SMS_DISABLED 只能是 0 或 1" ;;
@@ -97,15 +98,17 @@ esac
 [ -d "${SCRIPT_DIR}/release" ] || otto_die "部署包缺少 release 目录" 3
 [ -f "${SCRIPT_DIR}/release/manifest.json" ] || otto_die "部署包缺少 release manifest" 3
 otto_verify_package_manifest "$SCRIPT_DIR"
+otto_prepare_canary_identity
 
 if [ "$DRY_RUN" -eq 0 ]; then
   [ "$(id -u)" -eq 0 ] || otto_die "正式升级必须使用 sudo/root" 3
   [ "$(uname -s)" = "Linux" ] || otto_die "正式升级仅支持 Linux" 3
   command -v systemctl >/dev/null 2>&1 || otto_die "目标机没有 systemd" 3
-  mkdir -p "$(dirname -- "$LOCK_FILE")"
-  exec 9>"$LOCK_FILE"
-  flock -n 9 || otto_die "已有另一个 Otto 部署正在运行" 3
 fi
+# Dry-runs use the same dedicated UID and must not overlap another canary.
+mkdir -p "$(dirname -- "$LOCK_FILE")"
+exec 9>"$LOCK_FILE"
+flock -n 9 || otto_die "已有另一个 Otto 部署正在运行" 3
 
 [ -L "${INSTALL_ROOT}/current" ] || otto_die "${INSTALL_ROOT}/current 不存在或不是 symlink；请先用 install.sh 完成首装" 3
 CURRENT_REAL="$(readlink -f "${INSTALL_ROOT}/current")"
@@ -175,7 +178,7 @@ else
   TXN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/otto-enterprise-upgrade.XXXXXX")"
 fi
 chmod 0700 "$TXN_DIR"
-CANARY_PID=""
+CANARY_STARTED=0
 OLD_DATA_BACKUP="${TXN_DIR}/data.db.before"
 OLD_RESIDENT_STATE_BACKUP="${TXN_DIR}/resident-recurring-tasks.json.before"
 OLD_RESIDENT_STATE_ABSENT="${TXN_DIR}/resident-recurring-tasks.absent"
@@ -270,13 +273,91 @@ sync_live_deployment_filesystems() {
   done
 }
 
+otto_read_compensation_service_state() {
+  local output key value seen_state=0 seen_pid=0 seen_group=0
+  COMPENSATION_ACTIVE_STATE=''
+  COMPENSATION_MAIN_PID=''
+  COMPENSATION_CONTROL_GROUP=''
+  output="$(timeout --signal=TERM --kill-after=1s 5s systemctl show otto-enterprise \
+    --property=ActiveState --property=MainPID --property=ControlGroup)" || return 1
+  [ "${#output}" -le 1024 ] || return 1
+  while IFS='=' read -r key value; do
+    case "$key" in
+      ActiveState)
+        [ "$seen_state" -eq 0 ] && [[ "$value" =~ ^[a-z-]+$ ]] || return 1
+        seen_state=1; COMPENSATION_ACTIVE_STATE="$value" ;;
+      MainPID)
+        [ "$seen_pid" -eq 0 ] && [[ "$value" =~ ^(0|[1-9][0-9]*)$ ]] || return 1
+        seen_pid=1; COMPENSATION_MAIN_PID="$value" ;;
+      ControlGroup)
+        [ "$seen_group" -eq 0 ] || return 1
+        case "$value" in ''|/system.slice/otto-enterprise.service) ;; *) return 1 ;; esac
+        seen_group=1; COMPENSATION_CONTROL_GROUP="$value" ;;
+      *) return 1 ;;
+    esac
+  done <<< "$output"
+  [ "$seen_state:$seen_pid:$seen_group" = '1:1:1' ]
+}
+
+otto_compensation_cgroup_empty() {
+  local group='/sys/fs/cgroup/system.slice/otto-enterprise.service'
+  local events processes key value extra populated='' seen_populated=0
+  # The managed service uses system.slice on unified cgroup v2. Fail closed on
+  # an unknown hierarchy; never infer an empty group from a missing PID alone.
+  [ "$(stat -f -c %T /sys/fs/cgroup)" = cgroup2fs ] || return 1
+  [ -f /sys/fs/cgroup/cgroup.controllers ] \
+    && [ ! -L /sys/fs/cgroup ] \
+    && [ ! -L /sys/fs/cgroup/system.slice ] || return 1
+  if [ ! -e "$group" ] && [ ! -L "$group" ]; then return 0; fi
+  [ -d "$group" ] && [ ! -L "$group" ] \
+    && [ -f "$group/cgroup.events" ] && [ ! -L "$group/cgroup.events" ] \
+    && [ -f "$group/cgroup.procs" ] && [ ! -L "$group/cgroup.procs" ] || return 1
+  events="$(cat -- "$group/cgroup.events")" || return 1
+  while read -r key value extra; do
+    if [ "$key" = populated ]; then
+      [ "$seen_populated" -eq 0 ] && [ -z "$extra" ] || return 1
+      seen_populated=1; populated="$value"
+    fi
+  done <<< "$events"
+  # populated covers every descendant, not just this group's cgroup.procs:
+  # https://docs.kernel.org/admin-guide/cgroup-v2.html#un-populated-notification
+  [ "$seen_populated:$populated" = '1:0' ] || return 1
+  processes="$(cat -- "$group/cgroup.procs")" || return 1
+  [ -z "$processes" ]
+}
+
+otto_prove_compensation_stopped() {
+  COMPENSATION_STOP_REASON='service-state-unavailable'
+  command -v timeout >/dev/null 2>&1 || return 1
+  otto_read_compensation_service_state || return 1
+  COMPENSATION_STOP_REASON='service-stop-failed-or-timed-out'
+  # Do not compete with Restart=on-failure using a manual process signal.
+  # systemd owns stop; the outer timeout exceeds the managed unit's 60s budget.
+  timeout --signal=TERM --kill-after=5s 75s systemctl stop otto-enterprise \
+    >/dev/null 2>&1 || return 1
+  # A failed candidate may have Result=exit-code / ExecMainStatus!=0 and still
+  # be safe to replace. The old-service graceful gate below remains stricter.
+  for _ in 1 2; do
+    COMPENSATION_STOP_REASON='service-state-unavailable'
+    otto_read_compensation_service_state || return 1
+    COMPENSATION_STOP_REASON='service-not-fully-stopped'
+    case "$COMPENSATION_ACTIVE_STATE" in inactive|failed) ;; *) return 1 ;; esac
+    [ "$COMPENSATION_MAIN_PID" = 0 ] || return 1
+    COMPENSATION_STOP_REASON='service-cgroup-not-proven-empty'
+    otto_compensation_cgroup_empty || return 1
+  done
+}
+
 cleanup() {
   local rollback_ok=1
   local preserve_transaction=0
   local old_release_verified=0
-  if [ -n "$CANARY_PID" ] && kill -0 "$CANARY_PID" >/dev/null 2>&1; then
-    kill -TERM "$CANARY_PID" >/dev/null 2>&1 || true
-    wait "$CANARY_PID" || true
+  if [ "${CANARY_STARTED:-0}" -eq 1 ]; then
+    if ! "$NODE_PATH" "${SCRIPT_DIR}/tools/canary-worker.mjs" stop --transaction "$TXN_DIR"; then
+      ( set -o noclobber; printf '%s\n' 'canary-stop-unknown' >"${TXN_DIR}/recovery-required" ) 2>/dev/null || :
+      otto_warn "canary unit/cgroup 未证明停止；禁止复制数据库或回滚重启，保留事务证据：${TXN_DIR}"
+      return 1
+    fi
   fi
   if [ -n "$TARGET_RELEASE_STAGE" ] \
     && [ "$TARGET_RELEASE_STAGE" != "$TARGET_RELEASE" ]; then
@@ -297,7 +378,19 @@ cleanup() {
   if [ "$DRY_RUN" -eq 0 ] && [ "$UPGRADE_SUCCEEDED" -eq 0 ]; then
     if [ "$ROLLBACK_NEEDED" -eq 1 ]; then
       otto_warn "升级失败，开始回滚旧 release"
-      systemctl stop otto-enterprise >/dev/null 2>&1 || true
+      if ! otto_prove_compensation_stopped; then
+        # No current/DB/config/deploy/key restoration or restart may occur
+        # while any candidate process could still be using the live database.
+        # A failed proof is a recovery requirement, never a rollback receipt.
+        ( set -o noclobber
+          printf '%s\n' 'otto-enterprise-upgrade-recovery-required-v1' \
+            "reason=${COMPENSATION_STOP_REASON}" > "${TXN_DIR}/recovery-required"
+        ) || otto_warn "recovery-required 标记已存在或无法写入；保留原证据"
+        /usr/bin/sync -f "$TXN_DIR" \
+          || otto_warn "recovery-required 标记持久化失败；仍拒绝恢复任何业务文件"
+        otto_warn "recovery-required：候选服务未证实完全停止，未恢复业务文件；保留事务证据：${TXN_DIR}"
+        return 1
+      fi
       if ! ln -sfn "$CURRENT_REAL" "${INSTALL_ROOT}/current.rollback" \
         || ! mv -Tf "${INSTALL_ROOT}/current.rollback" "${INSTALL_ROOT}/current"; then
         rollback_ok=0
@@ -432,9 +525,10 @@ fi
 chown root:root "$OLD_DATA_BACKUP"
 chmod 0600 "$OLD_DATA_BACKUP"
 cp -p "$OLD_DATA_BACKUP" "$NEW_DATA"
-CANARY_DIR="${TXN_DIR}/canary"
+CANARY_DIR="${TXN_DIR}/canary/work"
 mkdir -p "$CANARY_DIR"
 cp -p "$NEW_DATA" "${CANARY_DIR}/data.db"
+otto_prepare_upgrade_canary_keys "$DATA_DIR" "$CANARY_DIR"
 if [ "$RESIDENT_STATE_EXISTED" -eq 1 ]; then
   install -o root -g root -m 0600 \
     "$OLD_RESIDENT_STATE_BACKUP" \
@@ -450,6 +544,7 @@ if [ -z "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" ]; then
     "import { randomBytes } from 'node:crypto'; import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[1], randomBytes(32), { flag: 'wx', mode: 0o600 });" \
     "$CANARY_DATABASE_KEY"
   OTTO_DATABASE_ENCRYPTION_KEY_FILE="$CANARY_DATABASE_KEY"
+  OTTO_DATABASE_ENCRYPTION_KEY_ID="oneclick-offline-database-key"
   DATABASE_KEY_MANAGED=1
 else
   [[ "$OTTO_DATABASE_ENCRYPTION_KEY_FILE" = /* ]] \
@@ -460,85 +555,17 @@ else
 fi
 export OTTO_DATABASE_ENCRYPTION="required"
 export OTTO_DATABASE_ENCRYPTION_KEY_FILE
-export OTTO_DATABASE_ENCRYPTION_KEY_ID="oneclick-offline-database-key"
+export OTTO_DATABASE_ENCRYPTION_KEY_ID
 export OTTO_DATABASE_ENCRYPTION_KEY_READONLY="true"
 export OTTO_SQLCIPHER_NATIVE_BINDING="$SQLCIPHER_RELEASE_BINDING"
 
-CANARY_READY_FILE="${CANARY_DIR}/canary-ready.json"
-CANARY_PORT=""
-export OTTO_ENTERPRISE_DIR="$CANARY_DIR"
-export OTTO_ENTERPRISE_HOST="127.0.0.1"
-export OTTO_ENTERPRISE_PORT="0"
-export OTTO_ENTERPRISE_READY_FILE="$CANARY_READY_FILE"
-export OTTO_ENTERPRISE_CANARY_MODE="1"
-OTTO_PUBLIC_HOST="${OTTO_PUBLIC_HOST:-localhost}"
-OTTO_PUBLIC_PORT="${OTTO_PUBLIC_PORT:-7777}"
-OTTO_ENTERPRISE_PUBLIC_URL="${OTTO_ENTERPRISE_PUBLIC_URL:-https://${OTTO_PUBLIC_HOST}:${OTTO_PUBLIC_PORT}}"
-export OTTO_ENTERPRISE_PUBLIC_URL
-export OTTO_ENTERPRISE_ADMIN_TOKEN="${OTTO_ENTERPRISE_ADMIN_TOKEN:-upgrade-canary-token-not-for-public-use}"
-export OTTO_ENTERPRISE_TRUST_PROXY_HOPS="1"
-export OTTO_APP_VERSION="$RELEASE_VERSION"
-export OTTO_BUILD_COMMIT="$BUILD_ID"
-export OTTO_LICENSE_TRUST_FILE="${SCRIPT_DIR}/release/license-public-keys.json"
-
-"$NODE_PATH" "${SCRIPT_DIR}/tools/migrate-check.mjs" \
-  "${SCRIPT_DIR}/release" "$CANARY_DIR" \
-  --baseline "$BASELINE_INSPECTION" >/dev/null
-otto_log "启动 127.0.0.1:自动分配端口 升级 canary"
-"$NODE_PATH" "${SCRIPT_DIR}/release/run.mjs" >"${TXN_DIR}/canary.log" 2>&1 &
-CANARY_PID=$!
-CANARY_OK=0
-for _ in $(seq 1 30); do
-  if ! kill -0 "$CANARY_PID" >/dev/null 2>&1; then
-    sed -n '1,160p' "${TXN_DIR}/canary.log" >&2
-    otto_die "升级 canary 启动后提前退出" 5
-  fi
-  if [ -f "$CANARY_READY_FILE" ]; then
-    CANARY_PORT="$("$NODE_PATH" --input-type=module - \
-      "$CANARY_READY_FILE" "$RELEASE_VERSION" "$BUILD_ID" <<'NODE'
-import { lstatSync, readFileSync } from 'node:fs';
-const [readyFile, expectedVersion, expectedBuild] = process.argv.slice(2);
-const metadata = lstatSync(readyFile);
-if (metadata.isSymbolicLink() || !metadata.isFile()) {
-  throw new Error('canary readiness file is not a regular file');
-}
-const ready = JSON.parse(readFileSync(readyFile, 'utf8'));
-if (
-  !ready ||
-  ready.host !== '127.0.0.1' ||
-  !Number.isInteger(ready.port) ||
-  ready.port < 1 ||
-  ready.port > 65535 ||
-  ready.version !== expectedVersion ||
-  ready.buildCommit !== expectedBuild
-) {
-  throw new Error('canary readiness content does not match the release');
-}
-process.stdout.write(String(ready.port));
-NODE
-    )" || {
-      sed -n '1,160p' "${TXN_DIR}/canary.log" >&2
-      otto_die "升级 canary 就绪文件无效" 5
-    }
-    if "$NODE_PATH" "${SCRIPT_DIR}/tools/health-check.mjs" \
-      "http://127.0.0.1:${CANARY_PORT}" "$RELEASE_VERSION" "$BUILD_ID" \
-      "$RELEASE_SCHEMA_TO" \
-      "$([ "$OTTO_ALLOW_SMS_DISABLED" = "1" ] && printf 'allow-sms-disabled' || printf 'require-sms')" \
-      >/dev/null 2>&1; then
-      CANARY_OK=1
-      break
-  fi
-  fi
-  sleep 1
-done
-[ "$CANARY_OK" -eq 1 ] || {
-  sed -n '1,160p' "${TXN_DIR}/canary.log" >&2
-  otto_die "升级 canary 未通过" 5
-}
-kill -TERM "$CANARY_PID" >/dev/null 2>&1 || true
-wait "$CANARY_PID" || true
-CANARY_PID=""
-unset OTTO_ENTERPRISE_CANARY_MODE OTTO_ENTERPRISE_READY_FILE
+otto_log "在独立 systemd cgroup 中迁移并验收 canary（500M / CPU 50%）"
+# This controller copies only allowlisted credentials. Production SMS/channel/
+# proxy secrets never enter the candidate unit. SMS configuration is validated
+# against the root-only configuration snapshot before launch.
+CANARY_STARTED=1
+"$NODE_PATH" "${SCRIPT_DIR}/tools/canary-worker.mjs" launch --transaction "$TXN_DIR"
+"$NODE_PATH" "${SCRIPT_DIR}/tools/canary-worker.mjs" verify-deliverable --transaction "$TXN_DIR"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   otto_log "dry-run 通过：release、数据库迁移和 canary health 均正常；未切换 current"
@@ -605,6 +632,7 @@ fi
 /usr/bin/sync -f "$TXN_DIR"
 ROLLBACK_NEEDED=1
 systemctl stop otto-enterprise
+"$NODE_PATH" "${SCRIPT_DIR}/tools/canary-worker.mjs" verify-deliverable --transaction "$TXN_DIR"
 install -o otto-enterprise -g otto-enterprise -m 0600 "${CANARY_DIR}/data.db" "${DATA_DIR}/data.db"
 CANARY_RESIDENT_STATE="${CANARY_DIR}/resident-recurring-tasks.json"
 if [ -e "$CANARY_RESIDENT_STATE" ] || [ -L "$CANARY_RESIDENT_STATE" ]; then
@@ -661,7 +689,7 @@ while (retained.at(-1) === '') retained.pop();
 for (const [key, value] of [
   ['OTTO_DATABASE_ENCRYPTION', 'required'],
   ['OTTO_DATABASE_ENCRYPTION_KEY_FILE', keyPath],
-  ['OTTO_DATABASE_ENCRYPTION_KEY_ID', 'oneclick-offline-database-key'],
+  ['OTTO_DATABASE_ENCRYPTION_KEY_ID', process.env.OTTO_DATABASE_ENCRYPTION_KEY_ID],
   ['OTTO_DATABASE_ENCRYPTION_KEY_READONLY', 'true'],
   ['OTTO_SQLCIPHER_NATIVE_BINDING', bindingPath],
   ['OTTO_APP_VERSION', appVersion],

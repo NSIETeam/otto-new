@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ✓ src/renderer/components/ParkMarketDialog.test.tsx (4 tests) 160ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  12:35:07
+   Duration  618ms (transform 90ms, setup 40ms, collect 98ms, tests 160ms, environment 152ms, prepare 49ms)

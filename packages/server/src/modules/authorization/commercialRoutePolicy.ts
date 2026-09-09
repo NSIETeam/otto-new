@@ -85,7 +85,18 @@ const COMMERCIAL_ROUTE_RULES: readonly CommercialRouteRule[] = [
 export function commercialFeatureForEnterpriseRoute(
   path: string,
   context: CommercialRouteContext = {},
-): OrganizationFeatureKey | null {
+ ): OrganizationFeatureKey | null {
+  // MLS commands retain signed-device and conversation authorization in the service.
+  if (path === '/enterprise/park-market/mls') return null;
+  // Attachment routes independently enforce current device and conversation access.
+  if ((context.method ?? 'GET').toUpperCase() === 'POST'
+    && /^\/enterprise\/park-market\/chat-attachments\/[^/]+(?:\/read)?$/.test(path)) return null;
+  if ((context.method ?? 'GET').toUpperCase() === 'GET' && /^\/enterprise\/park-market\/(?:conversations\/[^/]+\/items|images\/[^/]+)$/.test(path)) return null;
+  // Personal market history survives module removal. Its service still checks
+  // account identity and ownership; actions that revive publication recheck entitlements.
+  if (/^\/enterprise\/park-market\/(?:mine|records|settings|contacts|notifications(?:\/read)?)$/.test(path)
+    || /^\/enterprise\/park-market\/listings\/[^/]+\/(?:offline|sold|delete|appeal|hide|undo-sold)$/.test(path)) return null;
+  if (/^\/enterprise\/park-market\/(?:conversations\/[^/]+(?:\/read)?|contacts\/[^/]+|contact-prepare\/conversation\/[^/]+)$/.test(path)) return null;
   // A private enterprise deployment must always be able to onboard and manage
   // its own members. Authentication and enterprise-admin authorization still
   // protect these routes; enterprise_tree is reserved for advanced structure

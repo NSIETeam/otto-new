@@ -39,6 +39,8 @@ function assetNames() {
     `Otto-Setup-${VERSION}-win-x64.exe.blockmap`,
     'latest.json',
     'SHA256SUMS',
+    `otto-${VERSION}-corresponding-source.tar.gz`,
+    `otto-${VERSION}-corresponding-source.tar.gz.sha256`,
     'SHA256SUMS.sig',
     'UPDATE-MIRROR-SHA256SUMS',
     'UPDATE-MIRROR-SHA256SUMS.sig',
@@ -223,7 +225,7 @@ describe('release draft creation recovery', () => {
     );
   });
 
-  it('captures a SHA-bindable 14-asset intent before mutation', async () => {
+  it('captures a SHA-bindable 16-asset intent including corresponding source before mutation', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'otto-draft-intent-'));
     try {
       const nested = path.join(root, 'nested');
@@ -276,7 +278,7 @@ describe('release draft creation recovery', () => {
         createLegacy: true,
       });
 
-      expect(intent.expected.assets).toHaveLength(14);
+      expect(intent.expected.assets).toHaveLength(16);
       expect(intent.legacyMainCommit).toBe(LEGACY_COMMIT);
       expect(intent.expected.targets.legacy).toBe(LEGACY_COMMIT);
       expect(intent.preexisting).toEqual({
@@ -323,7 +325,7 @@ describe('release draft creation recovery', () => {
   it('binds an unsigned transition to null package identity without touching legacy', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'otto-transition-intent-'));
     try {
-      const transitionNames = assetNames().slice(0, 8);
+      const transitionNames = assetNames().slice(0, 10);
       await Promise.all(
         transitionNames.map((name, index) =>
           writeFile(path.join(root, name), `transition-${index}`),

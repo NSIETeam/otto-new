@@ -1,0 +1,67 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+ ❯ src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts (11 tests | 7 failed) 12ms
+   × allows pending processing for active 8ms
+     → expected 'pending' to be 'actionable' // Object.is equality
+   × allows pending processing for reserved 1ms
+     → expected 'pending' to be 'actionable' // Object.is equality
+   × ends requests for offline even during pause 0ms
+     → expected 'pending' to be 'ended' // Object.is equality
+   × ends requests for sold even during pause 1ms
+     → expected 'pending' to be 'ended' // Object.is equality
+   × ends requests for removed even during pause 0ms
+     → expected 'pending' to be 'ended' // Object.is equality
+   × ends requests for deleted even during pause 0ms
+     → expected 'pending' to be 'ended' // Object.is equality
+   × pause does not extend expiry and qualification loss ends immediately 0ms
+     → expected 'pending' to be 'paused' // Object.is equality
+   ✓ never revives withdrawn on restoration 0ms
+   ✓ never revives expired on restoration 0ms
+   ✓ never revives ended on restoration 0ms
+   ✓ never revives accepted on restoration 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts > allows pending processing for active
+ FAIL  src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts > allows pending processing for reserved
+AssertionError: expected 'pending' to be 'actionable' // Object.is equality
+
+Expected: "actionable"
+Received: "pending"
+
+ ❯ src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts:5:144
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts > ends requests for offline even during pause
+ FAIL  src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts > ends requests for sold even during pause
+ FAIL  src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts > ends requests for removed even during pause
+ FAIL  src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts > ends requests for deleted even during pause
+AssertionError: expected 'pending' to be 'ended' // Object.is equality
+
+Expected: "ended"
+Received: "pending"
+
+ ❯ src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts:6:187
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts > pause does not extend expiry and qualification loss ends immediately
+AssertionError: expected 'pending' to be 'paused' // Object.is equality
+
+Expected: "paused"
+Received: "pending"
+
+ ❯ src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts:7:141
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 4 passed (11)
+   Start at  09:42:33
+   Duration  247ms (transform 42ms, setup 0ms, collect 61ms, tests 12ms, environment 0ms, prepare 50ms)

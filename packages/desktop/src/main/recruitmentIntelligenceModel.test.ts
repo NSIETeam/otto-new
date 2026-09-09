@@ -160,7 +160,7 @@ describe('recruitment semantic model boundary', () => {
     expect(sanitized).toContain('负责支付系统');
   });
 
-  it('shares model calls across candidate IDs but invalidates changed inputs, routes and accounts', async () => {
+  it.each(['first', 'second'] as const)('shares model calls when the %s request finishes fingerprinting first but invalidates changed inputs, routes and accounts', async (winner) => {
     let model = 'm1'; let scope = 'a'; let route = 'https://a.example'; let key = 'private-key';
     const sendMessage = vi.fn(async () => ({ candidates: [{ content: { parts: [{ text: modelJson }] } }] }));
     const analyzer = createRecruitmentIntelligenceAnalyzer({ getScope: () => scope, loadConfig: async () => ({
@@ -169,11 +169,40 @@ describe('recruitment semantic model boundary', () => {
       getOttoClient: () => ({ createTemporaryChat: async () => ({ sendMessage }) }),
     }) });
     const input = { candidateId: 'a', jobTitle: '开发', jobDescription: '负责系统开发', redactedResume: resume };
-    const [first, joined] = await Promise.all([analyzer(input), analyzer({ ...input, candidateId: 'b' })]);
+    // WebCrypto completes independently of invocation order. Keep real SHA-256
+    // values but deterministically delay one request's three fingerprints.
+    const nativeDigest = webcrypto.subtle.digest.bind(webcrypto.subtle);
+    let releaseFingerprints!: () => void;
+    const fingerprintGate = new Promise<void>((resolve) => { releaseFingerprints = resolve; });
+    let fingerprintCalls = 0;
+    const digest = vi.spyOn(webcrypto.subtle, 'digest').mockImplementation(async (algorithm, data) => {
+      const index = fingerprintCalls++;
+      const result = nativeDigest(algorithm, data);
+      if ((winner === 'first' && index >= 3 && index < 6) || (winner === 'second' && index < 3)) {
+        await fingerprintGate;
+      }
+      return result;
+    });
+    const pending = Promise.all([analyzer(input), analyzer({ ...input, candidateId: 'b' })]);
+    let results: Awaited<typeof pending>;
+    try {
+      await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+      releaseFingerprints();
+      results = await pending;
+    } finally {
+      releaseFingerprints();
+      digest.mockRestore();
+    }
+    // The request that reaches the cache first owns execution, not necessarily
+    // the first analyzer invocation. Both orders must still pay for one call.
+    const [executed, reused] = winner === 'first' ? results : [results[1], results[0]];
     expect(sendMessage).toHaveBeenCalledOnce();
-    expect(first.execution).toMatchObject({ disposition: 'executed', inputTokens: null, outputTokens: null });
-    expect(joined.execution).toMatchObject({ runId: first.execution?.runId, disposition: 'reused' });
-    expect(JSON.stringify(first)).not.toContain('private-key');
+    expect(executed.execution).toMatchObject({ runId: expect.any(String), requestId: expect.any(String),
+      disposition: 'executed', inputTokens: null, outputTokens: null });
+    expect(reused.execution).toMatchObject({ runId: executed.execution?.runId, requestId: expect.any(String),
+      disposition: 'reused', inputTokens: null, outputTokens: null, inputFingerprint: executed.execution?.inputFingerprint });
+    expect(reused.execution?.requestId).not.toBe(executed.execution?.requestId);
+    expect(JSON.stringify(results)).not.toContain('private-key');
     await analyzer({ ...input, enterpriseContext: '企业交付标准变化' });
     model = 'm2'; await analyzer(input);
     route = 'https://b.example'; await analyzer(input);

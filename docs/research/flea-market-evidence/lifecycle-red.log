@@ -1,0 +1,167 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+ ❯ src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts (8 tests | 8 failed) 10ms
+   × restores accidental offline without refreshing ranking or expiry 6ms
+     → expected { id: 'a', ownerId: 'seller', …(29) } to match object { state: 'active', listedAt: +0, …(2) }
+(27 matching properties omitted from actual)
+   × does not restore non-voluntary, expired, changed or late offline 1ms
+     → expected [Function] to throw an error
+   × undo sold after expiry becomes offline, never restores reservation 1ms
+     → expected { id: 'a', ownerId: 'seller', …(29) } to match object { state: 'offline', …(3) }
+(27 matching properties omitted from actual)
+   × permits selling offline and keeps ended retention time 0ms
+     → expected { id: 'a', ownerId: 'seller', …(29) } to match object { state: 'sold', endedAt: 86400000 }
+(29 matching properties omitted from actual)
+   × enforces rolling relist cooldown across midnight 0ms
+     → expected [Function] to throw an error
+   × requires explicit renewal for a reservation crossing expiry 0ms
+     → expected [Function] to throw an error
+   × reservation note edit keeps reminder; time changes invalidate it; expiry cancellation goes offline 1ms
+     → expected undefined to be '买家周五来' // Object.is equality
+   × never lets sellers restore removed or deleted listings 0ms
+     → expected [Function] to throw an error
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts > restores accidental offline without refreshing ranking or expiry
+AssertionError: expected { id: 'a', ownerId: 'seller', …(29) } to match object { state: 'active', listedAt: +0, …(2) }
+(27 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "expiresAt": 2592000000,
+    "listedAt": 0,
+    "state": "active",
+-   "version": 3,
++   "version": 1,
+  }
+
+ ❯ src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts:7:223
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts > does not restore non-voluntary, expired, changed or late offline
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts:8:325
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts > undo sold after expiry becomes offline, never restores reservation
+AssertionError: expected { id: 'a', ownerId: 'seller', …(29) } to match object { state: 'offline', …(3) }
+(27 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "expiresAt": 2592000000,
+    "listedAt": 0,
+-   "reservation": null,
+-   "state": "offline",
++   "reservation": {
++     "cycle": 1,
++     "expectedAt": null,
++     "note": "private",
++     "remindAt": 86400000,
++     "reminderVersion": 1,
++   },
++   "state": "reserved",
+  }
+
+ ❯ src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts:9:331
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts > permits selling offline and keeps ended retention time
+AssertionError: expected { id: 'a', ownerId: 'seller', …(29) } to match object { state: 'sold', endedAt: 86400000 }
+(29 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "endedAt": 86400000,
+-   "state": "sold",
++   "endedAt": null,
++   "state": "active",
+  }
+
+ ❯ src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts:10:190
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts > enforces rolling relist cooldown across midnight
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts:11:201
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts > requires explicit renewal for a reservation crossing expiry
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts:12:192
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts > reservation note edit keeps reminder; time changes invalidate it; expiry cancellation goes offline
+AssertionError: expected undefined to be '买家周五来' // Object.is equality
+
+- Expected:
+"买家周五来"
+
++ Received:
+undefined
+
+ ❯ src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts:13:220
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts > never lets sellers restore removed or deleted listings
+AssertionError: expected [Function] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts:14:255
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/8]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  8 failed (8)
+   Start at  09:33:29
+   Duration  176ms (transform 26ms, setup 0ms, collect 27ms, tests 10ms, environment 1ms, prepare 33ms)

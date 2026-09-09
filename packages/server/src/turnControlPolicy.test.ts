@@ -12,6 +12,82 @@ import {
 } from './turnControlPolicy.js';
 
 describe('deriveTurnControlPolicy', () => {
+  it.each([
+    'D:/otto/agent-publish-validation/report.txt',
+    'C:\\Users\\tester\\push\\readme.txt',
+    '/tmp/upload/report.txt',
+    'https://example.invalid/publish/instructions.txt',
+    'docs/deploy/instructions.md',
+    '`C:\\Program Files\\publish\\readme.txt`',
+    '"/tmp/upload files/readme.txt"',
+    '[说明](https://example.invalid/publish/instructions.txt)',
+  ])(
+    'does not infer a publication operation from a read target %s',
+    (target) => {
+      const policy = deriveTurnControlPolicy({
+        text: `读取说明文件并告诉我内容，不要打开 WPS。文件：${target}`,
+        source: 'local',
+        toolFree: false,
+      });
+      expect(policy.intent).toBe('answer');
+      expect(policy.riskLevel).toBe('read_only');
+      expect(policy.evidenceRequirement).toBe('none');
+      const write = deriveTurnControlPolicy({
+        text: `根据 ${target} 生成一页 PPT，不要打开 WPS`,
+        source: 'local',
+        toolFree: false,
+      });
+      expect(write.riskLevel).toBe('local_write');
+      expect(write.intent).toBe('create_artifact');
+      expect(
+        deriveTurnControlPolicy({
+          text: `读取 ${target} 然后发布并部署服务器`,
+          source: 'local',
+          toolFree: false,
+        }).riskLevel,
+      ).toBe('external_write');
+      expect(
+        deriveTurnControlPolicy({
+          text: `删除全部 ${target}`,
+          source: 'local',
+          toolFree: false,
+        }).riskLevel,
+      ).toBe('destructive');
+    },
+  );
+  it.each([
+    ['读取 /tmp/report.txt；然后发布并部署服务器', 'external_write'],
+    ['读取 /tmp/report.txt然后发布并部署服务器', 'external_write'],
+    ['读取 /tmp/report.txt再删除全部缓存', 'destructive'],
+    ['cat /tmp/report.txt&&upload result.json', 'external_write'],
+    ['读取 /tmp/report.txt, then publish and deploy', 'external_write'],
+    ['upload /tmp/report.txt', 'external_write'],
+    ['git push', 'external_write'],
+    ['rm -rf /tmp/report.txt', 'destructive'],
+    ['delete all /tmp/report.txt', 'destructive'],
+  ] as const)(
+    'retains action words outside resource operands: %s',
+    (text, riskLevel) => {
+      expect(
+        deriveTurnControlPolicy({ text, source: 'local', toolFree: false })
+          .riskLevel,
+      ).toBe(riskLevel);
+    },
+  );
+  it('keeps explicit artifact filenames recognizable after masking directories', () => {
+    const policy = deriveTurnControlPolicy({
+      text: '生成 /tmp/publish/result.json 并运行测试',
+      source: 'local',
+      toolFree: false,
+    });
+    expect(policy.intent).toBe('create_artifact');
+    expect(policy.riskLevel).toBe('local_write');
+    expect(
+      policy.successCriteria.some(
+        (criterion) => criterion.verificationKind === 'test',
+      ),
+    ).toBe(true);
+  });
   it('recognizes explicit output filenames instead of requiring internet evidence for local data', () => {
     const policy = deriveTurnControlPolicy({
       text: '读取 input.json，核对当前 revision 的记录，生成 result.json 并运行测试验证。',

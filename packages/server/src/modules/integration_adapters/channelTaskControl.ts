@@ -24,7 +24,7 @@ export type ChannelTaskCommand =
   | { action: 'propose'; request: string };
 
 export interface ChannelTaskMessageContext {
-  provider: 'feishu' | 'lark' | 'wecom';
+  provider: 'feishu' | 'lark' | 'wecom' | 'dingtalk';
   installationId: string;
   tenantId: string;
   /** Provider-native reply target, distinct from the canonical Otto user id. */

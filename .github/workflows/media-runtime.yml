@@ -1,0 +1,121 @@
+name: Native packaged media runtime acceptance
+
+on:
+  workflow_call:
+  pull_request:
+    paths:
+      - '.github/workflows/media-runtime.yml'
+      - 'package-lock.json'
+      - 'scripts/*media-runtime*'
+      - 'scripts/*sharp-runtime*'
+      - 'scripts/enterprise-runtime-dependencies.mjs'
+      - 'packages/server/src/modules/park_services/flea_market/**'
+      - 'packages/desktop/scripts/*sharp*'
+      - 'packages/desktop/scripts/before-pack.cjs'
+      - 'packages/desktop/package.json'
+  push:
+    paths:
+      - '.github/workflows/media-runtime.yml'
+      - 'package-lock.json'
+      - 'scripts/*media-runtime*'
+      - 'scripts/*sharp-runtime*'
+      - 'scripts/enterprise-runtime-dependencies.mjs'
+      - 'packages/server/src/modules/park_services/flea_market/**'
+      - 'packages/desktop/scripts/*sharp*'
+      - 'packages/desktop/scripts/before-pack.cjs'
+      - 'packages/desktop/package.json'
+
+permissions:
+  contents: read
+
+jobs:
+  enterprise-media:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-22.04
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.1'
+      - name: Verify source and install locked tools without lifecycle execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(node --version)" = v22.23.1
+          npm ci --ignore-scripts
+      - name: Probe actual target-native isolated enterprise image worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/test-media-runtime.mjs --target '${{ matrix.target }}' \
+            --work-directory "$RUNNER_TEMP/otto-media-${{ matrix.target }}-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Preserve native image-worker proof including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: media-runtime-${{ matrix.target }}
+          path: ${{ runner.temp }}/otto-media-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}/result.json
+          if-no-files-found: error
+          retention-days: 14
+
+  desktop-media:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: darwin-arm64
+            runner: macos-15
+          - target: win32-x64
+            runner: windows-2025
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.1'
+      - name: Verify source and materialize the pinned native Electron test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(node --version)" = v22.23.1
+          npm ci --ignore-scripts
+          test "$(node -p "require('./node_modules/electron/package.json').version")" = 43.2.0
+          node node_modules/electron/install.js
+      - name: Probe production image worker inside actual native Electron ASAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/test-desktop-media-runtime.mjs --target '${{ matrix.target }}' \
+            --electron "$(node -p "require('electron')")" \
+            --work-directory "$RUNNER_TEMP/otto-desktop-media-${{ matrix.target }}-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - name: Preserve native ASAR proof including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-media-runtime-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/otto-desktop-media-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}/result.json
+            ${{ runner.temp }}/otto-desktop-media-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}/desktop-result.json
+          if-no-files-found: error
+          retention-days: 14

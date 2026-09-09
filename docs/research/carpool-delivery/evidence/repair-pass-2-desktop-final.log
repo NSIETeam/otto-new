@@ -1,0 +1,28 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ✓ src/renderer/parkCarpoolConversationBridge.test.ts (8 tests) 23ms
+ ✓ src/main/park-carpool-startup.test.ts (5 tests) 63ms
+ ✓ src/renderer/components/CarpoolConfirmation.test.tsx (1 test) 49ms
+ ✓ src/renderer/components/CarpoolPointPicker.test.ts (1 test) 2ms
+ ✓ src/renderer/moduleWorkspace.test.ts (23 tests) 13ms
+ ✓ src/renderer/components/ParkCarpoolDialog.test.tsx (4 tests) 306ms
+(node:32253) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:32250) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:32251) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/renderer/parkCarpoolContract.integration.test.ts (3 tests) 191ms
+ ✓ src/main/park-carpool-chat.integration.test.ts (1 test) 4387ms
+   ✓ desktop coordinators exchange, retry after lost response, and restore actual MLS ciphertext from SQLite  4387ms
+ ✓ src/renderer/components/CarpoolFlow.integration.test.tsx (1 test) 6248ms
+   ✓ real UI publishes, previews, requests, chats, groups, admits and leaves through SQLite and native MLS  6248ms
+
+ Test Files  9 passed (9)
+      Tests  47 passed (47)
+   Start at  20:25:47
+   Duration  10.99s (transform 2.71s, setup 733ms, collect 12.72s, tests 11.28s, environment 3.33s, prepare 598ms)
+
+
+EXIT_CODE=0

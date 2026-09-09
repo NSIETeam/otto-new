@@ -3,13 +3,22 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { ApprovalMode, WebFetchTool, type Config } from 'otto-core';
 import { CoreSessionRuntime } from './runtime.js';
 import { InMemorySessionStore } from './sessions.js';
-const fetcher = vi.hoisted(() => vi.fn());
-vi.mock('../../core/src/tools/web-fetch-security.js', () => ({
-  safeFetchPublicUrl: fetcher,
-  assertPublicWebUrl: vi
-    .fn()
-    .mockResolvedValue(new URL('https://example.com/report')),
-}));
+const { fetcher, webFetchSecurity } = vi.hoisted(() => {
+  const fetcher = vi.fn();
+  return {
+    fetcher,
+    webFetchSecurity: () => ({
+      safeFetchPublicUrl: fetcher,
+      assertPublicWebUrl: vi
+        .fn()
+        .mockResolvedValue(new URL('https://example.com/report')),
+    }),
+  };
+});
+// CI consumes the built public core entry; source-alias development profiles
+// consume src instead. Both keep the real WebFetchTool and replace only I/O.
+vi.mock('../../core/src/tools/web-fetch-security.js', webFetchSecurity);
+vi.mock('../../core/dist/src/tools/web-fetch-security.js', webFetchSecurity);
 afterEach(() => vi.clearAllMocks());
 
 it.each([
@@ -204,6 +213,8 @@ it.each([
       [{ type: 'text', value: mode === 'simple-answer' ? '你好' : '查找资料' }],
       'local',
     );
+    if (!['simple-answer', 'forged-tool'].includes(mode))
+      expect(fetcher).toHaveBeenCalled();
     const turn = store.getHistory(session.sessionId).find((m) => m.turn)?.turn;
     if (
       ['valid', 'simple-answer', 'closure-fetch', 'bound-number'].includes(mode)

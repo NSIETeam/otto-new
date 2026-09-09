@@ -13,6 +13,7 @@ export type ModuleModalState =
   | { kind: 'auto-skill' }
   | { kind: 'policy-intelligence' }
   | { kind: 'park-carpool' }
+  | { kind: 'park-flea-market' }
   | { kind: 'custom-expert'; expertId?: string }
   | { kind: 'customer-module'; moduleId: string; version: string }
   | null;

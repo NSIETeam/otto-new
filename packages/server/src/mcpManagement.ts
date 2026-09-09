@@ -7,16 +7,19 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
-import { isAbsolute, resolve, sep } from 'node:path';
+import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, writeFile as writeFileCallback } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { promisify } from 'node:util';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { Agent } from 'undici';
+import { WorkspacePathIdentity } from './workspacePathIdentity.js';
 
 const MAX_CATALOG_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_PROBE_RESPONSE_BYTES = 1024 * 1024;
 const MAX_PROBE_TOOLS = 512;
 const MAX_TOOL_NAME_LENGTH = 128;
+const writeFileDescriptor = promisify(writeFileCallback);
 
 export type McpRiskLevel = 'low' | 'medium' | 'high' | 'critical';
 export type McpPermission =
@@ -775,16 +778,19 @@ export async function saveMcpCreationDraft(
   draft: McpCreationDraft,
   draftRoot: string,
 ): Promise<{ draftId: string; directory: string }> {
-  await mkdir(draftRoot, { recursive: true, mode: 0o700 });
-  const rootStat = await lstat(draftRoot);
-  if (rootStat.isSymbolicLink()) throw new Error('MCP draft root must not be a symbolic link');
-  const root = resolve(draftRoot);
-  const canonicalRoot = await realpath(draftRoot);
-  if (process.platform === 'win32'
-    ? canonicalRoot.toLowerCase() !== root.toLowerCase()
-    : canonicalRoot !== root) {
-    throw new Error('MCP draft root resolves through a link or alias');
-  }
+  // The server supplies homedir()/.otto-user/mcp-drafts, never a model path.
+  // Bind its host-selected ancestor (including /var -> /private/var) before
+  // any await. Descendants below this boundary are never realpath-authorized.
+  const identity = new WorkspacePathIdentity(draftRoot);
+  const root = identity.currentPath();
+  if (!root) throw new Error('MCP draft root identity is unavailable');
+  const assertRoot = () => {
+    if (identity.currentPath() !== root) throw new Error('MCP draft root identity changed');
+    if (lstatSync(draftRoot, { throwIfNoEntry: false })?.isSymbolicLink()) {
+      throw new Error('MCP draft root must not be a symbolic link');
+    }
+  };
+  assertRoot();
   if (!/^mcp-draft-[0-9a-f-]{36}$/i.test(draft.id)) {
     throw new Error('invalid MCP draft id');
   }
@@ -798,6 +804,8 @@ export async function saveMcpCreationDraft(
       !file.path
       || file.path.length > 240
       || isAbsolute(file.path)
+      || /^[a-z]:|^[\\/]/i.test(file.path)
+      || file.path.includes('\0')
       || file.path.split(/[\\/]/).includes('..')
       || file.path === 'draft-manifest.json'
     ) {
@@ -811,16 +819,61 @@ export async function saveMcpCreationDraft(
     totalBytes += bytes;
     if (totalBytes > 10_000_000) throw new Error('MCP draft total file size limit exceeded');
   }
-  const directory = resolve(draftRoot, draft.id);
+  assertRoot();
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  assertRoot();
+  const directory = resolve(root, draft.id);
   if (!directory.startsWith(`${root}${sep}`)) throw new Error('MCP draft path escaped draft root');
-  await mkdir(directory, { recursive: false, mode: 0o700 });
+  mkdirSync(directory, { recursive: false, mode: 0o700 });
+  const directories = new Map<string, string>();
+  const pinDirectory = (path: string) => {
+    const info = lstatSync(path, { bigint: true });
+    if (!info.isDirectory() || info.isSymbolicLink() || info.ino === 0n) {
+      throw new Error('MCP draft directory must not be a link or unknown identity');
+    }
+    const fileId = `${info.dev}:${info.ino}`;
+    const previous = directories.get(path);
+    if (previous && previous !== fileId) throw new Error('MCP draft directory identity changed');
+    directories.set(path, fileId);
+  };
+  const assertDirectories = () => {
+    assertRoot();
+    for (const path of directories.keys()) pinDirectory(path);
+  };
+  pinDirectory(directory);
+  const saveFile = async (target: string, content: string) => {
+    assertDirectories();
+    const parent = dirname(target);
+    let cursor = directory;
+    for (const segment of relative(directory, parent).split(sep).filter(Boolean)) {
+      cursor = resolve(cursor, segment);
+      if (!lstatSync(cursor, { throwIfNoEntry: false })) mkdirSync(cursor, { mode: 0o700 });
+      pinDirectory(cursor);
+    }
+    assertDirectories();
+    // Open exclusively before yielding; async writes use this descriptor, not
+    // a path that an attacker could retarget during the filesystem await.
+    const fd = openSync(target, 'wx', 0o600);
+    try {
+      await writeFileDescriptor(fd, content, 'utf8');
+      assertDirectories();
+      const opened = fstatSync(fd, { bigint: true });
+      const current = lstatSync(target, { bigint: true });
+      if (!current.isFile() || current.isSymbolicLink() || current.nlink !== 1n
+        || current.dev !== opened.dev || current.ino !== opened.ino) {
+        throw new Error('MCP draft file identity changed');
+      }
+    } finally {
+      closeSync(fd);
+    }
+  };
   for (const file of draft.files) {
     const target = resolve(directory, file.path);
     if (!target.startsWith(`${directory}${sep}`)) throw new Error('MCP draft file escaped draft directory');
-    await mkdir(resolve(target, '..'), { recursive: true, mode: 0o700 });
-    await writeFile(target, file.content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    await saveFile(target, file.content);
+    assertDirectories();
   }
-  await writeFile(
+  await saveFile(
     resolve(directory, 'draft-manifest.json'),
     JSON.stringify({
       id: draft.id,
@@ -831,7 +884,8 @@ export async function saveMcpCreationDraft(
       files: draft.files.map((file) => file.path),
       createdAt: new Date().toISOString(),
     }, null, 2) + '\n',
-    { encoding: 'utf8', flag: 'wx', mode: 0o600 },
   );
-  return { draftId: draft.id, directory };
+  assertDirectories();
+  // Preserve the host-facing spelling without changing the canonical write root.
+  return { draftId: draft.id, directory: resolve(draftRoot, draft.id) };
 }

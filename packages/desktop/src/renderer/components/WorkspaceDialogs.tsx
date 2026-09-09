@@ -1,3 +1,4 @@
+import { useModuleReadCache } from '../state/ModuleReadProvider.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -18,8 +19,9 @@ import { ModuleIcon } from './ModuleIcon.js';
 import { SkillFunctionCard, SkillVersionPanel } from './SkillVersionPanel.js';
 import { EnterpriseMemoryVersions, MemoryContentComparison } from './EnterpriseMemoryVersions.js';
 
-export function DialogFrame({ title, onClose, children }: {
-  title: string; onClose(): void; children: React.ReactNode;
+export function DialogFrame({ title, onClose, children, size = 'standard', className = '', icon, subtitle }: {
+  title: string; onClose(): void; children: React.ReactNode; size?: 'compact' | 'standard' | 'wide';
+  className?: string; icon?: React.ReactNode; subtitle?: string;
 }): React.JSX.Element {
   const ref = useRef<HTMLElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
@@ -30,7 +32,7 @@ export function DialogFrame({ title, onClose, children }: {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onCloseRef.current();
       if (event.key !== 'Tab' || !ref.current) return;
-      const focusable = Array.from(ref.current.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])'));
+      const focusable = Array.from(ref.current.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex]:not([tabindex="-1"])'));
       if (!focusable.length) return;
       const first = focusable[0]; const last = focusable[focusable.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
@@ -45,8 +47,8 @@ export function DialogFrame({ title, onClose, children }: {
   }, []);
   return createPortal(
     <div className="otto-workspace-dialog-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section ref={ref} className="otto-workspace-dialog" role="dialog" aria-modal="true" aria-label={title}>
-        <header><h2>{title}</h2><button type="button" aria-label={`关闭${title}`} onClick={onClose}>×</button></header>
+      <section ref={ref} className={`otto-workspace-dialog otto-workspace-dialog--${size} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
+        <header>{icon || subtitle ? <div className="otto-workspace-dialog__heading">{icon ? <span className="otto-workspace-dialog__icon" aria-hidden="true">{icon}</span> : null}<div><h2>{title}</h2>{subtitle ? <p>{subtitle}</p> : null}</div></div> : <h2>{title}</h2>}<button type="button" aria-label={`关闭${title}`} onClick={onClose}>×</button></header>
         <div className="otto-workspace-dialog__body">{children}</div>
       </section>
     </div>, document.body,
@@ -132,6 +134,7 @@ function evidenceClaimStatusLabel(status: NonNullable<KnowledgeAiProposal['evide
 export function EnterpriseMemoryDialog({ open, role, onClose }: {
   open: boolean; role?: CentralEnterpriseRole; onClose(): void;
 }): React.JSX.Element | null {
+  const cache = useModuleReadCache();
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -158,28 +161,32 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
     const epoch = ++epochRef.current;
     setLoading(true); setError('');
     try {
-      const next = await window.otto.enterpriseKnowledgeList({
-        query: queryRef.current.trim() || undefined,
+      const query = queryRef.current.trim();
+      const key = `knowledge:${query}`;
+      const cached = cache.peek<KnowledgeItem[]>(key);
+      if (cached) setItems(cached);
+      const next = await cache.read(key, () => window.otto.enterpriseKnowledgeList({
+        query: query || undefined,
         includeReview: true,
-      });
-      if (epoch === epochRef.current) {
+      }), 0);
+      if (epoch === epochRef.current && cache.isCurrent(key, next)) {
         setItems(next); setRevisions({}); setEvidence({}); setAiInsights({});
       }
     } catch (cause) {
       if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause));
     } finally { if (epoch === epochRef.current) setLoading(false); }
-  }, []);
+  }, [cache]);
   useEffect(() => {
     if (open) void refresh();
     else {
       epochRef.current += 1;
-      queryRef.current = '';
-      setQuery(''); setItems([]); setLoading(false);
+      cache.invalidate(`knowledge:${queryRef.current.trim()}`);
+      setLoading(false);
       setEditor(null); setRevalidation(null); setRevisions({}); setEvidence({});
       setAdjudications({}); setAiInsights({}); setError(''); setNotice('');
-      setView('overview'); setBusyId('');
+      setBusyId('');
     }
-  }, [open, refresh]);
+  }, [cache, open, refresh]);
   const requestClose = (): void => {
     if (((editor && (editor.title.trim() || editor.content.trim()))
       || (revalidation && revalidation.rationale.trim())
@@ -206,6 +213,7 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
         resolveConflict: editor.resolveConflict,
         adjudication: editor.resolveConflict ? editor.adjudication : undefined,
       }) : await window.otto.enterpriseKnowledgeRecord({ sourceId: `manual:${crypto.randomUUID()}`, title: editor.title.trim(), category: editor.category.trim(), content: editor.content.trim(), confidence: 0.95, sourceType: 'manual', sourceLabel: '企业管理员手动录入' });
+      cache.removePrefix('knowledge:');
       if (epoch !== epochRef.current) return;
       if (editor.id) {
         setRevisions((current) => { const next = { ...current }; delete next[editor.id!]; return next; });
@@ -224,7 +232,7 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
   const review = async (id: string, action: 'approve' | 'archive'): Promise<void> => {
     const epoch = epochRef.current;
     setBusyId(id);
-    try { await window.otto.enterpriseKnowledgeReview(id, action, undefined, items.find((item) => item.id === id)?.version); if (epoch !== epochRef.current) return; setNotice(action === 'approve' ? '知识已发布，可供 Otto 检索引用。' : '知识已归档。'); setRevisions((current) => { const next = { ...current }; delete next[id]; return next; }); setEvidence((current) => { const next = { ...current }; delete next[id]; return next; }); setBusyId(''); await refresh(); }
+    try { await window.otto.enterpriseKnowledgeReview(id, action, undefined, items.find((item) => item.id === id)?.version); cache.removePrefix('knowledge:'); if (epoch !== epochRef.current) return; setNotice(action === 'approve' ? '知识已发布，可供 Otto 检索引用。' : '知识已归档。'); setRevisions((current) => { const next = { ...current }; delete next[id]; return next; }); setEvidence((current) => { const next = { ...current }; delete next[id]; return next; }); setBusyId(''); await refresh(); }
     catch (cause) { if (epoch === epochRef.current) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (epoch === epochRef.current) setBusyId(''); }
   };
@@ -238,6 +246,7 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
       await window.otto.enterpriseKnowledgeRevalidate(revalidation.id, {
         rationale, validForDays: revalidation.validForDays,
       });
+      cache.removePrefix('knowledge:');
       if (epoch !== epochRef.current) return;
       setRevisions((current) => { const next = { ...current }; delete next[revalidation.id]; return next; });
       setRevalidation(null); setNotice('复核记录已留档，知识有效期已更新。'); setBusyId('');
@@ -328,8 +337,9 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
     setBusyId(item.id); setError(''); setNotice('');
     try {
       await window.otto.enterpriseKnowledgeDelete(item.id);
-      if (epoch !== epochRef.current) return;
+      cache.removePrefix('knowledge:');
       setItems((current) => current.filter((entry) => entry.id !== item.id));
+      if (epoch !== epochRef.current) return;
       setRevisions((current) => { const next = { ...current }; delete next[item.id]; return next; });
       setEvidence((current) => { const next = { ...current }; delete next[item.id]; return next; });
       setAiInsights((current) => { const next = { ...current }; delete next[item.id]; return next; });
@@ -516,7 +526,7 @@ export function AutoSkillDialog({ open, candidates, lastAction, onRefresh, onCon
 }): React.JSX.Element | null {
   useEffect(() => { if (open) onRefreshReleases?.(); }, [open, onRefreshReleases, lastAction]);
   if (!open) return null;
-  return <DialogFrame title="Skill 功能、草稿与版本" onClose={onClose}>
+  return <DialogFrame title="Skill 功能、草稿与版本" size="compact" onClose={onClose}>
     {onRefreshReleases && onRollback && onRecord ? <SkillVersionPanel skills={releases} busy={releaseBusy} error={releaseError} status={releaseStatus} onRefresh={onRefreshReleases} onRollback={onRollback} onRecord={onRecord} /> : null}
     <h2>待确认的新功能与更新</h2><div className="otto-workspace-dialog__toolbar"><p>先说明能做什么，再披露检查与风险。你确认后才安装；安装不代表业务效果已获验证。</p><button type="button" onClick={onRefresh}>立即分析</button></div>{lastAction?.kind === 'confirmed' ? <p role="status">Skill 已确认安装{lastAction.savedPath ? `：${lastAction.savedPath}` : ''}</p> : null}<div className="otto-workspace-dialog__list">{candidates.length ? candidates.map((candidate) => {
     const ready = candidate.draft?.validationPassed === true && candidate.draft.packageReady === true;

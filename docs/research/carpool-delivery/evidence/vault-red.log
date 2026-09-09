@@ -1,0 +1,33 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/desktop
+
+ ❯ src/renderer/parkCarpoolConversationBridge.test.ts (8 tests | 1 failed) 37ms
+   ✓ handleParkCarpoolConversation > collects one natural-language request, resolves places, and requires confirmation 30ms
+   ✓ handleParkCarpoolConversation > asks only for missing details and does not call the model 1ms
+   ✓ handleParkCarpoolConversation > shows privacy-safe match results and confirms before stopping 1ms
+   ✓ handleParkCarpoolConversation > does not silently rewrite a future-day or past-time request into a valid publication 0ms
+   ✓ carpool field patches > uses afternoon hours and does not parse flexible minutes as departure 1ms
+   ✓ carpool field patches > keeps a retryable draft on failure and cancels collecting drafts 1ms
+   ✓ carpool field patches > asks explicitly about ambiguous places 0ms
+   × restores encrypted-vault draft payload only to the same scope and before expiry 2ms
+     → registry.snapshot is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/parkCarpoolConversationBridge.test.ts > restores encrypted-vault draft payload only to the same scope and before expiry
+TypeError: registry.snapshot is not a function
+ ❯ src/renderer/parkCarpoolConversationBridge.test.ts:195:29
+    193|   const now = Date.parse('2026-09-02T00:00:00Z');
+    194|   registry.set({ scopeId: 'org:a', sessionId: 's', phase: 'collecting'…
+    195|   const snapshot = registry.snapshot('org:a', now);
+       |                             ^
+    196|   const restored = new ParkCarpoolConversationRegistry();
+    197|   restored.restore('org:b', snapshot, now);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 passed (8)
+   Start at  09:04:06
+   Duration  618ms (transform 48ms, setup 77ms, collect 24ms, tests 37ms, environment 271ms, prepare 56ms)

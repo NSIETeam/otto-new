@@ -191,7 +191,7 @@ otto_load_config() {
     [ -z "$line" ] && continue
     [[ "$line" == \#* ]] && continue
     [[ "$line" == export\ * ]] && line="${line#export }"
-    [[ "$line" == *=* ]] || otto_die "配置行必须是 KEY=VALUE：${raw}"
+    [[ "$line" == *=* ]] || otto_die "配置行必须是 KEY=VALUE（内容已隐藏）"
     key="${line%%=*}"
     value="${line#*=}"
     key="${key%"${key##*[![:space:]]}"}"
@@ -199,6 +199,7 @@ otto_load_config() {
       OTTO_PUBLIC_HOST|OTTO_PUBLIC_PORT|OTTO_ENTERPRISE_PUBLIC_URL|\
       OTTO_ENTERPRISE_DIR|OTTO_ENTERPRISE_HOST|OTTO_ENTERPRISE_PORT|\
       OTTO_ENTERPRISE_TRUST_PROXY_HOPS|OTTO_APP_VERSION|OTTO_BUILD_COMMIT|\
+      OTTO_ENTERPRISE_DEPLOYMENT_GRANTS|\
       OTTO_ENTERPRISE_ADMIN_TOKEN|OTTO_BOOTSTRAP_USERNAME|\
       OTTO_BOOTSTRAP_PASSWORD|OTTO_BOOTSTRAP_NAME|OTTO_CADDY_MODE|\
       OTTO_ALLOW_SMS_DISABLED|ALIYUN_SMS_PROVIDER|\
@@ -208,10 +209,18 @@ otto_load_config() {
       OTTO_ENTERPRISE_FEISHU_APP_ID|OTTO_ENTERPRISE_FEISHU_APP_SECRET|\
       OTTO_ENTERPRISE_FEISHU_DOMAIN|\
       OTTO_AMAP_WEB_SERVICE_KEY|OTTO_PARK_CARPOOL_MINIMUM_OVERLAP|\
+      OTTO_PARK_CARPOOL_REQUESTS_ENABLED|OTTO_PARK_CARPOOL_INVITATIONS_ENABLED|\
+      OTTO_PARK_CARPOOL_GROUPS_ENABLED|OTTO_PARK_CARPOOL_PILOT_PARK_IDS|\
+      OTTO_PARK_CARPOOL_REQUEST_LIMIT_PER_HOUR|OTTO_PARK_CARPOOL_COOLDOWN_MINUTES|\
+      OTTO_PARK_CARPOOL_MAX_TAXI_MEMBERS|OTTO_PARK_CARPOOL_STALE_MINUTES|\
+      OTTO_PARK_CARPOOL_PAUSE_MINUTES|OTTO_PARK_CARPOOL_POSITION_RETENTION_HOURS|\
+      OTTO_PARK_CARPOOL_COMMUNICATION_RETENTION_DAYS|\
+      OTTO_PARK_CARPOOL_DRIVER_MINIMUM_OVERLAP|OTTO_PARK_CARPOOL_TAXI_MINIMUM_OVERLAP|\
+      OTTO_PARK_CARPOOL_MAXIMUM_DETOUR_SECONDS|\
       OTTO_DEFAULT_ORGANIZATION_NAME|OTTO_ENTERPRISE_USAGE_DAILY_LIMIT|\
       OTTO_CREDIT_TOKEN_RATE|OTTO_ESTIMATE_MANUAL_MULT|\
       OTTO_ESTIMATE_CNY_PER_HOUR|OTTO_ESTIMATE_LABOR_PER_TOKEN_CAP|\
-      OTTO_BACKUP_ENCRYPTION_KEY|OTTO_BACKUP_INTERVAL_HOURS|\
+      OTTO_BACKUP_ENCRYPTION_KEY|OTTO_BACKUP_ENCRYPTION_KEY_FILE|OTTO_BACKUP_INTERVAL_HOURS|\
       OTTO_BACKUP_ENCRYPTION_KEY_RECOVERY_FILE|\
       OTTO_BACKUP_RETENTION_DAYS|OTTO_BACKUP_MINIMUM_RETAINED|\
       OTTO_BACKUP_REPLICA_DIR|OTTO_DISK_MIN_FREE_MB|\
@@ -241,8 +250,79 @@ otto_load_config() {
   done < "$config_path"
 }
 
+otto_prepare_upgrade_canary_keys() {
+  local source_dir="$1" canary_dir="$2" setting name key_path
+  [ -d "$source_dir" ] && [ ! -L "$source_dir" ] \
+    && [ -d "$canary_dir" ] && [ ! -L "$canary_dir" ] \
+    || otto_die "升级密钥快照目录不安全" 3
+  source_dir="$(readlink -f -- "$source_dir")"
+  canary_dir="$(readlink -f -- "$canary_dir")"
+  case "$canary_dir/" in
+    "$source_dir/"*) otto_die "升级 canary 必须位于生产数据目录之外" 3 ;;
+  esac
+  # Never generate replacement business keys for an existing encrypted DB.
+  # Copy even externally held keys into the root-only transaction: the canary
+  # must neither change external custody nor encrypt rows with a fresh key.
+  for setting in OTTO_ACCOUNT_SYNC_ENCRYPTION_KEY_FILE \
+    OTTO_ATTACHMENT_ENCRYPTION_KEY_FILE OTTO_FIELD_ENCRYPTION_KEY_FILE; do
+    case "$setting" in
+      OTTO_ACCOUNT_SYNC_ENCRYPTION_KEY_FILE) name=account-sync.key ;;
+      OTTO_ATTACHMENT_ENCRYPTION_KEY_FILE) name=attachment-storage.key ;;
+      OTTO_FIELD_ENCRYPTION_KEY_FILE) name=field-encryption.key ;;
+    esac
+    key_path="${!setting:-$source_dir/$name}"
+    [[ "$key_path" = /* ]] && [ -f "$key_path" ] && [ ! -L "$key_path" ] \
+      || otto_die "升级必须保留既有业务密钥：${setting}（普通文件、绝对路径）" 3
+    [ ! -e "$canary_dir/$name" ] && [ ! -L "$canary_dir/$name" ] \
+      || otto_die "拒绝覆盖既有 canary 密钥：${name}" 3
+    install -m 0600 -- "$key_path" "$canary_dir/$name"
+    printf -v "$setting" '%s' "$canary_dir/$name"
+    export "$setting"
+  done
+  for name in federation-signing-key.pem backup-encryption.key \
+    backup-key-custody.json privacy-deletions.key; do
+    key_path="$source_dir/$name"
+    if [ -e "$key_path" ] || [ -L "$key_path" ]; then
+      [ -f "$key_path" ] && [ ! -L "$key_path" ] \
+        || otto_die "升级身份快照只允许普通文件：${name}" 3
+      [ ! -e "$canary_dir/$name" ] && [ ! -L "$canary_dir/$name" ] \
+        || otto_die "拒绝覆盖既有 canary 身份快照：${name}" 3
+      install -m 0600 -- "$key_path" "$canary_dir/$name"
+    fi
+  done
+}
+
 otto_random_secret() {
   local node_path="$1"
   "$node_path" --input-type=module -e \
     "import { randomBytes } from 'node:crypto'; console.log(randomBytes(32).toString('base64url'))"
+}
+
+otto_prepare_canary_identity() {
+  [ "$(id -u)" -eq 0 ] && [ "$(uname -s)" = Linux ] \
+    || otto_die "隔离升级 canary（含 dry-run）需要 Linux sudo/root" 3
+  local tool identity uid gid members shell user_home
+  for tool in systemctl systemd-run getent useradd groupadd id cut awk; do otto_require_command "$tool"; done
+  if ! getent passwd otto-upgrade-canary >/dev/null; then
+    getent group otto-upgrade-canary >/dev/null \
+      || groupadd --system otto-upgrade-canary
+    useradd --system --gid otto-upgrade-canary --no-create-home \
+      --home-dir /nonexistent --shell /usr/sbin/nologin otto-upgrade-canary
+  fi
+  identity="$(getent passwd otto-upgrade-canary)"
+  IFS=: read -r _ _ uid gid _ user_home shell <<< "$identity"
+  [[ "$uid" =~ ^[0-9]+$ ]] && [ "$uid" -gt 0 ] \
+    && [ "$(id -G otto-upgrade-canary)" = "$gid" ] \
+    && [ "$(getent group "$gid" | cut -d: -f1)" = otto-upgrade-canary ] \
+    || otto_die "canary 专用账号或组身份不安全" 3
+  case "$shell" in /usr/sbin/nologin|/sbin/nologin|/bin/false) ;; *) otto_die "canary 账号必须禁止登录" 3 ;; esac
+  [ "$user_home" = /nonexistent ] || otto_die "canary 账号不得拥有可写 home" 3
+  members="$(getent group "$gid" | cut -d: -f4)"
+  [ -z "$members" ] || [ "$members" = otto-upgrade-canary ] \
+    || otto_die "canary 专用组包含其他用户" 3
+  getent passwd | awk -F: -v uid="$uid" -v gid="$gid" \
+    '$1 != "otto-upgrade-canary" && ($3 == uid || $4 == gid) { bad=1 } END { exit bad }' \
+    || otto_die "canary UID/GID 被其他用户共享" 3
+  [ "$uid" != "$(id -u otto-enterprise 2>/dev/null || printf absent)" ] \
+    || otto_die "canary 不得复用生产服务 UID" 3
 }

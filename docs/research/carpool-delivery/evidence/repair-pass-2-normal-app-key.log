@@ -1,0 +1,5 @@
+{"status":"failed","reason":"SQLCipher native asset is missing: /Users/yang/Desktop/otto-carpool-fixed-91bc4e/native/sqlcipher/darwin-arm64/better_sqlite3.node","temp":"/var/folders/mg/ctd9153d5_g93y9n6w7tvmf80000gn/T/otto-carpool-normal-app-YlHtT6"}
+(node:39122) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+EXIT_CODE=1

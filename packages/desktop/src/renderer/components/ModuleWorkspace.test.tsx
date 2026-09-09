@@ -251,8 +251,8 @@ describe('ModuleWorkspace', () => {
     expect(container.querySelector('.otto-module-workspace__floating-scrollbar')).toBeNull();
   });
 
-  it('keeps a full nine-module group fixed and moves add-module outside the grid', () => {
-    const fullModules = Array.from({ length: 9 }, (_, index): ModuleDefinition => ({
+  it.each([8, 9, 10, 12])('keeps add-module as the last grid cell after %i modules', (count) => {
+    const fullModules = Array.from({ length: count }, (_, index): ModuleDefinition => ({
       id: `module-${index}`,
       label: `模块 ${index + 1}`,
       category: 'common',
@@ -260,6 +260,7 @@ describe('ModuleWorkspace', () => {
       activation: { kind: 'agent', profileId: `profile-${index}` },
       availability: 'available',
     }));
+    const onOpenMarketplace = vi.fn();
     const { container } = render(
       <ModuleWorkspace
         presentation="panel"
@@ -274,18 +275,21 @@ describe('ModuleWorkspace', () => {
         }}
         modules={fullModules}
         onActivate={vi.fn()}
-        onOpenMarketplace={vi.fn()}
+        onOpenMarketplace={onOpenMarketplace}
         onLayoutChange={vi.fn()}
       />,
     );
 
     const grid = container.querySelector<HTMLElement>('.otto-module-group__grid');
-    const addModule = screen.getByRole('button', { name: '向完整九项添加模块' });
-    expect(grid?.classList.contains('is-overflowing')).toBe(false);
-    expect(grid?.getAttribute('tabindex')).toBeNull();
-    expect(grid?.children).toHaveLength(9);
-    expect(grid?.contains(addModule)).toBe(false);
-    expect(addModule.classList.contains('otto-module-group__add--compact')).toBe(true);
+    const addModule = screen.getByRole('button', { name: '管理“完整九项”中的模块' });
+    expect(grid?.classList.contains('is-overflowing')).toBe(count + 1 > 9);
+    expect(grid?.getAttribute('tabindex')).toBe(count + 1 > 9 ? '0' : null);
+    expect(grid?.children).toHaveLength(count + 1);
+    expect(grid?.lastElementChild).toBe(addModule);
+    expect(grid?.classList.contains(`otto-module-group__grid--rows-${Math.min(3, Math.ceil((count + 1) / 3))}`)).toBe(true);
+    fireEvent.click(addModule);
+    expect(onOpenMarketplace).toHaveBeenCalledWith('full-group');
+    expect(addModule.classList.contains('otto-module-group__add--compact')).toBe(false);
 
     if (!grid) throw new Error('missing full module grid');
     Object.defineProperty(grid, 'scrollTop', { configurable: true, writable: true, value: 24 });

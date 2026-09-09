@@ -1,0 +1,12 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new
+
+(node:55011) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolContract.integration.test.ts (2 tests) 958ms
+   ✓ real database carpool contract (synthetic map only) > postgres: publish, privacy, replay, concurrent updates, stop, identity revocation  938ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  09:11:19
+   Duration  3.50s (transform 1.24s, setup 0ms, collect 2.41s, tests 958ms, environment 0ms, prepare 25ms)

@@ -53,6 +53,9 @@ interface RuntimeState {
   running: boolean;
   state: ChannelHealth['state'];
   reconnectCount: number;
+  startedAtMs: number;
+  connectedAtMs?: number;
+  nextReconnectAtMs?: number;
   reconnectTimer?: ReturnType<typeof setTimeout>;
   generation: number;
   lastReceivedAtMs?: number;
@@ -116,11 +119,14 @@ export class BrokerChannelRuntimeV1 implements ChannelRuntimeAdapterV1 {
       running: true,
       state: 'reconnecting',
       reconnectCount: 0,
+      startedAtMs: Date.now(),
       generation: 0,
     };
     state.credential = parseCredential(plaintextCredential);
     state.running = true;
     state.state = 'reconnecting';
+    state.startedAtMs = Date.now();
+    state.nextReconnectAtMs = undefined;
     this.states.set(installation.installationId, state);
     await this.connect(state);
     return this.snapshot(state);
@@ -133,6 +139,7 @@ export class BrokerChannelRuntimeV1 implements ChannelRuntimeAdapterV1 {
     state.generation += 1;
     if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
     state.reconnectTimer = undefined;
+    state.nextReconnectAtMs = undefined;
     state.socket?.close();
     state.socket = undefined;
     return this.snapshot(state);
@@ -213,6 +220,8 @@ export class BrokerChannelRuntimeV1 implements ChannelRuntimeAdapterV1 {
         clearTimeout(timer);
         settled = true;
         state.state = 'connected';
+        state.connectedAtMs = Date.now();
+        state.nextReconnectAtMs = undefined;
         state.message = undefined;
         resolve();
       });
@@ -237,8 +246,10 @@ export class BrokerChannelRuntimeV1 implements ChannelRuntimeAdapterV1 {
     if (state.reconnectTimer || !state.running) return;
     state.reconnectCount += 1;
     const delay = Math.min(60_000, 1_000 * 2 ** Math.min(6, state.reconnectCount - 1));
+    state.nextReconnectAtMs = Date.now() + delay;
     state.reconnectTimer = setTimeout(() => {
       state.reconnectTimer = undefined;
+      state.nextReconnectAtMs = undefined;
       void this.connect(state).catch(() => {
         if (state.running) this.scheduleReconnect(state);
       });
@@ -333,11 +344,18 @@ export class BrokerChannelRuntimeV1 implements ChannelRuntimeAdapterV1 {
   }
 
   private snapshot(state: RuntimeState): ChannelHealth {
+    const requested = state.installation.requestedScopes ?? state.installation.grantedScopes;
+    const granted = new Set(state.installation.grantedScopes);
+    const missingScopes = requested.filter((scope) => !granted.has(scope));
     return {
       installationId: state.installation.installationId,
       running: state.running,
       state: state.state,
       reconnectCount: state.reconnectCount,
+      missingScopes,
+      startedAtMs: state.startedAtMs,
+      ...(state.connectedAtMs ? { connectedAtMs: state.connectedAtMs } : {}),
+      ...(state.nextReconnectAtMs ? { nextReconnectAtMs: state.nextReconnectAtMs } : {}),
       ...(state.lastReceivedAtMs ? { lastReceivedAtMs: state.lastReceivedAtMs } : {}),
       ...(state.lastSentAtMs ? { lastSentAtMs: state.lastSentAtMs } : {}),
       ...(state.message ? { message: state.message } : {}),

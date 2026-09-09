@@ -1,0 +1,92 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/desktop
+
+ ❯ src/renderer/parkCarpoolConversationBridge.test.ts (7 tests | 3 failed) 22ms
+   ✓ handleParkCarpoolConversation > collects one natural-language request, resolves places, and requires confirmation 14ms
+   ✓ handleParkCarpoolConversation > asks only for missing details and does not call the model 1ms
+   ✓ handleParkCarpoolConversation > shows privacy-safe match results and confirms before stopping 1ms
+   ✓ handleParkCarpoolConversation > does not silently rewrite a future-day or past-time request into a valid publication 0ms
+   × carpool field patches > uses afternoon hours and does not parse flexible minutes as departure 3ms
+     → expected "spy" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+   × carpool field patches > keeps a retryable draft on failure and cancels collecting drafts 1ms
+     → expected { Object (scopeId, sessionId, ...) } to be undefined
+   × carpool field patches > asks explicitly about ambiguous places 1ms
+     → expected '请确认同行意向：\n- 出发地：测试南门甲（甲区）\n- 目的地：测试南门…' to contain '选择'
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/parkCarpoolConversationBridge.test.ts > carpool field patches > uses afternoon hours and does not parse flexible minutes as departure
+AssertionError: expected "spy" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+ ❯ src/renderer/parkCarpoolConversationBridge.test.ts:164:23
+    162|     await handleParkCarpoolConversation({ ...common, text: '前后20分钟都可以'…
+    163|     await handleParkCarpoolConversation({ ...common, text: '确认发布' });
+    164|     expect(h.publish).toHaveBeenCalledWith(expect.objectContaining({ d…
+       |                       ^
+    165|   });
+    166|   it('keeps a retryable draft on failure and cancels collecting drafts…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/renderer/parkCarpoolConversationBridge.test.ts > carpool field patches > keeps a retryable draft on failure and cancels collecting drafts
+AssertionError: expected { Object (scopeId, sessionId, ...) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "expiresAt": 1788309000000,
+  "fields": {
+    "originQuery": "取消",
+  },
+  "phase": "collecting",
+  "scopeId": "o:a",
+  "sessionId": "s",
+}
+
+ ❯ src/renderer/parkCarpoolConversationBridge.test.ts:171:76
+    169|     await handleParkCarpoolConversation({ ...common, text: '我要拼车' });
+    170|     await handleParkCarpoolConversation({ ...common, text: '取消' });
+    171|     expect(h.registry.get('o:a', 's', Date.parse('2026-09-02T00:00:00Z…
+       |                                                                            ^
+    172|     await handleParkCarpoolConversation({ ...common, text: '我要拼车，今天18:…
+    173|     h.publish.mockRejectedValueOnce(new Error('连接失败'));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/renderer/parkCarpoolConversationBridge.test.ts > carpool field patches > asks explicitly about ambiguous places
+AssertionError: expected '请确认同行意向：\n- 出发地：测试南门甲（甲区）\n- 目的地：测试南门…' to contain '选择'
+
+- Expected
++ Received
+
+- 选择
++ 请确认同行意向：
++ - 出发地：测试南门甲（甲区）
++ - 目的地：测试南门甲（甲区）
++ - 时间：今天 18:30，可接受前后 30 分钟
++ - 方式：搭车
++
++ 发布后，同园区且路线、时间符合条件的用户会看到脱敏意向。回复“确认发布”后才会执行；回复“取消”则不发布。
+
+ ❯ src/renderer/parkCarpoolConversationBridge.test.ts:184:31
+    182|     const common = { scopeId: 'o:a', sessionId: 's', registry: h.regis…
+    183|     await handleParkCarpoolConversation({ ...common, text: '我要拼车，今天18:…
+    184|     expect(h.messages.at(-1)).toContain('选择');
+       |                               ^
+    185|     await handleParkCarpoolConversation({ ...common, text: '确认发布' });
+    186|     expect(h.publish).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 4 passed (7)
+   Start at  08:57:51
+   Duration  387ms (transform 39ms, setup 40ms, collect 17ms, tests 22ms, environment 143ms, prepare 42ms)

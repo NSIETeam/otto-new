@@ -1,0 +1,9 @@
+{
+  "backend": "sqlite",
+  "encryption": "native MLS",
+  "concurrency": 100,
+  "writeP95Ms": 4,
+  "readP95Ms": 230,
+  "scope": "Real signed/encrypted messages and database; one hot conversation with 50 sends per account (below each account rate limit). 100 in-flight client sends; native coordinators serialize encryption preparation, so native server writes are not 100 simultaneously. Timings measure server service entry to completion, excluding client encryption, HTTP/network and UI. Test-only pending capacity 200, production unchanged.",
+  "targetP95Ms": 1000
+}

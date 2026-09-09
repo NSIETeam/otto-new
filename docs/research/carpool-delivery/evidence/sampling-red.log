@@ -1,0 +1,631 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolService.test.ts (12 tests | 2 failed) 27ms
+   ✓ createParkCarpoolService > upserts one daily intent and plans the route on the server 13ms
+   ✓ createParkCarpoolService > bounds a provider route before persistence and matching 1ms
+   × createParkCarpoolService > preserves a short detour between sparse sampling indices 6ms
+     → expected [ { longitude: 116.23, …(1) }, …(127) ] to deep equally contain { longitude: 116.23501, …(1) }
+   × createParkCarpoolService > rejects malformed provider geometry without writing an intent 3ms
+     → promise resolved "{ travelDate: '2026-09-02', …(19) }" instead of rejecting
+   ✓ createParkCarpoolService > fails closed for an unknown, disabled, or unbound principal 1ms
+   ✓ createParkCarpoolService > returns multiple privacy-safe matches and only lets the owner stop an intent 1ms
+   ✓ createParkCarpoolService > treats a stale active record as expired and never matches it 0ms
+   ✓ createParkCarpoolService > fails closed when a stored active intent has an invalid expiry 0ms
+   ✓ publish race and date regressions > rejects a departure outside the selected Shanghai date before planning 0ms
+   ✓ publish race and date regressions > revalidates identity after planning 0ms
+   ✓ publish race and date regressions > does not revive an intent stopped during planning 0ms
+   ✓ only an explicit confirmation renews freshness and cannot restart stopped intents 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolService.test.ts > createParkCarpoolService > preserves a short detour between sparse sampling indices
+AssertionError: expected [ { longitude: 116.23, …(1) }, …(127) ] to deep equally contain { longitude: 116.23501, …(1) }
+
+- Expected:
+{
+  "latitude": 40.23,
+  "longitude": 116.23501,
+}
+
++ Received:
+[
+  {
+    "latitude": 40.22,
+    "longitude": 116.23,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23016,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23031,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23047000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23063,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23079,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23094,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.2311,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23126,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23142,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23157,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23173,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23189,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23205,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.2322,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23236,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23252000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23268,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23283,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23299,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23315000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23331,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23346000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23362,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23378000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23394,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23409000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23425,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23441,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23456,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23472000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23488,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23504,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23519,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23535000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23551,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23567,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23582,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23598,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23614,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.2363,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23645,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23661,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23677,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23693,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23708,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23724,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23740000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23756,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23771,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23787,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23803000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23818,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23834000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.2385,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23866000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23881,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23897000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23913,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23929,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23944,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23960000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23976,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.23992,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24007,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24023000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24039,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24055,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.2407,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24086,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24102,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24118,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24133,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24149,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24165,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24181,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24196,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24212,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24228000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24243,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24259,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24275,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24291000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24306,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24322000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24338,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24354000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24369,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24385000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24401,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24417,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24432,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24448000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24464,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.2448,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24495,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24511000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24527,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24543,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24558,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24574,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.2459,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24605000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24621,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24637,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24653,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24668,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24684,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.247,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24716000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24731,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24747,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24763,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24779000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24794,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24810000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24826,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24842000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24857,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24873000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24889,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24905,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.2492,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24936000000001,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24952,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24968,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24983,
+  },
+  {
+    "latitude": 40.22,
+    "longitude": 116.24999000000001,
+  },
+]
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolService.test.ts:126:34
+    124|     provider.planDrivingRoute.mockResolvedValueOnce({ ...route, polyli…
+    125|     const saved = await service.publishIntent('self', publishInput);
+    126|     expect(saved.route.polyline).toContainEqual(polyline[501]);
+       |                                  ^
+    127|     expect(saved.route.polyline).toContainEqual(polyline[500]);
+    128|     expect(saved.route.polyline).toContainEqual(polyline[502]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolService.test.ts > createParkCarpoolService > rejects malformed provider geometry without writing an intent
+AssertionError: promise resolved "{ travelDate: '2026-09-02', …(19) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "accountId": "self",
++   "createdAt": "2026-09-02T09:00:00.000Z",
++   "departureTime": "2026-09-02T10:30:00.000Z",
++   "destination": {
++     "coordinate": {
++       "latitude": 40.17,
++       "longitude": 116.31,
++     },
++     "label": "回龙观地铁站",
++   },
++   "displayName": "张某",
++   "expiresAt": "2026-09-02T11:00:00.000Z",
++   "flexibleMinutes": 30,
++   "id": "intent-new",
++   "lastConfirmedAt": "2026-09-02T09:00:00.000Z",
++   "organizationId": "org-a",
++   "organizationName": "甲企业",
++   "origin": {
++     "coordinate": {
++       "latitude": 40.22,
++       "longitude": 116.23,
++     },
++     "label": "北控宏创科技园南门",
++   },
++   "parkId": "park-a",
++   "requestHash": "2f6c1db73271bab2b7204311473def2ab4e5089327b86ecaffa22e70356a6bfc",
++   "requestKey": undefined,
++   "route": {
++     "distanceMeters": 10000,
++     "durationSeconds": 1500,
++     "polyline": [
++       {
++         "latitude": 40,
++         "longitude": NaN,
++       },
++       {
++         "latitude": 40,
++         "longitude": 116,
++       },
++     ],
++     "provider": "test-map",
++   },
++   "status": "active",
++   "travelDate": "2026-09-02",
++   "travelOptions": [
++     "rider",
++     "shared_taxi",
++   ],
++   "updatedAt": "2026-09-02T09:00:00.000Z",
+  }
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolService.test.ts:136:61
+    134|       { longitude: Number.NaN, latitude: 40 }, { longitude: 116, latit…
+    135|     ] });
+    136|     await expect(service.publishIntent('self', publishInput)).rejects.…
+       |                                                             ^
+    137|     expect(store.saveIntent).not.toHaveBeenCalled();
+    138|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 10 passed (12)
+   Start at  09:21:17
+   Duration  227ms (transform 40ms, setup 0ms, collect 43ms, tests 27ms, environment 0ms, prepare 36ms)

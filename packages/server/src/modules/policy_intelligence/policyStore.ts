@@ -5,22 +5,117 @@ import type {
   EncryptedFieldValue,
 } from '../data_platform/index.js';
 import type { PostgresPoolLike } from '../data_platform/postgresDatabaseLifecycle.js';
+export interface PolicyPageOptions {
+  after?: string;
+  limit?: number;
+}
+export interface PolicyUpdateOptions {
+  maxPayloadBytes?: number;
+}
+export interface PolicyPage<T> {
+  rows: Array<{ key: string; value: T }>;
+  nextCursor?: string;
+}
+export interface PolicyKeyPage {
+  rows: Array<{ key: string; payloadBytes: number }>;
+  nextCursor?: string;
+}
+export const POLICY_PAGE_LIMIT = 32;
+export const POLICY_BACKGROUND_RECORD_BYTES = 1024 * 1024;
+export class PolicyRecordTooLargeError extends Error {
+  constructor(
+    readonly key: string,
+    readonly payloadBytes: number,
+    readonly limitBytes: number,
+  ) {
+    super(
+      'Policy background record exceeds byte limit; preserved history requires maintenance',
+    );
+  }
+}
+function byteLimit(limit: number): void {
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > POLICY_BACKGROUND_RECORD_BYTES
+  )
+    throw new Error('Policy background byte limit must be between 1 and 1 MiB');
+}
+function pageBounds(prefix: string, options: PolicyPageOptions) {
+  const limit = options.limit ?? POLICY_PAGE_LIMIT;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > POLICY_PAGE_LIMIT)
+    throw new Error('Policy page limit must be between 1 and 32');
+  // Store prefixes are internal ASCII namespaces, not SQL LIKE patterns. The
+  // primary-key range keeps a page from scanning unrelated encrypted records.
+  if (!/^[\x20-\x7e]{1,256}$/u.test(prefix))
+    throw new Error('Invalid policy page prefix');
+  if (
+    options.after !== undefined &&
+    (!options.after.startsWith(prefix) || options.after.length > 1024)
+  )
+    throw new Error('Policy page cursor belongs to another prefix');
+  return {
+    limit,
+    after: options.after ?? '',
+    upper:
+      prefix.slice(0, -1) +
+      String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1),
+  };
+}
+function pageResult<T extends { key: string }>(
+  rows: T[],
+  limit: number,
+): { rows: T[]; nextCursor?: string } {
+  return {
+    rows,
+    ...(rows.length === limit ? { nextCursor: rows[rows.length - 1].key } : {}),
+  };
+}
 export interface PolicyStore {
   get<T>(key: string): Promise<T | null>;
-  update<T>(key: string, change: (current: T | null) => T): Promise<T>;
+  getBounded<T>(key: string, limitBytes: number): Promise<T | null>;
+  update<T>(
+    key: string,
+    change: (current: T | null) => T,
+    options?: PolicyUpdateOptions,
+  ): Promise<T>;
   list<T>(prefix: string): Promise<Array<{ key: string; value: T }>>;
+  page<T>(prefix: string, options?: PolicyPageOptions): Promise<PolicyPage<T>>;
+  keysPage(prefix: string, options?: PolicyPageOptions): Promise<PolicyKeyPage>;
   remove(key: string): Promise<void>;
 }
 export class MemoryPolicyStore implements PolicyStore {
   private readonly values = new Map<string, unknown>();
+  private readonly payloadBytes = new Map<string, number>();
   async get<T>(key: string): Promise<T | null> {
     return structuredClone(this.values.get(key) ?? null) as T | null;
   }
-  async update<T>(key: string, change: (current: T | null) => T): Promise<T> {
+  async getBounded<T>(key: string, limitBytes: number): Promise<T | null> {
+    byteLimit(limitBytes);
+    const size = this.payloadBytes.get(key) ?? 0;
+    if (size > limitBytes)
+      throw new PolicyRecordTooLargeError(key, size, limitBytes);
+    return this.get<T>(key);
+  }
+  async update<T>(
+    key: string,
+    change: (current: T | null) => T,
+    options: PolicyUpdateOptions = {},
+  ): Promise<T> {
+    const limit = options.maxPayloadBytes;
+    if (limit !== undefined) {
+      byteLimit(limit);
+      const size = this.payloadBytes.get(key) ?? 0;
+      if (size > limit) throw new PolicyRecordTooLargeError(key, size, limit);
+    }
     const value = change(
       structuredClone(this.values.get(key) ?? null) as T | null,
     );
+    const size = Buffer.byteLength(JSON.stringify(value), 'utf8');
+    if (limit !== undefined && size > limit)
+      throw new PolicyRecordTooLargeError(key, size, limit);
     this.values.set(key, structuredClone(value));
+    this.payloadBytes.set(key, size);
     return structuredClone(value);
   }
   async list<T>(prefix: string): Promise<Array<{ key: string; value: T }>> {
@@ -28,8 +123,46 @@ export class MemoryPolicyStore implements PolicyStore {
       .filter(([key]) => key.startsWith(prefix))
       .map(([key, value]) => ({ key, value: structuredClone(value) as T }));
   }
+  async page<T>(
+    prefix: string,
+    options: PolicyPageOptions = {},
+  ): Promise<PolicyPage<T>> {
+    const page = await this.keysPage(prefix, options);
+    return {
+      ...page,
+      rows: page.rows.map(({ key }) => ({
+        key,
+        value: structuredClone(this.values.get(key)) as T,
+      })),
+    };
+  }
+  async keysPage(
+    prefix: string,
+    options: PolicyPageOptions = {},
+  ): Promise<PolicyKeyPage> {
+    const { limit, after } = pageBounds(prefix, options);
+    const keys: string[] = [];
+    for (const key of this.values.keys()) {
+      if (!key.startsWith(prefix) || key <= after) continue;
+      const index = keys.findIndex((existing) => existing > key);
+      if (index < 0) {
+        if (keys.length < limit) keys.push(key);
+      } else {
+        keys.splice(index, 0, key);
+        if (keys.length > limit) keys.pop();
+      }
+    }
+    return pageResult(
+      keys.map((key) => ({
+        key,
+        payloadBytes: this.payloadBytes.get(key) ?? 0,
+      })),
+      limit,
+    );
+  }
   async remove(key: string): Promise<void> {
     this.values.delete(key);
+    this.payloadBytes.delete(key);
   }
 }
 const SCHEMA =
@@ -58,6 +191,22 @@ function decode<T>(
       ) as T)
     : null;
 }
+function decodeBounded<T>(
+  cipher: EncryptedFieldCipher,
+  key: string,
+  row: { payload: string | null; payload_bytes: number } | undefined,
+  limitBytes: number,
+): T | null {
+  if (!row) return null;
+  const size = Number(row.payload_bytes);
+  if (!Number.isSafeInteger(size) || size < 0)
+    throw new Error('Invalid policy record byte count');
+  if (size > limitBytes)
+    throw new PolicyRecordTooLargeError(key, size, limitBytes);
+  if (typeof row.payload !== 'string')
+    throw new Error('Policy bounded payload is unavailable');
+  return decode<T>(cipher, key, row.payload);
+}
 export function createSqlitePolicyStore(
   db: () => Database,
   cipher: EncryptedFieldCipher,
@@ -76,21 +225,62 @@ export function createSqlitePolicyStore(
         .get(key) as { payload: string } | undefined;
       return decode<T>(cipher, key, row?.payload);
     },
-    async update<T>(key: string, change: (current: T | null) => T) {
+    async getBounded<T>(key: string, limitBytes: number) {
+      byteLimit(limitBytes);
+      // The CASE executes inside SQLite: an oversized legacy blob never crosses
+      // into JS and is not decrypted merely to discover its byte count.
+      const row = ready()
+        .prepare(
+          'SELECT CASE WHEN length(CAST(payload AS BLOB)) <= ? THEN payload END AS payload, length(CAST(payload AS BLOB)) AS payload_bytes FROM enterprise_policy_records_v1 WHERE record_key = ?',
+        )
+        .get(limitBytes, key) as
+        { payload: string | null; payload_bytes: number } | undefined;
+      return decodeBounded<T>(cipher, key, row, limitBytes);
+    },
+    async update<T>(
+      key: string,
+      change: (current: T | null) => T,
+      options: PolicyUpdateOptions = {},
+    ) {
+      const limit = options.maxPayloadBytes;
+      if (limit !== undefined) byteLimit(limit);
       const database = ready();
       database.exec('BEGIN IMMEDIATE');
       try {
-        const row = database
-          .prepare(
-            'SELECT payload FROM enterprise_policy_records_v1 WHERE record_key = ?',
-          )
-          .get(key) as { payload: string } | undefined;
-        const value = change(decode<T>(cipher, key, row?.payload));
+        const current =
+          limit !== undefined
+            ? decodeBounded<T>(
+                cipher,
+                key,
+                database
+                  .prepare(
+                    'SELECT CASE WHEN length(CAST(payload AS BLOB)) <= ? THEN payload END AS payload, length(CAST(payload AS BLOB)) AS payload_bytes FROM enterprise_policy_records_v1 WHERE record_key = ?',
+                  )
+                  .get(limit, key) as
+                  { payload: string | null; payload_bytes: number } | undefined,
+                limit,
+              )
+            : decode<T>(
+                cipher,
+                key,
+                (
+                  database
+                    .prepare(
+                      'SELECT payload FROM enterprise_policy_records_v1 WHERE record_key = ?',
+                    )
+                    .get(key) as { payload: string } | undefined
+                )?.payload,
+              );
+        const value = change(current);
+        const payload = encode(cipher, key, value);
+        const size = Buffer.byteLength(payload, 'utf8');
+        if (limit !== undefined && size > limit)
+          throw new PolicyRecordTooLargeError(key, size, limit);
         database
           .prepare(
             'INSERT INTO enterprise_policy_records_v1(record_key,payload) VALUES(?,?) ON CONFLICT(record_key) DO UPDATE SET payload=excluded.payload',
           )
-          .run(key, encode(cipher, key, value));
+          .run(key, payload);
         database.exec('COMMIT');
         return structuredClone(value);
       } catch (error) {
@@ -111,6 +301,42 @@ export function createSqlitePolicyStore(
         key: row.record_key,
         value: decode<T>(cipher, row.record_key, row.payload)!,
       }));
+    },
+    async page<T>(prefix: string, options: PolicyPageOptions = {}) {
+      const { limit, after, upper } = pageBounds(prefix, options);
+      const rows = ready()
+        .prepare(
+          'SELECT record_key, payload FROM enterprise_policy_records_v1 WHERE record_key >= ? AND record_key < ? AND record_key > ? AND substr(record_key,1,?) = ? ORDER BY record_key LIMIT ?',
+        )
+        .all(prefix, upper, after, prefix.length, prefix, limit) as Array<{
+        record_key: string;
+        payload: string;
+      }>;
+      return pageResult(
+        rows.map((row) => ({
+          key: row.record_key,
+          value: decode<T>(cipher, row.record_key, row.payload)!,
+        })),
+        limit,
+      );
+    },
+    async keysPage(prefix: string, options: PolicyPageOptions = {}) {
+      const { limit, after, upper } = pageBounds(prefix, options);
+      const rows = ready()
+        .prepare(
+          'SELECT record_key, length(CAST(payload AS BLOB)) AS payload_bytes FROM enterprise_policy_records_v1 WHERE record_key >= ? AND record_key < ? AND record_key > ? AND substr(record_key,1,?) = ? ORDER BY record_key LIMIT ?',
+        )
+        .all(prefix, upper, after, prefix.length, prefix, limit) as Array<{
+        record_key: string;
+        payload_bytes: number;
+      }>;
+      return pageResult(
+        rows.map((row) => ({
+          key: row.record_key,
+          payloadBytes: Number(row.payload_bytes),
+        })),
+        limit,
+      );
     },
     async remove(key: string) {
       ready()
@@ -140,7 +366,25 @@ export function createPostgresPolicyStore(
       );
       return decode<T>(cipher, key, result.rows[0]?.payload);
     },
-    async update<T>(key: string, change: (current: T | null) => T) {
+    async getBounded<T>(key: string, limitBytes: number) {
+      byteLimit(limitBytes);
+      await ready();
+      const result = await pool.query<{
+        payload: string | null;
+        payload_bytes: number;
+      }>(
+        'SELECT CASE WHEN octet_length(payload) <= $2 THEN payload END AS payload, octet_length(payload) AS payload_bytes FROM enterprise_policy_records_v1 WHERE record_key=$1',
+        [key, limitBytes],
+      );
+      return decodeBounded<T>(cipher, key, result.rows[0], limitBytes);
+    },
+    async update<T>(
+      key: string,
+      change: (current: T | null) => T,
+      options: PolicyUpdateOptions = {},
+    ) {
+      const limit = options.maxPayloadBytes;
+      if (limit !== undefined) byteLimit(limit);
       await ready();
       const client = await pool.connect();
       try {
@@ -149,14 +393,40 @@ export function createPostgresPolicyStore(
           'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
           [context(key)],
         );
-        const result = await client.query<{ payload: string }>(
-          'SELECT payload FROM enterprise_policy_records_v1 WHERE record_key=$1 FOR UPDATE',
-          [key],
-        );
-        const value = change(decode<T>(cipher, key, result.rows[0]?.payload));
+        const current =
+          limit !== undefined
+            ? decodeBounded<T>(
+                cipher,
+                key,
+                (
+                  await client.query<{
+                    payload: string | null;
+                    payload_bytes: number;
+                  }>(
+                    'SELECT CASE WHEN octet_length(payload) <= $2 THEN payload END AS payload, octet_length(payload) AS payload_bytes FROM enterprise_policy_records_v1 WHERE record_key=$1 FOR UPDATE',
+                    [key, limit],
+                  )
+                ).rows[0],
+                limit,
+              )
+            : decode<T>(
+                cipher,
+                key,
+                (
+                  await client.query<{ payload: string }>(
+                    'SELECT payload FROM enterprise_policy_records_v1 WHERE record_key=$1 FOR UPDATE',
+                    [key],
+                  )
+                ).rows[0]?.payload,
+              );
+        const value = change(current);
+        const payload = encode(cipher, key, value);
+        const size = Buffer.byteLength(payload, 'utf8');
+        if (limit !== undefined && size > limit)
+          throw new PolicyRecordTooLargeError(key, size, limit);
         await client.query(
           'INSERT INTO enterprise_policy_records_v1(record_key,payload) VALUES($1,$2) ON CONFLICT(record_key) DO UPDATE SET payload=excluded.payload',
-          [key, encode(cipher, key, value)],
+          [key, payload],
         );
         await client.query('COMMIT');
         return structuredClone(value);
@@ -177,6 +447,41 @@ export function createPostgresPolicyStore(
         key: row.record_key,
         value: decode<T>(cipher, row.record_key, row.payload)!,
       }));
+    },
+    async page<T>(prefix: string, options: PolicyPageOptions = {}) {
+      const { limit, after } = pageBounds(prefix, options);
+      await ready();
+      // PostgreSQL may use a locale collation. Keep its primary-key ordering for
+      // both cursor and ORDER BY; an ASCII prefix upper bound is not sound there.
+      const result = await pool.query<{ record_key: string; payload: string }>(
+        'SELECT record_key,payload FROM enterprise_policy_records_v1 WHERE left(record_key,$1)=$2 AND record_key > $3 ORDER BY record_key LIMIT $4',
+        [prefix.length, prefix, after, limit],
+      );
+      return pageResult(
+        result.rows.map((row) => ({
+          key: row.record_key,
+          value: decode<T>(cipher, row.record_key, row.payload)!,
+        })),
+        limit,
+      );
+    },
+    async keysPage(prefix: string, options: PolicyPageOptions = {}) {
+      const { limit, after } = pageBounds(prefix, options);
+      await ready();
+      const result = await pool.query<{
+        record_key: string;
+        payload_bytes: number;
+      }>(
+        'SELECT record_key,octet_length(payload) AS payload_bytes FROM enterprise_policy_records_v1 WHERE left(record_key,$1)=$2 AND record_key > $3 ORDER BY record_key LIMIT $4',
+        [prefix.length, prefix, after, limit],
+      );
+      return pageResult(
+        result.rows.map((row) => ({
+          key: row.record_key,
+          payloadBytes: Number(row.payload_bytes),
+        })),
+        limit,
+      );
     },
     async remove(key: string) {
       await ready();

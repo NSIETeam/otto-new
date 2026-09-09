@@ -1,0 +1,105 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-repair-91bc4e/packages/desktop
+
+ ❯ src/renderer/moduleWorkspace.test.ts (23 tests | 1 failed) 23ms
+   ✓ module workspace defaults > auto-installs only the official daily-office group for a new enterprise workspace 2ms
+   ✓ module workspace defaults > does not synthesize enterprise or park modules for personal edition 1ms
+   ✓ module workspace defaults > recomputes restored defaults from the current capability snapshot 0ms
+   ✓ module workspace parsing and normalization > falls back for corrupt or unsupported records 0ms
+   ✓ module workspace parsing and normalization > migrates ordinary park services without rearranging existing modules 1ms
+   ✓ module workspace parsing and normalization > migrates the official daily-office group once to add policy intelligence 1ms
+   ✓ module workspace parsing and normalization > upgrades an installed enterprise-memory experience without restoring a removed module 1ms
+   ✓ module workspace parsing and normalization > migrates an installed Hongchuang group once to add carpool without restoring it after removal 1ms
+   ✓ module workspace parsing and normalization > adds carpool once to custom park groups while preserving other groups and manual removal 1ms
+   ✓ module workspace parsing and normalization > deduplicates module IDs globally, repairs group IDs, clamps rows, and keeps unknown modules 0ms
+   ✓ module workspace parsing and normalization > truncates long names and supplies a safe name for blank groups 0ms
+   ✓ module workspace layout operations > resolves two columns only for a genuinely narrow side panel 0ms
+   ✓ module workspace layout operations > creates groups with stable unique default names and IDs 0ms
+   ✓ module workspace layout operations > adds park services as one complete function group and removes duplicate park entries 1ms
+   ✓ module workspace layout operations > rejects blank and duplicate group names without mutating layout 0ms
+   ✓ module workspace layout operations > moves modules between groups without duplicates 0ms
+   ✓ module workspace layout operations > applies additions and removals for one group as a single selection 1ms
+   ✓ module workspace layout operations > ignores a group selection update when the target group does not exist 1ms
+   ✓ module workspace layout operations > removes only the requested module from layout 0ms
+   ✓ module workspace layout operations > protects the last group and removes deleted group modules from the workspace 0ms
+   ✓ module workspace layout operations > renames, updates row count, and reorders groups and modules 1ms
+   ✓ module workspace storage scope > normalizes server URL and separates edition, organization, and account 1ms
+   × legacy park module additive migration > adds newly authorized legacy entries once without moving existing or restoring removed entries 7ms
+     → expected [ 'park-repair', 'park-announcement' ] to deeply equal [ 'park-repair', …(2) ]
+stdout | src/main/park-carpool-chat.integration.test.ts
+[2026-09-08T04:45:27.164Z] [INFO] [MCPResponseGuard] Created temp directory: /private/tmp/otto-carpool-repair-91bc4e/.otto/mcp-tmp
+
+(node:37138) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/main/park-carpool-chat.integration.test.ts (1 test | 1 failed) 2119ms
+   × desktop coordinators exchange, retry after lost response, and restore actual MLS ciphertext from SQLite 2118ms
+     → 服务器已暂停同行消息写入，历史仍可查看
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-carpool-startup.test.ts [ src/main/park-carpool-startup.test.ts ]
+Error: Failed to resolve import "./park-carpool-startup.js" from "src/main/park-carpool-startup.test.ts". Does the file exist?
+  Plugin: vite:import-analysis
+  File: /private/tmp/otto-carpool-repair-91bc4e/packages/desktop/src/main/park-carpool-startup.test.ts:2:33
+  1  |  import { expect, it, vi } from "vitest";
+  2  |  import { ParkCarpoolStartup } from "./park-carpool-startup.js";
+     |                                      ^
+  3  |  const scope = { serverUrl: "http://localhost", organizationId: "org", accountId: "a", deviceId: "device", approvalSta...
+  4  |  it("does not block private startup and never starts a stale identity", async () => {
+ ❯ TransformPluginContext._formatLog ../../node_modules/vite/dist/node/chunks/config.js:29079:43
+ ❯ TransformPluginContext.error ../../node_modules/vite/dist/node/chunks/config.js:29076:14
+ ❯ normalizeUrl ../../node_modules/vite/dist/node/chunks/config.js:27199:18
+ ❯ ../../node_modules/vite/dist/node/chunks/config.js:27257:32
+ ❯ TransformPluginContext.transform ../../node_modules/vite/dist/node/chunks/config.js:27225:4
+ ❯ EnvironmentPluginContainer.transform ../../node_modules/vite/dist/node/chunks/config.js:28877:14
+ ❯ loadAndTransform ../../node_modules/vite/dist/node/chunks/config.js:22746:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-carpool-chat.integration.test.ts > desktop coordinators exchange, retry after lost response, and restore actual MLS ciphertext from SQLite
+Error: 服务器已暂停同行消息写入，历史仍可查看
+ ❯ ../server/src/modules/park_carpool/parkCarpoolTransport.ts:353:19
+ ❯ ../server/src/modules/park_carpool/parkCarpoolWorkflow.ts:570:14
+ ❯ Object.transactWorkflow ../server/src/modules/park_carpool/parkCarpoolSqliteRepository.ts:317:24
+ ❯ Object.transact [as withContext] ../server/src/modules/park_carpool/parkCarpoolWorkflow.ts:560:24
+ ❯ Object.executeParkCarpoolTransport src/main/park-carpool-chat.integration.test.ts:76:26
+     74|         executeParkCarpoolTransport: async (command) => {
+     75|           if(pauseOnAppend && command.type==='append')vi.stubEnv('OTTO…
+     76|           const result = await service.executeTransport(id, command);
+       |                          ^
+     77|           if (loseResponse && command.type === 'append') {
+     78|             loseResponse = false;
+ ❯ ParkCarpoolChat.synchronize src/main/park-carpool-chat.ts:290:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/renderer/moduleWorkspace.test.ts > legacy park module additive migration > adds newly authorized legacy entries once without moving existing or restoring removed entries
+AssertionError: expected [ 'park-repair', 'park-announcement' ] to deeply equal [ 'park-repair', …(2) ]
+
+- Expected
++ Received
+
+  [
+    "park-repair",
+    "park-announcement",
+-   "park-satisfaction",
+  ]
+
+ ❯ src/renderer/moduleWorkspace.test.ts:422:40
+    420|   const first=parseModuleWorkspace(JSON.stringify(input),limited);
+    421|   const upgraded=parseModuleWorkspace(JSON.stringify(first),{...limite…
+    422|   expect(upgraded.groups[0].moduleIds).toEqual(['park-repair','park-an…
+       |                                        ^
+    423|   expect(upgraded.groups[1].moduleIds).toEqual(['park-meeting-room']);
+    424|   const removed=removeModuleFromGroup(upgraded,'park-services','park-s…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  2 failed | 22 passed (24)
+   Start at  12:45:25
+   Duration  6.80s (transform 2.16s, setup 301ms, collect 3.96s, tests 2.14s, environment 1.24s, prepare 270ms)

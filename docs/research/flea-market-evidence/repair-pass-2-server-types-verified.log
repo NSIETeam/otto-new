@@ -1,0 +1,4 @@
+COMMAND: npm run typecheck --workspace=packages/server
+
+> otto-server@0.1.0 typecheck
+> tsc --noEmit

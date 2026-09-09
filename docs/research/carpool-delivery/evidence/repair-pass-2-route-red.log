@@ -1,0 +1,99 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ ❯ packages/server/src/enterprise/parkCarpoolRoutes.test.ts (28 tests | 2 failed) 14ms
+   ✓ park carpool enterprise routes > requires an authenticated enterprise account before any repository call 1ms
+   ✓ park carpool enterprise routes > derives the owner from the session for state, publish and stop operations 2ms
+   ✓ park carpool enterprise routes > maps entitlement and map-provider failures without leaking exception details 0ms
+   ✓ rejects anonymous  GET before every business dependency 0ms
+   ✓ rejects anonymous /matches GET before every business dependency 0ms
+   ✓ rejects anonymous /places GET before every business dependency 0ms
+   ✓ rejects anonymous /intents PUT before every business dependency 0ms
+   ✓ rejects anonymous /intents/stop POST before every business dependency 1ms
+   ✓ rejects anonymous /intents/confirm POST before every business dependency 0ms
+   ✓ rejects anonymous /workflow GET before every business dependency 0ms
+   ✓ rejects anonymous /workflow POST before every business dependency 0ms
+   ✓ rejects anonymous /transport POST before every business dependency 0ms
+   ✓ rejects anonymous /data DELETE before every business dependency 0ms
+   ✓ rejects anonymous /route-preview POST before every business dependency 0ms
+   ✓ rejects anonymous /reverse POST before every business dependency 0ms
+   ✓ rejects anonymous /map POST before every business dependency 0ms
+   ✓ dispatches  GET with exact authenticated arguments 0ms
+   ✓ dispatches /matches GET with exact authenticated arguments 0ms
+   ✓ dispatches /workflow GET with exact authenticated arguments 0ms
+   ✓ dispatches /workflow POST with exact authenticated arguments 0ms
+   ✓ dispatches /transport POST with exact authenticated arguments 0ms
+   ✓ dispatches /data DELETE with exact authenticated arguments 0ms
+   ✓ dispatches /route-preview POST with exact authenticated arguments 0ms
+   ✓ dispatches /reverse POST with exact authenticated arguments 0ms
+   ✓ dispatches /map POST with exact authenticated arguments 0ms
+   ✓ does not expose internal maintenance or unsigned transport 1ms
+   × redacts unknown exceptions, including misleading business prefixes: INTERNAL_SECRET_database_path 3ms
+     → expected [ { status: 400, …(1) } ] to deeply equal [ { status: 500, …(1) } ]
+   × redacts unknown exceptions, including misleading business prefixes: 地图服务连接失败，请稍后重试 INTERNAL_SECRET 0ms
+     → expected [ { status: 503, …(1) } ] to deeply equal [ { status: 500, …(1) } ]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/enterprise/parkCarpoolRoutes.test.ts > redacts unknown exceptions, including misleading business prefixes: INTERNAL_SECRET_database_path
+AssertionError: expected [ { status: 400, …(1) } ] to deeply equal [ { status: 500, …(1) } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "data": {
+-       "error": "拼车助手请求失败，请稍后重试",
++       "error": "INTERNAL_SECRET_database_path",
+      },
+-     "status": 500,
++     "status": 400,
+    },
+  ]
+
+ ❯ packages/server/src/enterprise/parkCarpoolRoutes.test.ts:141:23
+    139|   const h = request({path: '/enterprise/park-carpool'});
+    140|   await h.invoke();
+    141|   expect(h.responses).toEqual([{status: 500, data: {error: '拼车助手请求失败，请…
+       |                       ^
+    142| });
+    143| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  packages/server/src/enterprise/parkCarpoolRoutes.test.ts > redacts unknown exceptions, including misleading business prefixes: 地图服务连接失败，请稍后重试 INTERNAL_SECRET
+AssertionError: expected [ { status: 503, …(1) } ] to deeply equal [ { status: 500, …(1) } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "data": {
+-       "error": "拼车助手请求失败，请稍后重试",
++       "error": "地图服务连接失败，请稍后重试 INTERNAL_SECRET",
+      },
+-     "status": 500,
++     "status": 503,
+    },
+  ]
+
+ ❯ packages/server/src/enterprise/parkCarpoolRoutes.test.ts:141:23
+    139|   const h = request({path: '/enterprise/park-carpool'});
+    140|   await h.invoke();
+    141|   expect(h.responses).toEqual([{status: 500, data: {error: '拼车助手请求失败，请…
+       |                       ^
+    142| });
+    143| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 26 passed (28)
+   Start at  20:04:44
+   Duration  177ms (transform 36ms, setup 0ms, collect 36ms, tests 14ms, environment 0ms, prepare 33ms)
+
+
+EXIT_CODE=1

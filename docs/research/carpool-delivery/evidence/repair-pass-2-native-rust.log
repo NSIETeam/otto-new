@@ -1,0 +1,195 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling subtle v2.6.1
+   Compiling const-oid v0.9.6
+   Compiling base64ct v1.8.3
+   Compiling serde_core v1.0.229
+   Compiling base16ct v0.2.0
+   Compiling generic-array v0.14.7
+   Compiling memchr v2.8.3
+   Compiling pem-rfc7468 v0.7.0
+   Compiling semver v1.0.28
+   Compiling serde v1.0.229
+   Compiling rustc_version v0.4.1
+   Compiling zerocopy v0.8.55
+   Compiling crossbeam-utils v0.8.22
+   Compiling hax-lib v0.3.6
+   Compiling syn v2.0.119
+   Compiling getrandom v0.2.17
+   Compiling syn v3.0.3
+   Compiling cpufeatures v0.2.17
+   Compiling rand_core v0.6.4
+   Compiling curve25519-dalek v4.1.3
+   Compiling ff v0.13.1
+   Compiling opaque-debug v0.3.1
+   Compiling group v0.13.0
+   Compiling crossbeam-epoch v0.9.20
+   Compiling rand_core v0.9.5
+   Compiling smallvec v1.15.2
+   Compiling aho-corasick v1.1.4
+   Compiling libcrux-intrinsics v0.0.6
+   Compiling regex-syntax v0.8.11
+   Compiling zmij v1.0.23
+   Compiling crossbeam-deque v0.8.7
+   Compiling serde_derive v1.0.229
+   Compiling log v0.4.33
+   Compiling scopeguard v1.2.0
+   Compiling thiserror v2.0.19
+   Compiling lock_api v0.4.14
+   Compiling thiserror-impl v2.0.19
+   Compiling regex-automata v0.4.16
+   Compiling zeroize_derive v1.5.0
+   Compiling tls_codec_derive v0.4.2
+   Compiling hax-lib-macros v0.3.6
+   Compiling zeroize v1.9.0
+   Compiling rand v0.9.5
+   Compiling rayon-core v1.13.0
+   Compiling libcrux-sha3 v0.0.8
+   Compiling serde_json v1.0.151
+   Compiling ppv-lite86 v0.2.21
+   Compiling parking_lot_core v0.9.12
+   Compiling parking_lot_core v0.8.6
+   Compiling der v0.7.10
+   Compiling rand_chacha v0.3.1
+   Compiling rand v0.8.7
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling crypto-bigint v0.5.5
+   Compiling digest v0.10.7
+   Compiling hmac v0.12.1
+   Compiling spki v0.7.3
+   Compiling pkcs8 v0.10.2
+   Compiling hkdf v0.12.4
+   Compiling sec1 v0.7.3
+   Compiling inout v0.1.4
+   Compiling cipher v0.4.4
+   Compiling signature v2.2.0
+   Compiling universal-hash v0.5.1
+   Compiling rfc6979 v0.4.0
+   Compiling sha2 v0.10.9
+   Compiling elliptic-curve v0.13.8
+   Compiling tls_codec v0.4.2
+   Compiling libcrux-secrets v0.0.5
+   Compiling polyval v0.6.2
+   Compiling aead v0.5.2
+   Compiling ghash v0.5.1
+   Compiling libcrux-traits v0.0.6
+   Compiling primeorder v0.13.6
+   Compiling ecdsa v0.16.9
+   Compiling poly1305 v0.8.0
+   Compiling ctr v0.9.2
+   Compiling chacha20 v0.9.1
+   Compiling aes v0.8.4
+   Compiling ed25519 v2.2.3
+   Compiling hpke-rs-crypto v0.6.1
+   Compiling p256 v0.13.2
+   Compiling libcrux-platform v0.0.3
+   Compiling instant v0.1.13
+   Compiling anyhow v1.0.104
+   Compiling crc32fast v1.5.0
+   Compiling openmls_traits v0.5.0
+   Compiling itoa v1.0.18
+   Compiling bit-vec v0.6.3
+   Compiling bit-set v0.5.3
+   Compiling aes-gcm v0.10.3
+   Compiling ed25519-dalek v2.2.0
+   Compiling chacha20poly1305 v0.10.1
+   Compiling p384 v0.13.1
+   Compiling x25519-dalek v2.0.1
+   Compiling k256 v0.13.4
+   Compiling equivalent v1.0.2
+   Compiling rand_core v0.10.1
+   Compiling allocator-api2 v0.2.21
+   Compiling foldhash v0.1.5
+   Compiling byteorder v1.5.0
+   Compiling either v1.17.0
+   Compiling fxhash v0.2.1
+   Compiling hashbrown v0.15.5
+   Compiling hpke-rs-rust-crypto v0.6.1
+   Compiling parking_lot v0.12.5
+   Compiling hpke-rs v0.6.1
+   Compiling parking_lot v0.11.2
+   Compiling fancy-regex v0.13.0
+   Compiling regex v1.13.1
+   Compiling rayon v1.12.0
+   Compiling openmls_memory_storage v0.5.0
+   Compiling bstr v1.13.0
+   Compiling serde_bytes v0.11.19
+   Compiling fs2 v0.4.3
+   Compiling rustc-hash v1.1.0
+   Compiling base64 v0.21.7
+   Compiling lazy_static v1.5.0
+   Compiling openmls_rust_crypto v0.5.1
+   Compiling lru v0.12.5
+   Compiling sled v0.34.7
+   Compiling openmls_basic_credential v0.5.0
+   Compiling hex v0.4.3
+   Compiling base64 v0.22.1
+   Compiling tiktoken-rs v0.6.0
+   Compiling openmls v0.8.1
+   Compiling otto-native v0.1.0 (/Users/yang/Desktop/otto-carpool-fixed-91bc4e/otto-native)
+warning: method `stage_transport_application` is never used
+    --> src/mls.rs:2058:12
+     |
+ 430 | impl MlsKernel {
+     | -------------- method in this implementation
+...
+2058 |     pub fn stage_transport_application(
+     |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `model` is never read
+ --> src/tokenizer.rs:5:5
+  |
+3 | pub struct Tokenizer {
+  |            --------- field in this struct
+4 |     bpe: CoreBPE,
+5 |     model: String,
+  |     ^^^^^
+
+warning: `otto-native` (bin "otto-native" test) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 28.25s
+     Running unittests src/main.rs (otto-native/target/debug/deps/otto_native-fe62299091e39fd6)
+
+running 23 tests
+test mls::tests::another_device_scope_requires_an_explicit_reset ... ok
+test mls::park::tests::expired_native_packages_are_not_advertised_as_publishable_but_keep_welcome_keys ... ok
+test mls::park::tests::maintenance_deletes_expired_group_secrets_and_cached_plaintext ... ok
+test mls::tests::exported_key_package_is_valid_mls_1_0 ... ok
+test mls::tests::encrypted_snapshot_restores_a_pending_member_commit ... ok
+test mls::tests::member_key_packages_cannot_cross_server_or_organization_boundaries ... ok
+test mls::tests::local_epoch_update_is_idempotent_persistent_and_mergeable ... ok
+test mls::tests::mismatched_welcome_group_binding_retires_the_one_time_key_package ... ok
+test mls::tests::encrypted_snapshot_restores_and_acknowledges_the_application_outbox ... ok
+test mls::tests::remote_commit_quarantines_a_member_removal_even_with_no_add_binding ... ok
+test mls::tests::remote_commit_rejects_a_substituted_sender_device ... ok
+test mls::tests::conversation_reset_replaces_only_the_bound_group_and_survives_restart ... ok
+test mls::tests::reset_does_not_accept_an_unrelated_scope ... ok
+
+thread 'mls::tests::remote_commit_tampering_quarantines_without_advancing_cursor' (4535542) panicked at /Users/yang/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/openmls-0.8.1/src/framing/private_message_in.rs:136:17:
+Ciphertext decryption failed
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test mls::tests::remote_commit_tampering_quarantines_without_advancing_cursor ... ok
+test mls::park::tests::exact_roster_binding_persistence_and_replay_are_enforced ... ok
+test mls::tests::remote_commit_accepts_a_server_bound_second_local_device ... ok
+test mls::tests::sender_rejects_a_duplicate_device_credential ... ok
+
+thread 'mls::tests::two_devices_join_and_exchange_an_authenticated_application_message' (4535561) panicked at /Users/yang/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/openmls-0.8.1/src/framing/private_message_in.rs:136:17:
+Ciphertext decryption failed
+test mls::tests::two_devices_join_and_exchange_an_authenticated_application_message ... ok
+test mls::tests::encrypted_snapshots_restore_two_device_ratchets_after_restart ... ok
+test mls::tests::sender_rejects_an_unexpected_account_addition ... ok
+test mls::tests::remote_update_commit_atomically_advances_epoch_cursor_and_persisted_state ... ok
+test mls::park::tests::cross_company_three_accounts_four_devices_use_real_mls_and_isolate_generations ... ok
+test mls::park::tests::retiring_packages_removes_private_material_and_releases_inventory ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.31s
+
+
+EXIT_CODE=0

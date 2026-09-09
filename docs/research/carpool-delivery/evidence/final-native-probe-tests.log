@@ -1,0 +1,10 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-validation-7f3a9c
+
+ ✓ scripts/tests/otto-native-runtime.test.js (11 tests) 447ms
+   ✓ rejects a legacy runtime that answers ping but has no park MLS operations  434ms
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  12:09:06
+   Duration  605ms (transform 33ms, setup 19ms, collect 20ms, tests 447ms, environment 0ms, prepare 33ms)

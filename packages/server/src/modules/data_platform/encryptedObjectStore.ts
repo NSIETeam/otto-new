@@ -19,6 +19,7 @@ const TAG_BYTES = 16;
 
 export interface EncryptedObjectStore {
   readonly backend: 'encrypted-filesystem';
+  keyFor?(namespace: string, objectId: string): string;
   put(input: { namespace: string; objectId: string; content: Buffer }): {
     backend: 'encrypted-filesystem';
     key: string;
@@ -124,6 +125,7 @@ export function createEncryptedObjectStore(input: {
 
   return {
     backend: 'encrypted-filesystem',
+    keyFor: safeObjectKey,
     put({ namespace, objectId, content }) {
       if (!namespace.trim() || !objectId.trim() || content.length === 0) {
         throw new Error('object storage input is invalid');

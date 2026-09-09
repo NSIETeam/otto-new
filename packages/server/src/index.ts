@@ -73,6 +73,8 @@ export * from './modules/integration_adapters/brokerChannelRuntime.js';
 export * from './modules/integration_adapters/brokerChannelTaskBridge.js';
 export * from './modules/integration_adapters/channelIdentityRegistry.js';
 export * from './modules/integration_adapters/managedChannelPlatform.js';
+export * from './modules/integration_adapters/officialQrPairingBrokers.js';
+export * from './modules/integration_adapters/officialChannelRuntime.js';
 export * from './modules/integration_adapters/workflowTaskControlPort.js';
 export * from './modules/integration_adapters/jsonChannelMessageJournal.js';
 export * from './productModules.js';
@@ -84,6 +86,7 @@ export type {
   FeishuRegisterDeps,
 } from './feishu/register.js';
 export { registerFeishu } from './feishu/register.js';
+export * from './feishu/deviceRegistration.js';
 export {
   endpointFilePath,
   readEndpoint,
@@ -93,3 +96,19 @@ export {
 } from './endpoint.js';
 export type { ServerEndpointRecord } from './endpoint.js';
 export type * from './modules/policy_intelligence/contracts.js';
+export { policyApplicationStatus } from './modules/policy_intelligence/policyDomain.js';
+
+// Shared carpool composition boundary used by desktop contract verification.
+export { createParkCarpoolService, createParkCarpoolSqliteStore, PARK_CARPOOL_SCHEMA_CONTRIBUTOR } from './modules/park_carpool/index.js';
+
+export type { CarpoolWorkflowView, CarpoolWorkflowCommand } from './modules/park_carpool/parkCarpoolWorkflow.js';
+
+export type { ParkTransportCommand, ParkTransportResult, ParkTransportView, ParkCipherEvent } from './modules/park_carpool/parkCarpoolTransport.js';
+
+export type { CarpoolGroupMatch } from './modules/park_carpool/parkCarpoolGroupMatching.js';
+
+export type { CarpoolRoutePreview } from './modules/park_carpool/parkCarpoolRoutePreview.js';
+
+export type { CarpoolMeetingPoint } from './modules/park_carpool/parkCarpoolWorkflow.js';
+
+export { readCarpoolConfig, type CarpoolConfig } from './modules/park_carpool/parkCarpoolConfig.js';

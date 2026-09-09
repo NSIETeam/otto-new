@@ -1,3 +1,13 @@
+import { PARK_CONTACT_ATTACHMENT_SCHEMA_SQL, PARK_CONTACT_UPLOAD_INTENT_SCHEMA_SQL } from '../modules/collaboration/parkContactAttachments.js';
+import { MARKET_MAINTENANCE_SCHEMA_SQL, MARKET_CLEANUP_SCAN_SCHEMA_SQL } from '../modules/park_services/flea_market/fleaMarketJobs.js';
+import { MARKET_SEARCH_SCAN_SCHEMA_SQL, MARKET_SEARCH_SCHEMA_SQL } from '../modules/park_services/flea_market/fleaMarketSearchIndex.js';
+import { MARKET_IMAGE_CHARGE_SCHEMA_SQL } from '../modules/park_services/flea_market/fleaMarketStorageQuota.js';
+import { PARK_CONTACT_MLS_SCHEMA_SQL } from '../modules/collaboration/parkContactMls.js';
+import { MARKET_CONTACT_SCHEMA_SQL } from '../modules/park_services/flea_market/fleaMarketContacts.js';
+import { PARK_CONTACT_MESSAGE_SCHEMA_SQL, PARK_CONTACT_ORDER_SCHEMA_SQL } from '../modules/collaboration/parkContactCiphertext.js';
+import { MARKET_ROLE_SCHEMA_SQL } from '../modules/park_services/flea_market/fleaMarketRoles.js';
+import { MARKET_GOVERNANCE_SCHEMA_SQL } from '../modules/park_services/flea_market/fleaMarketGovernance.js';
+import { MARKET_SCHEMA_SQL, MARKET_PERSONAL_SCHEMA_SQL } from '../modules/park_services/flea_market/fleaMarketSchema.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -925,6 +935,29 @@ CREATE INDEX attachment_objects_mls_message
   ) WHERE mls_conversation_id IS NOT NULL;
 `,
   },
+  {
+    version: 15,
+    name: 'park-carpool-workflow-authority',
+    sql: `CREATE TABLE park_carpool_workflow (
+      park_id TEXT PRIMARY KEY,
+      encrypted_payload TEXT NOT NULL,
+      version BIGINT NOT NULL DEFAULT 1
+    );`,
+  },
+  { version: 16, name: 'park-flea-market-v1', sql: MARKET_SCHEMA_SQL },
+  { version: 17, name: 'park-flea-market-governance', sql: MARKET_GOVERNANCE_SCHEMA_SQL },
+  { version: 18, name: 'park-flea-market-explicit-admins', sql: MARKET_ROLE_SCHEMA_SQL },
+  { version: 19, name: 'park-market-contact-requests', sql: MARKET_CONTACT_SCHEMA_SQL + PARK_CONTACT_MESSAGE_SCHEMA_SQL },
+  { version: 20, name: 'park-contact-message-order', sql: PARK_CONTACT_ORDER_SCHEMA_SQL },
+  { version: 21, name: 'park-contact-native-mls', sql: PARK_CONTACT_MLS_SCHEMA_SQL },
+  { version: 22, name: 'park-market-personal-records', sql: MARKET_PERSONAL_SCHEMA_SQL },
+  { version: 23, name: 'park-market-image-storage-charges', sql: MARKET_IMAGE_CHARGE_SCHEMA_SQL },
+  { version: 24, name: 'park-market-private-search-index', sql: MARKET_SEARCH_SCHEMA_SQL },
+  { version: 25, name: 'park-market-bounded-search-scan', sql: MARKET_SEARCH_SCAN_SCHEMA_SQL },
+  { version: 26, name: 'park-market-maintenance-progress', sql: MARKET_MAINTENANCE_SCHEMA_SQL },
+  { version: 27, name: 'park-contact-private-attachments', sql: PARK_CONTACT_ATTACHMENT_SCHEMA_SQL },
+  { version: 28, name: 'park-contact-durable-upload-intents', sql: PARK_CONTACT_UPLOAD_INTENT_SCHEMA_SQL },
+  { version: 29, name: 'park-market-bounded-object-maintenance', sql: MARKET_CLEANUP_SCAN_SCHEMA_SQL },
 ];
 
 export const ENTERPRISE_POSTGRES_SCHEMA_VERSION =

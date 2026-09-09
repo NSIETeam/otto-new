@@ -9,6 +9,7 @@ import { createAuditLogSchemaContributor } from './auditLogSchema.js';
 import { createCommercialControlComposition } from './commercialControlComposition.js';
 import { signTelemetryRequest } from './deploymentRepository.js';
 import { PRIVATE_DEPLOYMENT_SCHEMA_CONTRIBUTOR } from './privateDeploymentSchema.js';
+import { DEPLOYMENT_GRANTABLE_ENTERPRISE_FEATURES } from './deploymentFeatureGrants.js';
 import {
   canonicalJson,
   publicKeyId,
@@ -98,18 +99,13 @@ describe('private deployment license repository', () => {
         signature: signEd25519Envelope(payload, privateKey),
       });
 
-      expect(
-        control.isLicenseUsableForOrganizationFeature(
-          'skill_market',
-          'org-another-enterprise',
-        ),
-      ).toBe(true);
-      expect(
-        control.isLicenseUsableForOrganizationFeature(
-          'enterprise_tree',
-          'org-another-enterprise',
-        ),
-      ).toBe(true);
+      for (const feature of DEPLOYMENT_GRANTABLE_ENTERPRISE_FEATURES) {
+        for (const organization of ['org-licensed', 'org-another-enterprise']) {
+          expect(
+            control.isLicenseUsableForOrganizationFeature(feature, organization),
+          ).toBe(true);
+        }
+      }
       expect(
         control.isLicenseUsableForOrganizationFeature(
           'model_gateway',
@@ -123,15 +119,14 @@ describe('private deployment license repository', () => {
 
   it('does not activate deployment grants without a usable signed License', () => {
     const { database, control } = setup({
-      deploymentGrantedFeatures: ['skill_market'],
+      deploymentGrantedFeatures: DEPLOYMENT_GRANTABLE_ENTERPRISE_FEATURES,
     });
     try {
-      expect(
-        control.isLicenseUsableForOrganizationFeature(
-          'skill_market',
-          'org-another-enterprise',
-        ),
-      ).toBe(false);
+      for (const feature of DEPLOYMENT_GRANTABLE_ENTERPRISE_FEATURES) {
+        expect(
+          control.isLicenseUsableForOrganizationFeature(feature, 'org-another-enterprise'),
+        ).toBe(false);
+      }
     } finally {
       database.close();
     }

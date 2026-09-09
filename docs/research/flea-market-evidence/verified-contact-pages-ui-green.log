@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ✓ src/renderer/components/MarketContactCenter.test.tsx (1 test) 59ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  12:51:16
+   Duration  787ms (transform 79ms, setup 91ms, collect 85ms, tests 59ms, environment 306ms, prepare 50ms)

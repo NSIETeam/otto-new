@@ -14,7 +14,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ServerEndpoint } from 'otto-server';
 import type { RecurringTaskDefinition } from 'otto-core';
 import {
+  appendDesktopServerLog,
   prepareDesktopSqlCipherRuntime,
+  resolveDesktopUserDirectory,
   ServerManager,
   type ServerManagerDependencies,
 } from './server-manager.js';
@@ -42,6 +44,36 @@ const ENTERPRISE_ACCOUNT = {
   positionTitle: '工程师',
   leaseExpiresAt: '2026-07-19T12:00:00.000Z',
 };
+
+describe('desktop user data isolation', () => {
+  it('routes every desktop-owned artifact through OTTO_USER_DIR when configured', () => {
+    expect(resolveDesktopUserDirectory(
+      { OTTO_USER_DIR: '/private/tmp/otto-isolated-user' },
+      '/Users/example',
+    )).toBe(path.resolve('/private/tmp/otto-isolated-user'));
+    expect(resolveDesktopUserDirectory({}, '/Users/example'))
+      .toBe(path.join('/Users/example', '.otto-user'));
+  });
+
+  it('creates desktop logs with owner-only permissions', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'otto-desktop-logs-'));
+    try {
+      const environment = { OTTO_USER_DIR: root };
+      appendDesktopServerLog('secure log\n', environment, '/Users/example');
+
+      const directory = await fs.stat(path.join(root, 'logs'));
+      const logfile = await fs.stat(path.join(root, 'logs', 'otto-server.log'));
+      if (process.platform !== 'win32') {
+        expect(directory.mode & 0o777).toBe(0o700);
+        expect(logfile.mode & 0o777).toBe(0o600);
+      }
+      await expect(fs.readFile(path.join(root, 'logs', 'otto-server.log'), 'utf8'))
+        .resolves.toBe('secure log\n');
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('desktop SQLCipher runtime custody', () => {
   it('creates one permission-restricted key and configures the packaged native binding', async () => {
@@ -279,6 +311,95 @@ describe('ServerManager desktop runtime diagnostics', () => {
 });
 
 describe('ServerManager trusted enterprise identity bridge', () => {
+  it('supports only bounded Feishu registration routes with the private control token', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, data: {}, error: null })));
+    const mod = {
+      ...discoveredMainModule(),
+      readEndpointRecord: vi.fn(() => ({ ...MAIN_ENDPOINT, controlToken: 'private-control' })),
+    } as unknown as Awaited<ReturnType<ServerManagerDependencies['loadOttoServer']>>;
+    const manager = new ServerManager({ dependencies: dependencies({ loadOttoServer: async () => mod, fetchImpl }) });
+    await manager.ensure();
+    const registrationPath = '/feishu/device-registration?registrationId=fdr_0123456789abcdef01234567';
+    await manager.requestControlApi('POST', '/feishu/device-registration', { domain: 'feishu' });
+    await manager.requestControlApi('GET', registrationPath);
+    await manager.requestControlApi('DELETE', registrationPath);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl).toHaveBeenLastCalledWith(`http://127.0.0.1:4123${registrationPath}`, expect.objectContaining({
+      redirect: 'error', headers: expect.objectContaining({ authorization: 'Bearer private-control' }),
+    }));
+    for (const unsafe of ['/feishu/config', '/feishu/device-registration?registrationId=invalid', `${registrationPath}&redirect=https://example.com`, '/channels/../health']) {
+      await expect(manager.requestControlApi('GET', unsafe)).rejects.toThrow('channel control route is not allowed');
+    }
+  });
+
+  it('通道配对通过 manager 内部控制令牌访问 loopback，公开端点仍不泄露令牌', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: true,
+      data: { pairingId: 'pair_1234567890abcdef12345678' },
+      error: null,
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    const discovered = {
+      ...MAIN_ENDPOINT,
+      controlToken: 'discovered-control-token',
+    };
+    const mod = {
+      ...discoveredMainModule(),
+      readEndpointRecord: vi.fn(() => discovered),
+    } as unknown as Awaited<ReturnType<ServerManagerDependencies['loadOttoServer']>>;
+    const manager = new ServerManager({
+      dependencies: dependencies({
+        loadOttoServer: async () => mod,
+        fetchImpl: fetchImpl as typeof fetch,
+      }),
+    });
+
+    const ensured = await manager.ensure();
+    const response = await manager.requestControlApi(
+      'POST',
+      '/channels/pairings',
+      { provider: 'wecom' },
+    );
+
+    expect(ensured.endpoint).not.toHaveProperty('controlToken');
+    expect(response).toEqual({
+      ok: true,
+      data: { pairingId: 'pair_1234567890abcdef12345678' },
+      error: null,
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:4123/channels/pairings',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          authorization: 'Bearer discovered-control-token',
+          'content-type': 'application/json',
+        }),
+        body: JSON.stringify({ provider: 'wecom' }),
+      }),
+    );
+  });
+
+  it('控制 API 拒绝非通道路由，且旧 server 缺少控制令牌时诚实返回 null', async () => {
+    const fetchImpl = vi.fn();
+    const manager = new ServerManager({
+      dependencies: dependencies({
+        loadOttoServer: async () => discoveredMainModule(),
+        fetchImpl: fetchImpl as typeof fetch,
+      }),
+    });
+    await manager.ensure();
+
+    await expect(manager.requestControlApi('GET', '/health')).rejects.toThrow(
+      'channel control route is not allowed',
+    );
+    await expect(manager.requestControlApi('GET', '/channels/installations'))
+      .resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('内嵌 server 直接应用中心认证账号，且 renderer 端点不泄露 control token', async () => {
     const setAuthenticatedEnterpriseAccount = vi.fn();
     const mod = embeddedMainModule(setAuthenticatedEnterpriseAccount);

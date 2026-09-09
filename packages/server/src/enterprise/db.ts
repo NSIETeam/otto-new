@@ -1,3 +1,8 @@
+import { localMarketAcceptance } from '../modules/park_services/flea_market/fleaMarketReadiness.js';
+import { carpoolRuntimeConfig } from '../modules/park_carpool/parkCarpoolConfig.js';
+import { E2EE_PRODUCTION_RELEASE_POLICY } from './e2eeProductionReleasePolicy.js';
+import { createMarketSqliteRuntime } from '../modules/park_services/flea_market/fleaMarketSqliteRuntime.js';
+import { PARK_FLEA_MARKET_SCHEMA_CONTRIBUTOR } from '../modules/park_services/flea_market/fleaMarketSchema.js';
 /**
  * @license Copyright 2026 Felix SPDX-License-Identifier: Apache-2.0
  *
@@ -23,7 +28,7 @@ import {
 } from '../modules/data_platform/index.js';
 import { createAuthorizationComposition } from '../modules/authorization/index.js';
 import { createSqlitePolicyStore } from '../modules/policy_intelligence/policyStore.js';
-import { createSqliteRecruitmentJobStore, RecruitmentJobService, createSqliteWorkableConnectionStore, WorkableConnectionService, createWorkableOAuthClient, createWorkableSourceRuntime, createSqliteRecruitmentSourceStore, deleteSqliteRecruitmentSearchesForAccount } from '../modules/recruitment_intelligence/index.js';
+import { createSqliteRecruitmentJobStore, RecruitmentJobService, createSqliteWorkableConnectionStore, WorkableConnectionService, createWorkableOAuthClient, createWorkableSourceRuntime, createSqliteRecruitmentSourceStore, deleteSqliteRecruitmentSearchesForAccount, revokeSqliteWorkableConnectionsForAccount } from '../modules/recruitment_intelligence/index.js';
 import { startRecruitmentCacheMaintenance } from '../modules/recruitment_intelligence/recruitmentCacheMaintenance.js';
 import { RecruitmentIntakeWorker, type RecruitmentSourceRuntime } from '../modules/recruitment_intelligence/index.js';
 import { RecruitmentBackgroundWorker, resolveRecruitmentBackgroundModel, RecruitmentUsageLedger, createSqliteRecruitmentUsageStore } from '../modules/recruitment_intelligence/index.js';
@@ -84,6 +89,7 @@ import {
 } from '../modules/park_services/index.js';
 import {
   createAmapParkCarpoolProvider,
+  resolveAmapWebServiceKey,
   createParkCarpoolService,
   createParkCarpoolSqliteStore,
   PARK_CARPOOL_SCHEMA_CONTRIBUTOR,
@@ -303,6 +309,7 @@ function initSchema(d: Database): void {
     }),
     PARK_RESOURCE_SCHEMA_CONTRIBUTOR,
     PARK_CARPOOL_SCHEMA_CONTRIBUTOR,
+    PARK_FLEA_MARKET_SCHEMA_CONTRIBUTOR,
     createCreditsSchemaContributor({
       defaultOrganizationId: DEFAULT_ORGANIZATION_ID,
     }),
@@ -968,9 +975,7 @@ export const {
   createAccountEntityId: (prefix: 'acc' | 'emp') => `${prefix}_${randomUUID()}`,
   deleteAccountIntegrationData(database, organizationId, accountId) {
     deleteSqliteRecruitmentSearchesForAccount(database, fieldCipher, organizationId, accountId);
-    if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='enterprise_workable_connections_v1'").get()) {
-      database.prepare("UPDATE enterprise_workable_connections_v1 SET revision=revision+1,payload='' WHERE organization_id=? AND account_id=?").run(organizationId, accountId);
-    }
+    revokeSqliteWorkableConnectionsForAccount(database, organizationId, accountId);
   },
   createDeletionPasswordHash: () =>
     passwordHash(randomBytes(32).toString('base64url')),
@@ -1294,6 +1299,16 @@ export function startPolicyIntelligenceRuntime(registry: RecurringTaskRegistry):
   return startPolicyRuntime(getPolicyIntelligenceService(), policyIntelligenceStore, registry);
 }
 
+let fleaMarketApplication: ReturnType<typeof createMarketSqliteRuntime> | undefined;
+export function getFleaMarketApplication() {
+  return fleaMarketApplication ??= createMarketSqliteRuntime({
+    database: getDB(), cipher: fieldCipher, objects: attachmentObjectStore,
+    enterpriseEnabled: organizationId => getOrganizationFeatures(organizationId).park_service,
+    localAcceptance: localMarketAcceptance(DATA_DIR),
+    requiresMls: () => E2EE_PRODUCTION_RELEASE_POLICY.enabled,
+  });
+}
+
 const parkCarpoolStore = createParkCarpoolSqliteStore({
   db: getDB,
   fieldCipher,
@@ -1309,35 +1324,42 @@ const parkCarpoolStore = createParkCarpoolSqliteStore({
       displayName: account.name,
       parkId: park?.status === 'active' ? park.id : null,
       active: account.status === 'active' && organization?.status === 'active',
+      parkAdmin: Boolean(account.isAdmin && park?.adminOrganizationId === account.organizationId),
       parkServiceEnabled:
         getOrganizationFeatures(account.organizationId).park_service,
     };
   },
 });
 
-const configuredCarpoolOverlap = Number(process.env.OTTO_PARK_CARPOOL_MINIMUM_OVERLAP || 0.35);
 const parkCarpoolService = createParkCarpoolService({
+    config: carpoolRuntimeConfig,
   store: parkCarpoolStore,
   mapProvider: createAmapParkCarpoolProvider({
-    key: process.env.OTTO_AMAP_WEB_SERVICE_KEY,
+    key: resolveAmapWebServiceKey(),
   }),
   createId: (accountId, travelDate) => `carpool_intent_${createHash('sha256')
     .update(`${accountId}\0${travelDate}`, 'utf8')
     .digest('hex')
     .slice(0, 32)}`,
-  minimumOverlap: Number.isFinite(configuredCarpoolOverlap)
-    && configuredCarpoolOverlap >= 0
-    && configuredCarpoolOverlap <= 1
-    ? configuredCarpoolOverlap
-    : 0.35,
+  minimumOverlap: carpoolRuntimeConfig.minimumOverlap,
 });
 
 export const {
+  executeSignedTransport: executeSignedParkCarpoolTransport,
+  executeTransport: executeParkCarpoolTransport,
+  maintain: maintainParkCarpool,
+  deleteData: deleteParkCarpoolData,
+  routePreview: getParkCarpoolRoutePreview,
+  reversePlace: reverseParkCarpoolPlace,
+  staticMap: getParkCarpoolStaticMap,
+  getWorkflow: getParkCarpoolWorkflow,
+  executeWorkflow: executeParkCarpoolWorkflow,
   getState: getParkCarpoolState,
   searchPlaces: searchParkCarpoolPlaces,
   publishIntent: publishParkCarpoolIntent,
   stopIntent: stopParkCarpoolIntent,
   refreshMatches: refreshParkCarpoolMatches,
+  confirmIntent: confirmParkCarpoolIntent,
 } = parkCarpoolService;
 
 export {

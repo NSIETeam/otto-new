@@ -26,7 +26,7 @@ const pairing: PairingSession = {
   pollAfterMs: 2_000,
 };
 
-function fakeConnector(): ChannelConnectorV1 {
+function fakeConnector(ownerProviderUserId?: string): ChannelConnectorV1 {
   const installation = {
     installationId: 'channel_feishu_0123456789abcdef01234567',
     provider: 'feishu' as const,
@@ -35,6 +35,7 @@ function fakeConnector(): ChannelConnectorV1 {
     botName: 'Otto',
     grantedScopes: ['im:message'],
     connectedAtMs: Date.now(),
+    ...(ownerProviderUserId ? { ownerProviderUserId } : {}),
   };
   return {
     listInstallations: vi.fn(() => [installation]),
@@ -115,6 +116,59 @@ describe('channel pairing REST routes', () => {
     });
   });
 
+  it('rechecks the current local user and active channel binding before executing approved remote work', async () => {
+    const workspace = new ProductWorkspaceStore(path.join(userDir, 'execution-workspace.json'));
+    const userId = workspace.snapshot().context.userId;
+    await start({ feishu: fakeConnector() }, workspace);
+    const execution = server as unknown as {
+      executeChannelWorkflowStep(input: unknown): Promise<unknown>;
+      channelIdentityRegistry: { resolve: ReturnType<typeof vi.fn> };
+    };
+    const resolveBinding = vi.spyOn(execution.channelIdentityRegistry, 'resolve');
+    const input = { step: { stepId: 'execute-request', kind: 'agent', input: {
+      request: '检查当前任务', origin: {
+        provider: 'feishu', installationId: 'channel_feishu_0123456789abcdef01234567',
+        tenantId: 'tenant-1', providerUserId: 'ou_user_1', userId: 'different-user',
+      },
+    } } };
+    await expect(execution.executeChannelWorkflowStep(input)).rejects.toThrow('remote channel task owner changed');
+    input.step.input.origin.userId = userId;
+    resolveBinding.mockResolvedValueOnce({ canonicalUserId: userId, active: false });
+    await expect(execution.executeChannelWorkflowStep(input)).rejects.toThrow('remote channel identity binding is no longer active');
+    resolveBinding.mockResolvedValueOnce({ canonicalUserId: userId, active: true });
+    await expect(execution.executeChannelWorkflowStep(input)).resolves.toMatchObject({ mock: true, sessionId: expect.any(String) });
+  });
+
+  it.each(['load', 'save'] as const)('does not continue cancelled Feishu authorization after pending credential %s', async (phase) => {
+    await start();
+    let active = true;
+    let release!: () => void;
+    const paused = new Promise<void>((resolve) => { release = resolve; });
+    const load = vi.fn(async () => { if (phase === 'load') await paused; return null; });
+    const save = vi.fn(async () => { if (phase === 'save') await paused; });
+    const stopGateway = vi.fn(async () => ({ ok: true }));
+    const startGateway = vi.fn(async () => ({ ok: true }));
+    const target = server as unknown as {
+      credentialsStore: unknown;
+      runtimeFeishuStop: unknown;
+      runtimeFeishuStart: unknown;
+      runtimeFeishuSaveConfig(body: unknown, assertActive: () => void): Promise<unknown>;
+    };
+    target.credentialsStore = { load, save, clear: vi.fn() };
+    target.runtimeFeishuStop = stopGateway;
+    target.runtimeFeishuStart = startGateway;
+    const saving = target.runtimeFeishuSaveConfig({
+      appId: 'cli_cancelled', appSecret: 'secret', domain: 'feishu', ownerOpenId: 'ou_owner',
+    }, () => { if (!active) throw new Error('registration ended'); });
+    await vi.waitFor(() => expect(phase === 'load' ? load : save).toHaveBeenCalled());
+    active = false;
+    release();
+    await expect(saving).rejects.toThrow('registration ended');
+    if (phase === 'load') expect(save).not.toHaveBeenCalled();
+    expect(stopGateway).not.toHaveBeenCalled();
+    expect(startGateway).not.toHaveBeenCalled();
+  });
+
   it('delegates begin, status, install and cancellation without local admin bypass', async () => {
     const connector = fakeConnector();
     const { baseUrl, token } = await start({ feishu: connector });
@@ -174,6 +228,78 @@ describe('channel pairing REST routes', () => {
       pairing.pairingId,
       { installationPublicKey: 'public-key', signature: 'A'.repeat(86) },
     );
+    expect(connector.denyPairing).toHaveBeenCalledOnce();
+  });
+
+  it('binds the scanning provider identity to the local user who initiated installation', async () => {
+    const workspace = new ProductWorkspaceStore(path.join(userDir, 'owner-workspace.json'));
+    const canonicalUserId = workspace.snapshot().context.userId;
+    const connector = fakeConnector('ou_scanner_1');
+    const { baseUrl, token } = await start({ feishu: connector }, workspace);
+    const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    await fetch(`${baseUrl}/channels/pairings`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        provider: 'feishu', installationPublicKey: 'public-key', requestedScopes: ['im:message'],
+      }),
+    });
+    const installed = await fetch(
+      `${baseUrl}/channels/pairings/${pairing.pairingId}/install`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ installationPublicKey: 'public-key', signature: 'A'.repeat(86) }),
+      },
+    );
+    expect(installed.status).toBe(200);
+
+    const identities = await fetch(
+      `${baseUrl}/channels/installations/channel_feishu_0123456789abcdef01234567/identities`,
+      { headers },
+    );
+    expect(await identities.json()).toMatchObject({
+      ok: true,
+      data: [{
+        providerUserId: 'ou_scanner_1',
+        canonicalUserId,
+        approvedBy: canonicalUserId,
+        active: true,
+        revision: 1,
+      }],
+    });
+  });
+
+  it.each(['begin', 'install'] as const)('rejects an account change while channel %s is pending', async (phase) => {
+    const workspace = new ProductWorkspaceStore(path.join(userDir, 'changing-owner-workspace.json'));
+    const connector = fakeConnector('ou_scanner_1');
+    const { baseUrl, token } = await start({ feishu: connector }, workspace);
+    const original = workspace.snapshot();
+    const snapshot = vi.spyOn(workspace, 'snapshot');
+    let finishBegin!: () => void;
+    if (phase === 'begin') vi.mocked(connector.beginPairing).mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { finishBegin = resolve; });
+      return pairing;
+    });
+    const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    const begun = fetch(`${baseUrl}/channels/pairings`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ provider: 'feishu', installationPublicKey: 'public-key', requestedScopes: ['im:message'] }),
+    });
+    await vi.waitFor(() => expect(connector.beginPairing).toHaveBeenCalled());
+    if (phase === 'install') expect((await begun).status).toBe(201);
+    snapshot.mockReturnValue({ ...original, context: { ...original.context, userId: 'new-user' } });
+    if (phase === 'begin') {
+      finishBegin();
+      expect((await begun).status).toBe(400);
+    } else {
+      const response = await fetch(`${baseUrl}/channels/pairings/${pairing.pairingId}/install`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ installationPublicKey: 'public-key', signature: 'A'.repeat(86) }),
+      });
+      expect(response.status).toBe(409);
+      expect(connector.completeInstallation).not.toHaveBeenCalled();
+    }
     expect(connector.denyPairing).toHaveBeenCalledOnce();
   });
 
@@ -264,7 +390,7 @@ describe('channel pairing REST routes', () => {
       'content-type': 'application/json',
     };
     const bound = await fetch(url, { method: 'POST', headers, body });
-    expect(bound.status).toBe(200);
+    expect(bound.status, await bound.clone().text()).toBe(200);
     const boundPayload = await bound.json() as { data: { approvedBy: string } };
     expect(boundPayload).toMatchObject({
       ok: true,
@@ -327,6 +453,7 @@ describe('channel pairing REST routes', () => {
     const flushMilestones = vi.fn(async () => undefined);
     const platform = {
       connectors: { feishu: connector },
+      startInstalled: vi.fn(async () => []),
       stopAll,
       milestoneInputVersion,
       flushMilestones,

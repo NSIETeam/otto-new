@@ -1,0 +1,60 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolService.test.ts (13 tests | 1 failed) 32ms
+   ✓ createParkCarpoolService > upserts one daily intent and plans the route on the server 16ms
+   ✓ createParkCarpoolService > bounds a provider route before persistence and matching 2ms
+   ✓ createParkCarpoolService > preserves a short detour between sparse sampling indices 3ms
+   × createParkCarpoolService > preserves a collinear reversal including duplicate provider points 5ms
+     → expected [ …(2) ] to deeply equal [ …(4) ]
+   ✓ createParkCarpoolService > rejects malformed provider geometry without writing an intent 1ms
+   ✓ createParkCarpoolService > fails closed for an unknown, disabled, or unbound principal 0ms
+   ✓ createParkCarpoolService > returns multiple privacy-safe matches and only lets the owner stop an intent 2ms
+   ✓ createParkCarpoolService > treats a stale active record as expired and never matches it 0ms
+   ✓ createParkCarpoolService > fails closed when a stored active intent has an invalid expiry 0ms
+   ✓ publish race and date regressions > rejects a departure outside the selected Shanghai date before planning 0ms
+   ✓ publish race and date regressions > revalidates identity after planning 0ms
+   ✓ publish race and date regressions > does not revive an intent stopped during planning 1ms
+   ✓ only an explicit confirmation renews freshness and cannot restart stopped intents 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolService.test.ts > createParkCarpoolService > preserves a collinear reversal including duplicate provider points
+AssertionError: expected [ …(2) ] to deeply equal [ …(4) ]
+
+- Expected
++ Received
+
+@@ -3,16 +3,8 @@
+      "latitude": 40,
+      "longitude": 116,
+    },
+    {
+      "latitude": 40,
+-     "longitude": 116.00117398450341,
+-   },
+-   {
+-     "latitude": 40,
+-     "longitude": 116.0005869922517,
+-   },
+-   {
+-     "latitude": 40,
+      "longitude": 116.0023479690068,
+    },
+  ]
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolService.test.ts:138:34
+    136|     provider.planDrivingRoute.mockResolvedValueOnce({ ...route, polyli…
+    137|     const saved = await service.publishIntent('self', publishInput);
+    138|     expect(saved.route.polyline).toEqual([polyline[0], polyline[1], po…
+       |                                  ^
+    139|   });
+    140|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 passed (13)
+   Start at  09:24:23
+   Duration  252ms (transform 52ms, setup 0ms, collect 51ms, tests 32ms, environment 0ms, prepare 44ms)

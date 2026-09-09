@@ -1,0 +1,13 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new-carpool/packages/desktop
+
+ ✓ src/main/park-market-links.test.ts (1 test) 5ms
+ ✓ src/main/park-market.test.ts (1 test) 6ms
+ ✓ src/renderer/components/ParkMarketModel.test.ts (1 test) 12ms
+ ✓ src/renderer/components/MarketImageViewer.test.tsx (1 test) 72ms
+ ✓ src/renderer/components/ParkMarketDialog.test.tsx (2 tests) 103ms
+
+ Test Files  5 passed (5)
+      Tests  6 passed (6)
+   Start at  12:00:17
+   Duration  893ms (transform 182ms, setup 443ms, collect 301ms, tests 198ms, environment 1.75s, prepare 297ms)

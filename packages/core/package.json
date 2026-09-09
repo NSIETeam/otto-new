@@ -8,6 +8,11 @@
   },
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./recurring-tasks": { "types": "./dist/src/recurringTasks.d.ts", "default": "./dist/src/recurringTasks.js" },
+    "./*": "./*"
+  },
   "scripts": {
     "build": "node ../../scripts/build_package.js",
     "lint": "eslint . --ext .ts,.tsx",

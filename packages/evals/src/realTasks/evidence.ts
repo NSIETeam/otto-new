@@ -90,8 +90,20 @@ export async function confinedFile(
   requested: string,
   mustExist = true,
 ) {
+  // This function also grants synthetic approval to the real native writer,
+  // which consumes the raw parameter. Never erase a link-bearing '..' segment.
+  if (/(?:^|[\\/])\.\.(?:[\\/]|$)/u.test(requested))
+    throw new Error('Parent traversal is not an auditable fixture target');
   const base = await realpath(root);
-  const target = path.resolve(base, requested);
+  // An absolute spelling under the selected root may contain an OS ancestor
+  // alias (macOS /var). Map only that root; never resolve descendant links.
+  const selected = path.resolve(root);
+  const selectedRelative = path.relative(selected, path.resolve(selected, requested));
+  const insideSelected = selectedRelative !== '..' &&
+    !selectedRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(selectedRelative);
+  const target = insideSelected
+    ? path.resolve(base, selectedRelative)
+    : path.resolve(base, requested);
   const relative = path.relative(base, target);
   if (
     !relative ||

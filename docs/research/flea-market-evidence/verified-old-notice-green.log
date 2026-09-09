@@ -1,0 +1,10 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ✓ src/renderer/components/MarketNotifications.test.tsx (3 tests) 121ms
+ ✓ src/renderer/components/ParkMarketDialog.test.tsx (4 tests) 145ms
+
+ Test Files  2 passed (2)
+      Tests  7 passed (7)
+   Start at  12:37:54
+   Duration  730ms (transform 106ms, setup 143ms, collect 182ms, tests 267ms, environment 424ms, prepare 81ms)

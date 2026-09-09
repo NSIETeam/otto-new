@@ -1,3 +1,8 @@
+import { ModuleReadProvider } from './state/ModuleReadProvider.js';
+import { useMarketLinks } from './useMarketLinks.js';
+import {CarpoolConfirmation} from './components/CarpoolConfirmation.js';
+import { MarketNotifications, useMarketNotifications } from './components/MarketNotifications.js';
+import { ParkMarketDialog } from './components/ParkMarketDialog.js';
 /**
  * @license
  * Copyright 2025 Otto
@@ -272,7 +277,11 @@ export function App(): React.JSX.Element {
   );
 }
 
-function OttoWorkspaceApp({
+function OttoWorkspaceApp(props: React.ComponentProps<typeof WorkspaceContent>): React.JSX.Element {
+  return <ModuleReadProvider><WorkspaceContent {...props} /></ModuleReadProvider>;
+}
+
+function WorkspaceContent({
   account,
   serverUrl,
   onJoinEnterprise,
@@ -316,11 +325,14 @@ function OttoWorkspaceApp({
       .map((source) => source.source.label),
     [recruitmentSourceStates],
   );
+  const [carpoolUnreadCount,setCarpoolUnreadCount]=useState(0);
+  useEffect(()=>{setCarpoolUnreadCount(0);return window.otto.onParkCarpoolChanged?.(event=>{if(event.accountId===account.id){setCarpoolUnreadCount(event.unreadCount);window.dispatchEvent(new Event('otto-carpool-changed'));}});},[account.id]);
   const [enterpriseUnreadCounts, setEnterpriseUnreadCounts] = useState<EnterpriseUnreadCounts>({});
   const [parkTicketUnreadCounts, setParkTicketUnreadCounts] = useState<ParkTicketUnreadCounts>({
     actionableCount: 0,
     creatorUpdateCount: 0,
   });
+  const { postSystemNote } = actions;
   const moduleActionDraftsRef = useRef(new ModuleActionDraftRegistry());
   const parkServiceActionDraftsRef = useRef(new ParkServiceActionDraftRegistry());
   const parkConversationCoordinatorRef = useRef(new ParkConversationCoordinator());
@@ -342,6 +354,7 @@ function OttoWorkspaceApp({
     version: 1,
     accountId: account.id,
     savedAt: now,
+    parkCarpool: parkCarpoolConversationRef.current.snapshot(`${account.organizationId}:${account.id}`, now),
     repair: moduleActionDraftsRef.current.snapshot(account.id, now),
     parkService: parkServiceActionDraftsRef.current.snapshot(account.id, now),
     parkQueue: parkConversationCoordinatorRef.current.snapshot(conversationDraftVaultScope, now),
@@ -349,13 +362,14 @@ function OttoWorkspaceApp({
     recruitment: recruitmentActionDraftsRef.current.snapshot(account.id, now),
     workspaceCapability: workspaceCapabilityDraftsRef.current.snapshot(account.id),
     ticketLinks: conversationTicketLinksRef.current.snapshot(now),
-  }), [account.id, conversationDraftVaultScope]);
+  }), [account.id, account.organizationId, conversationDraftVaultScope]);
   useEffect(() => {
     let cancelled = false;
     setConversationDraftVaultReady(null);
     moduleActionDraftsRef.current = new ModuleActionDraftRegistry();
     parkServiceActionDraftsRef.current = new ParkServiceActionDraftRegistry();
     parkConversationCoordinatorRef.current = new ParkConversationCoordinator();
+    parkCarpoolConversationRef.current = new ParkCarpoolConversationRegistry();
     if (typeof window.otto.conversationDraftLoad !== 'function') {
       // 兼容升级过程中短暂存在的旧 preload；不写 localStorage 明文降级。
       return () => { cancelled = true; };
@@ -372,6 +386,7 @@ function OttoWorkspaceApp({
             throw new Error('操作草稿存档版本或账号范围不匹配');
           }
           const now = Date.now();
+          parkCarpoolConversationRef.current.restore(`${account.organizationId}:${account.id}`, snapshot.parkCarpool, now);
           moduleActionDraftsRef.current.restore(account.id, snapshot.repair, now);
           parkServiceActionDraftsRef.current.restore(account.id, snapshot.parkService, now);
           parkConversationCoordinatorRef.current.restore(conversationDraftVaultScope, snapshot.parkQueue, now);
@@ -387,10 +402,10 @@ function OttoWorkspaceApp({
         if (cancelled) return;
         const message = error instanceof Error ? error.message : String(error);
         conversationDraftVaultWarningRef.current = message;
-        actions.postSystemNote(`操作草稿安全恢复失败：${message}。为避免覆盖原存档，本次不会自动写入或删除该存档。`);
+        postSystemNote(`操作草稿安全恢复失败：${message}。为避免覆盖原存档，本次不会自动写入或删除该存档。`);
       });
     return () => { cancelled = true; };
-  }, [account.id, actions, conversationDraftVaultScope]);
+  }, [account.id, account.organizationId, postSystemNote, conversationDraftVaultScope]);
   useEffect(() => {
     if (conversationDraftVaultReady !== conversationDraftVaultScope) return;
     const timer = window.setTimeout(() => {
@@ -398,6 +413,7 @@ function OttoWorkspaceApp({
       const snapshot = captureConversationDrafts(now);
       const draftCount = snapshot.repair.length
         + snapshot.parkQueue.length
+        + snapshot.parkCarpool.length
         + snapshot.parkService.length
         + snapshot.customerModule.length
         + snapshot.recruitment.length
@@ -410,13 +426,14 @@ function OttoWorkspaceApp({
         const message = error instanceof Error ? error.message : String(error);
         if (conversationDraftVaultWarningRef.current === message) return;
         conversationDraftVaultWarningRef.current = message;
-        actions.postSystemNote(`操作草稿安全保存失败：${message}。当前会话仍可继续，但重启后可能无法恢复草稿。`);
+        postSystemNote(`操作草稿安全保存失败：${message}。当前会话仍可继续，但重启后可能无法恢复草稿。`);
       });
     }, 250);
     return () => window.clearTimeout(timer);
   }, [
     account.id,
-    actions,
+    postSystemNote,
+    account.organizationId,
     conversationDraftRevision,
     conversationDraftVaultReady,
     conversationDraftVaultScope,
@@ -1100,7 +1117,16 @@ function OttoWorkspaceApp({
   const [mainView, setMainView] = useState<MainView>('chat');
   const policyMessages = usePolicyInbox(policyScopeId, edition === 'enterprise' && account.accountType !== 'personal' && !internalAdminPreview, mainView);
   const [openedPolicyId, setOpenedPolicyId] = useState<string>();
-  const allEnterpriseUnreadCounts = { ...enterpriseUnreadCounts, 'enterprise:policy:inbox': policyMessages.inbox.unreadCount };
+  const [marketRecordsOpen, setMarketRecordsOpen] = useState(false);
+  const marketLink = useMarketLinks(!!account && !internalAdminPreview);
+  const marketDraftScope = useMemo(() => ({ server: serverUrl || 'local', organization: account.organizationId, account: account.id }), [serverUrl, account.organizationId, account.id]);
+  const marketNotifications = useMarketNotifications(!!account.id && !internalAdminPreview, JSON.stringify(marketDraftScope));
+  const allEnterpriseUnreadCounts = {
+    ...enterpriseUnreadCounts,
+    'enterprise:policy:inbox': policyMessages.inbox.unreadCount,
+    'enterprise:market': marketNotifications.state.unread,
+    'enterprise:carpool': carpoolUnreadCount,
+  };
   const workspacePreferenceScope = useMemo(() => ({
     serverUrl,
     organizationId: account.organizationId,
@@ -1160,6 +1186,8 @@ function OttoWorkspaceApp({
     requestId: number;
   }>();
   const openNotificationSession = useCallback((sessionId: string): void => {
+    if (sessionId === 'enterprise:carpool') {setMainView('inbox');return;}
+    if (sessionId === 'enterprise:market') { setMainView('inbox'); return; }
     const federationPrefix = 'enterprise:federation:';
     if (sessionId.startsWith(federationPrefix)) {
       const contactId = sessionId.slice(federationPrefix.length);
@@ -1330,6 +1358,9 @@ function OttoWorkspaceApp({
     ? state.messages[state.activeSessionId] ?? []
     : [];
 
+  // The actions container is recreated on render; depend on its stable callback.
+  const { postLocalChatMessage } = actions;
+
   useEffect(() => {
     if (!effectiveParkService) return;
     let cancelled = false;
@@ -1339,7 +1370,7 @@ function OttoWorkspaceApp({
       if (!sessionId) return;
       const pending = conversationTicketLinksRef.current.pendingForSession(sessionId);
       for (const update of pending) {
-        actions.postLocalChatMessage('assistant', update.message);
+        postLocalChatMessage('assistant', update.message);
         conversationTicketLinksRef.current.markDelivered(update.ticketId, sessionId);
       }
       if (pending.length > 0) setConversationDraftRevision((revision) => revision + 1);
@@ -1374,7 +1405,7 @@ function OttoWorkspaceApp({
       cancelled = true;
       stopPolling();
     };
-  }, [actions, activeSession?.sessionId, effectiveParkService]);
+  }, [postLocalChatMessage, activeSession?.sessionId, effectiveParkService]);
 
   // Composer 也可把当前会话切换到新目录；会话路径变化后同步最近项目，
   // 这样即使随后删掉该项目最后一个会话，项目入口仍会保留在侧栏。
@@ -1452,7 +1483,7 @@ function OttoWorkspaceApp({
             stop: window.otto.enterpriseParkCarpoolStop,
             postMessage: actions.postLocalChatMessage,
           });
-          if (carpoolHandled) return true;
+          if (carpoolHandled) { setConversationDraftRevision(revision => revision + 1); return true; }
         }
         const context = JSON.stringify([conversationDraftVaultScope, sessionId, true]);
         const isCurrent = (): boolean => parkConversationContextRef.current === context;
@@ -1917,6 +1948,19 @@ function OttoWorkspaceApp({
     handleCreateCustomAgent(draft);
   };
 
+  useEffect(()=>{const deleted=()=>{parkCarpoolConversationRef.current.clearScope(`${account.organizationId}:${account.id}`);setConversationDraftRevision(value=>value+1);setModuleModal(current=>current?.kind==='park-carpool'?null:current);};window.addEventListener('otto-carpool-data-deleted',deleted);return()=>window.removeEventListener('otto-carpool-data-deleted',deleted);},[account.id,account.organizationId]);
+  const [pendingCarpoolRemoval,setPendingCarpoolRemoval]=useState<{layout:ModuleWorkspaceLayout;visible:boolean}|null>(null);
+  const updateModuleLayout=(next:ModuleWorkspaceLayout,visible=false):void=>{
+    const before=visible?moduleWorkspace.visibleLayout:moduleWorkspace.layout;
+    if(before.groups.some(group=>group.moduleIds.includes('park-carpool'))&&!next.groups.some(group=>group.moduleIds.includes('park-carpool'))){
+      void window.otto.enterpriseParkCarpoolWorkflowGet().then(workflow=>{
+        if(workflow.hasActiveIntent||workflow.myGroup)setPendingCarpoolRemoval({layout:next,visible});
+        else if(visible)moduleWorkspace.setVisibleLayout(next);else moduleWorkspace.setLayout(next);
+      }).catch(()=>setPendingCarpoolRemoval({layout:next,visible}));return;
+    }
+    if(visible)moduleWorkspace.setVisibleLayout(next);else moduleWorkspace.setLayout(next);
+  };
+
   const handleDeleteCustomAgent = (agentId: string): void => {
     persistCustomAgents(customAgents.filter((agent) => agent.id !== agentId));
     const moduleId = `agent-${agentId}`;
@@ -2116,6 +2160,7 @@ function OttoWorkspaceApp({
         recentWorkspacePaths={workspaceDirectories.recentPaths}
         onOpenHub={() => openHub('prefs')}
         onOpenAccounts={() => setMainView('accounts')}
+        onOpenMarketRecords={() => setMarketRecordsOpen(true)}
         onNavigate={(view) => {
           if (view === 'hub') openHub('prefs');
           else setMainView(view);
@@ -2171,6 +2216,9 @@ function OttoWorkspaceApp({
           policyInboxError={policyMessages.error}
           onPolicyRead={policyMessages.read}
           onOpenPolicy={(id) => { setOpenedPolicyId(id); openModuleModal({ kind: 'policy-intelligence' }); }}
+          key={JSON.stringify(marketDraftScope)}
+          marketNotifications={<MarketNotifications state={marketNotifications.state} error={marketNotifications.error} onRead={marketNotifications.markRead} onLoadMore={marketNotifications.loadMore} loadingMore={marketNotifications.loadingMore} onOpen={() => setMarketRecordsOpen(true)} />}
+          onOpenCarpool={() => setModuleModal({ kind: 'park-carpool' })}
           enterpriseAccount={account}
           effectiveDirectMessages={
             effectiveDirectMessages
@@ -2253,7 +2301,7 @@ function OttoWorkspaceApp({
             onUnavailableModule={setUnavailableModule}
             onOpenMarketplace={(groupId) => openModuleModal({ kind: 'marketplace', groupId })}
             onAddGroup={() => openModuleModal({ kind: 'group-catalog' })}
-            onLayoutChange={moduleWorkspace.setVisibleLayout}
+            onLayoutChange={next=>updateModuleLayout(next,true)}
           />
         </section>
       ) : (
@@ -2356,7 +2404,7 @@ function OttoWorkspaceApp({
               onUnavailableModule={setUnavailableModule}
               onOpenMarketplace={(groupId) => openModuleModal({ kind: 'marketplace', groupId })}
               onAddGroup={() => openModuleModal({ kind: 'group-catalog' })}
-              onLayoutChange={moduleWorkspace.setVisibleLayout}
+              onLayoutChange={next=>updateModuleLayout(next,true)}
             />
           ) : null}
         </div>
@@ -2368,7 +2416,7 @@ function OttoWorkspaceApp({
         targetGroupId={moduleModal?.kind === 'marketplace' ? moduleModal.groupId : ''}
         layout={moduleWorkspace.layout}
         modules={moduleCapabilities.modules}
-        onConfirm={(next) => { moduleWorkspace.setLayout(next); setModuleModal(null); }}
+        onConfirm={(next) => { updateModuleLayout(next); setModuleModal(null); }}
         onClose={() => setModuleModal(null)}
         onManageExperts={() => openModuleModal({ kind: 'custom-expert' })}
         onDeleteExpert={handleDeleteCustomAgent}
@@ -2398,7 +2446,7 @@ function OttoWorkspaceApp({
         layout={moduleWorkspace.layout}
         modules={moduleCapabilities.modules}
         parkIdentity={moduleCapabilities.parkIdentity}
-        onConfirm={(next) => { moduleWorkspace.setLayout(next); setModuleModal(null); }}
+        onConfirm={(next) => { updateModuleLayout(next); setModuleModal(null); }}
         onClose={() => setModuleModal(null)}
       />
       <ConfirmDialog
@@ -2422,6 +2470,8 @@ function OttoWorkspaceApp({
         seedProfile={policySeedProfile}
         onClose={() => setModuleModal(null)}
       />
+      {pendingCarpoolRemoval?<CarpoolConfirmation label="移除拼车入口" onCancel={()=>setPendingCarpoolRemoval(null)}><p>移除模块不会停止寻找、退出同行组或删除聊天。你仍可在“我的消息”的“当前同行状态”中管理，也可以从模块超市重新添加。</p><button type="button" autoFocus onClick={()=>setPendingCarpoolRemoval(null)}>保留入口</button><button type="button" onClick={()=>{const pending=pendingCarpoolRemoval;setPendingCarpoolRemoval(null);if(pending.visible)moduleWorkspace.setVisibleLayout(pending.layout);else moduleWorkspace.setLayout(pending.layout);}}>仅移除入口</button></CarpoolConfirmation>:null}
+      <ParkMarketDialog draftScope={marketDraftScope} open={marketRecordsOpen || !!marketLink.intent || moduleModal?.kind === 'park-flea-market'} accountId={account.id} initialView={moduleModal?.kind === 'park-flea-market' ? 'market' : 'mine'} initialListingId={marketLink.intent?.listingId} initialError={marketLink.intent?.error} onClose={() => { setMarketRecordsOpen(false); marketLink.clear(); if (moduleModal?.kind === 'park-flea-market') setModuleModal(null); moduleCapabilities.retry(); }} />
       <ParkCarpoolDialog
         key={`${moduleWorkspaceScopeKey}:park-carpool`}
         open={moduleModal?.kind === 'park-carpool'}

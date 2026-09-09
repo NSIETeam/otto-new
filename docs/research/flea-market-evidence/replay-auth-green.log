@@ -1,0 +1,11 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+(node:94338) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketPublication.test.ts (2 tests) 36ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  09:41:15
+   Duration  2.40s (transform 1.08s, setup 0ms, collect 2.22s, tests 36ms, environment 0ms, prepare 32ms)

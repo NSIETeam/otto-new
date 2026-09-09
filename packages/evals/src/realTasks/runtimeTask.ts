@@ -8,7 +8,7 @@ import {
   type CustomModelConfig,
   type ToolResult,
 } from 'otto-core';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
@@ -344,7 +344,7 @@ export async function executeRuntimeTask(options: RuntimeTaskOptions) {
               );
               approved = isCode(options.caseId)
                 ? path.basename(target) === CODE_FIXTURES[options.caseId].file
-                : target.startsWith(workspace + path.sep);
+                : target.startsWith((await realpath(workspace)) + path.sep);
               if (
                 typeof parameters?.content === 'string' &&
                 parameters.content.length > 128_000

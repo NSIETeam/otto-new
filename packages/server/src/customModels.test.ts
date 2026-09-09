@@ -48,6 +48,7 @@ beforeEach(() => {
   // 故用 stubEnv 隔离到临时目录，绝不碰真实 ~/.otto-user。
   vi.stubEnv('HOME', tmpHome);
   vi.stubEnv('USERPROFILE', tmpHome);
+  vi.stubEnv('OTTO_USER_DIR', '');
 });
 
 afterEach(() => {
@@ -56,6 +57,16 @@ afterEach(() => {
 });
 
 describe('customModelsFilePath', () => {
+  it('keeps model configuration and key references inside the explicit profile', () => {
+    const isolated = path.join(tmpHome, 'isolated');
+    vi.stubEnv('OTTO_USER_DIR', isolated);
+    saveCustomModel({ ...VALID_MODEL, apiKey: 'isolated-test-secret' });
+    expect(customModelsFilePath()).toBe(path.join(isolated, 'custom-models.json'));
+    const keyPath = loadCustomModels()[0].apiKey.match(/^\{file:(.+)\}$/)?.[1];
+    expect(keyPath?.startsWith(path.join(isolated, 'secrets') + path.sep)).toBe(true);
+    expect(fs.existsSync(path.join(tmpHome, '.otto-user'))).toBe(false);
+  });
+
   it('指向临时 HOME 下的 .otto-user/custom-models.json', () => {
     expect(customModelsFilePath()).toBe(
       path.join(tmpHome, '.otto-user', 'custom-models.json'),

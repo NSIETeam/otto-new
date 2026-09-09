@@ -256,7 +256,7 @@ const graphScenarios: DeterministicScenario[] = graphPrompts.flatMap(
       id: `adversarial-graph-${promptIndex + 1}-${adaptationIndex + 1}`,
       lane: 'recovery' as const,
       description:
-        'A failed dependency blocks delivery, then a bounded replan restores the graph and evidence.',
+        'A failed dependency blocks delivery until a bounded replan is resolved by evidence for that exact failure.',
       requiredEvidence: [
         'tool_trace' as const,
         'plan_revision' as const,
@@ -286,12 +286,15 @@ const graphScenarios: DeterministicScenario[] = graphPrompts.flatMap(
         ]);
         const blockedBeforeRecovery =
           !graph.markDelivered() && graph.validate().blockedNodeIds.length > 0;
+        const failureFingerprint = `replace-target-${promptIndex}-${adaptationIndex}`;
         graph.applyAdaptation({
           revision: 1,
           timestamp: 1_800_000_000_000 + promptIndex * 10 + adaptationIndex,
           ...adaptation,
           toolName: 'replace',
           attempt: 1,
+          failureFingerprint,
+          failedToolCallId: `failed-write-${promptIndex}`,
         });
         graph.observeTools([
           {
@@ -309,6 +312,14 @@ const graphScenarios: DeterministicScenario[] = graphPrompts.flatMap(
             evidenceId: `test-${promptIndex}`,
           },
         ]);
+        // Successful tool observations alone must not clear a recovery. The
+        // production tracker calls this only for native success tied to the
+        // exact failed operation (or its independently reconciled outcome).
+        const retryOnly = adaptation.action === 'retry_once';
+        const blocksUnresolvedRecovery = retryOnly || !graph.markDelivered();
+        graph.resolveRecoveries(['unrelated-target'], `test-${promptIndex}`);
+        const blocksUnrelatedEvidence = retryOnly || !graph.markDelivered();
+        graph.resolveRecoveries([failureFingerprint], `write-${promptIndex}`);
         const delivered = graph.markDelivered();
         const snapshot = graph.snapshot();
         const restored = TaskGraphCoordinator.restore(
@@ -318,6 +329,8 @@ const graphScenarios: DeterministicScenario[] = graphPrompts.flatMap(
         return {
           passed:
             blockedBeforeRecovery &&
+            blocksUnresolvedRecovery &&
+            blocksUnrelatedEvidence &&
             delivered &&
             snapshot.nodes.every((node) => node.status === 'completed') &&
             snapshot.nodes.find((node) => node.kind === 'verify')?.evidenceIds
@@ -326,7 +339,7 @@ const graphScenarios: DeterministicScenario[] = graphPrompts.flatMap(
           evidence: [
             {
               kind: 'tool_trace' as const,
-              summary: 'read/write/test evidence recorded',
+              summary: `read/write/test evidence recorded; unresolvedBlocked=${blocksUnresolvedRecovery}; unrelatedBlocked=${blocksUnrelatedEvidence}`,
             },
             {
               kind: 'plan_revision' as const,

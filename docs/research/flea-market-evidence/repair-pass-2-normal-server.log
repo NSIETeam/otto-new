@@ -1,0 +1,40 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:63954) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ integration/park-market/authenticated-flow.test.ts (1 test | 1 failed) 1119ms
+   × real enterprise login and membership authority drive cross-company publish / encrypted contact / reply / reserve / sale HTTP flow 1119ms
+     → expected { …(4) } to match object { ready: true, …(1) }
+(2 matching properties omitted from actual)
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  integration/park-market/authenticated-flow.test.ts > real enterprise login and membership authority drive cross-company publish / encrypted contact / reply / reserve / sale HTTP flow
+AssertionError: expected { …(4) } to match object { ready: true, …(1) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "mode": "isolated-local-acceptance",
+-   "ready": true,
++   "ready": false,
+  }
+
+ ❯ integration/park-market/authenticated-flow.test.ts:77:31
+     75|   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', r…
+     76|   await runtime.initialize();
+     77|   expect(runtime.readiness()).toMatchObject({ready:true,mode:'isolated…
+       |                               ^
+     78|   const base = `http://127.0.0.1:${(server.address() as { port: number…
+     79|   const login = async (
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  21:45:03
+   Duration  3.62s (transform 1.70s, setup 0ms, collect 2.36s, tests 1.12s, environment 0ms, prepare 31ms)

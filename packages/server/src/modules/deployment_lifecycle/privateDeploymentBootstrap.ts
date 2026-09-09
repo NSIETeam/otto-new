@@ -14,7 +14,7 @@ import type {
   PrivateDeploymentRuntimeConfiguration,
   PrivateDeploymentStatus,
 } from '../commercial_control/deploymentTypes.js';
-import type { RecurringTaskRegistry } from 'otto-core';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 
 const USABLE_LICENSE_STATES = new Set(['active', 'expiring', 'grace']);
 
@@ -675,28 +675,19 @@ export function startPrivateDeploymentBootstrapRuntime(
       running = false;
     }
   };
-  if (options.taskRegistry) {
-    return (
-      options.taskRegistry.register({
-        name: 'enterprise.private-deployment-bootstrap',
-        source:
-          'packages/server/src/modules/deployment_lifecycle/privateDeploymentBootstrap.ts',
-        intervalMs,
-        initialDelayMs: options.initialDelayMs ?? 500,
-        missedRunPolicy: 'run-once',
-        estimatedCostUsdPerRun: 0,
-        getInputVersion: () => String(Math.floor(Date.now() / intervalMs)),
-        run: tick,
-      }) ?? (() => undefined)
-    );
-  }
-  const initial = setTimeout(() => void tick(), options.initialDelayMs ?? 500);
-  initial.unref();
-  const timer = setInterval(() => void tick(), intervalMs);
-  timer.unref();
+  const registry = options.taskRegistry ?? new RecurringTaskRegistry();
+  const stop = registry.register({
+    name: 'enterprise.private-deployment-bootstrap',
+    source: 'packages/server/src/modules/deployment_lifecycle/privateDeploymentBootstrap.ts',
+    intervalMs,
+    initialDelayMs: options.initialDelayMs ?? 500,
+    missedRunPolicy: 'run-once',
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => String(Math.floor(Date.now() / intervalMs)),
+    run: tick,
+  });
   return () => {
     stopped = true;
-    clearTimeout(initial);
-    clearInterval(timer);
+    stop?.();
   };
 }

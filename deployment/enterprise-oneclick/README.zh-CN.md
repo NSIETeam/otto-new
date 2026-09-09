@@ -470,6 +470,38 @@ sudoedit "$CONFIG_SNAPSHOT"
 
 Key 留空时，拼车接口会明确返回“地图服务尚未配置”，客户端保留可诊断入口但禁用发布，不会降级为虚构地点、直线距离或伪造匹配百分比。出发地、目的地和路线按敏感字段加密保存；候选结果只返回概略区域、时间差和可解释重合度。
 
+### 1.9.15 拼车通信分阶段启用与旧版回滚
+
+**代码部署不等于通信开关启用。** 以下开关在运行时和新安装配置中均默认 `false`，只接受 `true`、`false`、`1`、`0`。安装器不会自行开启功能：
+
+- `OTTO_PARK_CARPOOL_REQUESTS_ENABLED`：新发布、请求及第一阶段沟通写入。
+- `OTTO_PARK_CARPOOL_INVITATIONS_ENABLED`：双方邀请，必须同时启用 requests。
+- `OTTO_PARK_CARPOOL_GROUPS_ENABLED`：群组，必须同时启用 requests 和 invitations。
+- `OTTO_PARK_CARPOOL_PILOT_PARK_IDS`：真实园区 ID 的逗号分隔列表，最多 100 个，每个为 1–128 位字母、数字、下划线或连字符。不设置表示所有符合业务权限的园区；明确设置时不得为空。首期应配置已经核实的单园区 ID，而不是名称或示例值。
+
+当前上线准备仅建议 requests 试点：`requests=true`、`invitations=false`、`groups=false`，配合真实园区 ID 和服务端地图 Key。这不代表双方邀请和三人完整群组端到端已在生产验收；同事的本地交付记录也未证明真实地图、Windows 定位及生产多账号完整旅程。扩大阶段须先完成相应的真实账号/设备审批、组织与园区授权、MLS/撤销/退出、重启历史读取和跨节点（如适用）验收。开关不绕过这些权限或 native 加密要求。
+
+运行时还接受以下受限工程参数。新安装仅保留显式设置项，省略时沿用服务端默认值；非法值仍由原运行时校验拒绝，不会改为默认值掩盖配置错误：
+
+| 配置 | 默认值 | 运行时范围 |
+| --- | --- | --- |
+| `OTTO_PARK_CARPOOL_REQUEST_LIMIT_PER_HOUR` | 10 | 整数 1–100 |
+| `OTTO_PARK_CARPOOL_COOLDOWN_MINUTES` | 30 | 整数 1–1440 |
+| `OTTO_PARK_CARPOOL_MAX_TAXI_MEMBERS` | 4 | 整数 2–4 |
+| `OTTO_PARK_CARPOOL_STALE_MINUTES` | 120 | 5–1440 分钟 |
+| `OTTO_PARK_CARPOOL_PAUSE_MINUTES` | 360 | 不小于 stale，最多 1440 分钟 |
+| `OTTO_PARK_CARPOOL_POSITION_RETENTION_HOURS` | 24 | 1–168 小时 |
+| `OTTO_PARK_CARPOOL_COMMUNICATION_RETENTION_DAYS` | 30 | 1–90 天 |
+| `OTTO_PARK_CARPOOL_DRIVER_MINIMUM_OVERLAP` | 0.35 | 0–1 |
+| `OTTO_PARK_CARPOOL_TAXI_MINIMUM_OVERLAP` | 0.35 | 0–1 |
+| `OTTO_PARK_CARPOOL_MAXIMUM_DETOUR_SECONDS` | 600 | 0–3600 秒 |
+
+这些参数是启动时快照；变更要重启所有相关服务实例，不需要、也不得用整机重启作恢复手段。修改保留期限可能让原维护任务按新值清理到期数据，不应未经审查缩短期限。
+
+从 1.9.14 升级时，**不能先把新增键写入旧运行环境**：旧的严格 `otto_load_config` 会拒绝它们，网关升级前验收也会失败。正确顺序是用原环境完成签名 1.9.15 升级和新部署工具验收，再由管理员执行独立、可回滚的 0600 环境配置事务并重启服务。保留本次升级保存的 `enterprise.env.before`、`deploy.before` 及数据库/身份材料，不能改写旧 manifest、旧解析器或升级收据。升级本身保留非受管的现有配置行；补偿和正式回滚恢复原环境与原部署工具，所以旧版本不会被迫读取新键。独立启用失败时先恢复启用前的 1.9.15 环境；整版本回滚仍走完整原事务，不手动拿新环境启动旧版本。
+
+关闭阶段时先 groups、再 invitations、最后 requests，并保留已有历史读取、停止、退出和密钥/数据，不删除表或用旧库覆盖新数据。跳蚤市场没有同类默认关闭的环境总开关：园区缺省配置为 enabled，但仍要求组织 park_services 授权、账号/园区权限及数据库、加密、对象存储、图像处理、维护 worker 全部就绪。`OTTO_MARKET_LOCAL_ACCEPTANCE` 是隔离测试入口，不是生产开关，不能用来绕过就绪检查。
+
 跨私有服务器联邦为可选配置：
 
 - `OTTO_FEDERATION_ENABLED`：仅在已完成 Control 联邦网关注册和验签配置后设为 `1`；
@@ -729,4 +761,33 @@ sudo journalctl -u caddy -n 100 --no-pager
 
 ### 想把本包覆盖到已有不同版本
 
-不要修改安装脚本绕过检查。这个包是“新服务器迁入包”，不同版本升级需要单独的备份、canary、兼容矩阵和回滚计划。
+不要通过 `install.sh` 覆盖旧部署或绕过检查。已有 one-click `current` 布局使用签名包的
+`upgrade.sh`，必须先具备完整备份、canary、兼容矩阵和回滚计划。
+
+### 1.9.14 定制部署升级至 1.9.15
+
+`lstc` 仅可作为旧 release 的校验兼容通道；新包仍要求 stable/transition 的完整签名、来源与
+逐文件 SHA-256。旧目录名可包含 `all-enterprises-seven` 等定制后缀，但对应 manifest 中的
+版本、运行时包版本和每个文件 hash 必须吻合，不支持未登记的 hot patch。
+
+升级读取并保留 `OTTO_ENTERPRISE_DEPLOYMENT_GRANTS`、`OTTO_BACKUP_ENCRYPTION_KEY_FILE`、
+全部短信/飞书设置、公网 URL 和非托管配置行。七功能部署授权仍依赖可用的签名 License；
+有 grants 时健康验收额外要求 License 为 active/expiring/grace，不接受仅开启 enforce 的空授权。
+发布包必须继续信任签发旧 License 的公钥；企业部署包签名公钥不是 License 公钥。
+
+SQLCipher 的原密钥路径和 `OTTO_DATABASE_ENCRYPTION_KEY_ID` 保留，继续强制加密与只读密钥，
+只更新对应新 release 的原生 binding 路径。升级 canary 必须取得既有 account-sync、attachment、
+field 三把业务密钥：使用配置的外部文件，或数据目录内同名默认文件。仅把普通文件复制进
+root-only 事务目录并收紧为 0600；缺失、符号链接或目标已存在均拒绝，不为旧密文重新生成密钥。
+canary 的临时密钥路径不会写回生产 env；回滚恢复原 env 的完整字节、root:root 0600、旧 DB、
+resident checkpoint、current 与旧 deploy 工具，并要求旧 `verify.sh` 真正通过。
+
+正式升级按 stop/drain → DB 快照 → 隔离迁移 → loopback canary → 停止 canary → 切换顺序执行，
+不并行运行备份、迁移与 canary。canary 设置 `OTTO_ENTERPRISE_CANARY_MODE=1`，不注册工单
+SMS/飞书、政策收集/通知、招聘、遥测/License 同步、联邦和备份等后台任务；验收只 GET
+health、legal、deployment/status，不发短信、不重放历史 outbox、不抓取政策来源。
+这是受控健康检查模式，不是通用禁网沙箱；不要调用 canary 的业务写路由。
+
+上线前仍需真实隔离验证 schema 24 → 26、逐表行数/quick_check/foreign_key_check、旧 License
+可验证、现有多个企业的七功能鉴权（含未授权账号反例）、旧会话/登录、历史密文读取，以及
+独立备份恢复与失败回滚。不得把合成 fixture 或公开 health 成功当作这些真实验收已完成。

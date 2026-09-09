@@ -1,0 +1,16 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c
+
+ ✓ packages/server/src/enterprise/gracefulShutdown.test.ts (2 tests) 4ms
+ ✓ packages/server/src/enterprise/parkCarpoolRoutes.test.ts (3 tests) 5ms
+(node:8285) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:8282) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/enterprise/clusteredInfrastructure.test.ts (3 tests) 2ms
+ ✓ packages/server/src/enterprise/enterpriseCompatibilityContract.test.ts (3 tests) 37ms
+
+ Test Files  4 passed (4)
+      Tests  11 passed (11)
+   Start at  12:54:33
+   Duration  3.07s (transform 1.98s, setup 0ms, collect 5.19s, tests 48ms, environment 0ms, prepare 206ms)

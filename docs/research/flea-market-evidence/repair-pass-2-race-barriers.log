@@ -1,0 +1,50 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+(node:15020) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/modules/park_services/flea_market/fleaMarketRepairRaces.test.ts (4 tests | 2 failed) 4803ms
+   × sqlite: renewal committed ahead of queued expiry cleanup cannot be overwritten by the old deadline 79ms
+     → CONFLICT
+   ✓ sqlite: identity revocation holding the transaction blocks and rejects a queued first contact without a message 58ms
+   × postgres: renewal committed ahead of queued expiry cleanup cannot be overwritten by the old deadline 2161ms
+     → INVALID_INPUT
+   ✓ postgres: identity revocation holding the transaction blocks and rejects a queued first contact without a message  2504ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketRepairRaces.test.ts > sqlite: renewal committed ahead of queued expiry cleanup cannot be overwritten by the old deadline
+MarketError: CONFLICT
+ ❯ src/modules/park_services/flea_market/fleaMarketService.ts:281:19
+    279|             throw new MarketError('NOT_FOUND');
+    280|           if (previous.version !== input.expectedVersion)
+    281|             throw new MarketError('CONFLICT', 'expectedVersion');
+       |                   ^
+    282|           if (
+    283|             ['expire', 'identity-offline', 'restriction-offline'].incl…
+ ❯ src/modules/park_services/flea_market/fleaMarketUnitOfWork.ts:55:24
+ ❯ src/modules/park_services/flea_market/fleaMarketSqliteRepository.ts:30:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketRepairRaces.test.ts > postgres: renewal committed ahead of queued expiry cleanup cannot be overwritten by the old deadline
+MarketError: INVALID_INPUT
+ ❯ transitionListing src/modules/park_services/flea_market/fleaMarketLifecycle.ts:153:13
+    151|       break;
+    152|     default:
+    153|       throw new MarketError('INVALID_INPUT', 'action');
+       |             ^
+    154|   }
+    155|   if (next.state !== 'reserved') next.reservation = null;
+ ❯ src/modules/park_services/flea_market/fleaMarketService.ts:288:24
+ ❯ src/modules/park_services/flea_market/fleaMarketUnitOfWork.ts:55:24
+ ❯ transact src/modules/park_services/flea_market/fleaMarketPostgresRepository.ts:37:22
+ ❯ src/modules/park_services/flea_market/fleaMarketRepairRaces.test.ts:18:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  23:09:12
+   Duration  11.75s (transform 3.10s, setup 0ms, collect 6.56s, tests 4.80s, environment 0ms, prepare 111ms)

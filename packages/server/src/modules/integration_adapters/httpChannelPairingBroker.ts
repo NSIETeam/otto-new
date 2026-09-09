@@ -111,6 +111,9 @@ export class HttpChannelPairingBrokerV1 implements ChannelPairingBrokerV1 {
         tenantId: authorization.tenantId,
         tenantName: authorization.tenantName,
         botName: authorization.botName,
+        ...(typeof authorization.providerUserId === 'string' && authorization.providerUserId.trim()
+          ? { providerUserId: authorization.providerUserId.trim().slice(0, 200) }
+          : {}),
         grantedScopes: authorization.grantedScopes as string[],
         ...(authorization.requiresAdminApproval === true
           ? { requiresAdminApproval: true }

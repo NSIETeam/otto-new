@@ -1,0 +1,871 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ❯ src/renderer/components/ParkMarketDialog.test.tsx (12 tests | 1 failed) 4483ms
+   ✓ keeps own records and drafts reachable when the market is paused and validates publication without dropping fields 68ms
+   ✓ flushes the last input on save-and-close with the originating account scope 45ms
+   ✓ remounts private form state when the same account id switches server or organization 30ms
+   ✓ preserves expired draft text and identifies the failed photo with an independent retry 30ms
+   ✓ shows per-image transfer progress and allows cancelling without dropping form text 41ms
+   ✓ flushes unsaved text when switching away from the form without closing the market 42ms
+   ✓ closes directly after the current form is durably saved  1044ms
+   ✓ retains search, loaded cards and scroll position when returning from detail 58ms
+   ✓ blocks publication while a restored draft image is unreadable and allows removing it 31ms
+   ✓ filters own records by state with counts while keeping drafts reachable 17ms
+   ✓ reuses the governance receipt after timeout and refreshes the completed report 27ms
+   × focuses the first invalid field after publication is rejected locally 3050ms
+     → expected <body><div>…(1)</div></body> to be <input aria-invalid="true" value></input> // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<dialog[39m
+        [33maria-labelledby[39m=[32m"park-market-title"[39m
+        [33mclass[39m=[32m"park-market-dialog"[39m
+        [33mopen[39m=[32m""[39m
+      [36m>[39m
+        [36m<header>[39m
+          [36m<div>[39m
+            [36m<h2[39m
+              [33mid[39m=[32m"park-market-title"[39m
+            [36m>[39m
+              [0m园区跳蚤市场[0m
+            [36m</h2>[39m
+            [36m<p>[39m
+              [0m仅本园区成员可见，交易由双方线下协商[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"关闭跳蚤市场"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m关闭[0m
+          [36m</button>[39m
+        [36m</header>[39m
+        [36m<nav[39m
+          [33maria-label[39m=[32m"市场页面"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m逛市场[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m我的发布记录[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m我的收藏[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mdisabled[39m=[32m""[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m发布闲置[0m
+          [36m</button>[39m
+        [36m</nav>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"park-market-error"[39m
+          [33mrole[39m=[32m"alert"[39m
+        [36m>[39m
+          [0m请先修复表单和图片错误[0m
+        [36m</p>[39m
+        [36m<form>[39m
+          [36m<p>[39m
+            [0m更换物品请另发一件。请先将手机照片传到电脑，支持选择、拖拽或粘贴图片。[0m
+          [36m</p>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"park-market-form"[39m
+          [36m>[39m
+            [36m<label>[39m
+              [0m标题 *[0m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"true"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+              [36m<small[39m
+                [33mrole[39m=[32m"alert"[39m
+              [36m>[39m
+                [0m标题需要 2–40 字[0m
+              [36m</small>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m分类 *[0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m""[39m
+                [36m>[39m
+                  [0m请选择分类[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"electronics"[39m
+                [36m>[39m
+                  [0m数码电子[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"office"[39m
+                [36m>[39m
+                  [0m办公用品[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"home"[39m
+                [36m>[39m
+                  [0m生活家居[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"sports"[39m
+                [36m>[39m
+                  [0m运动户外[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"books"[39m
+                [36m>[39m
+                  [0m书籍文娱[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"other"[39m
+                [36m>[39m
+                  [0m其他[0m
+                [36m</option>[39m
+              [36m</select>[39m
+              [0m请选择分类[0m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m出售方式[0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"sale"[39m
+                [36m>[39m
+                  [0m出售[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"free"[39m
+                [36m>[39m
+                  [0m免费送[0m
+                [36m</option>[39m
+              [36m</select>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m售价（元）*[0m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"true"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+              [36m<small[39m
+                [33mrole[39m=[32m"alert"[39m
+              [36m>[39m
+                [0m售价须为 0.01–999999.99 元，最多两位小数[0m
+              [36m</small>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [36m<input[39m
+                [33mtype[39m=[32m"checkbox"[39m
+              [36m/>[39m
+              [0m可议价[0m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m成色 *[0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m""[39m
+                [36m>[39m
+                  [0m请选择[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"unused"[39m
+                [36m>[39m
+                  [0m全新未用[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"like_new"[39m
+                [36m>[39m
+                  [0m近乎全新[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"used"[39m
+                [36m>[39m
+                  [0m正常使用[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"worn"[39m
+                [36m>[39m
+                  [0m明显使用痕迹[0m
+                [36m</option>[39m
+              [36m</select>[39m
+              [0m请选择成色[0m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m功能状态 *[0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m""[39m
+                [36m>[39m
+                  [0m请选择[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"working"[39m
+                [36m>[39m
+                  [0m功能正常[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"faulty"[39m
+                [36m>[39m
+                  [0m存在故障[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"untested"[39m
+                [36m>[39m
+                  [0m未测试[0m
+                [36m</option>[39m
+              [36m</select>[39m
+              [0m请选择功能状态[0m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m物品说明 *[0m
+              [36m<textarea[39m
+                [33maria-invalid[39m=[32m"true"[39m
+              [36m/>[39m
+              [36m<small[39m
+                [33mrole[39m=[32m"alert"[39m
+              [36m>[39m
+                [0m说明需要 5–2000 字[0m
+              [36m</small>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m大致交接区域 *[0m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"true"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+              [36m<small[39m
+                [33mrole[39m=[32m"alert"[39m
+              [36m>[39m
+                [0m交接区域需要 2–50 字[0m
+              [36m</small>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m方便交接时间（选填）[0m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m图片（1–9 张，每张最多 20 MB）[0m
+              [36m<input[39m
+                [33maccept[39m=[32m"image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"[39m
+                [33mmultiple[39m=[32m""[39m
+                [33mtype[39m=[32m"file"[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"park-market-photos"[39m
+            [36m/>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"alert"[39m
+            [36m>[39m
+              [0m请上传 1–9 张有效图片[0m
+            [36m</p>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m预览[0m
+            [36m</button>[39m
+          [36m</fieldset>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"submit"[39m
+          [36m>[39m
+            [0m正式发布[0m
+          [36m</button>[39m
+        [36m</form>[39m
+        [36m<p[39m
+          [33mrole[39m=[32m"status"[39m
+        [36m>[39m
+          [0m已保存到本机[0m
+        [36m</p>[39m
+      [36m</dialog>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/components/ParkMarketDialog.test.tsx > focuses the first invalid field after publication is rejected locally
+AssertionError: expected <body><div>…(1)</div></body> to be <input aria-invalid="true" value></input> // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<dialog[39m
+        [33maria-labelledby[39m=[32m"park-market-title"[39m
+        [33mclass[39m=[32m"park-market-dialog"[39m
+        [33mopen[39m=[32m""[39m
+      [36m>[39m
+        [36m<header>[39m
+          [36m<div>[39m
+            [36m<h2[39m
+              [33mid[39m=[32m"park-market-title"[39m
+            [36m>[39m
+              [0m园区跳蚤市场[0m
+            [36m</h2>[39m
+            [36m<p>[39m
+              [0m仅本园区成员可见，交易由双方线下协商[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"关闭跳蚤市场"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m关闭[0m
+          [36m</button>[39m
+        [36m</header>[39m
+        [36m<nav[39m
+          [33maria-label[39m=[32m"市场页面"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m逛市场[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m我的发布记录[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m我的收藏[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mdisabled[39m=[32m""[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m发布闲置[0m
+          [36m</button>[39m
+        [36m</nav>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"park-market-error"[39m
+          [33mrole[39m=[32m"alert"[39m
+        [36m>[39m
+          [0m请先修复表单和图片错误[0m
+        [36m</p>[39m
+        [36m<form>[39m
+          [36m<p>[39m
+            [0m更换物品请另发一件。请先将手机照片传到电脑，支持选择、拖拽或粘贴图片。[0m
+          [36m</p>[39m
+          [36m<fieldset[39m
+            [33mclass[39m=[32m"park-market-form"[39m
+          [36m>[39m
+            [36m<label>[39m
+              [0m标题 *[0m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"true"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+              [36m<small[39m
+                [33mrole[39m=[32m"alert"[39m
+              [36m>[39m
+                [0m标题需要 2–40 字[0m
+              [36m</small>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m分类 *[0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m""[39m
+                [36m>[39m
+                  [0m请选择分类[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"electronics"[39m
+                [36m>[39m
+                  [0m数码电子[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"office"[39m
+                [36m>[39m
+                  [0m办公用品[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"home"[39m
+                [36m>[39m
+                  [0m生活家居[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"sports"[39m
+                [36m>[39m
+                  [0m运动户外[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"books"[39m
+                [36m>[39m
+                  [0m书籍文娱[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"other"[39m
+                [36m>[39m
+                  [0m其他[0m
+                [36m</option>[39m
+              [36m</select>[39m
+              [0m请选择分类[0m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m出售方式[0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"sale"[39m
+                [36m>[39m
+                  [0m出售[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"free"[39m
+                [36m>[39m
+                  [0m免费送[0m
+                [36m</option>[39m
+              [36m</select>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m售价（元）*[0m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"true"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+              [36m<small[39m
+                [33mrole[39m=[32m"alert"[39m
+              [36m>[39m
+                [0m售价须为 0.01–999999.99 元，最多两位小数[0m
+              [36m</small>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [36m<input[39m
+                [33mtype[39m=[32m"checkbox"[39m
+              [36m/>[39m
+              [0m可议价[0m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m成色 *[0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m""[39m
+                [36m>[39m
+                  [0m请选择[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"unused"[39m
+                [36m>[39m
+                  [0m全新未用[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"like_new"[39m
+                [36m>[39m
+                  [0m近乎全新[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"used"[39m
+                [36m>[39m
+                  [0m正常使用[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"worn"[39m
+                [36m>[39m
+                  [0m明显使用痕迹[0m
+                [36m</option>[39m
+              [36m</select>[39m
+              [0m请选择成色[0m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m功能状态 *[0m
+              [36m<select>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m""[39m
+                [36m>[39m
+                  [0m请选择[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"working"[39m
+                [36m>[39m
+                  [0m功能正常[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"faulty"[39m
+                [36m>[39m
+                  [0m存在故障[0m
+                [36m</option>[39m
+                [36m<option[39m
+                  [33mvalue[39m=[32m"untested"[39m
+                [36m>[39m
+                  [0m未测试[0m
+                [36m</option>[39m
+              [36m</select>[39m
+              [0m请选择功能状态[0m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m物品说明 *[0m
+              [36m<textarea[39m
+                [33maria-invalid[39m=[32m"true"[39m
+              [36m/>[39m
+              [36m<small[39m
+                [33mrole[39m=[32m"alert"[39m
+              [36m>[39m
+                [0m说明需要 5–2000 字[0m
+              [36m</small>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m大致交接区域 *[0m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"true"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+              [36m<small[39m
+                [33mrole[39m=[32m"alert"[39m
+              [36m>[39m
+                [0m交接区域需要 2–50 字[0m
+              [36m</small>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m方便交接时间（选填）[0m
+              [36m<input[39m
+                [33maria-invalid[39m=[32m"false"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0m图片（1–9 张，每张最多 20 MB）[0m
+              [36m<input[39m
+                [33maccept[39m=[32m"image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"[39m
+                [33mmultiple[39m=[32m""[39m
+                [33mtype[39m=[32m"file"[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"park-market-photos"[39m
+            [36m/>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"alert"[39m
+            [36m>[39m
+              [0m请上传 1–9 张有效图片[0m
+            [36m</p>[39m
+            [36m<button[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m预览[0m
+            [36m</button>[39m
+          [36m</fieldset>[39m
+          [36m<button[39m
+            [33mtype[39m=[32m"submit"[39m
+          [36m>[39m
+            [0m正式发布[0m
+          [36m</button>[39m
+        [36m</form>[39m
+        [36m<p[39m
+          [33mrole[39m=[32m"status"[39m
+        [36m>[39m
+          [0m已保存到本机[0m
+        [36m</p>[39m
+      [36m</dialog>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected
++ Received
+
++ <body>
++   <div>
++     <dialog
++       aria-labelledby="park-market-title"
++       class="park-market-dialog"
++       open=""
++     >
++       <header>
++         <div>
++           <h2
++             id="park-market-title"
++           >
++             园区跳蚤市场
++           </h2>
++           <p>
++             仅本园区成员可见，交易由双方线下协商
++           </p>
++         </div>
++         <button
++           aria-label="关闭跳蚤市场"
++           type="button"
++         >
++           关闭
++         </button>
++       </header>
++       <nav
++         aria-label="市场页面"
++       >
++         <button
++           type="button"
++         >
++           逛市场
++         </button>
++         <button
++           type="button"
++         >
++           我的发布记录
++         </button>
++         <button
++           type="button"
++         >
++           我的收藏
++         </button>
++         <button
++           disabled=""
++           type="button"
++         >
++           发布闲置
++         </button>
++       </nav>
++       <p
++         class="park-market-error"
++         role="alert"
++       >
++         请先修复表单和图片错误
++       </p>
++       <form>
++         <p>
++           更换物品请另发一件。请先将手机照片传到电脑，支持选择、拖拽或粘贴图片。
++         </p>
++         <fieldset
++           class="park-market-form"
++         >
++           <label>
++             标题 *
++             <input
++               aria-invalid="true"
++               value=""
++             />
++             <small
++               role="alert"
++             >
++               标题需要 2–40 字
++             </small>
++           </label>
++           <label>
++             分类 *
++             <select>
++               <option
++                 value=""
++               >
++                 请选择分类
++               </option>
++               <option
++                 value="electronics"
++               >
++                 数码电子
++               </option>
++               <option
++                 value="office"
++               >
++                 办公用品
++               </option>
++               <option
++                 value="home"
++               >
++                 生活家居
++               </option>
++               <option
++                 value="sports"
++               >
++                 运动户外
++               </option>
++               <option
++                 value="books"
++               >
++                 书籍文娱
++               </option>
++               <option
++                 value="other"
++               >
++                 其他
++               </option>
++             </select>
++             请选择分类
++           </label>
++           <label>
++             出售方式
++             <select>
++               <option
++                 value="sale"
++               >
++                 出售
++               </option>
++               <option
++                 value="free"
++               >
++                 免费送
++               </option>
++             </select>
++           </label>
++           <label>
++             售价（元）*
++             <input
++               aria-invalid="true"
++               value=""
++             />
++             <small
++               role="alert"
++             >
++               售价须为 0.01–999999.99 元，最多两位小数
++             </small>
++           </label>
++           <label>
+              <input
++               type="checkbox"
++             />
++             可议价
++           </label>
++           <label>
++             成色 *
++             <select>
++               <option
++                 value=""
++               >
++                 请选择
++               </option>
++               <option
++                 value="unused"
++               >
++                 全新未用
++               </option>
++               <option
++                 value="like_new"
++               >
++                 近乎全新
++               </option>
++               <option
++                 value="used"
++               >
++                 正常使用
++               </option>
++               <option
++                 value="worn"
++               >
++                 明显使用痕迹
++               </option>
++             </select>
++             请选择成色
++           </label>
++           <label>
++             功能状态 *
++             <select>
++               <option
++                 value=""
++               >
++                 请选择
++               </option>
++               <option
++                 value="working"
++               >
++                 功能正常
++               </option>
++               <option
++                 value="faulty"
++               >
++                 存在故障
++               </option>
++               <option
++                 value="untested"
++               >
++                 未测试
++               </option>
++             </select>
++             请选择功能状态
++           </label>
++           <label>
++             物品说明 *
++             <textarea
+                aria-invalid="true"
++             />
++             <small
++               role="alert"
++             >
++               说明需要 5–2000 字
++             </small>
++           </label>
++           <label>
++             大致交接区域 *
++             <input
++               aria-invalid="true"
+                value=""
++             />
++             <small
++               role="alert"
++             >
++               交接区域需要 2–50 字
++             </small>
++           </label>
++           <label>
++             方便交接时间（选填）
++             <input
++               aria-invalid="false"
++               value=""
++             />
++           </label>
++           <label>
++             图片（1–9 张，每张最多 20 MB）
++             <input
++               accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
++               multiple=""
++               type="file"
++             />
++           </label>
++           <div
++             class="park-market-photos"
+            />
++           <p
++             role="alert"
++           >
++             请上传 1–9 张有效图片
++           </p>
++           <button
++             type="button"
++           >
++             预览
++           </button>
++         </fieldset>
++         <button
++           type="submit"
++         >
++           正式发布
++         </button>
++       </form>
++       <p
++         role="status"
++       >
++         已保存到本机
++       </p>
++     </dialog>
++   </div>
++ </body>
+
+ ❯ src/renderer/components/ParkMarketDialog.test.tsx:620:52
+    618|   fireEvent.click(screen.getByRole('button',{name:'发布闲置'}));
+    619|   fireEvent.click(screen.getByRole('button',{name:'正式发布'}));
+    620|   await waitFor(()=>expect(document.activeElement).toBe(screen.getByLa…
+       |                                                    ^
+    621| });
+    622|
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 11 passed (12)
+   Start at  16:38:43
+   Duration  5.01s (transform 106ms, setup 43ms, collect 125ms, tests 4.48s, environment 159ms, prepare 39ms)

@@ -1,0 +1,33 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c
+
+(node:46489) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts (4 tests | 2 failed) 2059ms
+   × sqlite: A14/A32/A38 keep grants per item and retry existing-conversation consultations without changing snapshots 52ms
+     → contacts.associated is not a function
+   ✓ sqlite: A16/A17 serialize sale/contact and expiry/renewal races without resurrecting requests or expiring renewed content 25ms
+   × postgres: A14/A32/A38 keep grants per item and retry existing-conversation consultations without changing snapshots 992ms
+     → contacts.associated is not a function
+   ✓ postgres: A16/A17 serialize sale/contact and expiry/renewal races without resurrecting requests or expiring renewed content  989ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts > sqlite: A14/A32/A38 keep grants per item and retry existing-conversation consultations without changing snapshots
+ FAIL  packages/server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts > postgres: A14/A32/A38 keep grants per item and retry existing-conversation consultations without changing snapshots
+TypeError: contacts.associated is not a function
+ ❯ packages/server/src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts:90:41
+     88|       expect((await service.detail('buyer', b.id)).priceCents).toBe(99…
+     89|       expect((await contacts.inbox('seller')).requests).toHaveLength(1…
+     90|       const associated = await contacts.associated('buyer', first.conv…
+       |                                         ^
+     91|       expect(associated.items.map(row => row.listingId)).toEqual([b.id…
+     92|       expect(associated.items[0]).toMatchObject({messageId: one.messag…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 2 passed (4)
+   Start at  12:22:35
+   Duration  4.62s (transform 1.18s, setup 0ms, collect 2.36s, tests 2.06s, environment 0ms, prepare 47ms)

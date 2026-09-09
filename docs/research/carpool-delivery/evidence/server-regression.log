@@ -1,0 +1,41 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new
+
+(node:65649) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:65650) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:65647) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:65648) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/collaboration/mlsTransportRepository.test.ts (14 tests) 81ms
+(node:68317) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/enterprise/clusteredServer.test.ts (41 tests) 250ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolService.test.ts (13 tests) 40ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolDomain.test.ts (13 tests) 20ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolContract.integration.test.ts (2 tests) 1541ms
+   ✓ real database carpool contract (synthetic map only) > postgres: publish, privacy, replay, concurrent updates, stop, identity revocation  1509ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolHttp.integration.test.ts (1 test) 89ms
+(node:68401) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/amapParkCarpoolProvider.test.ts (2 tests) 7ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts (5 tests) 10ms
+(node:69025) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/enterprise/postgresBusinessRepository.test.ts (1 test) 5ms
+ ✓ packages/server/src/enterprise/parkEndpoints.test.ts (12 tests) 10215ms
+   ✓ Park endpoints > POST /enterprise/park creates a park (admin only)  6490ms
+   ✓ Park endpoints > POST /enterprise/park rejects without admin token  577ms
+   ✓ Park endpoints > POST /enterprise/park/invite creates an invite code  381ms
+   ✓ Park endpoints > POST /enterprise/park/services/request auto-routes to specialist  380ms
+   ✓ Park endpoints > POST /enterprise/park/services/request falls back to admin when no specialist  316ms
+   ✓ Park endpoints > GET /enterprise/park/services lists requests and specialists  338ms
+   ✓ Park endpoints > POST /enterprise/park/services/assign is admin-only  469ms
+ ✓ packages/server/src/enterprise/parkCarpoolRoutes.test.ts (3 tests) 3ms
+
+ Test Files  11 passed (11)
+      Tests  107 passed (107)
+   Start at  09:24:54
+   Duration  10.71s (transform 4.21s, setup 0ms, collect 20.87s, tests 12.26s, environment 2ms, prepare 615ms)

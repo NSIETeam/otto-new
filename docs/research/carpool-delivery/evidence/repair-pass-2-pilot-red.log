@@ -1,0 +1,43 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts (5 tests | 1 failed) 7ms
+   ✓ validates independent rollout flags and bounded request/capacity settings 1ms
+   ✓ keeps production and unspecified environments closed unless explicitly enabled 0ms
+   ✓ advertises only explicitly enabled production stages with their prerequisites 1ms
+   ✓ uses an immutable supplied snapshot even when the process environment changes 0ms
+   × limits pilot capabilities to configured parks without conflating map readiness 4ms
+     → expected [ 'park_carpool_requests_v1', …(1) ] to deeply equal []
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts > limits pilot capabilities to configured parks without conflating map readiness
+AssertionError: expected [ 'park_carpool_requests_v1', …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "park_carpool_requests_v1",
++   "park_carpool_mls_v1",
++ ]
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts:94:61
+     92|   });
+     93|   expect(carpoolCommunicationCapabilities(pilot, 'park-a')).toContain(…
+     94|   expect(carpoolCommunicationCapabilities(pilot, 'park-b')).toEqual([]…
+       |                                                             ^
+     95|   expect(() => readCarpoolConfig({OTTO_PARK_CARPOOL_PILOT_PARK_IDS: 'p…
+     96| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 passed (5)
+   Start at  20:11:32
+   Duration  164ms (transform 28ms, setup 0ms, collect 23ms, tests 7ms, environment 0ms, prepare 39ms)
+
+
+EXIT_CODE=1

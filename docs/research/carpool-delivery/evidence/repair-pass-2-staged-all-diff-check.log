@@ -1,0 +1,21 @@
+docs/research/carpool-delivery/evidence/repair-pass-2-map-red.log:24: trailing whitespace.
++- Expected: 
+docs/research/carpool-delivery/evidence/repair-pass-2-map-red.log:27: trailing whitespace.
+++ Received: 
+docs/research/carpool-delivery/evidence/repair-pass-2-map-red.log:43: trailing whitespace.
++- Expected: 
+docs/research/carpool-delivery/evidence/repair-pass-2-map-red.log:46: trailing whitespace.
+++ Received: 
+docs/research/carpool-delivery/evidence/repair-pass-2-review-red.log:14: trailing whitespace.
++Received: 
+docs/research/carpool-delivery/evidence/repair-pass-2-review-red.log:64: trailing whitespace.
++Received: 
+docs/research/carpool-delivery/evidence/repair-pass-2-route-red.log:61: trailing whitespace.
++    143| 
+docs/research/carpool-delivery/evidence/repair-pass-2-route-red.log:88: trailing whitespace.
++    143| 
+docs/research/carpool-delivery/evidence/repair-pass-2-worker-red.log:31: trailing whitespace.
++- Expected: 
+docs/research/carpool-delivery/evidence/repair-pass-2-worker-red.log:34: trailing whitespace.
+++ Received: 
+EXIT_CODE=2

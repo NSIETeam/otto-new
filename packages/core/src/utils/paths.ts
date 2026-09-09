@@ -17,6 +17,15 @@ const TMP_DIR_NAME = 'tmp';
 const COMMANDS_DIR_NAME = 'commands';
 const SKILLS_DIR_NAME = 'skills';
 
+/** User-data root shared by default storage consumers and isolated profiles. */
+export function resolveOttoUserDir(
+  environment: NodeJS.ProcessEnv = process.env,
+  homeDir: string = os.homedir(),
+): string {
+  const configured = environment['OTTO_USER_DIR']?.trim();
+  return configured ? path.resolve(configured) : path.join(homeDir, OTTO_DIR);
+}
+
 /**
  * Replaces the home directory with a tilde.
  * @param path - The path to tildeify.

@@ -4,7 +4,7 @@ import {
   policyDisplayStatus,
   policyDisplayValidity,
 } from './policyIntelligencePresentation.js';
-import { policyApplicationStatus } from '../../../server/src/modules/policy_intelligence/policyDomain.js';
+import { policyApplicationStatus } from 'otto-server';
 import type { OfficialPolicyDocument } from 'otto-server';
 
 describe('扩展政策条件的补充回答', () => {

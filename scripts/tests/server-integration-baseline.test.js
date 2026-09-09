@@ -5,11 +5,14 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { validateServerIntegrationBaseline } from '../validate-server-integration-baseline.mjs';
 import { supportedEnterpriseSchemaVersions } from '../enterprise-release-contract.mjs';
 
 const rootDir = path.resolve('.');
+// Trust only this read-only worktree command when the runner account differs
+// from its owner; do not change global Git trust or the ancestry assertions.
+const gitReadOptions = ['-c', `safe.directory=${rootDir.replaceAll('\\', '/')}`];
 const ledger = JSON.parse(
   readFileSync(
     path.join(rootDir, 'docs/server-integration-baseline.json'),
@@ -18,12 +21,28 @@ const ledger = JSON.parse(
 );
 const fetchedInternalTip = execFileSync(
   'git',
-  ['rev-parse', '--verify', 'origin/internal'],
+  [...gitReadOptions, 'rev-parse', '--verify', 'origin/internal'],
   { cwd: rootDir, encoding: 'utf8' },
 ).trim();
 const remoteBranchTips = new Map([['origin/internal', fetchedInternalTip]]);
 
 describe('server integration baseline', () => {
+  beforeAll(() => {
+    // The real validator also launches Git. Scope its inherited trust to this
+    // suite's exact worktree, preserving any existing command-line entries.
+    const count = Number(process.env.GIT_CONFIG_COUNT ?? 0);
+    if (!Number.isSafeInteger(count) || count < 0) {
+      throw new Error('invalid inherited GIT_CONFIG_COUNT');
+    }
+    vi.stubEnv(`GIT_CONFIG_KEY_${count}`, 'safe.directory');
+    vi.stubEnv(`GIT_CONFIG_VALUE_${count}`, rootDir.replaceAll('\\', '/'));
+    vi.stubEnv('GIT_CONFIG_COUNT', String(count + 1));
+  });
+
+  afterAll(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('keeps the ledger aligned with versions, schema, capabilities and release policy', () => {
     expect(validateServerIntegrationBaseline({ rootDir })).toEqual([]);
     expect(supportedEnterpriseSchemaVersions(24)).toEqual([
@@ -39,8 +58,21 @@ describe('server integration baseline', () => {
     expect(
       validateServerIntegrationBaseline({ rootDir, ledger: changed }),
     ).toContain(
-      'release.clientVersion=99.0.0 does not match packages/desktop/package.json=1.9.14',
+      `release.clientVersion=99.0.0 does not match packages/desktop/package.json=${ledger.release.clientVersion}`,
     );
+  });
+
+  it('rejects capability additions or removals that are not in the source contract', () => {
+    const changed = structuredClone(ledger);
+    changed.release.capabilities = changed.release.capabilities.filter(
+      (capability) => capability !== 'policy_intelligence_inbox_v1',
+    );
+    expect(validateServerIntegrationBaseline({ rootDir, ledger: changed }))
+      .toContain('release.capabilities do not match ENTERPRISE_CAPABILITIES');
+
+    changed.release.capabilities = [...ledger.release.capabilities, 'unimplemented_capability'];
+    expect(validateServerIntegrationBaseline({ rootDir, ledger: changed }))
+      .toContain('release.capabilities do not match ENTERPRISE_CAPABILITIES');
   });
 
   it('fails when an integrated source has no valid disposition or integration evidence', () => {
@@ -67,7 +99,7 @@ describe('server integration baseline', () => {
     expect(
       validateServerIntegrationBaseline({ rootDir, ledger: changed }),
     ).toContain(
-      'release.databaseMigration.schemaTo=21 does not match enterprise schema=24',
+      `release.databaseMigration.schemaTo=21 does not match enterprise schema=${ledger.release.enterpriseSchemaVersion}`,
     );
   });
 
@@ -106,7 +138,12 @@ describe('server integration baseline', () => {
   });
 
   it('fails when the candidate does not contain the authoritative internal baseline', () => {
-    const candidate = ledger.authority.integratedSources[0].tip;
+    // A source list can legitimately gain newer descendants at any position.
+    // The authority's own parent is a stable negative ancestry fixture.
+    const candidate = execFileSync('git', [...gitReadOptions, 'rev-parse', `${ledger.authority.baselineCommit}^`], {
+      cwd: rootDir,
+      encoding: 'utf8',
+    }).trim();
 
     expect(
       validateServerIntegrationBaseline({

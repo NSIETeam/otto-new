@@ -1,0 +1,147 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ✓ src/main/enterprise-auth-sync.test.ts (25 tests) 201ms
+ ✓ src/renderer/components/MarketImageViewer.test.tsx (1 test) 666ms
+   ✓ loads controlled full-size photos and supports keyboard navigation and Escape  655ms
+ ✓ src/renderer/components/MarketAssociatedItems.test.tsx (2 tests) 783ms
+   ✓ loads consulted items independently from the visible message page and locates their original messages  693ms
+stderr | src/renderer/components/MarketContactCenter.test.tsx > keeps attachment and request identity on send failure, rejects excess files and clears only after confirmation
+An update to MarketConversation inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to MarketConversation inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to MarketConversation inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to MarketConversation inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/renderer/components/MarketContactCenter.test.tsx > keeps attachment and request identity on send failure, rejects excess files and clears only after confirmation
+An update to MarketConversation inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/renderer/components/MarketContactCenter.test.tsx > keeps attachment and request identity on send failure, rejects excess files and clears only after confirmation
+An update to MarketContactCenter inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to MarketContactCenter inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/renderer/components/MarketContactCenter.test.tsx (2 tests) 1233ms
+   ✓ offers older contact history without dropping the current conversation page  698ms
+   ✓ keeps attachment and request identity on send failure, rejects excess files and clears only after confirmation  532ms
+ ✓ src/main/park-market-messaging.test.ts (2 tests) 67ms
+ ✓ src/renderer/components/InboxPage.test.tsx (12 tests) 4249ms
+   ✓ InboxPage response hardening > keeps the inbox usable when an older bridge returns no notification array  512ms
+   ✓ InboxPage response hardening > confirms a direct-message read only after the conversation load succeeds  478ms
+   ✓ InboxPage response hardening > opens a federated E2EE conversation from the same contact list  796ms
+   ✓ InboxPage response hardening > only lets a verified contact receive an encrypted A2A proposal  722ms
+   ✓ InboxPage response hardening > A2A effective=false 时不显示跨服务器 Otto 询问入口，也不会发送 A2A 请求  426ms
+   ✓ InboxPage response hardening > 申请进入待验收后可以在客服会话中确认办理完成  316ms
+ ✓ src/renderer/components/ParkMarketModel.test.ts (3 tests) 133ms
+ ✓ src/main/park-market-links.test.ts (1 test) 12ms
+ ✓ src/main/park-market.test.ts (2 tests) 41ms
+ ✓ src/main/park-market-uploads.test.ts (1 test) 27ms
+ ✓ src/renderer/components/ParkMarketDialog.test.tsx (12 tests) 7038ms
+   ✓ keeps own records and drafts reachable when the market is paused and validates publication without dropping fields  906ms
+   ✓ flushes the last input on save-and-close with the originating account scope  1162ms
+   ✓ remounts private form state when the same account id switches server or organization  681ms
+   ✓ preserves expired draft text and identifies the failed photo with an independent retry  465ms
+   ✓ shows per-image transfer progress and allows cancelling without dropping form text  739ms
+   ✓ flushes unsaved text when switching away from the form without closing the market  500ms
+   ✓ closes directly after the current form is durably saved  1338ms
+   ✓ retains search, loaded cards and scroll position when returning from detail  366ms
+   ✓ reuses the governance receipt after timeout and refreshes the completed report  409ms
+ ❯ src/main/enterprise-e2ee.test.ts (14 tests | 1 failed) 44335ms
+   × enterprise private-chat E2EE > streams federation attachments, verifies ciphertext and decrypts only on the recipient device 42377ms
+     → Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   ✓ enterprise private-chat E2EE > pins, verifies and isolates signed federation contact identities 102ms
+   ✓ enterprise private-chat E2EE > accepts only monotonic multi-device federation directories signed by a trusted device 236ms
+   ✓ enterprise private-chat E2EE > keeps a stable federation safety number after root-device revocation 96ms
+   ✓ enterprise private-chat E2EE > wraps a federated message key for every approved active device 267ms
+   ✓ enterprise private-chat E2EE > pins transparency heads and rejects a server rollback or fork 20ms
+   ✓ enterprise private-chat E2EE > rejects malformed transparency entries and inconsistent device directories 36ms
+   ✓ enterprise private-chat E2EE > derives symmetric safety numbers and signs out-of-band device approvals locally 22ms
+   ✓ enterprise private-chat E2EE > encrypts for sender and recipient devices and detects message tampering 65ms
+   ✓ enterprise private-chat E2EE > encrypts attachment bodies and metadata and authenticates downloads 39ms
+   ✓ enterprise private-chat E2EE > covers every active device and stops targeting a revoked device 39ms
+   ✓ enterprise private-chat E2EE > imports a passphrase recovery bundle as historical keys on a new device  1000ms
+   ✓ enterprise private-chat E2EE > keeps raw private keys out of the vault file 11ms
+   ✓ signs carpool commands with the approved identity and binds account, time and payload 21ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/enterprise-e2ee.test.ts > enterprise private-chat E2EE > streams federation attachments, verifies ciphertext and decrypts only on the recipient device
+Error: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/main/enterprise-e2ee.test.ts:123:3
+    121|
+    122| describe('enterprise private-chat E2EE', () => {
+    123|   it('streams federation attachments, verifies ciphertext and decrypts…
+       |   ^
+    124|     const alice = createEndpoint('Alice laptop');
+    125|     const bob = createEndpoint('Bob laptop');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 11 passed (12)
+      Tests  1 failed | 76 passed (77)
+   Start at  23:15:27
+   Duration  49.84s (transform 4.17s, setup 5.05s, collect 10.36s, tests 58.79s, environment 27.46s, prepare 4.84s)

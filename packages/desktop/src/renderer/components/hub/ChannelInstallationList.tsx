@@ -12,6 +12,31 @@ import { startNonOverlappingPoll } from '../../lib/nonOverlappingPoll.js';
 
 const REFRESH_MS = 10_000;
 
+function relativeTime(timestamp: number | undefined, now = Date.now()): string {
+  if (!timestamp) return '从未';
+  const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
+  if (seconds < 60) return `${seconds} 秒前`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  return `${Math.floor(hours / 24)} 天前`;
+}
+
+function elapsedTime(startedAtMs: number | undefined, now = Date.now()): string {
+  if (!startedAtMs) return '未知';
+  const minutes = Math.max(0, Math.floor((now - startedAtMs) / 60_000));
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours} 小时 ${minutes % 60} 分钟` : `${Math.floor(hours / 24)} 天 ${hours % 24} 小时`;
+}
+
+function reconnectTime(timestamp: number | undefined, now = Date.now()): string {
+  if (!timestamp) return '';
+  const seconds = Math.max(0, Math.ceil((timestamp - now) / 1000));
+  return seconds < 60 ? `${seconds} 秒后` : `${Math.ceil(seconds / 60)} 分钟后`;
+}
+
 export function ChannelInstallationList({
   provider,
 }: {
@@ -104,11 +129,11 @@ export function ChannelInstallationList({
 
   const mutateIdentity = async (
     installation: ChannelInstallation,
-    action: 'bind' | 'revoke',
+    action: 'claim-owner' | 'bind' | 'revoke',
     binding?: ChannelIdentityBindingV1,
   ): Promise<void> => {
     if (busy) return;
-    if (!approvalId.trim()) {
+    if (action !== 'claim-owner' && !approvalId.trim()) {
       setError('请填写审批 ID；审批人将使用当前 Otto 登录身份。');
       return;
     }
@@ -136,7 +161,7 @@ export function ChannelInstallationList({
           action,
           providerUserId: binding?.providerUserId ?? providerUserId.trim(),
           ...(action === 'bind' ? { canonicalUserId: canonicalUserId.trim() } : {}),
-          approvalId: approvalId.trim(),
+          approvalId: action === 'claim-owner' ? 'local-owner-claim' : approvalId.trim(),
           expectedRevision: current?.revision ?? 0,
         },
       );
@@ -173,6 +198,16 @@ export function ChannelInstallationList({
             <div className="otto-hub__field-hint">
               权限：{installation.grantedScopes.join('、') || '无'} · 重连 {state?.reconnectCount ?? 0} 次
             </div>
+            {state?.missingScopes?.length ? (
+              <div className="otto-hub__feishu-message" role="status">
+                缺少已授权权限：{state.missingScopes.join('、')}。机器人部分能力将不可用，请在平台管理后台补齐后重新连接。
+              </div>
+            ) : null}
+            <div className="otto-hub__field-hint">
+              运行 {elapsedTime(state?.startedAtMs)} · 最近接收 {relativeTime(state?.lastReceivedAtMs)} · 最近发送 {relativeTime(state?.lastSentAtMs)}
+              {state?.nextReconnectAtMs ? ` · 计划 ${reconnectTime(state.nextReconnectAtMs)}重连` : ''}
+            </div>
+            {state?.message ? <div className="otto-hub__field-hint">诊断：{state.message}</div> : null}
             <div className="otto-hub__feishu-actions">
               {state?.running ? (
                 <button type="button" className="otto-hub__btn" disabled={working} onClick={() => void act(installation, 'stop')}>停止</button>
@@ -199,7 +234,7 @@ export function ChannelInstallationList({
             </div>
             {identityPanel === installation.installationId ? (
               <div className="otto-channel-identities">
-                <div className="otto-hub__field-hint">只有已绑定且启用的身份可以从聊天控制 Otto。</div>
+                <div className="otto-hub__field-hint">先从企业微信或钉钉给机器人发一条消息；诊断区会显示渠道用户 ID。只有你在本机确认绑定后，该账号才能控制 Otto。</div>
                 {(identities[installation.installationId] ?? []).map((binding) => (
                   <div className="otto-channel-identities__row" key={binding.providerUserId}>
                     <span>{binding.providerUserId} → {binding.canonicalUserId}</span>
@@ -220,6 +255,15 @@ export function ChannelInstallationList({
                   <span>渠道用户 ID</span>
                   <input value={providerUserId} onChange={(event) => setProviderUserId(event.target.value)} />
                 </label>
+                <button
+                  type="button"
+                  className="otto-hub__btn otto-hub__btn--primary"
+                  disabled={working || !providerUserId.trim()}
+                  onClick={() => void mutateIdentity(installation, 'claim-owner')}
+                >
+                  绑定为当前 Otto 账号
+                </button>
+                <div className="otto-hub__field-hint">以下为企业管理员高级绑定，可将渠道账号映射给其他 Otto 用户。</div>
                 <label className="otto-hub__field">
                   <span>Otto 用户 ID</span>
                   <input value={canonicalUserId} onChange={(event) => setCanonicalUserId(event.target.value)} />

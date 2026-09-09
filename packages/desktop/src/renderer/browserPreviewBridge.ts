@@ -1,3 +1,4 @@
+import { supplyDemo } from './starMap/supplyDemo.js';
 /**
  * 浏览器静态预览桥。
  *
@@ -377,7 +378,7 @@ if (!previewWindow.otto) {
     conversationDraftLoad: () => Promise.resolve(null),
     conversationDraftSave: () => Promise.resolve(),
     conversationDraftRemove: () => Promise.resolve(),
-    appVersion: () => Promise.resolve('1.9.14-browser-preview'),
+    appVersion: () => Promise.resolve('1.9.15-browser-preview'),
     getWorkspaceDirectories: () => Promise.resolve({
       defaultPath: '/Users/demo',
       recentPaths: ['/Users/demo'],
@@ -434,7 +435,7 @@ if (!previewWindow.otto) {
     updateCheck: () =>
       Promise.resolve({
         status: 'up-to-date',
-        currentVersion: '1.9.14',
+        currentVersion: '1.9.15',
         latestVersion: null,
       }),
     updateDownload: () =>
@@ -634,69 +635,7 @@ if (!previewWindow.otto) {
       } as typeof previewPublicProfile;
       return Promise.resolve({ ...previewPublicProfile });
     },
-    enterpriseParkStarMap: () => {
-      const nodes = [
-        previewPublicProfile,
-        {
-          organizationId: 'preview-tenant-smart',
-          organizationName: '宏创智能制造',
-          summary: '提供自动化产线、工业视觉与设备改造。',
-          website: 'https://example.com/smart',
-          industryTags: ['智能制造'],
-          productsServices: ['智能制造解决方案', '自动化产线改造'],
-          capabilities: ['工业视觉', '设备集成'],
-          cooperationNeeds: ['企业数字化服务'],
-          publicContact: '商务合作 smart@example.com',
-          isPublic: true,
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          organizationId: 'preview-tenant-digital',
-          organizationName: '北辰数字科技',
-          summary: '企业数字化和数据平台服务商。',
-          website: 'https://example.com/digital',
-          industryTags: ['软件与信息服务'],
-          productsServices: ['企业数字化服务'],
-          capabilities: ['园区数字化运营', '数据平台建设'],
-          cooperationNeeds: ['智能制造解决方案'],
-          publicContact: '合作邮箱 digital@example.com',
-          isPublic: true,
-          updatedAt: new Date().toISOString(),
-        },
-      ];
-      return Promise.resolve({
-        parkId: 'preview-park',
-        parkName: '北控宏创科技园',
-        currentOrganizationId: previewAccount.organizationId,
-        generatedAt: new Date().toISOString(),
-        nodes,
-        edges: [
-          {
-            id: 'preview-park-admin--preview-tenant-smart',
-            sourceOrganizationId: previewAccount.organizationId,
-            targetOrganizationId: 'preview-tenant-smart',
-            strength: 'promising',
-            ruleConfidence: 0.78,
-            evidence: [
-              '宏创园区管理方公开需求“智能制造解决方案”与宏创智能制造公开产品/服务“智能制造解决方案”存在互补',
-            ],
-            unverifiedQuestions: ['双方需核实交付范围、产能、时间与商务条件。'],
-          },
-          {
-            id: 'preview-park-admin--preview-tenant-digital',
-            sourceOrganizationId: previewAccount.organizationId,
-            targetOrganizationId: 'preview-tenant-digital',
-            strength: 'strong',
-            ruleConfidence: 0.86,
-            evidence: [
-              '宏创园区管理方公开需求“企业数字化服务”与北辰数字科技公开产品/服务“企业数字化服务”存在互补',
-              '北辰数字科技公开需求“智能制造解决方案”与宏创园区管理方公开合作需求存在业务联动线索',
-            ],
-            unverifiedQuestions: ['公开资料是否仍然有效，需由企业联系人确认。'],
-          },
-        ],
-      });
-    },
+    enterpriseParkStarMap: () => Promise.resolve(structuredClone(supplyDemo)),
     enterpriseMessagesList: (peerAccountId: string) => {
       // 与真实后端一致：拉取会话消息即标记该 peer 已读，下轮轮询未读清零
       previewUnread.delete(peerAccountId);

@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Database } from '../sqlite-compat.js';
+import { CUSTOMER_MODULE_SCHEMA_CONTRIBUTOR } from '../modules/tool_skill_platform/customerModuleSchema.js';
 
 type DbModule = typeof import('./db.js');
 
@@ -122,7 +123,7 @@ afterEach(() => {
   fs.rmSync(temporaryDirectory, { recursive: true, force: true });
 });
 
-describe('V1.9.13 schema 23 to V1.9.14 schema 26 acceptance', () => {
+describe('legacy schema 23/24 to V1.9.15 schema 26 acceptance', () => {
   it('locks the fixture to the real V1.9.13 source and its byte digest', () => {
     expect(FIXTURE_METADATA).toMatchObject({
       format: 'otto-enterprise-v1.9.13-schema23-fixture-v1',
@@ -333,6 +334,50 @@ describe('V1.9.13 schema 23 to V1.9.14 schema 26 acceptance', () => {
           )
           .get(),
       ).toEqual({ name: 'customer_module_versions' });
+    } finally {
+      db.closeEnterpriseDatabase();
+    }
+  }, 60_000);
+
+  it('migrates a synthetic schema-24 database without losing tenant, session or module records', async () => {
+    // This is a synthetic schema-24 regression, not a copy of the production
+    // database. The real schema-24 SQLCipher snapshot still needs its canary.
+    const databasePath = copyFixture();
+    const legacy = new Database(databasePath);
+    CUSTOMER_MODULE_SCHEMA_CONTRIBUTOR.apply(legacy);
+    legacy.exec(`
+      INSERT INTO customer_module_versions
+        (module_id, version, publisher_id, status, manifest_json, created_at, updated_at)
+      VALUES ('legacy-private-module', '1.0.0', 'legacy-publisher', 'approved',
+              '{"fixture":true}', '2026-08-01', '2026-08-01');
+      PRAGMA user_version = 24;
+    `);
+    const counts = tableCounts(legacy);
+    const oldSession = legacy.prepare('SELECT * FROM auth_sessions WHERE account_id = ?')
+      .get(FIXTURE_METADATA.tenantAdminAccountId);
+    const oldModule = legacy.prepare('SELECT * FROM customer_module_versions WHERE module_id = ?')
+      .get('legacy-private-module');
+    expect(readSchemaVersion(legacy)).toBe(24);
+    legacy.close();
+
+    const db = await openCurrentDatabase();
+    try {
+      expect(db.getDatabaseReadiness()).toEqual({ ready: true, schemaVersion: 26 });
+      expect(tableCounts(db.getDB())).toEqual(counts);
+      expect(db.getDB().prepare('SELECT * FROM auth_sessions WHERE account_id = ?')
+        .get(FIXTURE_METADATA.tenantAdminAccountId)).toEqual(oldSession);
+      expect(db.getDB().prepare('SELECT * FROM customer_module_versions WHERE module_id = ?')
+        .get('legacy-private-module')).toEqual(oldModule);
+      expect(db.getDB().prepare('PRAGMA quick_check').get()).toEqual({ quick_check: 'ok' });
+      expect(db.getDB().prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(db.getDB().prepare('PRAGMA table_info(it_tickets)').all()
+        .map((column) => (column as { name: string }).name)).toEqual(
+        expect.arrayContaining(['idempotency_key', 'idempotency_request_hash']),
+      );
+      expect(db.getDB().prepare("SELECT name FROM sqlite_master WHERE name = 'park_carpool_intents'").get())
+        .toEqual({ name: 'park_carpool_intents' });
+      expect(db.authenticateAccount(FIXTURE_METADATA.tenantAdminUsername, TENANT_ADMIN_PASSWORD))
+        .toMatchObject({ id: FIXTURE_METADATA.tenantAdminAccountId, organizationId: FIXTURE_METADATA.tenantOrganizationId });
     } finally {
       db.closeEnterpriseDatabase();
     }

@@ -1,0 +1,164 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling subtle v2.6.1
+   Compiling const-oid v0.9.6
+   Compiling base64ct v1.8.3
+   Compiling serde_core v1.0.229
+   Compiling base16ct v0.2.0
+   Compiling generic-array v0.14.7
+   Compiling serde v1.0.229
+   Compiling pem-rfc7468 v0.7.0
+   Compiling semver v1.0.28
+   Compiling memchr v2.8.3
+   Compiling rustc_version v0.4.1
+   Compiling zerocopy v0.8.55
+   Compiling hax-lib v0.3.6
+   Compiling crossbeam-utils v0.8.22
+   Compiling getrandom v0.2.17
+   Compiling rand_core v0.6.4
+   Compiling ff v0.13.1
+   Compiling cpufeatures v0.2.17
+   Compiling group v0.13.0
+   Compiling curve25519-dalek v4.1.3
+   Compiling crossbeam-epoch v0.9.20
+   Compiling syn v2.0.119
+   Compiling syn v3.0.3
+   Compiling opaque-debug v0.3.1
+   Compiling rand_core v0.9.5
+   Compiling smallvec v1.15.2
+   Compiling serde_derive v1.0.229
+   Compiling aho-corasick v1.1.4
+   Compiling scopeguard v1.2.0
+   Compiling zmij v1.0.23
+   Compiling log v0.4.33
+   Compiling regex-syntax v0.8.11
+   Compiling thiserror v2.0.19
+   Compiling libcrux-intrinsics v0.0.6
+   Compiling crossbeam-deque v0.8.7
+   Compiling zeroize_derive v1.5.0
+   Compiling hax-lib-macros v0.3.6
+   Compiling zeroize v1.9.0
+   Compiling tls_codec_derive v0.4.2
+   Compiling regex-automata v0.4.16
+   Compiling lock_api v0.4.14
+   Compiling thiserror-impl v2.0.19
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling der v0.7.10
+   Compiling crypto-bigint v0.5.5
+   Compiling hmac v0.12.1
+   Compiling inout v0.1.4
+   Compiling hkdf v0.12.4
+   Compiling cipher v0.4.4
+   Compiling signature v2.2.0
+   Compiling universal-hash v0.5.1
+   Compiling tls_codec v0.4.2
+   Compiling rfc6979 v0.4.0
+   Compiling sha2 v0.10.9
+   Compiling ppv-lite86 v0.2.21
+   Compiling rand_chacha v0.3.1
+   Compiling polyval v0.6.2
+   Compiling spki v0.7.3
+   Compiling pkcs8 v0.10.2
+   Compiling sec1 v0.7.3
+   Compiling openmls_traits v0.5.0
+   Compiling libcrux-secrets v0.0.5
+   Compiling aead v0.5.2
+   Compiling elliptic-curve v0.13.8
+   Compiling rand v0.9.5
+   Compiling libcrux-sha3 v0.0.8
+   Compiling rayon-core v1.13.0
+   Compiling primeorder v0.13.6
+   Compiling ecdsa v0.16.9
+   Compiling serde_json v1.0.151
+   Compiling parking_lot_core v0.9.12
+   Compiling parking_lot_core v0.8.6
+   Compiling libcrux-traits v0.0.6
+   Compiling p256 v0.13.2
+   Compiling ghash v0.5.1
+   Compiling rand v0.8.7
+   Compiling poly1305 v0.8.0
+   Compiling chacha20 v0.9.1
+   Compiling aes v0.8.4
+   Compiling ctr v0.9.2
+   Compiling ed25519 v2.2.3
+   Compiling hpke-rs-crypto v0.6.1
+   Compiling libcrux-platform v0.0.3
+   Compiling instant v0.1.13
+   Compiling bit-vec v0.6.3
+   Compiling crc32fast v1.5.0
+   Compiling anyhow v1.0.104
+   Compiling itoa v1.0.18
+   Compiling bit-set v0.5.3
+   Compiling aes-gcm v0.10.3
+   Compiling ed25519-dalek v2.2.0
+   Compiling chacha20poly1305 v0.10.1
+   Compiling p384 v0.13.1
+   Compiling k256 v0.13.4
+   Compiling x25519-dalek v2.0.1
+   Compiling foldhash v0.1.5
+   Compiling either v1.17.0
+   Compiling byteorder v1.5.0
+   Compiling equivalent v1.0.2
+   Compiling allocator-api2 v0.2.21
+   Compiling rand_core v0.10.1
+   Compiling hpke-rs-rust-crypto v0.6.1
+   Compiling fxhash v0.2.1
+   Compiling rayon v1.12.0
+   Compiling openmls_memory_storage v0.5.0
+   Compiling hashbrown v0.15.5
+   Compiling hpke-rs v0.6.1
+   Compiling parking_lot v0.12.5
+   Compiling fancy-regex v0.13.0
+   Compiling parking_lot v0.11.2
+   Compiling bstr v1.13.0
+   Compiling regex v1.13.1
+   Compiling serde_bytes v0.11.19
+   Compiling fs2 v0.4.3
+   Compiling base64 v0.21.7
+   Compiling rustc-hash v1.1.0
+   Compiling lazy_static v1.5.0
+   Compiling sled v0.34.7
+   Compiling tiktoken-rs v0.6.0
+   Compiling lru v0.12.5
+   Compiling openmls_rust_crypto v0.5.1
+   Compiling openmls_basic_credential v0.5.0
+   Compiling base64 v0.22.1
+   Compiling hex v0.4.3
+   Compiling openmls v0.8.1
+   Compiling otto-native v0.1.0 (/Users/yang/Desktop/otto-new-carpool/otto-native)
+warning: methods `receive_transport_commit`, `receive_transport_application`, and `stage_transport_application` are never used
+    --> src/mls.rs:1615:12
+     |
+ 430 | impl MlsKernel {
+     | -------------- methods in this implementation
+...
+1615 |     pub fn receive_transport_commit(
+     |            ^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1887 |     pub fn receive_transport_application(
+     |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2058 |     pub fn stage_transport_application(
+     |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `model` is never read
+ --> src/tokenizer.rs:5:5
+  |
+3 | pub struct Tokenizer {
+  |            --------- field in this struct
+4 |     bpe: CoreBPE,
+5 |     model: String,
+  |     ^^^^^
+
+warning: `otto-native` (bin "otto-native") generated 2 warnings
+    Finished `release` profile [optimized] target(s) in 1m 17s
+[otto-native-runtime] verified darwin-arm64: 11408912 bytes sha256=d481f5c5a8c9a0e902cb441274f48ccbca3c364d20ce54eb050dd2b0c124d7cb

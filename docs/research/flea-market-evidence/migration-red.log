@@ -1,0 +1,40 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+ ❯ src/modules/park_services/flea_market/fleaMarketMigration.test.ts (1 test | 1 failed) 5ms
+   × keeps concurrent carpool and market migration versions unique and sequential 5ms
+     → expected [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, …(6) ] to deeply equal [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, …(6) ]
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/modules/park_services/flea_market/fleaMarketMigration.test.ts > keeps concurrent carpool and market migration versions unique and sequential
+AssertionError: expected [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, …(6) ] to deeply equal [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, …(6) ]
+
+- Expected
++ Received
+
+@@ -12,7 +12,7 @@
+    11,
+    12,
+    13,
+    14,
+    15,
+-   16,
++   15,
+  ]
+
+ ❯ src/modules/park_services/flea_market/fleaMarketMigration.test.ts:5:60
+      3| import { ENTERPRISE_POSTGRES_MIGRATIONS } from '../../../enterprise/po…
+      4| it('keeps concurrent carpool and market migration versions unique and …
+      5|   expect(ENTERPRISE_POSTGRES_MIGRATIONS.map(m=>m.version)).toEqual(ENT…
+       |                                                            ^
+      6|   expect(ENTERPRISE_POSTGRES_MIGRATIONS.filter(m=>m.name==='park-flea-…
+      7| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  09:38:11
+   Duration  168ms (transform 35ms, setup 0ms, collect 32ms, tests 5ms, environment 0ms, prepare 33ms)

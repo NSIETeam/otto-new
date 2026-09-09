@@ -86,12 +86,12 @@ describe('enterprise runtime dependency closure', () => {
     }
   });
 
-  it('keeps the workspace workflow package out of the server runtime graph', () => {
+  it('declares the local channel workflow as production, explicitly vendored for enterprise', () => {
     const serverPackage = JSON.parse(
       readFileSync(path.join(repoRoot, 'packages/server/package.json'), 'utf8'),
     );
-    expect(serverPackage.dependencies).not.toHaveProperty('otto-workflow');
-    expect(serverPackage.devDependencies).toHaveProperty(
+    expect(serverPackage.devDependencies).not.toHaveProperty('otto-workflow');
+    expect(serverPackage.dependencies).toHaveProperty(
       'otto-workflow',
       'file:../workflow',
     );
@@ -106,7 +106,9 @@ describe('enterprise runtime dependency closure', () => {
         path.relative(repoRoot, sourceFile).replaceAll('\\', '/'),
       ),
     );
-    expect(runtimeImports).toEqual([]);
+    expect(runtimeImports).toEqual([
+      'packages/server/src/modules/integration_adapters/localOfficialChannelPlatform.ts',
+    ]);
   }, 30_000);
 
   it.skipIf(!lockedInstallMaterialized)(

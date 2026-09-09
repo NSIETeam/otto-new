@@ -8,7 +8,10 @@ import type {
   EnterprisePublicProfileInput,
 } from '../../preload/index.js';
 
+import { industryTaxonomy } from '../starMap/model.js';
+
 interface ProfileDraft {
+  primaryIndustryCode: string;
   summary: string;
   website: string;
   industryTags: string;
@@ -19,6 +22,7 @@ interface ProfileDraft {
   isPublic: boolean;
 }
 const EMPTY_DRAFT: ProfileDraft = {
+  primaryIndustryCode: '',
   summary: '',
   website: '',
   industryTags: '',
@@ -46,6 +50,7 @@ function list(value: string): string[] {
 
 function draftFromProfile(profile: EnterprisePublicProfile): ProfileDraft {
   return {
+    primaryIndustryCode: profile.primaryIndustryCode ?? '',
     summary: profile.summary,
     website: profile.website,
     industryTags: lines(profile.industryTags),
@@ -63,11 +68,36 @@ function errorMessage(error: unknown): string {
     .replace(/^Error:\s*/u, '');
 }
 
-export function EnterprisePublicProfilePanel(): React.JSX.Element {
+export function EnterprisePublicProfilePanel({
+  canEdit = true,
+  onDirtyChange,
+  onSaved,
+}: {
+  canEdit?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+  onSaved?: () => void;
+} = {}): React.JSX.Element {
   const [profile, setProfile] = useState<EnterprisePublicProfile | null>(null);
   const [draft, setDraft] = useState<ProfileDraft>(EMPTY_DRAFT);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [industryQuery, setIndustryQuery] = useState('');
+  const dirty =
+    profile !== null &&
+    JSON.stringify(draft) !== JSON.stringify(draftFromProfile(profile));
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    const guard = (event: BeforeUnloadEvent): void => {
+      if (dirty) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+  }, [dirty]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,10 +127,12 @@ export function EnterprisePublicProfilePanel(): React.JSX.Element {
   ): void => setDraft((current) => ({ ...current, [key]: value }));
 
   const save = async (): Promise<void> => {
+    if (saving || !canEdit || !profile) return;
     setSaving(true);
     setMessage(null);
     setError(null);
     const input: EnterprisePublicProfileInput = {
+      primaryIndustryCode: draft.primaryIndustryCode || null,
       summary: draft.summary,
       website: draft.website,
       industryTags: list(draft.industryTags),
@@ -113,6 +145,8 @@ export function EnterprisePublicProfilePanel(): React.JSX.Element {
     try {
       const saved = await window.otto.enterprisePublicProfileUpdate(input);
       setProfile(saved);
+      window.dispatchEvent(new CustomEvent('otto:enterprise-profile-updated'));
+      onSaved?.();
       setDraft(draftFromProfile(saved));
       setMessage(
         saved.isPublic
@@ -127,16 +161,25 @@ export function EnterprisePublicProfilePanel(): React.JSX.Element {
   };
 
   return (
-    <section className="otto-enterprise-profile" aria-label="企业公开资料">
+    <section
+      className="otto-enterprise-profile"
+      aria-label="企业公开资料"
+      data-profile-dirty={dirty ? 'true' : undefined}
+    >
       <div className="otto-enterprise-profile__notice">
         <strong>由企业自行维护，默认不公开</strong>
         <p>
-          公开后，同一园区成员可看到下列资料，星链图只用“产品与服务、企业能力、合作需求”推理合作线索。
+          公开后，同一园区成员可看到下列资料。星链图按已确认的主营行业连接同行，同行业不代表已有合作。
           成员名单、内部消息和经营数据不会参与推理。
         </p>
       </div>
-      {loading ? <p className="otto-enterprise-profile__status">正在读取企业资料…</p> : null}
-      {!loading ? (
+      {loading ? (
+        <p className="otto-enterprise-profile__status">正在读取企业资料…</p>
+      ) : null}
+      {!loading && !profile ? (
+        <p role="alert">{error || '企业资料读取失败，请重新打开后重试。'}</p>
+      ) : null}
+      {!loading && profile ? (
         <div className="otto-enterprise-profile__layout">
           <form
             className="otto-enterprise-profile__form"
@@ -145,100 +188,176 @@ export function EnterprisePublicProfilePanel(): React.JSX.Element {
               void save();
             }}
           >
-            <label className="is-wide">
-              <span>企业简介</span>
-              <textarea
-                aria-label="企业简介"
-                value={draft.summary}
-                maxLength={1000}
-                onChange={(event) => update('summary', event.target.value)}
-                placeholder="说明企业主营方向、服务对象和核心优势"
-              />
-            </label>
-            <label>
-              <span>企业官网</span>
-              <input
-                aria-label="企业官网"
-                value={draft.website}
-                onChange={(event) => update('website', event.target.value)}
-                placeholder="https://example.com"
-              />
-            </label>
-            <label>
-              <span>公开联系方式</span>
-              <input
-                aria-label="公开联系方式"
-                value={draft.publicContact}
-                onChange={(event) => update('publicContact', event.target.value)}
-                placeholder="建议填写商务邮箱或企业电话"
-              />
-            </label>
-            <label>
-              <span>行业标签</span>
-              <textarea
-                aria-label="行业标签"
-                value={draft.industryTags}
-                onChange={(event) => update('industryTags', event.target.value)}
-                placeholder={'每行一项，例如：\n智能制造\n工业软件'}
-              />
-            </label>
-            <label>
-              <span>产品与服务</span>
-              <textarea
-                aria-label="产品与服务"
-                value={draft.productsServices}
-                onChange={(event) => update('productsServices', event.target.value)}
-                placeholder="每行填写一项可对外提供的产品或服务"
-              />
-            </label>
-            <label>
-              <span>企业能力</span>
-              <textarea
-                aria-label="企业能力"
-                value={draft.capabilities}
-                onChange={(event) => update('capabilities', event.target.value)}
-                placeholder="每行填写一项可验证的交付能力"
-              />
-            </label>
-            <label>
-              <span>合作需求</span>
-              <textarea
-                aria-label="合作需求"
-                value={draft.cooperationNeeds}
-                onChange={(event) => update('cooperationNeeds', event.target.value)}
-                placeholder="每行填写一项当前希望对接的资源或服务"
-              />
-            </label>
-            <label className="otto-enterprise-profile__visibility is-wide">
-              <input
-                type="checkbox"
-                checked={draft.isPublic}
-                onChange={(event) => update('isPublic', event.target.checked)}
-              />
-              <span>
-                <strong>向同一园区公开这份企业资料</strong>
-                <small>关闭后立即退出星链图；填写内容仍保存在企业服务器中。</small>
-              </span>
-            </label>
-            <div className="otto-enterprise-profile__actions is-wide">
-              <button type="submit" disabled={saving}>
-                {saving ? '正在保存…' : '保存企业资料'}
-              </button>
-              {profile?.updatedAt ? (
-                <small>最近更新：{new Date(profile.updatedAt).toLocaleString('zh-CN')}</small>
-              ) : null}
-            </div>
-            {message ? <p className="otto-enterprise-profile__success is-wide">{message}</p> : null}
-            {error ? <p className="otto-enterprise-profile__error is-wide" role="alert">{error}</p> : null}
+            <fieldset
+              disabled={!canEdit || saving}
+              style={{ display: 'contents' }}
+            >
+              {!canEdit ? <p>请联系企业资料管理员完善。</p> : null}
+              <label className="is-wide">
+                <span>主营行业（单选）</span>
+                <input
+                  aria-label="搜索主营行业"
+                  placeholder="搜索行业名称"
+                  value={industryQuery}
+                  onChange={(event) => setIndustryQuery(event.target.value)}
+                />
+                <select
+                  aria-label="主营行业"
+                  value={draft.primaryIndustryCode}
+                  onChange={(event) =>
+                    update('primaryIndustryCode', event.target.value)
+                  }
+                >
+                  <option value="">暂不选择</option>
+                  {industryTaxonomy
+                    .filter(
+                      (item) =>
+                        item.name.includes(industryQuery.trim()) ||
+                        item.code === draft.primaryIndustryCode,
+                    )
+                    .map((item) => (
+                      <option key={item.code} value={item.code}>
+                        {item.name}
+                      </option>
+                    ))}
+                </select>
+                <small>
+                  选择并保存即确认本企业主营行业；不会改变资料公开开关。
+                </small>
+              </label>
+              <label className="is-wide">
+                <span>企业简介</span>
+                <textarea
+                  aria-label="企业简介"
+                  value={draft.summary}
+                  maxLength={1000}
+                  onChange={(event) => update('summary', event.target.value)}
+                  placeholder="说明企业主营方向、服务对象和核心优势"
+                />
+              </label>
+              <label>
+                <span>企业官网</span>
+                <input
+                  aria-label="企业官网"
+                  value={draft.website}
+                  onChange={(event) => update('website', event.target.value)}
+                  placeholder="https://example.com"
+                />
+              </label>
+              <label>
+                <span>公开联系方式</span>
+                <input
+                  aria-label="公开联系方式"
+                  value={draft.publicContact}
+                  onChange={(event) =>
+                    update('publicContact', event.target.value)
+                  }
+                  placeholder="建议填写商务邮箱或企业电话"
+                />
+              </label>
+              <label>
+                <span>行业标签</span>
+                <textarea
+                  aria-label="行业标签"
+                  value={draft.industryTags}
+                  onChange={(event) =>
+                    update('industryTags', event.target.value)
+                  }
+                  placeholder={'每行一项，例如：\n智能制造\n工业软件'}
+                />
+              </label>
+              <label>
+                <span>产品与服务</span>
+                <textarea
+                  aria-label="产品与服务"
+                  value={draft.productsServices}
+                  onChange={(event) =>
+                    update('productsServices', event.target.value)
+                  }
+                  placeholder="每行填写一项可对外提供的产品或服务"
+                />
+              </label>
+              <label>
+                <span>企业能力</span>
+                <textarea
+                  aria-label="企业能力"
+                  value={draft.capabilities}
+                  onChange={(event) =>
+                    update('capabilities', event.target.value)
+                  }
+                  placeholder="每行填写一项可验证的交付能力"
+                />
+              </label>
+              <label>
+                <span>合作需求</span>
+                <textarea
+                  aria-label="合作需求"
+                  value={draft.cooperationNeeds}
+                  onChange={(event) =>
+                    update('cooperationNeeds', event.target.value)
+                  }
+                  placeholder="每行填写一项当前希望对接的资源或服务"
+                />
+              </label>
+              <label className="otto-enterprise-profile__visibility is-wide">
+                <input
+                  type="checkbox"
+                  checked={draft.isPublic}
+                  onChange={(event) => update('isPublic', event.target.checked)}
+                />
+                <span>
+                  <strong>向同一园区公开这份企业资料</strong>
+                  <small>
+                    关闭后立即退出星链图；填写内容仍保存在企业服务器中。
+                  </small>
+                </span>
+              </label>
+              <div className="otto-enterprise-profile__actions is-wide">
+                <button type="submit" disabled={saving}>
+                  {saving ? '正在保存…' : '保存企业资料'}
+                </button>
+                {profile?.updatedAt ? (
+                  <small>
+                    最近更新：
+                    {new Date(profile.updatedAt).toLocaleString('zh-CN')}
+                  </small>
+                ) : null}
+              </div>
+            </fieldset>
+            {message ? (
+              <p className="otto-enterprise-profile__success is-wide">
+                {message}
+              </p>
+            ) : null}
+            {error ? (
+              <p
+                className="otto-enterprise-profile__error is-wide"
+                role="alert"
+              >
+                {error}
+              </p>
+            ) : null}
           </form>
-          <aside className="otto-enterprise-profile__preview" aria-label="企业资料公开预览">
+          <aside
+            className="otto-enterprise-profile__preview"
+            aria-label="企业资料公开预览"
+          >
             <span>PUBLIC PREVIEW</span>
             <h3>{profile?.organizationName ?? '本企业'}</h3>
             <p>{draft.summary || '填写企业简介后在这里预览。'}</p>
             <dl>
-              <div><dt>产品与服务</dt><dd>{list(draft.productsServices).join('、') || '未填写'}</dd></div>
-              <div><dt>企业能力</dt><dd>{list(draft.capabilities).join('、') || '未填写'}</dd></div>
-              <div><dt>合作需求</dt><dd>{list(draft.cooperationNeeds).join('、') || '未填写'}</dd></div>
+              <div>
+                <dt>产品与服务</dt>
+                <dd>{list(draft.productsServices).join('、') || '未填写'}</dd>
+              </div>
+              <div>
+                <dt>企业能力</dt>
+                <dd>{list(draft.capabilities).join('、') || '未填写'}</dd>
+              </div>
+              <div>
+                <dt>合作需求</dt>
+                <dd>{list(draft.cooperationNeeds).join('、') || '未填写'}</dd>
+              </div>
             </dl>
             <strong className={draft.isPublic ? 'is-public' : 'is-private'}>
               {draft.isPublic ? '将向同园区公开' : '当前仅企业管理员可见'}

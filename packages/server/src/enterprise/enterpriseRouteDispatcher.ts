@@ -1,3 +1,4 @@
+import { handleMarketHttp } from '../modules/park_services/flea_market/fleaMarketHttp.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { FeatureFlagManager } from 'otto-core';
 import * as db from './db.js';
@@ -296,6 +297,10 @@ export async function dispatchEnterpriseRoute({
     })
   ) {
     return true;
+  }
+
+  if (path === '/enterprise/park-market' || path.startsWith('/enterprise/park-market/')) {
+    return handleMarketHttp({ path, method, url, req, res, memberAccount, readBody, sendJSON, application: db.getFleaMarketApplication() });
   }
 
   if (

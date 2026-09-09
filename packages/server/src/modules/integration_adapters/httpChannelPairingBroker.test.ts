@@ -43,6 +43,7 @@ describe('HttpChannelPairingBrokerV1', () => {
         tenantId: 'corp-1',
         tenantName: 'Acme',
         botName: 'Otto',
+        providerUserId: 'ou_scanner_1',
         grantedScopes: ['message.send'],
         requiresAdminApproval: true,
       },
@@ -54,6 +55,9 @@ describe('HttpChannelPairingBrokerV1', () => {
       status: 'authorized',
       plaintextCredential: 'provider-token',
       authorization: { tenantId: 'corp-1', requiresAdminApproval: true },
+    });
+    await expect(broker.poll(registration.pairingId)).resolves.toMatchObject({
+      authorization: { providerUserId: 'ou_scanner_1' },
     });
 
     const failure = new HttpChannelPairingBrokerV1({

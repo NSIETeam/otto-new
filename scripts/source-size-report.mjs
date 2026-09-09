@@ -62,7 +62,9 @@ const SOURCE_EXTENSIONS = new Set([
 const TEXT_HARD_EXTENSIONS = new Set(['.ts', '.tsx', '.css', '.md']);
 
 const BUDGETS = {
-  totalBytes: 35 * 1024 * 1024,
+  // Reviewed feature/evidence growth, not an installer allowance. See
+  // docs/release-1.9.15-source-budget.md; all evidence stays counted.
+  totalBytes: 44 * 1024 * 1024,
   textWarnBytes: 150 * 1024,
   textHardBytes: 300 * 1024,
   duplicateBytes: 100 * 1024,

@@ -33,3 +33,13 @@ export function resolveWindowsInstallerBudget(environment = process.env) {
   }
   return { baselineBytes, growthBytes, absoluteMaxBytes, maxBytes };
 }
+
+export function resolveMacInstallerBudget(environment = process.env) {
+  const maxBytes = Math.floor(
+    positiveNumber(environment, 'OTTO_DESKTOP_MAX_DMG_MB', 140) * MEBIBYTE,
+  );
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new Error('macOS DMG size budget exceeds safe integer range');
+  }
+  return { maxBytes };
+}

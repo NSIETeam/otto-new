@@ -1,0 +1,32 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-verified-7f3a9c/packages/desktop
+
+ ❯ src/renderer/components/ParkMarketDialog.test.tsx (7 tests | 1 failed) 1250ms
+   ✓ keeps own records and drafts reachable when the market is paused and validates publication without dropping fields 59ms
+   ✓ flushes the last input on save-and-close with the originating account scope 38ms
+   ✓ remounts private form state when the same account id switches server or organization 21ms
+   ✓ preserves expired draft text and identifies the failed photo with an independent retry 27ms
+   ✓ shows per-image transfer progress and allows cancelling without dropping form text 34ms
+   ✓ flushes unsaved text when switching away from the form without closing the market 39ms
+   × closes directly after the current form is durably saved 1031ms
+     → expected "spy" to be called once, but got 0 times
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/renderer/components/ParkMarketDialog.test.tsx > closes directly after the current form is durably saved
+AssertionError: expected "spy" to be called once, but got 0 times
+ ❯ src/renderer/components/ParkMarketDialog.test.tsx:280:16
+    278|  await screen.findByText('已保存到本机');
+    279|  fireEvent.click(screen.getByRole('button',{name:'关闭跳蚤市场'}));
+    280|  expect(close).toHaveBeenCalledOnce();
+       |                ^
+    281|  expect(screen.queryByRole('alertdialog')).toBeNull();
+    282| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 passed (7)
+   Start at  13:20:05
+   Duration  1.95s (transform 107ms, setup 75ms, collect 115ms, tests 1.25s, environment 287ms, prepare 52ms)

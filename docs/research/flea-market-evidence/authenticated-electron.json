@@ -1,0 +1,7 @@
+{
+  "windows": 2,
+  "authenticatedHttp": true,
+  "realEncryptedMessages": true,
+  "flow": "publish/contact/reply/reserve/sold",
+  "packagedClient": false
+}

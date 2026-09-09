@@ -15,7 +15,7 @@ import {
 } from 'node:crypto';
 import type { ChannelOutboundReceipt } from './channelOutboundLedger.js';
 
-export type ChannelProvider = 'feishu' | 'lark' | 'wecom';
+export type ChannelProvider = 'feishu' | 'lark' | 'wecom' | 'dingtalk';
 export type PairingStatus =
   | 'waiting_scan'
   | 'user_authorized'
@@ -63,7 +63,13 @@ export interface ChannelInstallation {
   tenantId: string;
   tenantName: string;
   botName: string;
+  /** Scopes approved by the user during pairing. Optional for v1 registry compatibility. */
+  requestedScopes?: readonly string[];
   grantedScopes: readonly string[];
+  /** Provider identity that approved the QR pairing. Never treated as trusted until locally bound. */
+  ownerProviderUserId?: string;
+  /** Result of the local owner-binding step returned by the installation route. */
+  ownerBindingState?: 'bound' | 'manual_required';
   connectedAtMs: number;
 }
 
@@ -74,6 +80,11 @@ export interface ChannelHealth {
   lastReceivedAtMs?: number;
   lastSentAtMs?: number;
   reconnectCount: number;
+  /** Scopes approved during pairing but not granted by the provider. */
+  missingScopes?: readonly string[];
+  startedAtMs?: number;
+  connectedAtMs?: number;
+  nextReconnectAtMs?: number;
   message?: string;
 }
 
@@ -125,6 +136,8 @@ export interface PairingAuthorization {
   tenantId: string;
   tenantName: string;
   botName: string;
+  /** Provider-native id of the person who scanned and approved the QR code. */
+  providerUserId?: string;
   grantedScopes: readonly string[];
   requiresAdminApproval?: boolean;
 }
@@ -274,8 +287,12 @@ export class ChannelPairingCoordinator {
     const tenantId = authorization.tenantId.trim();
     const tenantName = authorization.tenantName.trim();
     const botName = authorization.botName.trim();
+    const providerUserId = authorization.providerUserId?.trim();
     if (!tenantId || !tenantName || !botName) {
       throw new Error('provider tenant identity is required');
+    }
+    if (providerUserId !== undefined && (!providerUserId || providerUserId.length > 200)) {
+      throw new Error('provider pairing user identity is invalid');
     }
     const granted = validateScopes(authorization.grantedScopes);
     if (granted.some((scope) => !pairing.requestedScopes.includes(scope))) {
@@ -286,6 +303,7 @@ export class ChannelPairingCoordinator {
       tenantId,
       tenantName,
       botName,
+      ...(providerUserId ? { providerUserId } : {}),
       grantedScopes: granted,
     };
     const next = authorization.requiresAdminApproval ? 'waiting_admin' : 'user_authorized';
@@ -341,32 +359,54 @@ export class ChannelPairingCoordinator {
     if (!authorization) throw new Error('channel pairing authorization is missing');
     if (pairing.status === 'user_authorized') {
       await this.transition(pairing, 'installing');
+      await this.expireIfNeeded(pairing);
+      this.assertStatus(pairing, 'installing');
       await this.transition(pairing, 'verifying');
     }
+    await this.expireIfNeeded(pairing);
+    this.assertStatus(pairing, 'verifying');
     const installation = pairing.installation ?? {
       installationId: `channel_${pairing.provider}_${pairing.pairingId.slice(5)}`,
       provider: pairing.provider,
       tenantId: authorization.tenantId,
       tenantName: authorization.tenantName,
       botName: authorization.botName,
+      requestedScopes: [...pairing.requestedScopes],
       grantedScopes: [...authorization.grantedScopes],
+      ...(authorization.providerUserId
+        ? { ownerProviderUserId: authorization.providerUserId }
+        : {}),
       connectedAtMs: this.now(),
     };
     pairing.installation = installation;
     await commit?.({
       idempotencyKey: installation.installationId,
-      installation: { ...installation, grantedScopes: [...installation.grantedScopes] },
+      installation: {
+        ...installation,
+        ...(installation.requestedScopes
+          ? { requestedScopes: [...installation.requestedScopes] }
+          : {}),
+        grantedScopes: [...installation.grantedScopes],
+      },
     });
     // The bearer is single use. Erase even its hash after installation.
+    await this.expireIfNeeded(pairing);
+    this.assertStatus(pairing, 'verifying');
     pairing.tokenHash.fill(0);
     await this.transition(pairing, 'connected');
-    return { ...installation, grantedScopes: [...installation.grantedScopes] };
+    return {
+      ...installation,
+      ...(installation.requestedScopes
+        ? { requestedScopes: [...installation.requestedScopes] }
+        : {}),
+      grantedScopes: [...installation.grantedScopes],
+    };
   }
 
   async deny(pairingId: string, reason = 'authorization denied'): Promise<PairingSession> {
     const pairing = this.requirePairing(pairingId);
     await this.expireIfNeeded(pairing);
-    if (!['waiting_scan', 'waiting_admin', 'user_authorized', 'verifying'].includes(pairing.status)) {
+    if (!['waiting_scan', 'waiting_admin', 'user_authorized', 'installing', 'verifying'].includes(pairing.status)) {
       throw new Error(`cannot deny channel pairing from ${pairing.status}`);
     }
     pairing.failureReason = reason;

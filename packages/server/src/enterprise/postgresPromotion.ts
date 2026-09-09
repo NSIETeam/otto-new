@@ -1,3 +1,4 @@
+import { parsePrimaryIndustry } from '../modules/park_services/enterpriseIndustry.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  *
@@ -1766,6 +1767,7 @@ async function promoteBusinessTables(input: {
       payload: {
         summary: optionalString(row.summary) ?? '',
         website: optionalString(row.website) ?? '',
+        ...parsePrimaryIndustry(optionalString(row.primary_industry_json) ?? '{}'),
         industryTags: jsonStringList(row.industry_tags_json),
         productsServices: jsonStringList(row.products_services_json),
         capabilities: jsonStringList(row.capabilities_json),

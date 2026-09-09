@@ -1,0 +1,36 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop
+
+ ❯ src/main/park-market-messaging.test.ts (2 tests | 1 failed) 119ms
+   ✓ retains both ciphertext receipts across concurrent timeouts and retries identical bytes 92ms
+   × discards retry ciphertext only when the server explicitly rejects the transaction 24ms
+     → expected [ 'orphan' ] to deeply equal []
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-market-messaging.test.ts > discards retry ciphertext only when the server explicitly rejects the transaction
+AssertionError: expected [ 'orphan' ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "orphan",
++ ]
+
+ ❯ src/main/park-market-messaging.test.ts:147:61
+    145|     ).rejects.toThrow(/明确未发送/);
+    146|     expect(pending.load(scope)).toEqual([]);
+    147|     expect(readdirSync(pending.attachmentDirectory(scope))).toEqual([]…
+       |                                                             ^
+    148|   } finally {
+    149|     rmSync(root, { recursive: true, force: true });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  23:23:08
+   Duration  6.28s (transform 339ms, setup 577ms, collect 438ms, tests 119ms, environment 2.97s, prepare 484ms)

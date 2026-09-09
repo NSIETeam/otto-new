@@ -1,0 +1,67 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:2648) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:2651) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:2650) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:2649) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts (5 tests) 3055ms
+   ✓ PostgreSQL: expires without user reads, cleans precise positions and deletes own workflow facts  1697ms
+   ✓ PostgreSQL: moving parks prunes old scope without deleting new valid intent  1299ms
+(node:3634) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolTransport.integration.test.ts (6 tests) 4609ms
+   ✓ PostgreSQL: public transport proves possession of the approved device key  1438ms
+   ✓ PostgreSQL: expired unclaimed packages can be securely retired  1410ms
+   ✓ PostgreSQL: actual native processes exchange ciphertext through authorized persistent transport  1503ms
+(node:3701) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolConfig.integration.test.ts (2 tests) 1332ms
+   ✓ PostgreSQL: injected rollout snapshot survives env drift and restart preserves historical management  1306ms
+(node:3743) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolHttp.integration.test.ts (1 test) 67ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolResults.test.ts (1 test) 12ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolDomain.test.ts (14 tests) 13ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolGroupMatching.test.ts (5 tests) 11ms
+ ✓ packages/server/src/enterprise/parkCarpoolRoutes.test.ts (28 tests) 10ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolRoutePreview.test.ts (3 tests) 15ms
+(node:3775) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolService.test.ts (13 tests) 19ms
+ ✓ packages/server/src/modules/park_carpool/amapParkCarpoolProvider.test.ts (11 tests) 7ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolSqliteRepository.test.ts (5 tests) 10ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolRuntime.test.ts (5 tests) 9ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolConfig.test.ts (5 tests) 3ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolContract.integration.test.ts (6 tests) 9960ms
+   ✓ real database carpool contract (synthetic map only) > postgres: publish, privacy, replay, concurrent updates, stop, identity revocation  1725ms
+   ✓ SQLite: scans beyond 200 candidates before ranking/filtering and pages without duplicates  514ms
+   ✓ PostgreSQL: scans beyond 200 candidates before ranking/filtering and pages without duplicates  5698ms
+   ✓ PostgreSQL: evaluates group invitations across multiple planning batches  1854ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolMetrics.test.ts (1 test) 2ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolWorkflow.integration.test.ts (25 tests) 15030ms
+   ✓ PostgreSQL persistent carpool requests > invalidates outstanding pair invitations on joining and allows blocking a fellow group member without a direct request  1643ms
+   ✓ PostgreSQL persistent carpool requests > does not restore a candidate who stops accepting during group route planning  1553ms
+   ✓ PostgreSQL persistent carpool requests > stopping new matches invalidates pending invitations without removing a group  1272ms
+   ✓ PostgreSQL persistent carpool requests > matches and admits today’s intents when the same account has yesterday’s stored route  1218ms
+   ✓ PostgreSQL persistent carpool requests > rechecks stopped target authorization in the same transaction that reads preview geometry  1098ms
+   ✓ PostgreSQL persistent carpool requests > persists administrator public meeting points, denies member writes and protects edit versions  1102ms
+   ✓ PostgreSQL persistent carpool requests > requires a live match, deduplicates reverse requests, conceals ignore and accepts chat without grouping  1092ms
+   ✓ PostgreSQL persistent carpool requests > invalidates changed intent versions and enforces block in both directions  1010ms
+   ✓ PostgreSQL persistent carpool requests > accepts one explicit invitation atomically and never creates duplicate two-person groups  967ms
+   ✓ PostgreSQL persistent carpool requests > requires a new driver to confirm capacity and supports invitation into an existing group  933ms
+   ✓ PostgreSQL persistent carpool requests > serializes the last place, rotates member generations, and persists leave-and-stop  1038ms
+   ✓ PostgreSQL persistent carpool requests > rolls back rather than expiring requests when a stored route cannot be decrypted  897ms
+   ✓ uses a single PostgreSQL pool connection without nested borrowing  1030ms
+ ✓ packages/server/src/modules/park_carpool/parkCarpoolRetention.test.ts (1 test) 1ms
+
+ Test Files  18 passed (18)
+      Tests  137 passed (137)
+   Start at  22:35:02
+   Duration  18.66s (transform 1.59s, setup 0ms, collect 18.84s, tests 34.17s, environment 2ms, prepare 653ms)
+
+EXIT_CODE=0

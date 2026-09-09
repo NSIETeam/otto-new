@@ -16,6 +16,7 @@ import {
   ParkServicesPlugin,
   effectiveMeetingSlotStatus,
   isActionableStaffTicket,
+  isCommercialModuleNotEntitled,
   isMeetingSlotPast,
   isStaffHistoryTicket,
   PARK_STATE_EVENT,
@@ -41,6 +42,13 @@ afterEach(() => {
       'enterpriseOrganizationView', 'parkConfig',
     ]) delete (window.otto as unknown as Record<string, unknown>)[key];
   }
+});
+
+it('只把明确的商业模块未授权视为终止轮询错误', () => {
+  expect(isCommercialModuleNotEntitled(new Error(
+    'Error invoking remote method: commercial module is not entitled',
+  ))).toBe(true);
+  expect(isCommercialModuleNotEntitled(new Error('request timed out'))).toBe(false);
 });
 
 /** 经右侧面板同款事件通路打开弹窗。 */
@@ -461,6 +469,51 @@ describe('ParkServicesPlugin', () => {
     await act(async () => { await Promise.resolve(); });
   });
 
+  it('最小化恢复保留尚未提交的表单输入', async () => {
+    installRepairBridge();
+    render(<ParkServicesPlugin />);
+    await act(async () => { await Promise.resolve(); });
+    openDialog('electric-card');
+    const field = await screen.findByRole('textbox', { name: '联系人' });
+    field.focus();
+    fireEvent.change(field, { target: { value: '尚未提交的联系人' } });
+    fireEvent.click(screen.getByRole('button', { name: '最小化电卡服务窗口' }));
+    fireEvent.click(screen.getByRole('button', { name: '还原电卡服务窗口' }));
+    expect((await screen.findByRole('textbox', { name: '联系人' }) as HTMLInputElement).value).toBe('尚未提交的联系人');
+    expect(document.activeElement).toBe(field);
+    fireEvent.click(screen.getByRole('button', { name: '← 返回服务列表' }));
+    expect(screen.getByRole('alertdialog', { name: '放弃未提交的修改' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '放弃修改并关闭' }));
+    expect(await screen.findByLabelText('园区服务列表')).toBeTruthy();
+  });
+
+  it('历史工单请求未返回时仍可填写表单，身份返回不覆盖输入', async () => {
+    installRepairBridge();
+    window.otto.enterpriseTicketList = vi.fn(() => new Promise<EnterpriseRepairTicket[]>(() => {}));
+    render(<ParkServicesPlugin />);
+    await act(async () => { await Promise.resolve(); });
+    openDialog('electric-card');
+    const field = screen.getByRole('textbox', { name: '联系人' });
+    fireEvent.change(field, { target: { value: '立即填写' } });
+    await act(async () => { await Promise.resolve(); });
+    expect((field as HTMLInputElement).value).toBe('立即填写');
+  });
+
+  it('身份尚未返回时允许填写，但不能提交申请', async () => {
+    const bridge = installRepairBridge();
+    window.otto.enterpriseSession = vi.fn(() => new Promise<Awaited<ReturnType<typeof window.otto.enterpriseSession>>>(() => {}));
+    render(<ParkServicesPlugin />);
+    await act(async () => { await Promise.resolve(); });
+    openDialog('electric-card');
+    const field = screen.getByRole('textbox', { name: '联系人' });
+    fireEvent.change(field, { target: { value: '先填写联系人' } });
+    expect((field as HTMLInputElement).value).toBe('先填写联系人');
+    expect(screen.getByText('待确认身份')).toBeTruthy();
+    expect((screen.getByRole('button', { name: '提交电卡服务申请' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.submit(field.closest('form')!);
+    expect(bridge.submit).not.toHaveBeenCalled();
+  });
+
   it('可以同时打开多个园区服务窗口，并分别最小化和继续办理', () => {
     render(<ParkServicesPlugin />);
     openDialog();
@@ -660,6 +713,9 @@ describe('ParkServicesPlugin', () => {
     })));
     expect((await screen.findByRole('button', { name: '已实名提交，不能修改' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByText(/模拟发布|园区端/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '关闭满意度调查窗口' }));
+    expect(screen.queryByRole('alertdialog', { name: '放弃未提交的修改' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: '满意度调查' })).toBeNull();
   });
 
   it('报修通过企业服务器提交并自动投递维修工作人员', async () => {

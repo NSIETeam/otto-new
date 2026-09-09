@@ -24,7 +24,7 @@ import {
 
 afterEach(() => vi.useRealTimers());
 
-function setup() {
+function setup(now: () => number = Date.now) {
   const entries = new Map<string, { installation: ChannelInstallation; credential: string }>();
   const vault: ChannelCredentialVaultV1 = {
     commit: vi.fn(async (installation, credential) => {
@@ -111,6 +111,7 @@ function setup() {
     }),
   };
   const coordinator = new ChannelPairingCoordinator({
+    now,
     publicPairingOrigin: 'https://connect.otto.example',
     randomToken: () => 'single-use-pairing-nonce-with-enough-entropy',
     audit: () => undefined,
@@ -141,6 +142,36 @@ function setup() {
 }
 
 describe('ManagedChannelConnectorV1', () => {
+  it.each(['cancel', 'expiry'] as const)('rolls back credentials when %s occurs during installation commit', async (end) => {
+    let now = Date.now();
+    const { connector, vault, runtime } = setup(() => now);
+    const keys = generateKeyPairSync('ed25519');
+    const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const pairing = await connector.beginPairing({ provider: 'lark', installationPublicKey: publicKey, requestedScopes: ['im:message'] });
+    await connector.acceptProviderAuthorization({
+      pairingId: pairing.pairingId, nonce: 'single-use-pairing-nonce-with-enough-entropy',
+      plaintextCredential: 'late-credential',
+      authorization: { tenantId: 'tenant', tenantName: 'Tenant', botName: 'Otto', grantedScopes: ['im:message'] },
+    });
+    const originalCommit = vi.mocked(vault.commit).getMockImplementation()!;
+    let release!: () => void;
+    vi.mocked(vault.commit).mockImplementationOnce(async (...args) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      await originalCommit(...args);
+    });
+    const installing = connector.completeInstallation(pairing.pairingId, {
+      installationPublicKey: publicKey,
+      signature: sign(null, channelInstallationProofPayload(pairing.pairingId), keys.privateKey).toString('base64url'),
+    });
+    await vi.waitFor(() => expect(vault.commit).toHaveBeenCalled());
+    if (end === 'cancel') await connector.denyPairing(pairing.pairingId);
+    else now = pairing.expiresAtMs;
+    release();
+    await expect(installing).rejects.toThrow(/denied|expired/u);
+    expect(vault.listInstallations()).toEqual([]);
+    expect(runtime.start).not.toHaveBeenCalled();
+  });
+
   it('shares one protected installation across start, health, stop and revoke', async () => {
     const { connector, runtime, vault } = setup();
     const keys = generateKeyPairSync('ed25519');
@@ -158,6 +189,7 @@ describe('ManagedChannelConnectorV1', () => {
         tenantId: 'tenant-1',
         tenantName: 'Acme',
         botName: 'Otto',
+        providerUserId: 'ou_scanner_1',
         grantedScopes: ['im:message'],
       },
     });
@@ -169,6 +201,7 @@ describe('ManagedChannelConnectorV1', () => {
         keys.privateKey,
       ).toString('base64url'),
     });
+    expect(installation.ownerProviderUserId).toBe('ou_scanner_1');
 
     await connector.start(installation.installationId);
     await connector.health(installation.installationId);

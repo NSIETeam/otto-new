@@ -1,0 +1,191 @@
+.park-market-dialog {
+  width: min(1080px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  border: 1px solid var(--border-color, #d6d8dc);
+  border-radius: 14px;
+  padding: 24px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #242729);
+}
+.park-market-dialog::backdrop {
+  background: #10202266;
+}
+.park-market-dialog header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+.park-market-dialog h2 {
+  margin: 0;
+}
+.park-market-dialog p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.park-market-dialog button {
+  border: 1px solid #c5ceca;
+  padding: 8px 12px;
+  border-radius: 7px;
+  background: var(--bg-secondary, #f5f7f5);
+  color: inherit;
+  cursor: pointer;
+}
+.park-market-dialog button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.park-market-dialog :focus-visible {
+  outline: 3px solid #368775;
+  outline-offset: 2px;
+}
+.park-market-dialog nav,
+.park-market-filters,
+.park-market-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+  align-items: center;
+}
+.park-market-dialog nav [aria-current='page'] {
+  color: white;
+  background: #276856;
+}
+.park-market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 16px;
+}
+.park-market-dialog .park-market-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  padding: 12px;
+}
+.park-market-card img {
+  width: 100%;
+  aspect-ratio: 4/3;
+  object-fit: contain;
+  background: #f0f2ef;
+  border-radius: 6px;
+}
+.park-market-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.park-market-photos img {
+  width: 150px;
+  height: 130px;
+  object-fit: contain;
+}
+.park-market-photos > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.park-market-photo-empty {
+  display: inline-grid;
+  place-items: center;
+  min-height: 100px;
+  padding: 12px;
+  background: #e9eeeb;
+  color: #47534e;
+}
+.park-market-form {
+  display: grid;
+  gap: 14px;
+  border: 0;
+  padding: 0;
+  max-width: 740px;
+}
+.park-market-form label,
+.park-market-actions label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.park-market-dialog input:not([type='checkbox']):not([type='file']),
+.park-market-dialog select,
+.park-market-dialog textarea {
+  padding: 9px 10px;
+  border: 1px solid #aab5ae;
+  border-radius: 5px;
+  background: var(--bg-primary, white);
+  color: inherit;
+  font: inherit;
+  min-width: 0;
+}
+.park-market-dialog textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+.park-market-dialog input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+}
+.park-market-error,
+.park-market-form small {
+  color: #a12828;
+}
+.park-market-error {
+  padding: 12px;
+  background: #fff0ed;
+  border-radius: 6px;
+}
+.park-market-dialog article {
+  border-top: 1px solid #d6ded8;
+  padding: 14px 0;
+}
+.park-market-dialog footer {
+  border-top: 1px solid #d6ded8;
+  padding-top: 16px;
+  margin-top: 24px;
+}
+@media (max-width: 600px) {
+  .park-market-dialog {
+    width: calc(100vw - 12px);
+    padding: 12px;
+    max-height: calc(100vh - 12px);
+  }
+  .park-market-grid {
+    grid-template-columns: 1fr;
+  }
+  .park-market-filters > input {
+    width: 100%;
+  }
+}
+.park-market-image-viewer {
+  width: min(1000px, calc(100vw - 32px));
+  max-height: calc(100vh - 24px);
+  padding: 16px;
+  border: 1px solid #d6ded8;
+  border-radius: 12px;
+}
+.park-market-image-viewer::backdrop {
+  background: #000b;
+}
+.park-market-image-viewer header,
+.park-market-image-viewer nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.park-market-image-stage {
+  height: min(65vh, 720px);
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  margin: 12px 0;
+}
+.park-market-image-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center;
+}

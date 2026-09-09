@@ -1,0 +1,42 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+(node:56041) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts (5 tests | 1 failed | 4 skipped) 25ms
+   ↓ SQLite: expires without user reads, cleans precise positions and deletes own workflow facts
+   ↓ PostgreSQL: expires without user reads, cleans precise positions and deletes own workflow facts
+   ↓ SQLite: moving parks prunes old scope without deleting new valid intent
+   ↓ PostgreSQL: moving parks prunes old scope without deleting new valid intent
+   × cancels maintenance before candidate effects after ownership is lost during a database read 25ms
+     → expected 1 to deeply equal +0
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts > cancels maintenance before candidate effects after ownership is lost during a database read
+AssertionError: expected 1 to deeply equal +0
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ packages/server/src/modules/park_carpool/parkCarpoolMaintenance.integration.test.ts:192:71
+    190|   expect((await service.getWorkflow('a')).notices.filter(n=>n.type==='…
+    191|   pause=false;await Promise.all([service.maintain(),service.maintain()…
+    192|   expect((await service.getWorkflow('a')).metrics?.averageCandidates).…
+       |                                                                       ^
+    193|   expect((await service.getWorkflow('a')).notices.filter(n=>n.type==='…
+    194|  }finally{release();await h.close();}
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  21:42:04
+   Duration  2.49s (transform 1.14s, setup 0ms, collect 2.33s, tests 25ms, environment 0ms, prepare 31ms)
+
+
+EXIT_CODE=1

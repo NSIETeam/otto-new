@@ -1,0 +1,14 @@
+
+> otto-core@1.4.0 build
+> node ../../scripts/build_package.js
+
+- Compiling TypeScript sources...
+✔ TypeScript compilation completed successfully.
+- Synchronizing resource files...
+✔ Resource files synchronized successfully.
+- Syncing templates to bundle (dev mode)...
+✔ Synced 3 template files to bundle directory.
+- Generating build metadata...
+✔ Build metadata generated.
+
+✅ otto-core build completed successfully.

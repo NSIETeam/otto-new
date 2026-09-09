@@ -1,0 +1,33 @@
+
+ RUN  v3.2.7 /private/tmp/otto-carpool-repair-91bc4e/packages/desktop
+
+(node:85468) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/main/park-carpool-chat.integration.test.ts (1 test | 1 failed) 326ms
+   × desktop coordinators exchange, retry after lost response, and restore actual MLS ciphertext from SQLite 326ms
+     → 服务器已暂停同行消息写入，历史仍可查看
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/main/park-carpool-chat.integration.test.ts > desktop coordinators exchange, retry after lost response, and restore actual MLS ciphertext from SQLite
+Error: 服务器已暂停同行消息写入，历史仍可查看
+ ❯ ../server/src/modules/park_carpool/parkCarpoolTransport.ts:353:19
+ ❯ ../server/src/modules/park_carpool/parkCarpoolWorkflow.ts:570:14
+ ❯ Object.transactWorkflow ../server/src/modules/park_carpool/parkCarpoolSqliteRepository.ts:317:24
+ ❯ Object.transact [as withContext] ../server/src/modules/park_carpool/parkCarpoolWorkflow.ts:560:24
+ ❯ Object.executeParkCarpoolTransport src/main/park-carpool-chat.integration.test.ts:77:26
+     75|           if (pauseOnAppend && command.type === 'append')
+     76|             vi.stubEnv('OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'false');
+     77|           const result = await service.executeTransport(id, command);
+       |                          ^
+     78|           if (loseResponse && command.type === 'append') {
+     79|             loseResponse = false;
+ ❯ ParkCarpoolChat.synchronize src/main/park-carpool-chat.ts:220:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  12:51:19
+   Duration  4.93s (transform 2.18s, setup 70ms, collect 4.01s, tests 326ms, environment 301ms, prepare 57ms)

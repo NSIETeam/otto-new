@@ -1,3 +1,18 @@
+import type { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
+
+let pollingSequence = 0;
+/** Native cursor tracking is free, bounded by the active drag, and stopped on release. */
+export function startDesktopPetDragPolling(registry: RecurringTaskRegistry, update: () => void): () => void {
+  return registry.register({
+    name: `desktop.pet-drag.${++pollingSequence}`,
+    source: 'packages/desktop/src/main/desktop-pet-drag.ts',
+    intervalMs: 16,
+    estimatedCostUsdPerRun: 0,
+    getInputVersion: () => String(Date.now()),
+    run: update,
+  }) ?? (() => undefined);
+}
+
 export interface DesktopPetDragState {
   anchorWindowX: number;
   anchorWindowY: number;

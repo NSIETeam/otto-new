@@ -3,6 +3,8 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { correspondingSourceAssetNames } from './release-corresponding-source.mjs';
 
 const USER_AGENT = 'Otto-release-anonymous-availability-gate/1.0';
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -139,7 +141,7 @@ async function verifyRemoteFile(url, localFile) {
   }
 }
 
-async function verifyRelease(
+export async function verifyRelease(
   manifestRepository,
   assetRepository,
   tag,
@@ -195,16 +197,30 @@ async function verifyRelease(
       path.resolve(assetDir, name),
     );
   }
+  // The compatibility manifest points at canonical installers, but its source
+  // sidecars must actually exist on the compatibility release too. Never use
+  // authenticated API availability as evidence of a free source download.
+  for (const name of correspondingSourceAssetNames(manifest.version)) {
+    await verifyRemoteFile(
+      `https://github.com/${manifestRepository}/releases/download/${tag}/${name}`,
+      path.resolve(assetDir, name),
+    );
+  }
 }
 
-const args = process.argv.slice(2);
-if (args[0] === '--repo-public' && args.length === 2) {
-  await requirePublicRepository(args[1]);
-} else if (args.length === 4) {
-  await verifyRelease(args[0], args[1], args[2], args[3]);
-} else {
-  fail(
-    'usage: verify-anonymous-github-release-assets.mjs --repo-public OWNER/REPO\n' +
-      '   or: verify-anonymous-github-release-assets.mjs MANIFEST_REPO ASSET_REPO TAG ASSET_DIR',
-  );
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+) {
+  const args = process.argv.slice(2);
+  if (args[0] === '--repo-public' && args.length === 2) {
+    await requirePublicRepository(args[1]);
+  } else if (args.length === 4) {
+    await verifyRelease(args[0], args[1], args[2], args[3]);
+  } else {
+    fail(
+      'usage: verify-anonymous-github-release-assets.mjs --repo-public OWNER/REPO\n' +
+        '   or: verify-anonymous-github-release-assets.mjs MANIFEST_REPO ASSET_REPO TAG ASSET_DIR',
+    );
+  }
 }

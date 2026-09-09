@@ -1,0 +1,8 @@
+COMMAND=npm run typecheck --workspace=packages/server
+CWD=/Users/yang/Desktop/otto-carpool-fixed-91bc4e
+
+> otto-server@0.1.0 typecheck
+> tsc --noEmit
+
+
+EXIT_CODE=0

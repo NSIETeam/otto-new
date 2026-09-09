@@ -31,6 +31,7 @@ const PROVIDER_LABEL: Readonly<Record<ChannelProvider, string>> = {
   feishu: '飞书',
   lark: 'Lark',
   wecom: '企业微信',
+  dingtalk: '钉钉',
 };
 
 function renderTerminalQr(value: string): string {
@@ -61,10 +62,10 @@ function parseArguments(args: readonly string[]): {
   const action = (args[0] ?? 'status') as ChannelCliAction;
   if (!['login', 'list', 'status', 'start', 'stop', 'send', 'logout',
     'identities', 'bind-user', 'revoke-user'].includes(action)) {
-    throw new Error('用法: otto <feishu|lark|wecom> <login|list|status|start|stop|send|logout|identities|bind-user|revoke-user> ...');
+    throw new Error('用法: otto <feishu|lark|wecom|dingtalk> <login|list|status|start|stop|send|logout|identities|bind-user|revoke-user> ...');
   }
   const installationId = args[1];
-  if (installationId && !/^channel_(feishu|lark|wecom)_[a-f0-9]{24}$/.test(installationId)) {
+  if (installationId && !/^channel_(feishu|lark|wecom|dingtalk)_[a-f0-9]{24}$/.test(installationId)) {
     throw new Error('installation id 不合法');
   }
   if (action === 'send') {
@@ -165,6 +166,7 @@ export async function runChannelCli(
         feishu: ['im:message', 'contact:user.base:readonly'],
         lark: ['im:message', 'contact:user.base:readonly'],
         wecom: ['message.send', 'contacts.read.basic'],
+        dingtalk: ['im:message', 'im:chat'],
       };
       let pairing = (await request('/channels/pairings', 'POST', {
         provider,

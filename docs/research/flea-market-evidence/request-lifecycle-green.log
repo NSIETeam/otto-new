@@ -1,0 +1,9 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+ ✓ src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts (11 tests) 2ms
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  09:42:34
+   Duration  150ms (transform 19ms, setup 0ms, collect 19ms, tests 2ms, environment 0ms, prepare 32ms)

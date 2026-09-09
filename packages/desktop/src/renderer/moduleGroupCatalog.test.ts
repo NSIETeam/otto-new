@@ -24,12 +24,13 @@ const hongchuangAccess = {
 };
 
 describe('official module group catalog', () => {
-  it('defines the Hongchuang park group as eleven official abilities including carpool', () => {
+  it('defines the Hongchuang park group as twelve official abilities including carpool and flea market', () => {
     expect(parkTemplate.name).toBe('宏创园区服务');
     expect(parkTemplate.moduleIds).toEqual(HONGCHUANG_PARK_SERVICE_MODULE_IDS);
-    expect(parkTemplate.moduleIds).toHaveLength(11);
+    expect(parkTemplate.moduleIds).toHaveLength(12);
     expect(parkTemplate.moduleIds).toContain('park-enterprise-star-map');
     expect(parkTemplate.moduleIds).toContain('park-carpool');
+    expect(parkTemplate.moduleIds).toContain('park-flea-market');
     expect(parkTemplate.package).toEqual({
       source: 'official',
       packageId: 'otto.group.hongchuang-park-services',
@@ -124,7 +125,7 @@ describe('official module group catalog', () => {
     expect(installModuleGroupTemplate(installed, parkTemplate, hongchuangAccess)).toBe(installed);
   });
 
-  it('adds the official group to a new layout with all eleven IDs retained', () => {
+  it('adds the official group to a new layout with all twelve IDs retained', () => {
     const layout: ModuleWorkspaceLayout = {
       version: 1,
       groups: [{ id: 'daily-office', name: '日常办公', rows: 2, moduleIds: ['agent-ppt'] }],

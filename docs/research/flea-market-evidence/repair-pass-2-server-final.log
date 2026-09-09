@@ -1,0 +1,134 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/server
+
+ ✓ src/modules/authorization/commercialRoutePolicy.test.ts (41 tests) 16ms
+ ✓ src/modules/data_platform/attachmentStorageService.test.ts (11 tests) 52ms
+(node:45611) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:45613) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46222) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:46227) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketRepositoryContract.test.ts (5 tests) 21116ms
+   ✓ PostgreSQL real storage contract > serializes simultaneous retries and restores encrypted receipts after database restart  7493ms
+   ✓ PostgreSQL real storage contract > rolls back failed commands including their quota and receipt  8579ms
+   ✓ PostgreSQL snapshot reads do not serialize behind unrelated market writes  4707ms
+(node:48969) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketAcceptanceMatrix.test.ts (6 tests) 22128ms
+   ✓ postgres: A14/A32/A38 keep grants per item and retry existing-conversation consultations without changing snapshots  7952ms
+   ✓ postgres: A16/A17 serialize sale/contact and expiry/renewal races without resurrecting requests or expiring renewed content  8541ms
+   ✓ postgres: A10 concurrent reverse consultations share one conversation and one pending request  4941ms
+ ✓ src/modules/park_services/flea_market/fleaMarketSearchIndex.test.ts (6 tests) 22715ms
+   ✓ postgres: persists private substring candidates atomically, updates on edit, and recovers search after restart  8497ms
+   ✓ sqlite: preserves literal substring semantics and caches sellers only within one request  353ms
+   ✓ sqlite: backfill is bounded, restartable and rollback-safe  590ms
+   ✓ postgres: preserves literal substring semantics and caches sellers only within one request  7834ms
+   ✓ postgres: backfill is bounded, restartable and rollback-safe  5189ms
+(node:48984) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:48998) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketRepairRaces.test.ts (8 tests) 25818ms
+   ✓ postgres: renewal committed ahead of queued expiry cleanup cannot be overwritten by the old deadline  6994ms
+   ✓ postgres: identity revocation holding the transaction blocks and rejects a queued first contact without a message  9055ms
+   ✓ sqlite: committed draft renewal and publication protect the image from queued cleanup  314ms
+   ✓ sqlite: report snapshot holding the write transaction survives a queued seller deletion  410ms
+   ✓ postgres: committed draft renewal and publication protect the image from queued cleanup  4953ms
+   ✓ postgres: report snapshot holding the write transaction survives a queued seller deletion  3761ms
+(node:49015) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketPersonalRecords.test.ts (2 tests) 4802ms
+   ✓ postgres: hiding a removed own record survives park exit without deleting appeal or audit  4519ms
+ ✓ src/modules/park_services/flea_market/fleaMarketContacts.test.ts (2 tests) 4949ms
+   ✓ postgres: atomically commits first question, snapshot, quota and notification; terminal requests never revive  4737ms
+(node:49387) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:49532) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketBusinessContract.test.ts (4 tests) 9647ms
+   ✓ PostgreSQL business contract > enforces the last daily quota under parallel requests and atomically binds every successful image  4486ms
+   ✓ PostgreSQL business contract > preserves state/version/privacy on conflicting writes, market pause and database restart  4756ms
+ ✓ src/modules/park_services/flea_market/fleaMarketContactPages.test.ts (2 tests) 6610ms
+   ✓ postgres: pages all same-timestamp contact history without duplicates or another account's records  6341ms
+(node:50663) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:50661) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketHttp.integration.test.ts (2 tests) 11609ms
+   ✓ sqlite: HTTP uploads decoded private photos and enforces current permissions through publishing and moderation  940ms
+   ✓ postgres: HTTP uploads decoded private photos and enforces current permissions through publishing and moderation  10668ms
+ ✓ src/modules/collaboration/parkContactAttachments.test.ts (2 tests) 11887ms
+   ✓ sqlite: private attachment stages once, binds atomically, survives restart and never uses listing grants  517ms
+   ✓ postgres: private attachment stages once, binds atomically, survives restart and never uses listing grants  11367ms
+(node:52417) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52469) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketGovernance.test.ts (2 tests) 8485ms
+   ✓ sqlite: governance is scoped, versioned, persistent and never republishes restored listings  496ms
+   ✓ postgres: governance is scoped, versioned, persistent and never republishes restored listings  7851ms
+ ✓ src/modules/park_services/flea_market/fleaMarketMessageEvidence.test.ts (2 tests) 7049ms
+   ✓ sqlite: message reports expose only selected authorized evidence, including ended listings  356ms
+   ✓ postgres: message reports expose only selected authorized evidence, including ended listings  6691ms
+(node:52724) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/data_platform/encryptedObjectStore.test.ts (3 tests) 79ms
+(node:52727) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketDiscovery.test.ts (3 tests) 666ms
+ ✓ src/modules/park_services/flea_market/fleaMarketAttachments.test.ts (3 tests) 601ms
+   ✓ persists real encrypted image bytes, denies another account and cleans expired leases after grace period  433ms
+(node:52729) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketImageProcessing.test.ts (5 tests) 1339ms
+   ✓ rejects invalid bytes, SVG and files over 20 MB  311ms
+   ✓ decodes a real synthetic HEIC file into visible JPEG pixels  457ms
+(node:52739) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketRemoteReferences.test.ts (1 test) 4803ms
+   ✓ shared orphan collection retains staged and bound market chat objects independently of product images  4802ms
+ ✓ src/modules/park_services/flea_market/fleaMarketInbox.test.ts (2 tests) 4675ms
+   ✓ postgres: pages through same-timestamp notifications without duplicates and retains cross-device read state  4486ms
+(node:52805) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:52817) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketJobs.test.ts (2 tests) 699ms
+   ✓ prioritizes due listings without decrypting an entire history backlog and resumes its bounded scan after restart  503ms
+(node:53195) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketStorageQuota.test.ts (1 test) 4995ms
+   ✓ charges market images against the same tenant quota as ordinary attachments and releases exactly once  4994ms
+(node:53905) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketPublication.test.ts (2 tests) 306ms
+ ✓ src/modules/park_services/flea_market/fleaMarketServiceLifecycle.test.ts (1 test) 199ms
+(node:54832) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54837) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketModeration.test.ts (1 test) 207ms
+(node:54842) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketPrivateReuse.test.ts (1 test) 229ms
+ ✓ src/modules/park_services/flea_market/fleaMarketLifecycle.test.ts (8 tests) 11ms
+ ✓ src/modules/park_services/flea_market/fleaMarketValidation.test.ts (25 tests) 18ms
+(node:54853) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketMls.test.ts (1 test) 228ms
+ ✓ src/modules/park_services/flea_market/fleaMarketReadiness.test.ts (1 test) 11ms
+ ✓ src/modules/park_services/flea_market/fleaMarketSettings.test.ts (1 test) 150ms
+ ✓ src/modules/park_services/flea_market/fleaMarketRequestLifecycle.test.ts (11 tests) 5ms
+ ✓ src/modules/park_services/flea_market/fleaMarketMigration.test.ts (1 test) 5ms
+ ✓ src/modules/park_services/flea_market/fleaMarketRoles.test.ts (1 test) 256ms
+ ✓ src/modules/park_services/flea_market/fleaMarketAccess.test.ts (4 tests) 6ms
+ ✓ src/modules/park_services/flea_market/fleaMarketSqliteRepository.test.ts (3 tests) 33ms
+ ✓ src/modules/authorization/enterpriseRoutePolicy.test.ts (5 tests) 6ms
+
+ Test Files  37 passed (37)
+      Tests  181 passed (181)
+   Start at  23:15:25
+   Duration  118.20s (transform 13.00s, setup 0ms, collect 256.91s, tests 176.41s, environment 54ms, prepare 9.80s)

@@ -1,0 +1,13 @@
+
+ RUN  v3.2.7 /Users/yang/Desktop/otto-new/packages/server
+
+(node:97729) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/modules/park_services/flea_market/fleaMarketBusinessContract.test.ts (4 tests) 2944ms
+   ✓ PostgreSQL business contract > enforces the last daily quota under parallel requests and atomically binds every successful image  1143ms
+   ✓ PostgreSQL business contract > preserves state/version/privacy on conflicting writes, market pause and database restart  1750ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  09:41:41
+   Duration  7.09s (transform 1.96s, setup 0ms, collect 3.92s, tests 2.94s, environment 0ms, prepare 72ms)

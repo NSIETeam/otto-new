@@ -1,0 +1,7 @@
+
+/Users/yang/Desktop/otto-carpool-fixed-91bc4e/packages/desktop/scripts/carpool-acceptance/normal-app-smoke.mjs
+  46:20  error  'window' is not defined  no-undef
+
+✖ 1 problem (1 error, 0 warnings)
+
+EXIT_CODE=1

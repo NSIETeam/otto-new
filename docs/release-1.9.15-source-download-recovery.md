@@ -19,3 +19,9 @@ The license texts are independent corresponding-source materials, not extra appl
 ## Verification scope
 
 Regression tests cover exact committed license bytes, dirty checkout rejection, missing/corrupt license rejection, refusal of altered expected hashes, unchanged non-license download handling, and HTTP 403/404/503 diagnostics. Existing URL, redirect, body-size, integrity and complete-Git-archive tests remain required. Real source-sidecar construction and the HEIC recombination probe remain mandatory release steps; a local or fixture pass is not proof of a published installer or production deployment.
+
+## Windows test-facility follow-up (2026-09-10)
+
+The first full script run retained 678 passes, three timeouts and four platform skips. Two real Git/disk-inventory cases passed with their original five-second budget in isolation but exceeded it under the full suite; these two cases now allow 15 seconds. The 8,193-file native NSIS pressure case exceeded its 15-second child-process budget twice. An independent timing probe observed the unchanged guard rejecting the directory after about 21 seconds with exit 73, `mainReached=false` and the expected inspection-limit reason. Only that pressure case now allows 45 seconds for execution and 60 seconds overall.
+
+All assertions, the 8,192-file product limit, other fixture budgets and the actual packaged-installer 120-second acceptance limit are unchanged. Focused Git tests passed 20/20; the real NSIS pressure case passed. The subsequent full script run on Node 22.23.1 / Vitest 4.1.11 with the official NSIS compiler passed **681 tests, zero failures, four existing platform skips** (55 files, 159.54 seconds). Earlier failures remain separate records. Independent diff review, focused lint, code-map and whitespace checks passed. This is test-facility evidence, not actual packaged-installer or production acceptance.

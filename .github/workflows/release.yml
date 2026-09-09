@@ -686,12 +686,17 @@ jobs:
           FILES+=("$SOURCE_ARCHIVE" "${SOURCE_ARCHIVE}.sha256")
           PACKAGE_ID=""
           if [ "$DESKTOP_TEST_BUILD" != "1" ]; then
-            mapfile -d '' ENTERPRISE_ARCHIVES < <(
+            # macOS /bin/bash is 3.2: preserve NUL-delimited paths without mapfile.
+            ENTERPRISE_ARCHIVE=''
+            ENTERPRISE_ARCHIVE_COUNT=0
+            while IFS= read -r -d '' archive; do
+              ENTERPRISE_ARCHIVE="$archive"
+              ENTERPRISE_ARCHIVE_COUNT=$((ENTERPRISE_ARCHIVE_COUNT + 1))
+            done < <(
               find deliverables -maxdepth 1 -type f \
                 -name "otto-enterprise-oneclick-v${VERSION}-*.tar.gz" -print0
             )
-            [ "${#ENTERPRISE_ARCHIVES[@]}" -eq 1 ]
-            ENTERPRISE_ARCHIVE="${ENTERPRISE_ARCHIVES[0]}"
+            [ "$ENTERPRISE_ARCHIVE_COUNT" -eq 1 ]
             ENTERPRISE_BASENAME="$(basename "$ENTERPRISE_ARCHIVE")"
             if [[ "$ENTERPRISE_BASENAME" =~ ^otto-enterprise-oneclick-v([0-9]+\.[0-9]+\.[0-9]+)-([0-9a-f]{12}-[0-9a-f]{12})\.tar\.gz$ ]]; then
               [ "${BASH_REMATCH[1]}" = "$VERSION" ]

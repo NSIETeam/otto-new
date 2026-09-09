@@ -87,6 +87,20 @@ jobs:
           PYTHON: python3.11
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build current-source native integration test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          rust_toolchain="$(node --input-type=module -e "import { OTTO_NATIVE_RELEASE_TOOLCHAIN } from './scripts/otto-native-runtime.mjs'; process.stdout.write(OTTO_NATIVE_RELEASE_TOOLCHAIN)")"
+          [[ "$rust_toolchain" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          rustup toolchain install "$rust_toolchain" --profile minimal
+          unset CARGO_BUILD_TARGET
+          cargo "+$rust_toolchain" build --locked \
+            --manifest-path otto-native/Cargo.toml --bin otto-native \
+            --target-dir otto-native/target
+          test -x otto-native/target/debug/otto-native
+          git diff --exit-code -- otto-native/Cargo.lock
+
       - name: E2EE hostile-server and signed release gate
         run: |
           npm run security:e2ee:adversarial

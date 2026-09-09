@@ -11,6 +11,7 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 
 import type { EnterpriseParkCarpoolState } from '../../preload/index.js';
 import { ParkCarpoolDialog } from './ParkCarpoolDialog.js';
@@ -24,7 +25,7 @@ const emptyState: EnterpriseParkCarpoolState = {
   generatedAt: '2026-09-02T00:00:00.000Z',
 };
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('按需定位与团队地图服务', () => {
   function locationFixture(getCurrentPosition: ReturnType<typeof vi.fn>) {
@@ -202,6 +203,7 @@ describe('拼车助手界面', () => {
   });
 
   it('用标准地点发布意向，精简说明不影响提交和编辑', async () => {
+    const register = vi.spyOn(RecurringTaskRegistry.prototype, 'register');
     const places = [
       {
         id: 'origin',
@@ -234,8 +236,9 @@ describe('拼车助手界面', () => {
       enterpriseParkCarpoolRefresh: vi.fn(async () => emptyState),
       enterpriseParkCarpoolStop: vi.fn(),
     });
-    render(<ParkCarpoolDialog open onClose={vi.fn()} />);
+    const view = render(<ParkCarpoolDialog open onClose={vi.fn()} />);
     await screen.findByText('本次同行');
+    expect(register).not.toHaveBeenCalled();
 
     const origin = screen.getByRole('group', { name: '从哪里出发' });
     fireEvent.change(
@@ -283,6 +286,15 @@ describe('拼车助手界面', () => {
     expect((screen.getByLabelText('从哪里出发搜索') as HTMLInputElement).value).toBe('宏创园区南门');
     fireEvent.click(screen.getByRole('button', { name: '已发布行程' }));
     expect(screen.queryByLabelText('从哪里出发搜索')).toBeNull();
+    expect(register).toHaveBeenCalledWith(expect.objectContaining({ name: 'desktop.carpool-match-refresh', intervalMs: 30_000, estimatedCostUsdPerRun: 0 }));
+    const definition = register.mock.calls.at(-1)![0];
+    const before = vi.mocked(window.otto.enterpriseParkCarpoolRefresh).mock.calls.length;
+    await act(async () => { await definition.run(); });
+    expect(window.otto.enterpriseParkCarpoolRefresh).toHaveBeenCalledTimes(before + 1);
+    view.unmount();
+    await act(async () => { await definition.run(); });
+    expect(window.otto.enterpriseParkCarpoolRefresh).toHaveBeenCalledTimes(before + 1);
+    expect((register.mock.contexts.at(-1) as RecurringTaskRegistry).list()).toEqual([]);
   });
 });
 

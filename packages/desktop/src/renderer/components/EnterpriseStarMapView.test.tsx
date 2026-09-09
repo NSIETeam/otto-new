@@ -9,6 +9,7 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 import { EnterpriseStarMapView } from './EnterpriseStarMapView.js';
 import { demoMap } from '../starMap/model.js';
 type CanvasProps = ComponentProps<typeof import('../starMap/EnterpriseGraphCanvas.js').EnterpriseGraphCanvas>;
@@ -88,6 +89,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe('enterprise star map exploration', () => {
+  it('owns real refresh polling and retires callbacks when leaving the page', async () => {
+    const register = vi.spyOn(RecurringTaskRegistry.prototype, 'register');
+    const demo = render(<EnterpriseStarMapView onBack={() => undefined} initialSource="demo" />);
+    await screen.findByTestId('graph');
+    expect(register).not.toHaveBeenCalled();
+    demo.unmount();
+    const view = render(<EnterpriseStarMapView onBack={() => undefined} initialSource="real" />);
+    await screen.findByTestId('graph');
+    expect(register).toHaveBeenCalledWith(expect.objectContaining({ name: 'desktop.enterprise-star-map', intervalMs: 30_000, estimatedCostUsdPerRun: 0 }));
+    const [definition] = register.mock.calls[0];
+    await act(async () => { await definition.run(); });
+    expect(window.otto.enterpriseParkStarMap).toHaveBeenCalledTimes(2);
+    view.unmount();
+    await act(async () => { await definition.run(); fireEvent.focus(window); });
+    expect(window.otto.enterpriseParkStarMap).toHaveBeenCalledTimes(2);
+    expect((register.mock.contexts[0] as RecurringTaskRegistry).list()).toEqual([]);
+  });
   it('uses a fixed visual policy and ignores legacy view preferences', async () => {
     localStorage.setItem(
       'otto:star-map:demo',

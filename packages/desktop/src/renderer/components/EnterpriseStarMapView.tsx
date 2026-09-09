@@ -1,4 +1,5 @@
 import { supplyDemo } from '../starMap/supplyDemo.js';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 import { useModuleReadCache } from '../state/ModuleReadProvider.js';
 import { loadStarMapCanvas } from '../starMap/loadCanvas.js';
 import { EnterpriseList } from '../starMap/EnterpriseList.js';
@@ -222,12 +223,20 @@ export function EnterpriseStarMapView({
   }, [cache, source, resetExploration]);
   useEffect(() => {
     active.current = true;
+    let current = true;
     void load();
-    const focus = () => {
-      if (document.visibilityState !== 'hidden' && sourceRef.current === 'real')
-        void load();
+    const focus = async () => {
+      if (current && document.visibilityState !== 'hidden' && sourceRef.current === 'real')
+        await load();
     };
-    const interval = setInterval(focus, 30000);
+    const stop = source === 'real' ? new RecurringTaskRegistry().register({
+      name: 'desktop.enterprise-star-map',
+      source: 'packages/desktop/src/renderer/components/EnterpriseStarMapView.tsx',
+      intervalMs: 30_000,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => String(Date.now()),
+      run: focus,
+    }) : undefined;
     const updated = () => {
       if (sourceRef.current === 'real') void load();
     };
@@ -256,11 +265,12 @@ export function EnterpriseStarMapView({
     window.addEventListener('online', focus);
     window.addEventListener('otto:enterprise-profile-updated', updated);
     return () => {
+      current = false;
       active.current = false;
       // Invalidate the latest request, deliberately not the generation captured at mount.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       ++requestId.current;
-      clearInterval(interval);
+      stop?.();
       unsub?.();
       accountChanged?.();
       window.removeEventListener('focus', focus);
@@ -268,7 +278,7 @@ export function EnterpriseStarMapView({
       window.removeEventListener('otto:enterprise-profile-updated', updated);
       if (frame.current) cancelAnimationFrame(frame.current);
     };
-  }, [cache, load, resetExploration]);
+  }, [cache, load, resetExploration, source]);
   useEffect(() => {
     const timer = setTimeout(() => {
       setSearch(query);

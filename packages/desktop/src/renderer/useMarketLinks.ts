@@ -1,5 +1,6 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { useEffect, useState } from 'react';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 export function useMarketLinks(enabled: boolean) {
   const [intent, setIntent] = useState<{
     listingId?: string;
@@ -10,7 +11,7 @@ export function useMarketLinks(enabled: boolean) {
     let active = true;
     let pending = false;
     const poll = async () => {
-      if (pending) return;
+      if (!active || pending) return;
       pending = true;
       try {
         const result = await window.otto.enterpriseMarketLink!();
@@ -22,10 +23,17 @@ export function useMarketLinks(enabled: boolean) {
       }
     };
     void poll();
-    const timer = setInterval(() => void poll(), 3000);
+    const stop = new RecurringTaskRegistry().register({
+      name: 'desktop.market-links',
+      source: 'packages/desktop/src/renderer/useMarketLinks.ts',
+      intervalMs: 3000,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => String(Date.now()),
+      run: poll,
+    });
     return () => {
       active = false;
-      clearInterval(timer);
+      stop?.();
     };
   }, [enabled]);
   return { intent, clear: () => setIntent(null) };

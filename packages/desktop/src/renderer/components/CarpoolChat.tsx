@@ -2,14 +2,21 @@ import { CarpoolConfirmation } from './CarpoolConfirmation.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import React, { useEffect, useRef, useState } from 'react';
 import type { ParkChatView } from '../../main/park-carpool-chat.js';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 
-export function CarpoolChat({
-  conversationId,
-  onClose,
-}: {
+interface CarpoolChatProps {
   conversationId: string;
   onClose(): void;
-}): React.JSX.Element {
+}
+export function CarpoolChat(props: CarpoolChatProps): React.JSX.Element {
+  // A conversation change also retires send/recovery callbacks and draft state,
+  // not only the periodic reader. An old receipt must never update the new view.
+  return <ScopedCarpoolChat key={props.conversationId} {...props} />;
+}
+function ScopedCarpoolChat({
+  conversationId,
+  onClose,
+}: CarpoolChatProps): React.JSX.Element {
   const [view, setView] = useState<ParkChatView | null>(null);
   const [text, setText] = useState('');
   const [confirmRecovery, setConfirmRecovery] = useState(false);
@@ -25,14 +32,18 @@ export function CarpoolChat({
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
+    let current = true;
     let running = false;
+    setView(null);
+    setText('');
+    draft.current = null;
     const read = async () => {
-      if (running) return;
+      if (!current || running) return;
       running = true;
       try {
         const next =
           await window.otto.enterpriseParkCarpoolChatRead(conversationId);
-        if (mounted.current) {
+        if (current && mounted.current) {
           setView(next);
           setError('');
           if (
@@ -44,17 +55,25 @@ export function CarpoolChat({
           }
         }
       } catch (cause) {
-        if (mounted.current)
+        if (current && mounted.current)
           setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
         running = false;
       }
     };
     void read();
-    const timer = setInterval(() => void read(), 5000);
+    const stop = new RecurringTaskRegistry().register({
+      name: 'desktop.carpool-chat',
+      source: 'packages/desktop/src/renderer/components/CarpoolChat.tsx',
+      intervalMs: 5000,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => String(Date.now()),
+      run: read,
+    });
     return () => {
+      current = false;
       mounted.current = false;
-      clearInterval(timer);
+      stop?.();
     };
   }, [conversationId]);
   const send = async () => {

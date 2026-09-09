@@ -1,4 +1,5 @@
 import type { CarpoolMeetingPoint } from 'otto-server';
+import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 import { useModuleReadCache } from '../state/ModuleReadProvider.js';
 import { CarpoolConfirmation } from './CarpoolConfirmation.js';
 import { CarpoolRouteComparison } from './CarpoolRouteComparison.js';
@@ -414,8 +415,15 @@ export function ParkCarpoolDialog({
   useEffect(() => {
     if (!open || !active) return;
     let cancelled = false;
-    const timer = window.setInterval(() => {
-      void window.otto
+    const stop = new RecurringTaskRegistry().register({
+      name: 'desktop.carpool-match-refresh',
+      source: 'packages/desktop/src/renderer/components/ParkCarpoolDialog.tsx',
+      intervalMs: 30_000,
+      estimatedCostUsdPerRun: 0,
+      getInputVersion: () => String(Date.now()),
+      run: async () => {
+        if (cancelled || document.visibilityState === 'hidden') return;
+        await window.otto
         .enterpriseParkCarpoolRefresh({ filter })
         .then((next) => {
           if (!cancelled)
@@ -436,10 +444,11 @@ export function ParkCarpoolDialog({
         .catch(() => {
           /* User initiated refresh reports connectivity failures. */
         });
-    }, 30_000);
+      },
+    });
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stop?.();
     };
   }, [
     open,

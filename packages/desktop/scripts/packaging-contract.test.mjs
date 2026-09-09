@@ -1077,8 +1077,10 @@ describe('desktop packaging contract', () => {
     expect(createDraftsJob).toContain(
       'gh attestation verify "$artifact" --repo "$GITHUB_REPOSITORY"',
     );
-    expect(createDraftsJob).toContain('EXPECTED_ASSET_COUNT=8');
-    expect(createDraftsJob).toContain('EXPECTED_ASSET_COUNT=14');
+    expect(createDraftsJob).toContain('EXPECTED_ASSET_COUNT=10');
+    expect(createDraftsJob).toContain('EXPECTED_ASSET_COUNT=16');
+    expect(createDraftsJob).toContain('copy_one "otto-${VERSION}-corresponding-source.tar.gz"');
+    expect(createDraftsJob).toContain('copy_one "otto-${VERSION}-corresponding-source.tar.gz.sha256"');
     expect(createDraftsJob).toContain('copy_one SHA256SUMS.sig');
     expect(createDraftsJob).toContain('copy_one UPDATE-MIRROR-SHA256SUMS');
     expect(createDraftsJob).toContain('copy_one UPDATE-MIRROR-SHA256SUMS.sig');
@@ -1211,7 +1213,7 @@ describe('desktop packaging contract', () => {
       'Canonical release tag changed during publication',
     );
     expect(publishJob).toContain(
-      'test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d \' \')" = 14',
+      'test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d \' \')" = 16',
     );
     expect(rollbackMirrorJob).toContain(
       '/usr/local/sbin/otto-enterprise-ci-deploy',

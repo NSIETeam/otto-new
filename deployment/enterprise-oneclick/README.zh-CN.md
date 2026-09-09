@@ -470,6 +470,38 @@ sudoedit "$CONFIG_SNAPSHOT"
 
 Key 留空时，拼车接口会明确返回“地图服务尚未配置”，客户端保留可诊断入口但禁用发布，不会降级为虚构地点、直线距离或伪造匹配百分比。出发地、目的地和路线按敏感字段加密保存；候选结果只返回概略区域、时间差和可解释重合度。
 
+### 1.9.15 拼车通信分阶段启用与旧版回滚
+
+**代码部署不等于通信开关启用。** 以下开关在运行时和新安装配置中均默认 `false`，只接受 `true`、`false`、`1`、`0`。安装器不会自行开启功能：
+
+- `OTTO_PARK_CARPOOL_REQUESTS_ENABLED`：新发布、请求及第一阶段沟通写入。
+- `OTTO_PARK_CARPOOL_INVITATIONS_ENABLED`：双方邀请，必须同时启用 requests。
+- `OTTO_PARK_CARPOOL_GROUPS_ENABLED`：群组，必须同时启用 requests 和 invitations。
+- `OTTO_PARK_CARPOOL_PILOT_PARK_IDS`：真实园区 ID 的逗号分隔列表，最多 100 个，每个为 1–128 位字母、数字、下划线或连字符。不设置表示所有符合业务权限的园区；明确设置时不得为空。首期应配置已经核实的单园区 ID，而不是名称或示例值。
+
+当前上线准备仅建议 requests 试点：`requests=true`、`invitations=false`、`groups=false`，配合真实园区 ID 和服务端地图 Key。这不代表双方邀请和三人完整群组端到端已在生产验收；同事的本地交付记录也未证明真实地图、Windows 定位及生产多账号完整旅程。扩大阶段须先完成相应的真实账号/设备审批、组织与园区授权、MLS/撤销/退出、重启历史读取和跨节点（如适用）验收。开关不绕过这些权限或 native 加密要求。
+
+运行时还接受以下受限工程参数。新安装仅保留显式设置项，省略时沿用服务端默认值；非法值仍由原运行时校验拒绝，不会改为默认值掩盖配置错误：
+
+| 配置 | 默认值 | 运行时范围 |
+| --- | --- | --- |
+| `OTTO_PARK_CARPOOL_REQUEST_LIMIT_PER_HOUR` | 10 | 整数 1–100 |
+| `OTTO_PARK_CARPOOL_COOLDOWN_MINUTES` | 30 | 整数 1–1440 |
+| `OTTO_PARK_CARPOOL_MAX_TAXI_MEMBERS` | 4 | 整数 2–4 |
+| `OTTO_PARK_CARPOOL_STALE_MINUTES` | 120 | 5–1440 分钟 |
+| `OTTO_PARK_CARPOOL_PAUSE_MINUTES` | 360 | 不小于 stale，最多 1440 分钟 |
+| `OTTO_PARK_CARPOOL_POSITION_RETENTION_HOURS` | 24 | 1–168 小时 |
+| `OTTO_PARK_CARPOOL_COMMUNICATION_RETENTION_DAYS` | 30 | 1–90 天 |
+| `OTTO_PARK_CARPOOL_DRIVER_MINIMUM_OVERLAP` | 0.35 | 0–1 |
+| `OTTO_PARK_CARPOOL_TAXI_MINIMUM_OVERLAP` | 0.35 | 0–1 |
+| `OTTO_PARK_CARPOOL_MAXIMUM_DETOUR_SECONDS` | 600 | 0–3600 秒 |
+
+这些参数是启动时快照；变更要重启所有相关服务实例，不需要、也不得用整机重启作恢复手段。修改保留期限可能让原维护任务按新值清理到期数据，不应未经审查缩短期限。
+
+从 1.9.14 升级时，**不能先把新增键写入旧运行环境**：旧的严格 `otto_load_config` 会拒绝它们，网关升级前验收也会失败。正确顺序是用原环境完成签名 1.9.15 升级和新部署工具验收，再由管理员执行独立、可回滚的 0600 环境配置事务并重启服务。保留本次升级保存的 `enterprise.env.before`、`deploy.before` 及数据库/身份材料，不能改写旧 manifest、旧解析器或升级收据。升级本身保留非受管的现有配置行；补偿和正式回滚恢复原环境与原部署工具，所以旧版本不会被迫读取新键。独立启用失败时先恢复启用前的 1.9.15 环境；整版本回滚仍走完整原事务，不手动拿新环境启动旧版本。
+
+关闭阶段时先 groups、再 invitations、最后 requests，并保留已有历史读取、停止、退出和密钥/数据，不删除表或用旧库覆盖新数据。跳蚤市场没有同类默认关闭的环境总开关：园区缺省配置为 enabled，但仍要求组织 park_services 授权、账号/园区权限及数据库、加密、对象存储、图像处理、维护 worker 全部就绪。`OTTO_MARKET_LOCAL_ACCEPTANCE` 是隔离测试入口，不是生产开关，不能用来绕过就绪检查。
+
 跨私有服务器联邦为可选配置：
 
 - `OTTO_FEDERATION_ENABLED`：仅在已完成 Control 联邦网关注册和验签配置后设为 `1`；

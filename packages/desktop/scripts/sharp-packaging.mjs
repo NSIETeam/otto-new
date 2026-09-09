@@ -19,6 +19,13 @@ const readAsar = (archive, name) => asar.extractFile(archive, name.split('/').jo
 const statAsar = (archive, name) => asar.statFile(archive, name.split('/').join(path.sep));
 export const SHARP_UNPACK_PATTERNS = Object.freeze(['**/node_modules/sharp/**/*', '**/node_modules/@img/sharp-*/**/*']);
 export const SHARP_TARGET_FILTER = Object.freeze(['**/*', '!**/*.h', '!**/README.md']);
+// heic-decode uses wasm-bundle.js -> libheif-bundle.js (embedded WASM).
+// Keep the default index.js -> asm.js entry and all LICENSE files untouched.
+export const LIBHEIF_UNUSED_DESKTOP_FILES = Object.freeze(['libheif-wasm/libheif-bundle.mjs', 'libheif-wasm/libheif.wasm', 'libheif-wasm/libheif.js']);
+export function includeDesktopMediaRuntimeFile(file) {
+  const normalized = file.replaceAll('\\', '/');
+  return !LIBHEIF_UNUSED_DESKTOP_FILES.some(relative => normalized.endsWith(`/node_modules/libheif-js/${relative}`));
+}
 
 export function desktopSharpTarget(context) {
   const arch = context.arch === 1 || context.arch === 'x64' ? 'x64' : context.arch === 3 || context.arch === 'arm64' ? 'arm64' : null;
@@ -58,6 +65,9 @@ export function verifyPackagedSharp(archivePath, { target, assetsRoot, sourceRoo
   if (!specs.length) return { applicable: false };
   const expected = new Set(specs.map(spec => spec.name));
   const entries = asar.listPackage(archivePath).map(name => name.replaceAll('\\', '/').replace(/^\//, ''));
+  for (const relative of LIBHEIF_UNUSED_DESKTOP_FILES) {
+    if (entries.includes(`node_modules/libheif-js/${relative}`)) throw new Error('packaged libheif contains an unused alternate bundle');
+  }
   const nativeNames = new Set(entries.map(name => name.match(/^node_modules\/(@img\/sharp-[^/]+)/)?.[1]).filter(Boolean));
   if (JSON.stringify([...nativeNames].sort()) !== JSON.stringify([...expected].sort())) throw new Error('packaged sharp contains a missing or foreign native target');
   const required = [imageWorker, 'node_modules/sharp/package.json', 'node_modules/sharp/dist/index.cjs',

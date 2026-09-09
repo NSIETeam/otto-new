@@ -14634,3 +14634,8 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
 .otto-carpool-map-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 20px; }
 .otto-carpool-map-dialog > h2 { margin: 0; font-size: 18px; }
 .otto-carpool-map-dialog .otto-carpool__map-picker { border: 0; padding: 0; }
+
+.otto-carpool__navigation { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-bottom: 16px; }
+.otto-carpool__navigation > button[aria-pressed="true"] { color: var(--otto-accent); border-color: var(--otto-accent); }
+.otto-carpool__trip-summary { border: 1px solid var(--otto-border); border-radius: 14px; padding: 16px; margin-bottom: 20px; }
+.otto-carpool__trip-summary > p { color: var(--otto-text-secondary); font-size: 13px; margin: 8px 0 12px; }

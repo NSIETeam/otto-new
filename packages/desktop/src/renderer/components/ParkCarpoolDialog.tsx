@@ -297,6 +297,10 @@ export function ParkCarpoolDialog({
   const [state, setState] = useState<EnterpriseParkCarpoolState>(() => cache.peek<EnterpriseParkCarpoolState>('carpool') ?? EMPTY_STATE);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const [page, setPage] = useState<'trip' | 'personal' | 'admin'>('trip');
+  const [editing, setEditing] = useState(false);
+  const [adminQuery, setAdminQuery] = useState('');
+  const [adminPlace, setAdminPlace] = useState<EnterpriseParkCarpoolPlaceSuggestion | null>(null);
   const [loading, setLoading] = useState(false);
   const [validationField, setValidationField] = useState('');
   const [error, setError] = useState('');
@@ -519,6 +523,7 @@ export function ParkCarpoolDialog({
       }));
       formVersionRef.current = saved.version ?? null;
       setDirty(false);
+      setEditing(false);
       try {
         setState(await window.otto.enterpriseParkCarpoolRefresh());
       } catch (cause) {
@@ -605,6 +610,18 @@ export function ParkCarpoolDialog({
         else onClose();
       }}
     >
+      <nav className="otto-carpool__navigation" aria-label="拼车功能">
+        {page !== 'trip' ? <button type="button" onClick={() => { setPage('trip'); setStopRequest(0); }}>返回行程</button> : null}
+        <button type="button" aria-pressed={page === 'personal'} onClick={() => setPage('personal')}>我的同行</button>
+        {state.parkAdmin ? <button type="button" aria-pressed={page === 'admin'} onClick={() => setPage('admin')}>园区管理</button> : null}
+      </nav>
+      {error ? (
+        <p role="alert" className="otto-workspace-dialog__error">
+          {error}
+          {state === EMPTY_STATE ? <button type="button" disabled={loading} onClick={() => void load()}>重新读取拼车状态</button> : null}
+        </p>
+      ) : null}
+      {page === 'trip' ? <>
       <section className="otto-carpool__hero">
         <strong>本次同行</strong>
         <span>
@@ -633,13 +650,21 @@ export function ParkCarpoolDialog({
           地图服务未配置，暂时无法搜索地点或匹配路线。
         </p>
       ) : null}
-      {error ? (
-        <p role="alert" className="otto-workspace-dialog__error">
-          {error}
-          {state === EMPTY_STATE ? <button type="button" disabled={loading} onClick={() => void load()}>重新读取拼车状态</button> : null}
-        </p>
-      ) : null}
-      <form
+      {active && !editing && state.currentIntent ? (
+        <section className="otto-carpool__trip-summary" aria-label="当前行程">
+          <strong>{state.currentIntent.origin.label} → {state.currentIntent.destination.label}</strong>
+          <p>{state.currentIntent.travelDate} · {timeLabel(state.currentIntent.departureTime)} · 前后 {state.currentIntent.flexibleMinutes} 分钟 · {state.currentIntent.travelOptions.map(option => MODE_LABEL[option]).join(' / ')}</p>
+          <div className="otto-carpool__actions">
+            <button type="button" onClick={() => setEditing(true)}>修改行程</button>
+            <button type="button" onClick={() => {
+              if (state.hasGroup) { setPage('personal'); setStopRequest(value => value + 1); }
+              else setConfirmStop(true);
+            }}>停止寻找</button>
+            <button type="button" disabled={loading} onClick={() => void confirm()}>仍在寻找</button>
+            <button type="button" disabled={loading} onClick={() => void refresh()}>刷新结果</button>
+          </div>
+        </section>
+      ) : <form
         onChange={() => setDirty(true)}
         className="otto-carpool__form"
         onSubmit={(event) => void publish(event)}
@@ -754,7 +779,7 @@ export function ParkCarpoolDialog({
               type="button"
               className="is-secondary"
               onClick={() => {
-                if (state.hasGroup) setStopRequest((value) => value + 1);
+                if (state.hasGroup) { setPage('personal'); setStopRequest((value) => value + 1); }
                 else setConfirmStop(true);
               }}
             >
@@ -770,21 +795,23 @@ export function ParkCarpoolDialog({
               仍在寻找
             </button>
           ) : null}
-          <button
+          {active ? <button
             type="button"
             className="is-secondary"
-            disabled={!active || loading}
+            disabled={loading}
             onClick={() => void refresh()}
           >
             刷新结果
-          </button>
+          </button> : null}
         </div>
-      </form>
-      {state.parkAdmin ? (
-        <details className="otto-carpool__help" aria-label="管理园区公共集合点">
-          <summary>管理公共集合点</summary>
+      </form>}
+      </> : null}
+      {state.parkAdmin && page === 'admin' ? (
+        <section aria-label="管理园区公共集合点">
+          <h3>公共集合点</h3>
+          <PlacePicker label="公共地点" hint="选择园区出口或公共集合点" query={adminQuery} setQuery={setAdminQuery} selected={adminPlace} setSelected={setAdminPlace} disabled={!state.mapConfigured} />
           <p>
-            将所选出发地设为公共集合点，地点及坐标全园区可见。请勿添加私人地点。
+            将所选地点设为公共集合点，地点及坐标全园区可见。请勿添加私人地点。
           </p>
           <label>
             公共集合点名称
@@ -796,14 +823,14 @@ export function ParkCarpoolDialog({
           </label>
           <button
             type="button"
-            disabled={!origin || !meetingName.trim()}
+            disabled={!adminPlace || !meetingName.trim()}
             onClick={() => {
-              if (!origin) return;
+              if (!adminPlace) return;
               void window.otto
                 .enterpriseParkCarpoolWorkflowExecute({
                   type: 'save_meeting_point',
                   name: meetingName,
-                  place: origin,
+                  place: adminPlace,
                 })
                 .then(() => {
                   setMeetingName('');
@@ -816,7 +843,7 @@ export function ParkCarpoolDialog({
                 );
             }}
           >
-            将所选出发地添加为公共集合点
+            将所选地点添加为公共集合点
           </button>
           {state.meetingPoints?.map((point) => (
             <p key={point.id}>
@@ -842,16 +869,16 @@ export function ParkCarpoolDialog({
               </button>
               <button
                 type="button"
-                disabled={!origin || !meetingName.trim()}
+                disabled={!adminPlace || !meetingName.trim()}
                 onClick={() => {
-                  if (!origin) return;
+                  if (!adminPlace) return;
                   void window.otto
                     .enterpriseParkCarpoolWorkflowExecute({
                       type: 'save_meeting_point',
                       id: point.id,
                       expectedVersion: point.version,
                       name: meetingName,
-                      place: origin,
+                      place: adminPlace,
                     })
                     .then(() => refresh())
                     .catch((cause) =>
@@ -865,7 +892,7 @@ export function ParkCarpoolDialog({
               </button>
             </p>
           ))}
-        </details>
+        </section>
       ) : null}
       {confirmClose ? (
         <CarpoolConfirmation
@@ -916,12 +943,13 @@ export function ParkCarpoolDialog({
           </div>
         </CarpoolConfirmation>
       ) : null}
-      <CarpoolRequestCenter
-        key={requestRevision}
-        showCurrentIntent={false}
-        stopRequest={stopRequest}
-      />
-      <section className="otto-carpool__results" aria-live="polite">
+      {page === 'personal' || (page === 'admin' && state.parkAdmin) ? <CarpoolRequestCenter
+        key={`${page}-${requestRevision}`}
+        mode={page === 'admin' ? 'admin' : 'personal'}
+        showCurrentIntent={page === 'personal'}
+        stopRequest={page === 'personal' ? stopRequest : 0}
+      /> : null}
+      {page === 'trip' && active && !editing ? <section className="otto-carpool__results" aria-live="polite">
         {state.failedCandidateCount ? (
           <p role="status">
             有 {state.failedCandidateCount}{' '}
@@ -1066,7 +1094,7 @@ export function ParkCarpoolDialog({
             <p>你的意向已经发布。稍后可刷新结果或修改时间范围。</p>
           </div>
         ) : null}
-      </section>
+      </section> : null}
     </DialogFrame>
   );
 }

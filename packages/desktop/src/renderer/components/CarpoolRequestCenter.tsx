@@ -25,10 +25,12 @@ export function CarpoolRequestCenter({
   onOpenCarpool,
   showCurrentIntent = true,
   stopRequest = 0,
+  mode = 'all',
 }: {
   onOpenCarpool?: () => void;
   showCurrentIntent?: boolean;
   stopRequest?: number;
+  mode?: 'all' | 'personal' | 'admin';
 }): React.JSX.Element {
   const [state, setState] = useState<CarpoolWorkflowView | null>(null);
   const [intent, setIntent] = useState<EnterpriseParkCarpoolIntent | null>(
@@ -105,13 +107,14 @@ export function CarpoolRequestCenter({
     }
   };
   return (
-    <section aria-label="同行请求与状态" className="otto-carpool__requests">
+    <section aria-label={mode === 'admin' ? '园区同行管理' : '同行请求与状态'} className="otto-carpool__requests">
       <header>
-        <h2>同行请求与状态</h2>
+        <h2>{mode === 'admin' ? '园区同行管理' : '同行请求与状态'}</h2>
         <button type="button" disabled={busy} onClick={() => void load()}>
-          刷新同行消息
+          {mode === 'admin' ? '刷新管理数据' : '刷新同行消息'}
         </button>
       </header>
+      {mode !== 'admin' ? <>
       {state?.readiness && !state.readiness.approvedDevice ? <p role="status">当前账号尚无已批准的安全设备；请在账号安全设置完成设备批准后使用加密聊天。</p> : null}
       {error ? <p role="alert">{error}</p> : null}
       {!state && !error ? <p role="status">正在读取同行消息…</p> : null}
@@ -526,6 +529,8 @@ export function CarpoolRequestCenter({
           </button>
         </form>
       ) : null}
+      </> : error ? <p role="alert">{error}</p> : !state ? <p role="status">正在读取园区管理…</p> : null}
+      {mode !== 'personal' ? <>
       {state?.metrics ? (
         <section aria-label="园区同行统计">
           <h3>园区同行统计</h3>
@@ -563,7 +568,8 @@ export function CarpoolRequestCenter({
           </p>
         </section>
       ) : null}
-      {state?.reports.map((report) => (
+      </> : null}
+      {(mode !== 'personal' || !state?.parkAdmin) ? state?.reports.map((report) => (
         <article key={report.id}>
           <h3>举报记录 · {report.status === 'open' ? '待处理' : '已处理'}</h3>
           <p>{report.reason}</p>
@@ -601,7 +607,8 @@ export function CarpoolRequestCenter({
             </form>
           ) : null}
         </article>
-      ))}
+      )) : null}
+      {mode !== 'admin' ? <>
       {state?.conversations.map((conversation) => (
         <button
           key={conversation.id}
@@ -681,6 +688,7 @@ export function CarpoolRequestCenter({
           ))}
         </section>
       ) : null}
+      </> : null}
     </section>
   );
 }

@@ -84,6 +84,7 @@ it('real UI can restart after stop and confirmation cannot carry forward another
     fireEvent.click(screen.getByRole('button', { name: '刷新结果' }));
     await waitFor(() => expect((screen.getByRole('button', { name: '仍在寻找' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: '仍在寻找' }));
+    fireEvent.click(screen.getByRole('button', { name: '修改行程' }));
     await waitFor(() => expect((screen.getByLabelText('可接受前后') as HTMLSelectElement).value).toBe('10'));
     fireEvent.click(screen.getByRole('button', { name: '更新并重新匹配' }));
     await waitFor(async () => expect((await h.store.getIntent('a'))?.version).toBe(6));

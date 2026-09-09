@@ -232,25 +232,55 @@ describe('Windows update installer launch lifecycle', () => {
       await vi.importActual<typeof import('node:child_process')>(
         'node:child_process',
       );
-    // No executable can exist below process.execPath: its parent is a file.
-    const absentExecutable = `${process.execPath}/otto-missing-update-installer`;
+    const nativeFs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const nativeOs = await vi.importActual<typeof import('node:os')>('node:os');
+    const nativePath =
+      await vi.importActual<typeof import('node:path')>('node:path');
+    const mockedPlatform = Object.getOwnPropertyDescriptor(
+      process,
+      'platform',
+    )!;
+    let temporaryDirectory: string;
+    Object.defineProperty(process, 'platform', originalPlatform);
+    try {
+      temporaryDirectory = nativeFs.mkdtempSync(
+        nativePath.join(nativeOs.tmpdir(), 'otto-updater-spawn-'),
+      );
+    } finally {
+      Object.defineProperty(process, 'platform', mockedPlatform);
+    }
+    // A fresh real directory gives ENOENT rather than a platform-dependent
+    // synchronous ENOTDIR. No installer executable is created or launched.
+    const absentExecutable = nativePath.join(
+      temporaryDirectory,
+      'otto-missing-update-installer.exe',
+    );
     const nativeError = vi.fn();
     mocks.spawn.mockImplementation((_file, args, options) => {
-      const nativeChild = nativeSpawn(absentExecutable, args, options);
-      nativeChild.once('error', nativeError);
-      return nativeChild;
+      Object.defineProperty(process, 'platform', originalPlatform);
+      try {
+        const nativeChild = nativeSpawn(absentExecutable, args, options);
+        nativeChild.once('error', nativeError);
+        return nativeChild;
+      } finally {
+        Object.defineProperty(process, 'platform', mockedPlatform);
+      }
     });
-    await expect(downloadedService().installUpdate()).resolves.toMatchObject({
-      ok: true,
-      message: expect.stringContaining('按向导'),
-    });
-    expect(mocks.openPath).toHaveBeenCalledOnce();
-    expect(mocks.quit).not.toHaveBeenCalled();
-    expect(nativeError).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        code: expect.stringMatching(/^(ENOENT|ENOTDIR)$/),
-      }),
-    );
+    try {
+      expect(nativeFs.existsSync(absentExecutable)).toBe(false);
+      await expect(downloadedService().installUpdate()).resolves.toMatchObject({
+        ok: true,
+        message: expect.stringContaining('按向导'),
+      });
+      expect(mocks.spawn).toHaveBeenCalledOnce();
+      expect(mocks.openPath).toHaveBeenCalledOnce();
+      expect(mocks.quit).not.toHaveBeenCalled();
+      expect(nativeError).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ code: 'ENOENT' }),
+      );
+    } finally {
+      nativeFs.rmdirSync(temporaryDirectory);
+    }
   });
 
   it.each(['spawn', 'error'] as const)(

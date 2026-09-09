@@ -56,6 +56,13 @@ not evidence for every 1.9.x historical installer, enterprise policy or machine.
   cases. Scripts workspace: 676 passed, none failed, four platform skips.
 - These observations do not assert formal installer acceptance, a new macOS
   measurement, a deployment, or an update already delivered to customers.
+- Candidate `c59a7be8` macOS CI run `34356000826` subsequently had 2,099
+  passing tests and one OS-error fixture failure; native exit was 1 and no
+  coverage report was generated. It is not usable baseline-adoption evidence.
+  The fixture now targets a nonexistent executable in a real exclusive empty
+  directory and restores the host platform during native calls. It still
+  requires exactly one real asynchronous `ENOENT`, no application quit, and
+  manual fallback; no production behavior or platform skip was changed.
 
 ## Template references
 

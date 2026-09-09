@@ -625,7 +625,7 @@ export function ParkCarpoolDialog({
   if (!open) return null;
   return (
     <DialogFrame
-      title="拼车助手" size="standard"
+      title="拼车助手" size="compact"
       className="otto-carpool-dialog"
       icon={<IconCar size={22} />}
       onClose={() => {
@@ -687,34 +687,36 @@ export function ParkCarpoolDialog({
         className="otto-carpool__form"
         onSubmit={(event) => void publish(event)}
       >
-        <PlacePicker
-          validationError={
-            validationField === 'origin' && !origin
-              ? '请搜索并明确选择出发地点。'
-              : undefined
-          }
-          meetingPoints={state.meetingPoints}
-          label="从哪里出发"
-          query={originQuery}
-          setQuery={setOriginQuery}
-          selected={origin}
-          setSelected={setOrigin}
-          disabled={!state.mapConfigured}
-        />
-        <PlacePicker
-          validationError={
-            validationField === 'destination' && !destination
-              ? '请搜索并明确选择目的地点。'
-              : undefined
-          }
-          meetingPoints={state.meetingPoints}
-          label="要去哪里"
-          query={destinationQuery}
-          setQuery={setDestinationQuery}
-          selected={destination}
-          setSelected={setDestination}
-          disabled={!state.mapConfigured}
-        />
+        <div className="otto-carpool__location-grid">
+          <PlacePicker
+            validationError={
+              validationField === 'origin' && !origin
+                ? '请搜索并明确选择出发地点。'
+                : undefined
+            }
+            meetingPoints={state.meetingPoints}
+            label="从哪里出发"
+            query={originQuery}
+            setQuery={setOriginQuery}
+            selected={origin}
+            setSelected={setOrigin}
+            disabled={!state.mapConfigured}
+          />
+          <PlacePicker
+            validationError={
+              validationField === 'destination' && !destination
+                ? '请搜索并明确选择目的地点。'
+                : undefined
+            }
+            meetingPoints={state.meetingPoints}
+            label="要去哪里"
+            query={destinationQuery}
+            setQuery={setDestinationQuery}
+            selected={destination}
+            setSelected={setDestination}
+            disabled={!state.mapConfigured}
+          />
+        </div>
         <div className="otto-carpool__row">
           <label>
             <span>计划出发时间</span>

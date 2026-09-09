@@ -14571,16 +14571,30 @@ textarea.otto-mcp__source { min-height: 180px; resize: vertical; font-family: va
   .otto-park-dialog { box-sizing: border-box; }
 }
 
-/* Carpool uses the same restrained form treatment as the park service windows. */
+/* Carpool shares park service sizing and neutral theme tokens. */
+.otto-carpool-dialog {
+  --otto-accent: var(--otto-text);
+  --otto-accent-hover: var(--otto-text);
+  --otto-accent-soft: color-mix(in srgb, var(--otto-text) 10%, transparent);
+  max-height: min(760px, calc(100dvh - 48px));
+  border-radius: var(--otto-radius-lg);
+  background: var(--otto-bg);
+  box-shadow: var(--otto-shadow-pop);
+}
+.otto-carpool__location-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; }
+.otto-carpool-dialog .otto-carpool__search { margin-top: 6px; }
+.otto-carpool-dialog .otto-carpool__navigation { flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.otto-carpool-dialog .otto-carpool__row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 560px) { .otto-carpool__location-grid { grid-template-columns: minmax(0, 1fr); } }
 .otto-carpool-dialog > header { padding: 20px 22px; border-bottom: 0; }
 .otto-carpool-dialog .otto-workspace-dialog__heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .otto-carpool-dialog .otto-workspace-dialog__heading p { margin: 5px 0 0; color: var(--otto-text-secondary); font-size: 13px; line-height: 1.5; }
-.otto-carpool-dialog .otto-workspace-dialog__icon { display: grid; place-items: center; flex: 0 0 42px; height: 42px; border-radius: 12px; background: var(--otto-bg); color: var(--otto-text); }
+.otto-carpool-dialog .otto-workspace-dialog__icon { display: grid; place-items: center; flex: 0 0 42px; height: 42px; border-radius: 12px; background: var(--otto-accent-soft); color: var(--otto-text); }
 .otto-carpool-dialog .otto-workspace-dialog__body { padding-top: 0; }
 .otto-carpool-dialog .otto-carpool__hero { padding: 0; border: 0; border-radius: 0; background: none; align-items: center; }
 .otto-carpool-dialog .otto-carpool__hero strong { font-size: 14px; }
 .otto-carpool-dialog .otto-carpool__hero > span { flex-shrink: 0; background: var(--otto-bg); color: var(--otto-text-secondary); }
-.otto-carpool-dialog .otto-carpool__form { gap: 20px; border-radius: 14px; }
+.otto-carpool-dialog .otto-carpool__form { gap: 14px; border-radius: 14px; }
 .otto-carpool-dialog .otto-carpool__place legend, .otto-carpool-dialog .otto-carpool__modes legend, .otto-carpool-dialog .otto-carpool__row label > span { color: var(--otto-text); font-size: 14px; font-weight: 700; }
 .otto-carpool-dialog .otto-carpool__search input, .otto-carpool-dialog .otto-carpool__row input, .otto-carpool-dialog .otto-carpool__row select { box-sizing: border-box; width: 100%; min-height: 42px; border-radius: var(--otto-radius-sm); font-size: 14px; }
 .otto-carpool-dialog .otto-carpool__search button { min-height: 42px; padding: 0 18px; }

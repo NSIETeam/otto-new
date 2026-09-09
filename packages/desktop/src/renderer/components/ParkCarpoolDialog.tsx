@@ -1,4 +1,3 @@
-import { CarpoolExamples } from './CarpoolExamples.js';
 import type { CarpoolMeetingPoint } from 'otto-server';
 import { useModuleReadCache } from '../state/ModuleReadProvider.js';
 import { CarpoolConfirmation } from './CarpoolConfirmation.js';
@@ -319,8 +318,8 @@ export function ParkCarpoolDialog({
   const [state, setState] = useState<EnterpriseParkCarpoolState>(() => cache.peek<EnterpriseParkCarpoolState>('carpool') ?? EMPTY_STATE);
   const stateRef = useRef(state);
   stateRef.current = state;
-  const [page, setPage] = useState<'trip' | 'personal' | 'admin'>('trip');
-  const [editing, setEditing] = useState(false);
+  const [page, setPage] = useState<'trip' | 'published' | 'personal' | 'admin'>('trip');
+  const [editing, setEditing] = useState(true);
   const [adminQuery, setAdminQuery] = useState('');
   const [adminPlace, setAdminPlace] = useState<EnterpriseParkCarpoolPlaceSuggestion | null>(null);
   const [loading, setLoading] = useState(false);
@@ -400,6 +399,8 @@ export function ParkCarpoolDialog({
       epochRef.current += 1;
       return;
     }
+    setPage('trip');
+    setEditing(true);
     void load();
     void window.otto
       .enterpriseParkCarpoolWorkflowExecute?.({ type: 'record_open' })
@@ -546,6 +547,7 @@ export function ParkCarpoolDialog({
       formVersionRef.current = saved.version ?? null;
       setDirty(false);
       setEditing(false);
+      setPage('published');
       try {
         setState(await window.otto.enterpriseParkCarpoolRefresh());
       } catch (cause) {
@@ -632,7 +634,8 @@ export function ParkCarpoolDialog({
       }}
     >
       <nav className="otto-carpool__navigation" aria-label="拼车功能">
-        {page !== 'trip' ? <button type="button" onClick={() => { setPage('trip'); setStopRequest(0); }}>返回行程</button> : null}
+        {page !== 'trip' ? <button type="button" onClick={() => { setPage('trip'); setEditing(true); setStopRequest(0); }}>返回行程</button> : null}
+        {state.currentIntent ? <button type="button" aria-pressed={page === 'published'} onClick={() => { setPage('published'); setEditing(false); }}>已发布行程</button> : null}
         <button type="button" aria-pressed={page === 'personal'} onClick={() => setPage('personal')}>我的同行</button>
         {state.parkAdmin ? <button type="button" aria-pressed={page === 'admin'} onClick={() => setPage('admin')}>园区管理</button> : null}
       </nav>
@@ -642,7 +645,7 @@ export function ParkCarpoolDialog({
           {state === EMPTY_STATE ? <button type="button" disabled={loading} onClick={() => void load()}>重新读取拼车状态</button> : null}
         </p>
       ) : null}
-      {page === 'trip' ? <>
+      {page === 'trip' || page === 'published' ? <>
       <section className="otto-carpool__hero">
         <strong>本次同行</strong>
         <span>
@@ -670,7 +673,7 @@ export function ParkCarpoolDialog({
           <strong>{state.currentIntent.origin.label} → {state.currentIntent.destination.label}</strong>
           <p>{state.currentIntent.travelDate} · {timeLabel(state.currentIntent.departureTime)} · 前后 {state.currentIntent.flexibleMinutes} 分钟 · {state.currentIntent.travelOptions.map(option => MODE_LABEL[option]).join(' / ')}</p>
           <div className="otto-carpool__actions">
-            <button type="button" onClick={() => setEditing(true)}>修改行程</button>
+            <button type="button" onClick={() => { setEditing(true); setPage('trip'); }}>修改行程</button>
             <button type="button" onClick={() => {
               if (state.hasGroup) { setPage('personal'); setStopRequest(value => value + 1); }
               else setConfirmStop(true);
@@ -959,7 +962,7 @@ export function ParkCarpoolDialog({
         showCurrentIntent={page === 'personal'}
         stopRequest={page === 'personal' ? stopRequest : 0}
       /> : null}
-      {page === 'trip' && active && !editing ? <section className="otto-carpool__results" aria-live="polite">
+      {page === 'published' && active && !editing ? <section className="otto-carpool__results" aria-live="polite">
         {state.failedCandidateCount ? (
           <p role="status">
             有 {state.failedCandidateCount}{' '}
@@ -1099,12 +1102,8 @@ export function ParkCarpoolDialog({
           </button>
         ) : null}
         {active && !loading && !sortedMatches.length ? (
-          <>
-            <p className="otto-carpool__empty">暂时没有合适的同行伙伴</p>
-            <CarpoolExamples />
-          </>
+          <p className="otto-carpool__empty">暂时没有合适的同行伙伴</p>
         ) : null}
-        {sortedMatches.length > 0 ? <details><summary>体验同行示例</summary><CarpoolExamples /></details> : null}
       </section> : null}
     </DialogFrame>
   );

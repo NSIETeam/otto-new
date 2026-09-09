@@ -225,6 +225,7 @@ it('real UI publishes, previews, requests, chats, groups, admits and leaves thro
       ),
     );
     show('a', true);
+    fireEvent.click(await screen.findByRole('button', { name: '已发布行程' }));
     fireEvent.click(await screen.findByRole('button', { name: '邀请同行' }));
     fireEvent.change(screen.getByLabelText('本次同行方式'), {
       target: { value: 'shared_taxi' },
@@ -255,6 +256,7 @@ it('real UI publishes, previews, requests, chats, groups, admits and leaves thro
     vi.unstubAllEnvs();
     await service.publishIntent('c', { ...input, requestKey: 'ui-peer-c' });
     show('c', true);
+    fireEvent.click(await screen.findByRole('button', { name: '已发布行程' }));
     fireEvent.click(
       await screen.findByRole('button', { name: '申请加入同行组' }),
     );

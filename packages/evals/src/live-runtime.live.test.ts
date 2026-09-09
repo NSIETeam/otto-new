@@ -6,18 +6,11 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { executeLiveCase, LIVE_CASES } from './liveRuntimeEval.js';
 import {
   liveEvalPreflight,
   LiveEvalBudget,
   LIVE_EVAL_EXECUTION_LIMITS as limits,
 } from './liveEvalGate.js';
-import {
-  FEEDBACK_BASELINE,
-  baselineFingerprint,
-  summarizeBaseline,
-  compareBaselines,
-} from './feedbackBaseline.js';
 
 it.skipIf(process.env.OTTO_LIVE_EVAL !== '1')(
   'runs real-model tasks through Otto runtime (explicit opt-in, synthetic data only)',
@@ -31,6 +24,20 @@ it.skipIf(process.env.OTTO_LIVE_EVAL !== '1')(
       admission.identity.maxCostUsd,
       admission.identity.reserveUsd,
     );
+    // Reject missing authorization/budget before initializing the entire Agent
+    // runtime. Static imports paid that cost even for deliberately refused runs.
+    const [
+      { executeLiveCase, LIVE_CASES },
+      {
+        FEEDBACK_BASELINE,
+        baselineFingerprint,
+        summarizeBaseline,
+        compareBaselines,
+      },
+    ] = await Promise.all([
+      import('./liveRuntimeEval.js'),
+      import('./feedbackBaseline.js'),
+    ]);
     const baseUrl = process.env.OTTO_EVAL_BASE_URL;
     const apiKey = process.env.OTTO_EVAL_API_KEY;
     const modelId = process.env.OTTO_EVAL_MODEL;

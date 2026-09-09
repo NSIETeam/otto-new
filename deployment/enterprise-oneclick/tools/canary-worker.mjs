@@ -83,6 +83,51 @@ function writeJson(file, value, exclusive = true) {
     fs.closeSync(directory);
   }
 }
+export function publishControlHandshake(file, nonce) {
+  if (!/^[a-f0-9]{32}$/.test(nonce)) reject('canary-handshake-nonce-invalid');
+  const staging = `${file}.${randomBytes(16).toString('hex')}.pending`;
+  const fd = fs.openSync(staging, 'wx', 0o600);
+  try {
+    fs.writeFileSync(fd, `${JSON.stringify({ nonce })}\n`);
+    // A root-only file must never become visible under go.json: the worker
+    // may read it immediately. Final permissions also must not depend on umask.
+    fs.fchmodSync(fd, 0o444);
+    fs.fsyncSync(fd);
+    // Atomic and no-clobber, including an existing symlink. The nonce reader
+    // does not require nlink=1 during this brief publication interval.
+    fs.linkSync(staging, file);
+  } finally {
+    fs.closeSync(fd);
+    fs.unlinkSync(staging);
+  }
+  const directory = fs.openSync(path.dirname(file), 'r');
+  try {
+    fs.fsyncSync(directory);
+  } finally {
+    fs.closeSync(directory);
+  }
+}
+export function readinessPublicationComplete(file, owner) {
+  let metadata;
+  try {
+    metadata = fs.lstatSync(file);
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isFile() ||
+    metadata.uid !== owner ||
+    metadata.mode & 0o022 ||
+    ![1, 2].includes(metadata.nlink)
+  )
+    reject('canary-path-custody-invalid');
+  if (metadata.size > 1024 * 1024) reject('canary-receipt-too-large');
+  // The producer exclusively links its complete temporary file, then removes
+  // that link. Wait inside the original health deadline; never accept nlink=2.
+  return metadata.nlink === 1;
+}
 function transactionRoot(input) {
   if (process.platform !== 'linux' || process.getuid() !== 0)
     reject('canary-requires-linux-root');
@@ -627,10 +672,10 @@ async function launch(transaction) {
       ) {
         witness = attest(witness, state(witness.unit));
         writeJson(`${transaction}/canary-controller.json`, witness, false);
-        writeJson(`${transaction}/canary/control/go.json`, {
-          nonce: witness.nonce,
-        });
-        fs.chmodSync(`${transaction}/canary/control/go.json`, 0o444);
+        publishControlHandshake(
+          `${transaction}/canary/control/go.json`,
+          witness.nonce,
+        );
       }
       if (
         witness.invocationId &&
@@ -752,7 +797,8 @@ async function worker() {
   let runtimeExited;
   process.on('SIGTERM', () => {
     stopping = true;
-    runtime?.kill('SIGTERM');
+    // KillMode=control-group already signals the runtime and every descendant.
+    // Forwarding TERM again can interrupt a one-shot graceful shutdown handler.
   });
   writeJson(`${VIEW}/work/worker-ready.json`, { nonce: config.nonce });
   while (!fs.existsSync(`${VIEW}/control/go.json`)) {
@@ -791,7 +837,12 @@ async function worker() {
   });
   // A single health budget includes readiness and every endpoint/body; retries never reset it.
   const healthDeadline = performance.now() + 30_000;
-  while (!fs.existsSync(env.OTTO_ENTERPRISE_READY_FILE)) {
+  while (
+    !readinessPublicationComplete(
+      env.OTTO_ENTERPRISE_READY_FILE,
+      process.getuid(),
+    )
+  ) {
     if (
       stopping ||
       runtimeResult !== undefined ||

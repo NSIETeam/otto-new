@@ -60,6 +60,70 @@ import {
 
 /** 检查更新的单次请求超时（任务书定 15s）。 */
 const CHECK_TIMEOUT_MS = 15_000;
+const INSTALLER_START_TIMEOUT_MS = 10_000;
+const INSTALLER_START_BUFFER_MS = 400;
+
+type InstallerStartResult =
+  | { status: 'started' | 'failed' | 'unknown' }
+  | { status: 'stopped'; code: number | null };
+
+/** A returned ChildProcess is not proof that Windows started the installer. */
+async function startWindowsInstaller(
+  filePath: string,
+): Promise<InstallerStartResult> {
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(filePath, ['/S', '--force-run'], {
+      detached: true,
+      stdio: 'ignore',
+      shell: false,
+    });
+  } catch {
+    return { status: 'failed' };
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    let spawned = false;
+    let startupBuffer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (outcome: InstallerStartResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(startupBuffer);
+      child.removeListener('spawn', onSpawn);
+      child.removeListener('exit', onExit);
+      if (outcome.status === 'started') child.unref();
+      resolve(outcome);
+    };
+    const onSpawn = () => {
+      spawned = true;
+      clearTimeout(timer);
+      // Reuse the existing 400 ms quit buffer to notice an installer refusing
+      // startup (e.g. NSIS directory protection). Do not wait for installation:
+      // a running installer may itself be waiting for Otto to exit.
+      startupBuffer = setTimeout(
+        () => finish({ status: 'started' }),
+        INSTALLER_START_BUFFER_MS,
+      );
+    };
+    const onExit = (code: number | null) => finish(
+      spawned ? { status: 'stopped', code } : { status: 'failed' },
+    );
+    const onError = () => onExit(null);
+    const onClose = (code: number | null) => {
+      onExit(code);
+      child.removeListener('error', onError);
+    };
+    // No acknowledgement is an unknown outcome, not permission to launch a
+    // second installer. Keep a single error listener until close so late errors
+    // are consumed, but a late spawn must neither quit Otto nor replay install.
+    const timer = setTimeout(() => finish({ status: 'unknown' }), INSTALLER_START_TIMEOUT_MS);
+    child.once('spawn', onSpawn);
+    child.once('exit', onExit);
+    child.on('error', onError);
+    child.once('close', onClose);
+  });
+}
 
 /** 下载进度（webContents.send 推给 renderer）。 */
 export interface UpdateProgressInfo {
@@ -165,6 +229,9 @@ export class UpdateService {
    * installUpdate 打开前要用它对文件重验，防「校验后被替换」的 TOCTOU 窗口。
    */
   private readyFile: { filePath: string; version: string; sha256: string } | null = null;
+  /** Coalesce clicks; an acknowledged or unknown launch must never be replayed. */
+  private installation: Promise<UpdateInstallResult> | null = null;
+  private installationOutcomeUnknown = false;
 
   constructor(
     /** 目标窗口 webContents（进度推送用；窗口可能重建，故传 getter）。 */
@@ -396,7 +463,25 @@ export class UpdateService {
    * 打开前必对文件**重验 sha256**（审查 H2 / TOCTOU）：下载校验通过到此刻之间
    * Downloads 里的文件可能被替换——不一致就拒绝打开、删文件、要求重新下载。
    */
-  async installUpdate(): Promise<UpdateInstallResult> {
+  installUpdate(): Promise<UpdateInstallResult> {
+    if (this.installation) return this.installation;
+    this.installation = this.performInstallUpdate().then(
+      (result) => {
+        if (!result.ok && !this.installationOutcomeUnknown) this.installation = null;
+        return result;
+      },
+      (error: unknown) => {
+        this.installation = null;
+        return {
+          ok: false,
+          message: `准备安装更新失败：${error instanceof Error ? error.message : String(error)}`,
+        };
+      },
+    );
+    return this.installation;
+  }
+
+  private async performInstallUpdate(): Promise<UpdateInstallResult> {
     const ready = this.readyFile;
     if (!ready) {
       return { ok: false, message: '还没有校验通过的安装包，请先下载更新' };
@@ -415,19 +500,30 @@ export class UpdateService {
 
     // Windows：NSIS 静默安装（/S）。--force-run 让装完自动拉起新版；
     // 安装器自带「等待旧进程退出」逻辑（electron-builder 生成的 NSIS 脚本），
-    // 因此拉起后立刻退出本进程即可。此路径需 Windows 实机回归（本机为 mac）。
+    // 必须收到 spawn 确认后才能安排退出；返回 child 对象并不代表拉起成功。
     if (process.platform === 'win32' && ready.filePath.toLowerCase().endsWith('.exe')) {
-      try {
-        const child = spawn(ready.filePath, ['/S', '--force-run'], {
-          detached: true,
-          stdio: 'ignore',
-        });
-        child.unref();
-        setTimeout(() => app.quit(), 400);
-        return { ok: true, message: '正在后台自动安装，安装完成后 Otto 将自动重新启动。' };
-      } catch {
-        /* 静默安装拉起失败 → 走下方手动兜底 */
+      const outcome = await startWindowsInstaller(ready.filePath);
+      if (outcome.status === 'started') {
+        // The startup buffer has elapsed; let the IPC result settle before quit.
+        setTimeout(() => app.quit(), 0);
+        return { ok: true, message: '更新安装器已启动，Otto 将退出以完成更新；安装器会尝试重新启动 Otto。' };
       }
+      if (outcome.status === 'stopped') {
+        this.installationOutcomeUnknown = true;
+        const detail = outcome.code === null ? '退出结果未确认' : `退出码 ${outcome.code}`;
+        return {
+          ok: false,
+          message: `更新安装器启动后已提前结束（${detail}），未确认完成安装；Otto 保持运行，不会重复启动安装器。请检查安装提示和安装目录，不要删除源码或用户数据。`,
+        };
+      }
+      if (outcome.status === 'unknown') {
+        this.installationOutcomeUnknown = true;
+        return {
+          ok: false,
+          message: '尚未确认更新安装器是否启动，Otto 保持运行且不会重复启动安装器。请先检查 Windows 安装提示或任务管理器，确认结果后再操作。',
+        };
+      }
+      // Only a known launch failure may fall back to the manual installer.
     }
 
     // macOS：挂载 dmg → ditto 覆盖当前 .app → 卸载 → 自动重启。
@@ -445,7 +541,12 @@ export class UpdateService {
       // 自动失败不终止：如实告知并降级手动路径。
     }
 
-    const openError = await shell.openPath(ready.filePath);
+    let openError: string;
+    try {
+      openError = await shell.openPath(ready.filePath);
+    } catch (error) {
+      openError = (error instanceof Error ? error.message : String(error)) || '系统未提供错误详情';
+    }
     if (openError) {
       return { ok: false, message: `打开安装包失败：${openError}` };
     }

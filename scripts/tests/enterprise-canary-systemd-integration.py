@@ -84,6 +84,8 @@ const work = process.env.OTTO_ENTERPRISE_DIR;
 const fixture = JSON.parse(fs.readFileSync(work + '/fixture.json', 'utf8'));
 if (!fs.existsSync(work + '/isolation-probe.json')) process.exit(8);
 const version = process.env.OTTO_APP_VERSION, buildCommit = process.env.OTTO_BUILD_COMMIT;
+const publication = {initialLinks:null,finalLinks:null,publishedAtMs:null,completedAtMs:null,signalCount:0,signalAtMs:null,drainCompleteAtMs:null};
+const recordPublication = () => fs.writeFileSync(work + '/runtime-publication.json', JSON.stringify(publication), {mode:0o600});
 if (fixture.mode === 'oom') {
   const buffers = []; setInterval(() => buffers.push(Buffer.alloc(32 * 1024 * 1024, 1)), 10);
   await new Promise(() => {});
@@ -96,16 +98,46 @@ const server = http.createServer((request, response) => {
   else { response.writeHead(403); response.end(); return; }
   response.setHeader('content-type','application/json'); response.end(JSON.stringify(body));
 });
-server.listen(0, '127.0.0.1', () => fs.writeFileSync(process.env.OTTO_ENTERPRISE_READY_FILE, JSON.stringify({host:'127.0.0.1',port:server.address().port,version,buildCommit}), {flag:'wx',mode:0o600}));
+server.listen(0, '127.0.0.1', () => {
+  const ready = process.env.OTTO_ENTERPRISE_READY_FILE;
+  const temporary = work + '/readiness-in-progress.tmp';
+  const fd = fs.openSync(temporary, 'wx', 0o600);
+  try {
+    fs.writeFileSync(fd, JSON.stringify({host:'127.0.0.1',port:server.address().port,version,buildCommit}));
+    fs.fchmodSync(fd, 0o600); fs.fsyncSync(fd);
+  } finally { fs.closeSync(fd); }
+  fs.linkSync(temporary, ready);
+  publication.initialLinks = fs.lstatSync(ready).nlink;
+  publication.publishedAtMs = performance.now(); recordPublication();
+  const finish = () => {
+    fs.unlinkSync(temporary);
+    const directory = fs.openSync(work, 'r');
+    try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+    publication.finalLinks = fs.lstatSync(ready).nlink;
+    publication.completedAtMs = performance.now(); recordPublication();
+  };
+  if (fixture.mode === 'ready-link-stuck') return;
+  if (fixture.mode === 'ready-link-delay') setTimeout(finish, 400);
+  else finish();
+});
 if (fixture.mode === 'residual') {
   const child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); setTimeout(()=>process.exit(0),90000)"], {stdio:'ignore'});
   fs.writeFileSync(work + '/child.pid', String(child.pid));
 }
-process.on('SIGTERM', () => {
+const onStop = () => {
+  publication.signalCount++;
+  publication.signalAtMs ??= performance.now(); recordPublication();
   if (fixture.mode === 'hang-stop') return;
   if (fixture.mode === 'runtime-exit7') process.exit(7);
-  server.close(() => setTimeout(() => process.exit(0), fixture.mode === 'drain45' ? 45000 : 10));
-});
+  server.close(() => setTimeout(() => {
+    publication.drainCompleteAtMs = performance.now(); recordPublication(); process.exit(0);
+  }, fixture.mode === 'drain45' ? 45000 : 10));
+};
+// The strict positive must survive systemd's one cgroup-wide TERM without a
+// second worker-forwarded TERM. A duplicate after once() restores the native
+// default and fails runtimeExit/cleanStopProof; it cannot silently pass.
+if (fixture.mode === 'drain45') process.once('SIGTERM', onStop);
+else process.on('SIGTERM', onStop);
 '''
 
 
@@ -169,7 +201,7 @@ def main():
         health_source = (source / 'tools/health-check.mjs').read_text()
         capabilities = re.findall(r"'([a-z0-9_]+)'", re.search(r'const requiredCapabilities = (\[[\s\S]*?\]);', health_source).group(1))
         require(len(capabilities) >= 18, 'health capabilities not found')
-        for mode in ['success','drain45','migration-exit7','runtime-exit7','oom','residual','hang-stop']:
+        for mode in ['success','drain45','ready-link-delay','ready-link-stuck','migration-exit7','runtime-exit7','oom','residual','hang-stop']:
             case = root / mode; case.mkdir(mode=0o700)
             package = case / 'package'; package.mkdir(mode=0o700)
             for name in ['canary-worker.mjs','health-check.mjs']:
@@ -198,7 +230,7 @@ def main():
             group = Path('/sys/fs/cgroup') / witness['cgroup'].lstrip('/')
             if group.exists():
                 require('populated 0' in (group / 'cgroup.events').read_text() and not (group / 'cgroup.procs').read_text().strip(), 'unit has remaining processes')
-            positive = mode in ['success','drain45']
+            positive = mode in ['success','drain45','ready-link-delay']
             report['cases'].append({'mode': mode, 'exit': result.returncode, 'seconds': round(elapsed, 2),
                 # Only root-produced fixed enums, never raw runner stderr or config.
                 'launchDiagnostic': json.loads((txn / 'canary-launch-diagnostic.json').read_text())
@@ -207,8 +239,48 @@ def main():
                     '--property=LoadState,ActiveState,MainPID,Result,ExecMainCode,ExecMainStatus'],check=False).stdout,
                 'unitJournal': run(['/usr/bin/journalctl','--unit',witness['unit'],'--no-pager','--output=cat','--lines=12'],check=False).stdout[-4000:],
                 'delivered': (txn / 'canary-deliverable.json').exists(), 'passed': False})
+            # Only numeric fields from this synthetic adapter enter the public
+            # diagnostic receipt. Never export the fixture/config/work tree.
+            publication = None
+            publication_file = work / 'runtime-publication.json'
+            if publication_file.exists():
+                metadata = publication_file.lstat()
+                require(stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1
+                        and metadata.st_uid == witness['uid'] and metadata.st_size <= 2048,
+                        'unsafe synthetic runtime publication probe')
+                observed = json.loads(publication_file.read_text())
+                keys = {'initialLinks','finalLinks','publishedAtMs','completedAtMs',
+                        'signalCount','signalAtMs','drainCompleteAtMs'}
+                require(set(observed) == keys and all(value is None or
+                        (type(value) in {int,float} and 0 <= value < 1e9)
+                        for value in observed.values()), 'invalid synthetic publication fields')
+                publication = {key: observed[key] for key in sorted(keys)}
+            report['cases'][-1]['runtimePublication'] = publication
             require((result.returncode == 0) == positive, f'{mode}: unexpected controller result: {result.stderr[:300]}')
             require((txn / 'canary-deliverable.json').exists() == positive, 'failed unit delivered a database')
+            if mode in {'success','drain45','ready-link-delay','ready-link-stuck'}:
+                require(publication is not None and publication['initialLinks'] == 2,
+                        'actual two-link publication was not observed')
+                if mode == 'ready-link-stuck':
+                    require(publication['finalLinks'] is None
+                            and (work / 'canary-ready.json').lstat().st_nlink == 2,
+                            'stuck publication unexpectedly completed')
+                    require(29 <= elapsed < 45, 'stuck publication did not use the original 30s health budget')
+                    require(not (work / 'health-complete.json').exists()
+                            and not (work / 'worker-result.json').exists(),
+                            'incomplete publication reached health or delivery')
+                else:
+                    require(publication['finalLinks'] == 1
+                            and (work / 'canary-ready.json').lstat().st_nlink == 1
+                            and not (work / 'readiness-in-progress.tmp').exists(),
+                            'publication was accepted before its temporary link was removed')
+                    require(publication['signalCount'] == 1, 'runtime did not receive exactly one cgroup stop signal')
+                if mode == 'ready-link-delay':
+                    require(publication['completedAtMs'] - publication['publishedAtMs'] >= 350,
+                            'temporary two-link interval was not exercised')
+                if mode == 'drain45':
+                    require(publication['drainCompleteAtMs'] - publication['signalAtMs'] >= 45_000
+                            and elapsed >= 45, 'accepted drain was interrupted before 45 seconds')
             if positive:
                 run([str(node),str(package / 'tools/canary-worker.mjs'),'verify-deliverable','--transaction',str(txn)],env=env)
                 probe = json.loads((work / 'isolation-probe.json').read_text()); require(probe['passed'] and witness['cgroup'] in probe['cgroup'], 'migration outside attested cgroup')

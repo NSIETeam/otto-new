@@ -78,6 +78,52 @@ describe('按需定位与团队地图服务', () => {
 });
 
 describe('拼车助手界面', () => {
+  it.each([
+    ['just_updated', undefined, '刚刚更新'],
+    ['departing_soon', undefined, '即将出发'],
+    ['needs_confirmation', undefined, '等待确认仍在寻找'],
+    ['recent', 8, '8 分钟前仍在寻找'],
+    ['recent', undefined, '仍在寻找'],
+  ] as const)('shows the reported freshness %s (%s) as %s without mislabelling it', async (freshness, confirmedAgoMinutes, expected) => {
+    const origin = { label: '园区南门', coordinate: { longitude: 116, latitude: 40 } };
+    const destination = { label: '公共地铁站', coordinate: { longitude: 116.1, latitude: 40 } };
+    const state: EnterpriseParkCarpoolState = {
+      ...emptyState,
+      currentIntent: {
+        id: 'freshness-current', accountId: 'current', organizationId: 'org-current',
+        organizationName: '当前企业', displayName: '当前用户', parkId: emptyState.parkId,
+        travelDate: '2026-09-09', departureTime: '2026-09-09T15:00:00Z',
+        origin, destination, flexibleMinutes: 30, travelOptions: ['shared_taxi'],
+        route: { provider: 'explicit-ui-fixture', distanceMeters: 8500, durationSeconds: 1200, polyline: [origin.coordinate, destination.coordinate] },
+        status: 'active', lastConfirmedAt: '2026-09-09T04:00:00Z',
+        expiresAt: '2026-09-09T15:30:00Z', createdAt: '2026-09-09T04:00:00Z', updatedAt: '2026-09-09T04:00:00Z',
+      },
+      matches: [{
+        intentId: 'freshness-peer', displayName: '候选甲', organizationName: '测试企业甲',
+        verifiedParkMember: true, departureTime: '2026-09-09T15:00:00Z',
+        timeDifferenceMinutes: 0, overlapPercent: 90, commonDistanceMeters: 8000,
+        compatibleModes: ['shared_taxi'], originArea: '园区附近', destinationArea: '公共站点附近',
+        freshness, confirmedAgoMinutes, explanation: '明确的匹配状态展示夹具',
+      }],
+    };
+    const get = vi.fn(async () => state);
+    Object.assign(window.otto, {
+      enterpriseParkCarpoolGet: get,
+      enterpriseParkCarpoolRefresh: vi.fn(async () => state),
+      enterpriseParkCarpoolMap: vi.fn(async () => 'data:image/png;base64,AA=='),
+      enterpriseParkCarpoolWorkflowExecute: vi.fn(async () => ({})),
+    });
+    const view = render(<ParkCarpoolDialog open onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: '已发布行程' }));
+    const card = (await screen.findByRole('heading', { name: '候选甲 · 测试企业甲' })).closest('article')!;
+    expect(within(card).getByText(expected, { exact: true })).toBeTruthy();
+    for (const label of ['刚刚更新', '即将出发', '等待确认仍在寻找', '8 分钟前仍在寻找', '仍在寻找']) {
+      if (label !== expected) expect(within(card).queryByText(label, { exact: true })).toBeNull();
+    }
+    expect(get).toHaveBeenCalledOnce();
+    view.unmount();
+  });
+
   it('keeps an unpublished form separate from personal messages and administration', async () => {
     Object.assign(window.otto, { enterpriseParkCarpoolGet: async () => ({ ...emptyState, parkAdmin: true }) });
     render(<ParkCarpoolDialog open onClose={() => undefined} />);

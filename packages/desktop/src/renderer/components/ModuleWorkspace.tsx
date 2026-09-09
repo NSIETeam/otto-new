@@ -415,13 +415,10 @@ export function ModuleWorkspace({
         const groupModules = group.moduleIds
           .map((moduleId) => modulesById.get(moduleId))
           .filter((module): module is ModuleDefinition => Boolean(module));
-        const displayRows = Math.min(
-          3,
-          Math.max(group.rows, Math.ceil((groupModules.length + 1) / gridColumns)),
+        const displayRows = Math.max(
+          group.rows,
+          Math.ceil((groupModules.length + 1) / gridColumns),
         );
-        const capacity = displayRows * gridColumns;
-        const addTileFits = groupModules.length < capacity;
-        const overflowing = groupModules.length > capacity;
         const condensed = presentation === 'panel' && density === 'condensed';
         const collapsed = condensed && activeCondensedGroupId !== group.id;
         return (
@@ -571,13 +568,9 @@ export function ModuleWorkspace({
                 );
                 updateTransientLayout(reorderModulesInGroup(current, group.id, mergedOrder));
               }}
-              className={`otto-module-group__grid otto-module-group__grid--rows-${displayRows}${
-                overflowing ? ' is-overflowing' : ''
-              }`}
+              className={`otto-module-group__grid otto-module-group__grid--rows-${displayRows}`}
               hidden={collapsed}
               data-reorder-group={`modules:${group.id}`}
-              layoutScroll={overflowing}
-              tabIndex={overflowing ? 0 : undefined}
               aria-label={`${group.name}模块`}
             >
               {groupModules.map((module, moduleIndex) => {
@@ -654,7 +647,7 @@ export function ModuleWorkspace({
                   </DraggableItem>
                 );
               })}
-              {addTileFits ? <button
+              <button
                 type="button"
                 className="otto-module-group__add"
                 aria-label={`管理“${group.name}”中的模块`}
@@ -662,19 +655,8 @@ export function ModuleWorkspace({
               >
                 <span className="otto-module-group__add-icon" aria-hidden>＋</span>
                 <span>管理模块</span>
-              </button> : null}
-            </Reorder.Group>
-            {!addTileFits ? (
-              <button
-                type="button"
-                className="otto-module-group__add otto-module-group__add--compact"
-                aria-label={`向${group.name}添加模块`}
-                onClick={() => onOpenMarketplace(group.id)}
-              >
-                <span className="otto-module-group__add-icon" aria-hidden>＋</span>
-                <span>添加模块</span>
               </button>
-            ) : null}
+            </Reorder.Group>
           </article>
             )}
           </DraggableItem>

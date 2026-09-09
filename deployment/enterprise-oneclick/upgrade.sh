@@ -98,15 +98,17 @@ esac
 [ -d "${SCRIPT_DIR}/release" ] || otto_die "部署包缺少 release 目录" 3
 [ -f "${SCRIPT_DIR}/release/manifest.json" ] || otto_die "部署包缺少 release manifest" 3
 otto_verify_package_manifest "$SCRIPT_DIR"
+otto_prepare_canary_identity
 
 if [ "$DRY_RUN" -eq 0 ]; then
   [ "$(id -u)" -eq 0 ] || otto_die "正式升级必须使用 sudo/root" 3
   [ "$(uname -s)" = "Linux" ] || otto_die "正式升级仅支持 Linux" 3
   command -v systemctl >/dev/null 2>&1 || otto_die "目标机没有 systemd" 3
-  mkdir -p "$(dirname -- "$LOCK_FILE")"
-  exec 9>"$LOCK_FILE"
-  flock -n 9 || otto_die "已有另一个 Otto 部署正在运行" 3
 fi
+# Dry-runs use the same dedicated UID and must not overlap another canary.
+mkdir -p "$(dirname -- "$LOCK_FILE")"
+exec 9>"$LOCK_FILE"
+flock -n 9 || otto_die "已有另一个 Otto 部署正在运行" 3
 
 [ -L "${INSTALL_ROOT}/current" ] || otto_die "${INSTALL_ROOT}/current 不存在或不是 symlink；请先用 install.sh 完成首装" 3
 CURRENT_REAL="$(readlink -f "${INSTALL_ROOT}/current")"
@@ -176,7 +178,7 @@ else
   TXN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/otto-enterprise-upgrade.XXXXXX")"
 fi
 chmod 0700 "$TXN_DIR"
-CANARY_PID=""
+CANARY_STARTED=0
 OLD_DATA_BACKUP="${TXN_DIR}/data.db.before"
 OLD_RESIDENT_STATE_BACKUP="${TXN_DIR}/resident-recurring-tasks.json.before"
 OLD_RESIDENT_STATE_ABSENT="${TXN_DIR}/resident-recurring-tasks.absent"
@@ -350,9 +352,12 @@ cleanup() {
   local rollback_ok=1
   local preserve_transaction=0
   local old_release_verified=0
-  if [ -n "$CANARY_PID" ] && kill -0 "$CANARY_PID" >/dev/null 2>&1; then
-    kill -TERM "$CANARY_PID" >/dev/null 2>&1 || true
-    wait "$CANARY_PID" || true
+  if [ "${CANARY_STARTED:-0}" -eq 1 ]; then
+    if ! "$NODE_PATH" "${SCRIPT_DIR}/tools/canary-worker.mjs" stop --transaction "$TXN_DIR"; then
+      ( set -o noclobber; printf '%s\n' 'canary-stop-unknown' >"${TXN_DIR}/recovery-required" ) 2>/dev/null || :
+      otto_warn "canary unit/cgroup 未证明停止；禁止复制数据库或回滚重启，保留事务证据：${TXN_DIR}"
+      return 1
+    fi
   fi
   if [ -n "$TARGET_RELEASE_STAGE" ] \
     && [ "$TARGET_RELEASE_STAGE" != "$TARGET_RELEASE" ]; then
@@ -520,7 +525,7 @@ fi
 chown root:root "$OLD_DATA_BACKUP"
 chmod 0600 "$OLD_DATA_BACKUP"
 cp -p "$OLD_DATA_BACKUP" "$NEW_DATA"
-CANARY_DIR="${TXN_DIR}/canary"
+CANARY_DIR="${TXN_DIR}/canary/work"
 mkdir -p "$CANARY_DIR"
 cp -p "$NEW_DATA" "${CANARY_DIR}/data.db"
 otto_prepare_upgrade_canary_keys "$DATA_DIR" "$CANARY_DIR"
@@ -554,81 +559,13 @@ export OTTO_DATABASE_ENCRYPTION_KEY_ID
 export OTTO_DATABASE_ENCRYPTION_KEY_READONLY="true"
 export OTTO_SQLCIPHER_NATIVE_BINDING="$SQLCIPHER_RELEASE_BINDING"
 
-CANARY_READY_FILE="${CANARY_DIR}/canary-ready.json"
-CANARY_PORT=""
-export OTTO_ENTERPRISE_DIR="$CANARY_DIR"
-export OTTO_ENTERPRISE_HOST="127.0.0.1"
-export OTTO_ENTERPRISE_PORT="0"
-export OTTO_ENTERPRISE_READY_FILE="$CANARY_READY_FILE"
-export OTTO_ENTERPRISE_CANARY_MODE="1"
-OTTO_PUBLIC_HOST="${OTTO_PUBLIC_HOST:-localhost}"
-OTTO_PUBLIC_PORT="${OTTO_PUBLIC_PORT:-7777}"
-OTTO_ENTERPRISE_PUBLIC_URL="${OTTO_ENTERPRISE_PUBLIC_URL:-https://${OTTO_PUBLIC_HOST}:${OTTO_PUBLIC_PORT}}"
-export OTTO_ENTERPRISE_PUBLIC_URL
-export OTTO_ENTERPRISE_ADMIN_TOKEN="${OTTO_ENTERPRISE_ADMIN_TOKEN:-upgrade-canary-token-not-for-public-use}"
-export OTTO_ENTERPRISE_TRUST_PROXY_HOPS="1"
-export OTTO_APP_VERSION="$RELEASE_VERSION"
-export OTTO_BUILD_COMMIT="$BUILD_ID"
-export OTTO_LICENSE_TRUST_FILE="${SCRIPT_DIR}/release/license-public-keys.json"
-
-"$NODE_PATH" "${SCRIPT_DIR}/tools/migrate-check.mjs" \
-  "${SCRIPT_DIR}/release" "$CANARY_DIR" \
-  --baseline "$BASELINE_INSPECTION" >/dev/null
-otto_log "启动 127.0.0.1:自动分配端口 升级 canary"
-"$NODE_PATH" "${SCRIPT_DIR}/release/run.mjs" >"${TXN_DIR}/canary.log" 2>&1 &
-CANARY_PID=$!
-CANARY_OK=0
-for _ in $(seq 1 30); do
-  if ! kill -0 "$CANARY_PID" >/dev/null 2>&1; then
-    sed -n '1,160p' "${TXN_DIR}/canary.log" >&2
-    otto_die "升级 canary 启动后提前退出" 5
-  fi
-  if [ -f "$CANARY_READY_FILE" ]; then
-    CANARY_PORT="$("$NODE_PATH" --input-type=module - \
-      "$CANARY_READY_FILE" "$RELEASE_VERSION" "$BUILD_ID" <<'NODE'
-import { lstatSync, readFileSync } from 'node:fs';
-const [readyFile, expectedVersion, expectedBuild] = process.argv.slice(2);
-const metadata = lstatSync(readyFile);
-if (metadata.isSymbolicLink() || !metadata.isFile()) {
-  throw new Error('canary readiness file is not a regular file');
-}
-const ready = JSON.parse(readFileSync(readyFile, 'utf8'));
-if (
-  !ready ||
-  ready.host !== '127.0.0.1' ||
-  !Number.isInteger(ready.port) ||
-  ready.port < 1 ||
-  ready.port > 65535 ||
-  ready.version !== expectedVersion ||
-  ready.buildCommit !== expectedBuild
-) {
-  throw new Error('canary readiness content does not match the release');
-}
-process.stdout.write(String(ready.port));
-NODE
-    )" || {
-      sed -n '1,160p' "${TXN_DIR}/canary.log" >&2
-      otto_die "升级 canary 就绪文件无效" 5
-    }
-    if "$NODE_PATH" "${SCRIPT_DIR}/tools/health-check.mjs" \
-      "http://127.0.0.1:${CANARY_PORT}" "$RELEASE_VERSION" "$BUILD_ID" \
-      "$RELEASE_SCHEMA_TO" \
-      "$([ "$OTTO_ALLOW_SMS_DISABLED" = "1" ] && printf 'allow-sms-disabled' || printf 'require-sms')" \
-      >/dev/null 2>&1; then
-      CANARY_OK=1
-      break
-  fi
-  fi
-  sleep 1
-done
-[ "$CANARY_OK" -eq 1 ] || {
-  sed -n '1,160p' "${TXN_DIR}/canary.log" >&2
-  otto_die "升级 canary 未通过" 5
-}
-kill -TERM "$CANARY_PID" >/dev/null 2>&1 || true
-wait "$CANARY_PID" || true
-CANARY_PID=""
-unset OTTO_ENTERPRISE_CANARY_MODE OTTO_ENTERPRISE_READY_FILE
+otto_log "在独立 systemd cgroup 中迁移并验收 canary（500M / CPU 50%）"
+# This controller copies only allowlisted credentials. Production SMS/channel/
+# proxy secrets never enter the candidate unit. SMS configuration is validated
+# against the root-only configuration snapshot before launch.
+CANARY_STARTED=1
+"$NODE_PATH" "${SCRIPT_DIR}/tools/canary-worker.mjs" launch --transaction "$TXN_DIR"
+"$NODE_PATH" "${SCRIPT_DIR}/tools/canary-worker.mjs" verify-deliverable --transaction "$TXN_DIR"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   otto_log "dry-run 通过：release、数据库迁移和 canary health 均正常；未切换 current"
@@ -695,6 +632,7 @@ fi
 /usr/bin/sync -f "$TXN_DIR"
 ROLLBACK_NEEDED=1
 systemctl stop otto-enterprise
+"$NODE_PATH" "${SCRIPT_DIR}/tools/canary-worker.mjs" verify-deliverable --transaction "$TXN_DIR"
 install -o otto-enterprise -g otto-enterprise -m 0600 "${CANARY_DIR}/data.db" "${DATA_DIR}/data.db"
 CANARY_RESIDENT_STATE="${CANARY_DIR}/resident-recurring-tasks.json"
 if [ -e "$CANARY_RESIDENT_STATE" ] || [ -L "$CANARY_RESIDENT_STATE" ]; then

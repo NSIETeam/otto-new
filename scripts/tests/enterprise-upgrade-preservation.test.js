@@ -323,14 +323,23 @@ otto_prepare_upgrade_canary_keys "$PWD/live" "$PWD/canary"`,
       'systemctl stop otto-enterprise\n  GRACEFUL_ACTIVE_STATE=',
       'DATABASE_HEADER=',
       'otto_prepare_upgrade_canary_keys "$DATA_DIR" "$CANARY_DIR"',
-      'export OTTO_ENTERPRISE_CANARY_MODE="1"',
-      '--baseline "$BASELINE_INSPECTION" >/dev/null',
-      '"${SCRIPT_DIR}/release/run.mjs"',
-      'unset OTTO_ENTERPRISE_CANARY_MODE OTTO_ENTERPRISE_READY_FILE',
+      '"${SCRIPT_DIR}/tools/canary-worker.mjs" launch --transaction "$TXN_DIR"',
+      '"${SCRIPT_DIR}/tools/canary-worker.mjs" verify-deliverable --transaction "$TXN_DIR"',
       'ROLLBACK_NEEDED=1',
     ].map((marker) => upgrade.indexOf(marker));
     expect(positions.every((position) => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    const worker = readFileSync(
+      path.join(root, 'deployment/enterprise-oneclick/tools/canary-worker.mjs'),
+      'utf8',
+    );
+    expect(worker).toContain("OTTO_ENTERPRISE_CANARY_MODE: '1'");
+    expect(worker).toMatch(
+      /'--baseline',\s*`\$\{VIEW\}\/control\/baseline\.json`/,
+    );
+    expect(worker.indexOf('const migrationResult =')).toBeLessThan(
+      worker.indexOf('runtime = startChild('),
+    );
   });
 
   it.each([
@@ -356,8 +365,8 @@ otto_prepare_upgrade_canary_keys "$PWD/live" "$PWD/canary"`,
       const result = spawnSync(process.execPath, ['--input-type=module', '-'], {
         input: `process.argv = ['node', 'health-check', 'http://127.0.0.1:10000', '1.9.15', '${'a'.repeat(40)}', '26', 'allow-sms-disabled'];
 const publicHealth = {status:'ok',service:'otto-enterprise',apiVersion:4,version:'1.9.15',appVersion:'1.9.15',capabilities:${capabilities}};
-globalThis.fetch = async (url) => ({url, ok:true, json:async () => url.endsWith('/health') ? publicHealth : url.endsWith('/legal') ? [{id:'terms',version:'1',hash:'a'.repeat(64)},{id:'privacy',version:'1',hash:'b'.repeat(64)}] : {runtime:{version:'1.9.15',buildCommit:'a'.repeat(40)},license:{enforce:true,status:${JSON.stringify(status)}},database:{ready:true,schemaVersion:26},operationsSecurity:{sqlCipher:{state:'active'}}}});
-await import(${JSON.stringify(pathToFileURL(healthPath).href)});`,
+globalThis.fetch = async (url) => { const body = url.endsWith('/health') ? publicHealth : url.endsWith('/legal') ? [{id:'terms',version:'1',hash:'a'.repeat(64)},{id:'privacy',version:'1',hash:'b'.repeat(64)}] : {runtime:{version:'1.9.15',buildCommit:'a'.repeat(40)},license:{enforce:true,status:${JSON.stringify(status)}},database:{ready:true,schemaVersion:26},operationsSecurity:{sqlCipher:{state:'active'}}}; const response = new Response(JSON.stringify(body)); Object.defineProperty(response, 'url', {value:url}); return response; };
+const { main } = await import(${JSON.stringify(pathToFileURL(healthPath).href)}); await main();`,
         encoding: 'utf8',
         env: {
           ...process.env,

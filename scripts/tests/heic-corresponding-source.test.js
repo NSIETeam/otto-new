@@ -1,16 +1,18 @@
 /** Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0 */
 import {
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   assertCleanSource,
   assertHeicLock,
@@ -34,6 +36,7 @@ const temp = () => {
   return root;
 };
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
 });
@@ -196,12 +199,73 @@ describe('HEIC corresponding-source release inputs', () => {
 
   it('refuses in-checkout output before performing a build or download', async () => {
     const root = repo();
+    const fetch = vi.fn(() => { throw new Error('unexpected source download'); });
+    vi.stubGlobal('fetch', fetch);
     await expect(
       buildCorrespondingSource({
         repoRoot: root,
         outputDir: path.join(root, 'output'),
       }),
     ).rejects.toThrow('outside');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(existsSync(path.join(root, 'output'))).toBe(false);
+  });
+
+  it.each(['outputDir', 'cacheDir'])('rejects a checkout alias in %s before any download or write', async (field) => {
+    const root = repo();
+    const parent = temp();
+    const alias = path.join(parent, 'checkout-alias');
+    symlinkSync(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const destination = path.join(alias, 'not-created', 'nested');
+    const fetch = vi.fn(() => { throw new Error('unexpected source download'); });
+    vi.stubGlobal('fetch', fetch);
+    await expect(buildCorrespondingSource({
+      repoRoot: root,
+      outputDir: path.join(parent, 'outside'),
+      [field]: destination,
+    })).rejects.toThrow('outside');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(existsSync(path.join(root, 'not-created'))).toBe(false);
+    expect(existsSync(path.join(parent, 'outside'))).toBe(false);
+  });
+
+  it('accepts a canonical outside destination, then still rejects a dirty source before downloading', async () => {
+    const root = repo();
+    const parent = temp();
+    const alias = path.join(temp(), 'outside-alias');
+    symlinkSync(parent, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    writeFileSync(path.join(root, 'dirty.txt'), 'not committed');
+    const fetch = vi.fn(() => { throw new Error('unexpected source download'); });
+    vi.stubGlobal('fetch', fetch);
+    await expect(buildCorrespondingSource({
+      repoRoot: root,
+      outputDir: path.join(alias, 'not-created', 'nested'),
+    })).rejects.toThrow('clean HEAD');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(existsSync(path.join(parent, 'not-created'))).toBe(false);
+  });
+
+  it.each(['outputDir', 'cacheDir'])('rejects non-directory and dangling %s ancestors without side effects', async (field) => {
+    const root = repo();
+    const parent = temp();
+    const regular = path.join(parent, 'regular-file');
+    writeFileSync(regular, 'preserved');
+    const dangling = path.join(parent, 'dangling');
+    symlinkSync(path.join(parent, 'absent'), dangling,
+      process.platform === 'win32' ? 'junction' : 'dir');
+    const fetch = vi.fn(() => { throw new Error('unexpected source download'); });
+    vi.stubGlobal('fetch', fetch);
+    for (const invalid of [regular, path.join(regular, 'child'), dangling, path.join(dangling, 'child')]) {
+      await expect(buildCorrespondingSource({
+        repoRoot: root,
+        outputDir: path.join(parent, 'outside'),
+        [field]: invalid,
+      })).rejects.toThrow();
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(readFileSync(regular, 'utf8')).toBe('preserved');
+    expect(existsSync(path.join(parent, 'absent'))).toBe(false);
+    expect(existsSync(path.join(parent, 'outside'))).toBe(false);
   });
 
   it('names a separate versioned sidecar and rejects unsafe/non-release versions', () => {

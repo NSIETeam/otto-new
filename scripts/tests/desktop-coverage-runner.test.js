@@ -6,6 +6,7 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
+  realpathSync,
   existsSync,
   rmSync,
   symlinkSync,
@@ -22,6 +23,8 @@ import {
 } from '../verify-desktop-coverage-ratchet.mjs';
 
 const temporary = [];
+// Match the native child's canonical cwd on macOS (/var -> /private/var).
+const temporaryRoot = realpathSync(os.tmpdir());
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const runnerFile = fileURLToPath(
   new URL('../run-desktop-coverage.mjs', import.meta.url),
@@ -30,7 +33,7 @@ const runnerFile = fileURLToPath(
 afterEach(() => {
   for (const dir of temporary.splice(0)) {
     if (
-      path.dirname(dir) !== os.tmpdir() ||
+      path.dirname(dir) !== temporaryRoot ||
       !path.basename(dir).startsWith('otto-coverage-runner-fixture-')
     )
       throw new Error('Unsafe fixture cleanup');
@@ -40,7 +43,7 @@ afterEach(() => {
 
 function fixture(mode = 'pass') {
   const root = mkdtempSync(
-    path.join(os.tmpdir(), 'otto-coverage-runner-fixture-'),
+    path.join(temporaryRoot, 'otto-coverage-runner-fixture-'),
   );
   temporary.push(root);
   const desktop = path.join(root, 'packages/desktop');
@@ -168,6 +171,7 @@ describe('native desktop coverage runner infrastructure', () => {
   });
   it('runs the exact native command in isolation and fails closed without a platform baseline', async () => {
     const input = fixture();
+    expect(realpathSync(input.desktop)).toBe(input.desktop);
     const oldSecret = process.env.OTTO_TEST_SECRET;
     process.env.OTTO_TEST_SECRET = 'do-not-propagate-to-child';
     let result;
@@ -286,6 +290,7 @@ describe('native desktop coverage runner infrastructure', () => {
     const { root, desktop } = fixture();
     const redirected = path.join(root, 'redirected');
     mkdirSync(redirected);
+    writeFileSync(path.join(redirected, 'sentinel'), 'user-owned');
     symlinkSync(
       redirected,
       path.join(desktop, 'coverage'),
@@ -295,6 +300,9 @@ describe('native desktop coverage runner infrastructure', () => {
       /directory/,
     );
     expect(existsSync(path.join(redirected, 'desktop-runs'))).toBe(false);
+    expect(readFileSync(path.join(redirected, 'sentinel'), 'utf8')).toBe(
+      'user-owned',
+    );
   });
 
   it.each(['--skip-ratchet', '--baseline', '--update-baseline', '--root'])(

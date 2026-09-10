@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readCarpoolConfig } from '../../packages/server/src/modules/park_carpool/parkCarpoolConfig.ts';
 
 const root = path.resolve('deployment/enterprise-oneclick');
 const common = readFileSync(path.join(root, 'lib/common.sh'), 'utf8');
@@ -78,6 +79,9 @@ describe('managed carpool configuration transport', () => {
     expect(result.status, result.stderr).toBe(0);
     for (const key of flags) expect(result.stdout).toContain(`${key}="false"`);
     expect(result.stdout).not.toContain('OTTO_PARK_CARPOOL_PILOT_PARK_IDS=');
+    expect(readCarpoolConfig(Object.fromEntries(flags.map(key => [key, 'false'])))).toMatchObject({
+      requestsEnabled: false, invitationsEnabled: false, groupsEnabled: false, pilotParkIds: undefined,
+    });
     const configured = Object.fromEntries(keys.map(key => [key, key.endsWith('_ENABLED') ? 'true' : key.endsWith('_PILOT_PARK_IDS') ? 'real-park_1,real-park_2' : '1']));
     const config = Object.entries(configured).map(([key, value]) => `${key}=${value}`).join('\n');
     const explicit = run(`source "$1"\notto_load_config "$2/input.env"\n${defaults}\nTXN_DIR="$2"\nset +u\n${writer}\ncat "$ENV_TEMP"`, { 'input.env': config });
@@ -91,6 +95,25 @@ describe('managed carpool configuration transport', () => {
     // configuration. The existing server parser will reject these empty values.
     expect(invalid.stdout).toContain('OTTO_PARK_CARPOOL_REQUESTS_ENABLED=""');
     expect(invalid.stdout).toContain('OTTO_PARK_CARPOOL_PILOT_PARK_IDS=""');
+    const transported = Object.fromEntries([...invalid.stdout.matchAll(/^(OTTO_PARK_CARPOOL_[A-Z_]+)="([^"]*)"$/gm)]
+      .map(([, key, value]) => [key, value]));
+    for (const key of ['OTTO_PARK_CARPOOL_REQUESTS_ENABLED', 'OTTO_PARK_CARPOOL_PILOT_PARK_IDS'])
+      expect(() => readCarpoolConfig({ [key]: transported[key] }), key).toThrow(`${key} 配置无效`);
+  });
+
+  it.runIf(hasBash)('collects only present values with Bash 3.2-compatible syntax, retaining explicit empty and literal values', () => {
+    const begin = installer.indexOf('CARPOOL_RUNTIME_ENV_ARGS=()');
+    const end = installer.indexOf('\nENV_TEMP=', begin);
+    expect(begin).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(begin);
+    const collect = installer.slice(begin, end);
+    expect(collect).not.toMatch(/\[\[\s+-v\s/);
+    for (const value of [undefined, '', '0', 'false', '$(printf must-not-execute)']) {
+      const assign = value === undefined ? '' : `OTTO_PARK_CARPOOL_PILOT_PARK_IDS='${value}'`;
+      const result = run(`${assign}\n${collect}\nprintf '%s' "\${#CARPOOL_RUNTIME_ENV_ARGS[@]}"\nif [ "\${#CARPOOL_RUNTIME_ENV_ARGS[@]}" -gt 0 ]; then printf '|%s|%s' "\${CARPOOL_RUNTIME_ENV_ARGS[0]}" "\${CARPOOL_RUNTIME_ENV_ARGS[1]}"; fi`);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe(value === undefined ? '0' : `2|OTTO_PARK_CARPOOL_PILOT_PARK_IDS|${value}`);
+    }
   });
 
   it('preserves configured keys through the actual upgrade transformation and restores the original old-version environment', () => {

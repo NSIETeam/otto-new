@@ -32,6 +32,31 @@ const requireThat = (condition, message) => {
   if (!condition) throw new Error(message);
 };
 export const sha256 = (data) => createHash('sha256').update(data).digest('hex');
+function canonicalDirectory(value) {
+  let ancestor = path.resolve(value);
+  const missing = [];
+  for (;;) {
+    let metadata;
+    try {
+      metadata = lstatSync(ancestor);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      const parent = path.dirname(ancestor);
+      requireThat(parent !== ancestor, 'source directory has no existing ancestor');
+      missing.unshift(path.basename(ancestor));
+      ancestor = parent;
+      continue;
+    }
+    // Resolve existing ancestors before comparing with the checkout. macOS
+    // /var aliases and user-selected directory links must not evade containment.
+    // A dangling link or non-directory fails closed; missing children are not
+    // created until all source and output checks have passed.
+    const canonical = realpathSync(ancestor);
+    requireThat(metadata.isDirectory() || (metadata.isSymbolicLink()
+      && lstatSync(canonical).isDirectory()), 'source destination must be a directory');
+    return path.join(canonical, ...missing);
+  }
+}
 const outside = (root, value) => {
   const relative = path.relative(realpathSync(root), path.resolve(value));
   return relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
@@ -437,6 +462,8 @@ export async function buildCorrespondingSource({
   cacheDir,
 }) {
   repoRoot = realpathSync(repoRoot);
+  outputDir = canonicalDirectory(outputDir);
+  if (cacheDir) cacheDir = canonicalDirectory(cacheDir);
   requireThat(
     outside(repoRoot, outputDir) && (!cacheDir || outside(repoRoot, cacheDir)),
     'source output and cache must be outside the checkout',
@@ -466,6 +493,8 @@ export async function buildCorrespondingSource({
         flag: 'wx',
       });
       if (cacheDir && !existsSync(path.join(cacheDir, spec.file))) {
+        requireThat(canonicalDirectory(cacheDir) === cacheDir,
+          'source cache directory changed during build');
         mkdirSync(cacheDir, { recursive: true });
         writeFileSync(path.join(cacheDir, spec.file), bytes, { flag: 'wx' });
       }
@@ -539,6 +568,8 @@ export async function buildCorrespondingSource({
     execFileSync('tar', ['-czf', stagedArchive, '-C', stage, top]);
     const bytes = readFileSync(stagedArchive);
     const digest = sha256(bytes);
+    requireThat(canonicalDirectory(outputDir) === outputDir,
+      'source output directory changed during build');
     mkdirSync(outputDir, { recursive: true });
     const archivePath = path.resolve(outputDir, name);
     const sha256Path = `${archivePath}.sha256`;

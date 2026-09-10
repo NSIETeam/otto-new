@@ -4,8 +4,10 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
   rmSync,
+  symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -20,8 +22,10 @@ import {
 import { seal, sha, readSealed } from '../agent-experiment-files.mjs';
 import { hashEntries } from '../agent-eval-baseline.mjs';
 const temporary = [];
+// Use a canonical fixture base without relaxing the product's link checks.
+const temporaryRoot = realpathSync(tmpdir());
 function fixture(source = 'export const fixture = true;') {
-  const root = mkdtempSync(path.join(tmpdir(), 'otto-iteration-unit-'));
+  const root = mkdtempSync(path.join(temporaryRoot, 'otto-iteration-unit-'));
   temporary.push(root);
   const snapshot = path.join(root, 'snapshot');
   mkdirSync(path.join(snapshot, 'source'), { recursive: true });
@@ -70,7 +74,7 @@ function fixture(source = 'export const fixture = true;') {
 afterEach(() => {
   for (const root of temporary.splice(0)) {
     if (
-      path.dirname(root) !== path.resolve(tmpdir()) ||
+      path.dirname(root) !== temporaryRoot ||
       !path.basename(root).startsWith('otto-iteration-unit-')
     )
       throw new Error('Unsafe cleanup');
@@ -235,6 +239,7 @@ it('writes a single exposure event, rejects another experiment/candidate, and de
 });
 it('raw evidence must exist, match its hash and stay inside the supplied evidence root', () => {
   const f = fixture();
+  expect(realpathSync(f.root)).toBe(f.root);
   mkdirSync(path.join(f.root, 'evidence'));
   writeFileSync(path.join(f.root, 'evidence/trace.json'), '{"native":true}');
   expect(
@@ -250,6 +255,18 @@ it('raw evidence must exist, match its hash and stay inside the supplied evidenc
       { path: 'evidence/trace.json', sha256: sha('wrong') },
     ]),
   ).toThrow(/evidence/i);
+  const external = path.join(f.root, 'external');
+  mkdirSync(external);
+  writeFileSync(path.join(external, 'trace.json'), '{"native":true}');
+  symlinkSync(external, path.join(f.root, 'evidence/linked'), 'junction');
+  expect(() =>
+    verifiedEvidence(f.root, [
+      { path: 'evidence/linked/trace.json', sha256: sha('{"native":true}') },
+    ]),
+  ).toThrow(/link/i);
+  expect(readFileSync(path.join(external, 'trace.json'), 'utf8')).toBe(
+    '{"native":true}',
+  );
   expect(JSON.parse(readFileSync(f.input, 'utf8')).tasks).toHaveLength(12);
 });
 it('the offline entry archives raw files, derives all actual changes, retains not-run slots and refuses overwrites', async () => {

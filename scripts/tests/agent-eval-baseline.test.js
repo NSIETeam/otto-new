@@ -4,6 +4,8 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
+  realpathSync,
+  existsSync,
   rmSync,
   symlinkSync,
 } from 'node:fs';
@@ -21,8 +23,10 @@ import {
 } from '../agent-eval-baseline.mjs';
 
 const temporary = [];
+// macOS may expose its temporary directory through /var -> /private/var.
+const temporaryRoot = realpathSync(tmpdir());
 function fixture() {
-  const parent = mkdtempSync(path.join(tmpdir(), 'otto-baseline-unit-'));
+  const parent = mkdtempSync(path.join(temporaryRoot, 'otto-baseline-unit-'));
   temporary.push(parent);
   const root = path.join(parent, 'repo');
   mkdirSync(root);
@@ -53,8 +57,14 @@ function fixture() {
   return { root, parent, put, destination: path.join(parent, 'frozen') };
 }
 afterEach(() => {
-  for (const dir of temporary.splice(0))
+  for (const dir of temporary.splice(0)) {
+    if (
+      path.dirname(dir) !== temporaryRoot ||
+      !path.basename(dir).startsWith('otto-baseline-unit-')
+    )
+      throw new Error('Unsafe fixture cleanup');
     rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe('immutable source baseline, no API calls', () => {
@@ -62,6 +72,7 @@ describe('immutable source baseline, no API calls', () => {
   // the combined Windows suite. Keep assertions and product budgets unchanged.
   it('captures current dirty and untracked source, not HEAD content', () => {
     const f = fixture();
+    expect(realpathSync(f.root)).toBe(f.root);
     f.put('packages/server/src/runtime.ts', 'export const value = 2;');
     f.put(
       'packages/server/src/newRequirement.ts',
@@ -102,7 +113,8 @@ describe('immutable source baseline, no API calls', () => {
     const m = freezeBaseline(f.root, f.destination);
     expect(
       m.source.files.every(
-        (x) => !/\.env|node_modules|\/dist\/|\.pem|vite-cache|\.vite\//.test(x.path),
+        (x) =>
+          !/\.env|node_modules|\/dist\/|\.pem|vite-cache|\.vite\//.test(x.path),
       ),
     ).toBe(true);
     expect(m.source.excluded.some((x) => x.path.endsWith('.pem'))).toBe(true);
@@ -122,6 +134,28 @@ describe('immutable source baseline, no API calls', () => {
     writeFileSync(path.join(external, 'leak.ts'), 'private');
     symlinkSync(external, path.join(f.root, 'packages/linked'), 'junction');
     expect(() => sourceInventory(f.root)).toThrow(/link/i);
+    expect(readFileSync(path.join(external, 'leak.ts'), 'utf8')).toBe(
+      'private',
+    );
+  });
+  it('still rejects explicit source and destination aliases before writing a snapshot', () => {
+    const f = fixture();
+    const sourceAlias = path.join(f.parent, 'linked-source');
+    symlinkSync(f.root, sourceAlias, 'junction');
+    expect(() => freezeBaseline(sourceAlias, f.destination)).toThrow(/link/i);
+    expect(existsSync(f.destination)).toBe(false);
+    const target = path.join(f.parent, 'target');
+    mkdirSync(target);
+    writeFileSync(path.join(target, 'sentinel'), 'user-owned');
+    const targetAlias = path.join(f.parent, 'linked-target');
+    symlinkSync(target, targetAlias, 'junction');
+    expect(() =>
+      freezeBaseline(f.root, path.join(targetAlias, 'frozen')),
+    ).toThrow(/link/i);
+    expect(existsSync(path.join(target, 'frozen'))).toBe(false);
+    expect(readFileSync(path.join(target, 'sentinel'), 'utf8')).toBe(
+      'user-owned',
+    );
   });
   it('rejects snapshot targets inside the source and never overwrites a prior baseline', () => {
     const f = fixture();

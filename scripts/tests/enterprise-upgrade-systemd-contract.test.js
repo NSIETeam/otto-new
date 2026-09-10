@@ -1,6 +1,6 @@
 /** Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0 */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, mkdirSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, mkdirSync, symlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -24,7 +24,9 @@ except RuntimeError:
 `;
 
 function checkArguments(command, makeArguments, { linkOutside = false } = {}) {
-  const directory = mkdtempSync(path.join(os.tmpdir(), 'otto-systemd-validator-'));
+  // The actual fixture_command entrypoint resolves its owned fixture first.
+  // Match that boundary when macOS exposes the temporary root through /var.
+  const directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'otto-systemd-validator-')));
   try {
     const fixture = path.join(directory, 'fixture');
     const outside = path.join(directory, 'outside');

@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
   rmSync,
   existsSync,
@@ -38,9 +39,9 @@ const keyFiles = [
 ];
 
 function fixture(run) {
-  const directory = mkdtempSync(
+  const directory = realpathSync(mkdtempSync(
     path.join(os.tmpdir(), 'otto-upgrade-preservation-'),
-  );
+  ));
   try {
     run(directory);
   } finally {

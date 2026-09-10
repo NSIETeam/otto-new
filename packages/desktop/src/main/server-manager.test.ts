@@ -254,6 +254,96 @@ function embeddedMainModule(setAuthenticatedEnterpriseAccount: ReturnType<typeof
   } as unknown as Awaited<ReturnType<ServerManagerDependencies['loadOttoServer']>>;
 }
 
+describe('detached server runtime identity', () => {
+  it.each([
+    {
+      name: 'renamed Windows Otto.exe',
+      executable: 'C:\\Program Files\\Otto\\Otto.exe',
+      electron: '43.2.0',
+      explicitBinding: undefined,
+    },
+    {
+      name: 'renamed macOS Otto executable',
+      executable: '/Applications/Otto.app/Contents/MacOS/Otto',
+      electron: '43.2.0',
+      explicitBinding: undefined,
+    },
+    {
+      name: 'ordinary Node inside an electron-named directory',
+      executable: '/opt/electron-tools/node',
+      electron: undefined,
+      explicitBinding: undefined,
+    },
+    {
+      name: 'Electron with an explicitly configured SQLCipher binding',
+      executable: 'C:\\Program Files\\Otto\\Otto.exe',
+      electron: '43.2.0',
+      explicitBinding: '/operator/verified/better_sqlite3.node',
+    },
+  ])('selects the child environment for $name', async ({ executable, electron, explicitBinding }) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'otto-detached-runtime-'));
+    const resourcesPath = path.join(root, 'resources');
+    const packagedBinding = path.join(resourcesPath, 'sqlcipher', 'better_sqlite3.node');
+    let manager: ServerManager | undefined;
+    try {
+      await fs.mkdir(path.dirname(packagedBinding), { recursive: true });
+      await fs.writeFile(packagedBinding, 'binding-presence-probe');
+      vi.stubGlobal('process', {
+        ...process,
+        execPath: executable,
+        resourcesPath,
+        versions: { ...process.versions, electron },
+        env: {
+          ...process.env,
+          NODE_ENV: 'test',
+          OTTO_USER_DIR: root,
+          ELECTRON_RUN_AS_NODE: undefined,
+          OTTO_SQLCIPHER_NATIVE_BINDING: explicitBinding,
+        },
+      });
+      let spawned = false;
+      const child = Object.assign(new EventEmitter(), {
+        exitCode: null,
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        unref: vi.fn(),
+        kill: vi.fn(),
+      });
+      const spawnDetached = vi.fn(() => {
+        spawned = true;
+        return child;
+      });
+      const mod = {
+        ...discoveredMainModule(),
+        readEndpoint: vi.fn(() => spawned ? MAIN_ENDPOINT : undefined),
+        readEndpointRecord: vi.fn(() => spawned ? MAIN_ENDPOINT : undefined),
+      } as unknown as Awaited<ReturnType<ServerManagerDependencies['loadOttoServer']>>;
+      manager = new ServerManager({ dependencies: dependencies({
+        loadOttoServer: async () => mod,
+        probeHealth: async () => true,
+        spawnDetached: spawnDetached as unknown as ServerManagerDependencies['spawnDetached'],
+      }) });
+
+      expect((await manager.ensure()).ownership).toBe('detached');
+      expect(spawnDetached).toHaveBeenCalledOnce();
+      const [command, args, options] = spawnDetached.mock.calls[0] as unknown as [
+        string, string[], NonNullable<Parameters<ServerManagerDependencies['spawnDetached']>[2]>,
+      ];
+      expect(command).toBe(executable);
+      expect(args[1]).toBe('start');
+      expect(options.env?.ELECTRON_RUN_AS_NODE).toBe(electron ? '1' : undefined);
+      expect(options.env?.OTTO_SQLCIPHER_NATIVE_BINDING)
+        .toBe(explicitBinding ?? (electron ? packagedBinding : undefined));
+      expect(options).toMatchObject({ detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      expect(options.shell).toBeUndefined();
+    } finally {
+      await manager?.shutdown();
+      vi.unstubAllGlobals();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('ServerManager resident health task', () => {
   it('registers one zero-cost non-overlapping health task and stops it on shutdown', async () => {
     const definitions: RecurringTaskDefinition[] = [];

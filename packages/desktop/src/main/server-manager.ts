@@ -12,12 +12,11 @@
  *      （headless / CLI 已在跑时直接连上它，不重复拉起）。
  *   2. 没有可用的现存 server → 以 detached 子进程拉起 server，
  *      关窗不杀 server（飞书继续活），仅托盘「退出 Otto」才 SIGTERM。
- *   3. 开发/非打包形态无法走 detached 时，回退同进程内嵌（embedded）。
+ *   3. detached 启动失败时，回退同进程内嵌（embedded）。
  *
- * 历史：曾尝试以 detached 子进程跑 server bin 实现「app 关了 server 仍活」，但打包形态下
- * 该路径必失败（process.execPath 是 Electron 二进制，缺 ELECTRON_RUN_AS_NODE 不会当 node
- * 脚本跑，且 single-instance lock 让第二实例立即 quit；bin.js 又在 asar 内），结果永远 15s
- * 超时后静默回退内嵌。既然内嵌才是实际生产路径，这里直接走内嵌，消掉那段必然超时的卡顿。
+ * Electron 运行时通过 process.versions.electron 识别，不依赖可执行文件名。
+ * 打包后的 Otto.exe / Otto.app 同样必须设置 ELECTRON_RUN_AS_NODE，让子进程运行
+ * server bin；否则会误开第二个 App 实例，被单实例锁拒绝后才回退内嵌。
  *
  * 注意：模块加载方式（打包崩溃根因修复）：otto-server 是纯 ESM 包（package.json
  * "type":"module"），而本文件编译目标是 CJS（tsconfig.main.json 无 "type":"module"，
@@ -581,7 +580,6 @@ export class ServerManager {
    * 开发形态：直接 node bin.js。
    */
   private async startDetached(port: number): Promise<ServerEndpointRecord> {
-    const nodeExec = process.execPath;
     const mod = await this.dependencies.loadOttoServer();
 
     // 查找 bin.js 路径；active kernel overlay 优先，其次回退安装包内 otto-server。
@@ -617,7 +615,7 @@ export class ServerManager {
       OTTO_DEFAULT_WORKSPACE_PATH: os.homedir(),
     };
 
-    if (nodeExec.endsWith('Electron') || nodeExec.includes('electron')) {
+    if (process.versions.electron) {
       // 打包形态：Electron 主二进制 + ELECTRON_RUN_AS_NODE
       env.ELECTRON_RUN_AS_NODE = '1';
       const packagedBinding = path.join(

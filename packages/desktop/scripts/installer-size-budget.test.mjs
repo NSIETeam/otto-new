@@ -40,12 +40,22 @@ describe('Windows installer size budget', () => {
 });
 
 describe('macOS disk image size budget', () => {
-  it('bounds both architectures slightly above the Windows growth ceiling', () => {
-    expect(resolveMacInstallerBudget({})).toEqual({ maxBytes: 140 * MEBIBYTE });
+  it('keeps the approved Mac allowance bounded without changing Windows growth', () => {
+    expect(resolveMacInstallerBudget({})).toEqual({ maxBytes: 160 * MEBIBYTE });
+    expect(resolveWindowsInstallerBudget({}).maxBytes).toBe(136_421_279);
     expect(
       resolveMacInstallerBudget({ OTTO_DESKTOP_MAX_DMG_MB: '130' }),
     ).toEqual({ maxBytes: 130 * MEBIBYTE });
   });
+
+  it.each([160_159_017, 165_870_179])(
+    'accepts the observed %i-byte Mac image within the revised allowance',
+    (bytes) => {
+      expect(bytes).toBeLessThanOrEqual(resolveMacInstallerBudget({}).maxBytes);
+      expect(resolveMacInstallerBudget({ OTTO_DESKTOP_MAX_DMG_MB: '160' }))
+        .toEqual(resolveMacInstallerBudget({}));
+    },
+  );
 
   it.each(['0', '-1', 'Infinity', 'NaN', '9007199254740991'])(
     'rejects an invalid DMG budget: %s',

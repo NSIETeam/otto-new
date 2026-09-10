@@ -1667,7 +1667,7 @@ describe('desktop packaging contract', () => {
     );
     expect(workflow).toContain("OTTO_DESKTOP_MAX_INSTALLER_GROWTH_MB: '8'");
     expect(workflow).toContain("OTTO_DESKTOP_MAX_INSTALLER_MB: '140'");
-    expect(workflow).toContain("OTTO_DESKTOP_MAX_DMG_MB: '140'");
+    expect(workflow).toContain("OTTO_DESKTOP_MAX_DMG_MB: '160'");
   });
 
   it('explicitly ad-hoc signs every nonstandard macOS loose binary before sealing the app', async () => {

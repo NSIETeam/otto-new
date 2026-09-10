@@ -126,7 +126,9 @@ npm run release --workspace=packages/desktop
 必须记录桌面安装包体积；包体增长异常时先查 `app.asar`、Electron Framework、`node_modules` 最大项，不得为了体积删除运行时必需文件。
 
 1.9.15 的 Windows 安装器继续按已发布基线 128,032,671 bytes 加最多 8 MiB
-增长验收（约 130.1 MiB 上限）；两种 macOS DMG 各自不超过 140 MiB。
+增长验收（约 130.1 MiB 上限）；两种 macOS DMG 各自不超过 160 MiB。
+此 Mac 限额经 1.9.15 发布任务中的用户明确同意放宽包体积要求后调整，
+保留原压缩格式和全部应用内容；不改变 Windows、ASAR、签名及实际升级验收。
 这些是阻断上限，目标仍是 Windows 约 125 MB、macOS 略大；实际大小以
 `release:gate` 对最终文件输出的字节数为准，构建前不得声称已满足目标。
 

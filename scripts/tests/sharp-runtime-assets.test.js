@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -104,7 +104,8 @@ describe('integrity-checked bounded npm archive (never executes package code)', 
 });
 
 async function stagedFixture(operation) {
-  const temporary = mkdtempSync(path.join(os.tmpdir(), 'otto-sharp-assets-test-'));
+  // Match native require.resolve, including macOS /var -> /private/var.
+  const temporary = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'otto-sharp-assets-test-')));
   try {
     const repoRoot = path.join(temporary, 'repo');
     mkdirSync(path.join(repoRoot, 'node_modules/sharp'), { recursive: true });

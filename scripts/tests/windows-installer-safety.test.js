@@ -190,11 +190,52 @@ describe('Windows installer directory preservation contract', () => {
     expect(guard).toContain('!insertmacro OttoSafetyCheckRegistry HKCU');
     expect(guard).toContain('!insertmacro OttoSafetyCheckRegistry HKLM');
     expect(guard).toContain('SetErrorLevel 73');
+    expect(guard).toMatch(/!ifndef BUILD_UNINSTALLER\r?\nVar OttoSafetyOldPath\r?\nVar OttoSafetyOldCommand\r?\nVar OttoSafetyOldExe\r?\n!endif/);
     expect(guard).not.toMatch(
       /^\s*(?:Delete|RMDir|Rename|WriteReg\w*|DeleteReg\w*)\s/m,
     );
   });
 });
+
+describe.skipIf(process.platform !== 'win32' || !compiler)(
+  'warning-free production guard compilation (no generated executable runs)',
+  () => {
+    it.each([false, true])('compiles BUILD_UNINSTALLER=%s with warnings as errors', (uninstall) => {
+      const fixture = mkdtempSync(path.join(os.tmpdir(), 'otto-nsis-compile-only-'));
+      // Include the exact production guard. Compile both targets without replacing
+      // registry instructions, suppressing warnings, or executing either output.
+      const script = `Unicode true
+Name "Otto compile-only guard"
+OutFile "${nsis(path.join(fixture, 'never-run.exe'))}"
+RequestExecutionLevel user
+!define APP_EXECUTABLE_FILENAME "Otto.exe"
+!define UNINSTALL_FILENAME "Uninstall Otto.exe"
+!define INSTALL_REGISTRY_KEY "Software\\OttoCompileOnly"
+!define UNINSTALL_REGISTRY_KEY "Software\\OttoCompileOnly\\Uninstall"
+${uninstall ? '!define BUILD_UNINSTALLER' : ''}
+!include "${nsis(path.join(root, 'packages/desktop/build/installer-safety.nsh'))}"
+!insertmacro customHeader
+Function .onInit
+  ${uninstall ? '' : '!insertmacro customInit'}
+  Abort
+FunctionEnd
+Section "main"
+  ${uninstall ? `WriteUninstaller "${nsis(path.join(fixture, 'never-run-uninstall.exe'))}"` : 'Abort'}
+SectionEnd
+${uninstall ? 'Function un.onInit\n  !insertmacro customUnInit\n  Abort\nFunctionEnd\nSection "Uninstall"\n  !insertmacro customUnInstall\nSectionEnd' : ''}
+`;
+      const scriptFile = path.join(fixture, 'compile-only.nsi');
+      writeFileSync(scriptFile, script);
+      const result = spawnSync(compiler, ['/WX', '/V3', '/INPUTCHARSET', 'UTF8', scriptFile], { encoding: 'utf8', timeout: 20000, windowsHide: true });
+      const output = `${result.stdout}\n${result.stderr}`;
+      writeFileSync(path.join(fixture, 'compile.log'), output);
+      console.info(`NSIS compile-only evidence: ${fixture}`);
+      expect(result.error).toBeUndefined();
+      expect(result.status, output).toBe(0);
+      expect(output).not.toMatch(/warning\s+\d+/i);
+    });
+  },
+);
 
 describe.skipIf(process.platform !== 'win32' || !compiler)(
   'actual NSIS guarded marker executables (not product installers)',

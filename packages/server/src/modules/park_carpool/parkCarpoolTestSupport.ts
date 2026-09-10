@@ -98,12 +98,16 @@ CREATE TABLE accounts(id TEXT PRIMARY KEY,organization_id TEXT,username TEXT,pas
         "UPDATE park_carpool_intents SET sensitive_auth_tag='corrupt' WHERE account_id='b'",
       );
     },
-    workflowCipher: async () =>
+    workflowCipher: async (parkId = 'park-a') =>
       (
         db
-          .prepare('SELECT encrypted_payload FROM park_carpool_workflow')
-          .get() as { encrypted_payload: string }
+          .prepare('SELECT encrypted_payload FROM park_carpool_workflow WHERE park_id=?')
+          .get(parkId) as { encrypted_payload: string }
       ).encrypted_payload,
+    setWorkflowCipher: async (parkId: string, value: string) => { db.prepare('UPDATE park_carpool_workflow SET encrypted_payload=? WHERE park_id=?').run(value, parkId); },
+    seedDevices: async (accountId: string, count: number) => { for (let i = 0; i < count; i++) db.prepare("INSERT INTO e2ee_devices(organization_id,account_id,device_id,approval_state) VALUES ('org-b',?,?,'approved')").run(accountId, `bulk-${accountId}-${i}`); },
+    failMaintenance: async (enabled: boolean) => { db.exec(enabled ? "CREATE TRIGGER reject_maintenance BEFORE UPDATE ON park_carpool_workflow BEGIN SELECT RAISE(ABORT, 'injected maintenance failure'); END;" : 'DROP TRIGGER reject_maintenance'); },
+    moveOrganization: async () => { db.exec("DELETE FROM park_carpool_intents WHERE account_id='a'; DELETE FROM park_carpool_publications WHERE account_id='a'; UPDATE accounts SET organization_id='org-b' WHERE id='a'"); },
     failReceipts: async () => {
       db.exec(
         "CREATE TRIGGER reject_receipt BEFORE UPDATE ON park_carpool_publications WHEN NEW.version > 1 BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END;",
@@ -148,6 +152,7 @@ export async function postgresHarness(poolSize = 10) {
     });
     return {
       store,
+      pool: sql,
       seedAccounts: async (ids: string[]) => {
         for (const id of ids)
           await sql.query(
@@ -175,9 +180,13 @@ export async function postgresHarness(poolSize = 10) {
           "UPDATE enterprise_business_records SET payload=jsonb_set(payload,'{sensitive,authTag}', '\"corrupt\"') WHERE resource_type='carpool_intent' AND owner_account_id='b'",
         );
       },
-      workflowCipher: async () =>
-        (await sql.query('SELECT encrypted_payload FROM park_carpool_workflow'))
+      workflowCipher: async (parkId = 'park-a') =>
+        (await sql.query('SELECT encrypted_payload FROM park_carpool_workflow WHERE park_id=$1', [parkId]))
           .rows[0].encrypted_payload as string,
+      setWorkflowCipher: async (parkId: string, value: string) => { await sql.query('UPDATE park_carpool_workflow SET encrypted_payload=$2 WHERE park_id=$1', [parkId, value]); },
+      seedDevices: async (accountId: string, count: number) => { for (let i = 0; i < count; i++) await sql.query("INSERT INTO e2ee_devices(organization_id,account_id,device_id,device_name,identity_signing_public_key,device_exchange_public_key,key_fingerprint,approval_state) VALUES ('org-b',$1,$2,'fixture','dGVzdA==','dGVzdA==',repeat('d',64),'approved')", [accountId, `bulk-${accountId}-${i}`]); },
+      failMaintenance: async (enabled: boolean) => { await sql.query(enabled ? "CREATE FUNCTION reject_maintenance() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected maintenance failure'; END $$; CREATE TRIGGER reject_maintenance BEFORE UPDATE ON park_carpool_workflow FOR EACH ROW EXECUTE FUNCTION reject_maintenance();" : 'DROP TRIGGER reject_maintenance ON park_carpool_workflow; DROP FUNCTION reject_maintenance()'); },
+      moveOrganization: async () => { await sql.query("DELETE FROM enterprise_business_records WHERE owner_account_id='a' AND domain='park' AND resource_type IN ('carpool_intent','carpool_publication'); UPDATE accounts SET organization_id='org-b' WHERE id='a'"); },
       failReceipts: async () => {
         await sql.query(
           "CREATE FUNCTION reject_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.resource_type='carpool_publication' AND NEW.status='complete' THEN RAISE EXCEPTION 'injected receipt failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_receipt BEFORE UPDATE ON enterprise_business_records FOR EACH ROW EXECUTE FUNCTION reject_receipt();",

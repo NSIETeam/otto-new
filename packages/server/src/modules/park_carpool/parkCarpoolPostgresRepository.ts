@@ -1,4 +1,4 @@
-import { pruneCarpoolWorkflow } from './parkCarpoolRetention.js';
+import { pruneCarpoolWorkflow, carpoolWorkflowAccountScopes, CARPOOL_BACKGROUND, CarpoolMaintenanceDeferred } from './parkCarpoolRetention.js';
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import {
   emptyCarpoolWorkflow,
@@ -129,14 +129,23 @@ export function createParkCarpoolPostgresStore(input: {
     maintain: (options) =>
       input.repository.maintainCarpoolRecords({
         ...options,
-        rewriteWorkflow(parkId, encrypted, removed) {
+        async rewriteWorkflow(parkId, encrypted, removed, getPrincipal) {
           const state = JSON.parse(
             input.repository.decryptBusinessSensitiveText(
               JSON.parse(encrypted),
               `park-carpool-workflow:${parkId}`,
             ),
           ) as CarpoolWorkflowState;
-          pruneCarpoolWorkflow(state, options.now, removed, options.communicationRetentionDays);
+          const before = JSON.stringify(state);
+          const revoked: string[] = [];
+          const scopes = carpoolWorkflowAccountScopes(state);
+          if (!options.deleteAccountId && scopes.size > CARPOOL_BACKGROUND.principals) throw new CarpoolMaintenanceDeferred(parkId, 'workflow_principals');
+          for (const [id, organizations] of scopes) {
+            const actor = await getPrincipal(id);
+            if (!actor?.active || !actor.parkServiceEnabled || actor.parkId !== parkId || [...organizations].some(org => org !== actor.organizationId)) revoked.push(id);
+          }
+          pruneCarpoolWorkflow(state, options.now, [...removed, ...revoked], options.communicationRetentionDays);
+          if (JSON.stringify(state) === before) return encrypted;
           return JSON.stringify(
             input.repository.encryptBusinessSensitiveText(
               JSON.stringify(state),
@@ -145,7 +154,7 @@ export function createParkCarpoolPostgresStore(input: {
           );
         },
       }),
-    async transactWorkflow(parkId, actorId, operation) {
+    async transactWorkflow(parkId, actorId, operation, maintenance = false) {
       return input.repository.transactCarpoolWorkflow(
         parkId,
         actorId,
@@ -157,7 +166,9 @@ export function createParkCarpoolPostgresStore(input: {
                   `park-carpool-workflow:${parkId}`,
                 ),
               ) as CarpoolWorkflowState)
-            : emptyCarpoolWorkflow();
+          : emptyCarpoolWorkflow();
+          const before = JSON.stringify(state);
+          if (maintenance && carpoolWorkflowAccountScopes(state).size > CARPOOL_BACKGROUND.principals) throw new CarpoolMaintenanceDeferred(parkId, 'workflow_principals');
           const decoded = await Promise.all(
             records.map((record) =>
               clusteredCarpoolIntentFromRecord(
@@ -188,14 +199,14 @@ export function createParkCarpoolPostgresStore(input: {
           return {
             result,
             stoppedIntentIds,
-            encrypted: JSON.stringify(
+            encrypted: encrypted && JSON.stringify(state) === before ? encrypted : JSON.stringify(
               input.repository.encryptBusinessSensitiveText(
                 JSON.stringify(state),
                 `park-carpool-workflow:${parkId}`,
               ),
             ),
           };
-        },
+        }, maintenance,
       );
     },
     publications: {

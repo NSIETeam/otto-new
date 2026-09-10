@@ -9,6 +9,38 @@ export interface CarpoolMaintenanceInput {
 export interface CarpoolMaintenanceResult {
   accountIds: string[];
   deletedPositions: number;
+  scanned?: { intents: number; publications: number; workflows: number };
+  deferred?: Array<{ parkId: string; reason: string }>;
+  checkedParkIds?: string[];
+}
+export const CARPOOL_BACKGROUND = { workflowBytes: 1024 * 1024, principals: 256, intents: 200, devices: 256 } as const;
+export class CarpoolMaintenanceDeferred extends Error {
+  constructor(readonly parkId: string, readonly reason: string) { super(`同行后台刷新已延后：${reason}`); }
+}
+export interface CarpoolMaintenanceCursor { after?: string[]; end?: string[] }
+// Process-local cursors deliberately reset on restart. A fixed high-water mark
+// completes each finite cycle even while later keys are being inserted.
+export function advanceCarpoolMaintenanceCursor(cursor: CarpoolMaintenanceCursor, keys: string[][], limit: number): void {
+  const last = keys.at(-1);
+  if (keys.length < limit || JSON.stringify(last) === JSON.stringify(cursor.end)) {
+    delete cursor.after; delete cursor.end;
+  } else cursor.after = last;
+}
+export function carpoolWorkflowAccountScopes(state: CarpoolWorkflowState): Map<string, Set<string>> {
+  const ids = new Map<string, Set<string>>();
+  const add = (id?: string, organization?: string) => { if (id && id !== 'deleted') { const scopes = ids.get(id) ?? new Set<string>(); if (organization) scopes.add(organization); ids.set(id, scopes); } };
+  for (const row of state.requests) { add(row.senderAccountId, row.senderOrganizationId); add(row.receiverAccountId, row.receiverOrganizationId); }
+  for (const group of state.groups) { add(group.coordinatorAccountId); add(group.driverAccountId); for (const member of group.members) add(member.accountId, member.organizationId); }
+  for (const conversation of state.conversations) for (const generation of conversation.generations) for (const member of generation.members) add(member.accountId, member.organizationId);
+  for (const row of state.blocks) { add(row.from); add(row.to); }
+  for (const row of state.notices) add(row.accountId);
+  for (const row of state.availability) add(row.accountId);
+  for (const row of state.measurements ?? []) add(row.accountId);
+  for (const row of state.reports) { add(row.reporter); add(row.target); }
+  for (const row of state.transport?.events ?? []) add(row.sender.split('/')[2], row.sender.split('/')[1]);
+  for (const row of state.transport?.reads ?? []) add(row.accountId);
+  for (const row of state.transport?.packages ?? []) add(row.device_scope.split('/')[2], row.device_scope.split('/')[1]);
+  return ids;
 }
 export function pruneCarpoolWorkflow(
   state: CarpoolWorkflowState,

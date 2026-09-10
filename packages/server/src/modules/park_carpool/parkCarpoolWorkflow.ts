@@ -1,4 +1,5 @@
 import { carpoolParkEnabled } from './parkCarpoolConfig.js';
+import { CarpoolMaintenanceDeferred } from './parkCarpoolRetention.js';
 import type { CarpoolConfig } from './parkCarpoolConfig.js';
 import {
   carpoolMeasurement,
@@ -348,6 +349,7 @@ function live(
 export function createCarpoolWorkflow(input: {
   config?: CarpoolConfig;
   signal?: AbortSignal;
+  maintenance?: boolean;
   store: ParkCarpoolStore;
   now?(): Date;
   minimumOverlap?: number;
@@ -574,7 +576,7 @@ export function createCarpoolWorkflow(input: {
       const now = clock().toISOString();
       reconcile(ctx, now);
       return operation(ctx, now);
-    });
+    }, input.maintenance);
   }
   function view(ctx: CarpoolWorkflowContext) {
     const { state, actor } = ctx;
@@ -810,11 +812,12 @@ export function createCarpoolWorkflow(input: {
     async groupMatches(
       accountId: string,
       acceptMatch: (match: CarpoolGroupMatch) => void,
+      background?: { after?: string; limit: number },
     ) {
       if (!config.requestsEnabled || !config.groupsEnabled || !config.invitationsEnabled)
         return { failedCount: 0 };
       let failedCount = 0;
-      let cursor: string | undefined;
+      let cursor: string | undefined = background?.after;
       do {
         const page = await transact(accountId, (ctx) => {
           const mine = ctx.intents.find(
@@ -854,7 +857,7 @@ export function createCarpoolWorkflow(input: {
           const remaining = pairs
             .filter((pair) => !cursor || key(pair) > cursor)
             .sort((a, b) => key(a).localeCompare(key(b)));
-          const batch = remaining.slice(0, 25);
+          const batch = remaining.slice(0, background ? Math.max(1, Math.min(25, background.limit)) : 25);
           return {
             nextCursor:
               remaining.length > batch.length ? key(batch.at(-1)!) : undefined,
@@ -946,13 +949,15 @@ export function createCarpoolWorkflow(input: {
                     }
                   : match,
               );
-          } catch {
+          } catch (error) {
+            if (input.maintenance && error instanceof CarpoolMaintenanceDeferred) throw error;
             failedCount += 1;
           }
         cursor = page.nextCursor;
+        if (background) break;
         if (cursor) await new Promise<void>((resolve) => setImmediate(resolve));
       } while (cursor);
-      return { failedCount };
+      return { failedCount, nextCursor: cursor };
     },
     withContext: transact,
     read: (accountId: string) => transact(accountId, (ctx) => view(ctx)),

@@ -4,6 +4,18 @@ import { RecurringTaskRegistry } from 'otto-core';
 import { startCarpoolMaintenance } from './parkCarpoolRuntime.js';
 import type { EnterpriseSharedCache } from '../data_platform/index.js';
 
+it('leaves thirty seconds of startup headroom before the first maintenance batch', async () => {
+  vi.useFakeTimers();
+  const run = vi.fn(async () => undefined);
+  const stop = startCarpoolMaintenance({ run });
+  try {
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(run).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run).toHaveBeenCalledOnce();
+  } finally { stop(); vi.useRealTimers(); }
+});
+
 it('registers the initial maintenance run so shutdown waits for its database work', async () => {
   vi.useFakeTimers();
   const registry = new RecurringTaskRegistry();
@@ -12,7 +24,7 @@ it('registers the initial maintenance run so shutdown waits for its database wor
   const work = vi.fn(async () => pending);
   const stop = startCarpoolMaintenance({ run: work, taskRegistry: registry });
   try {
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(30_001);
     expect(work).toHaveBeenCalledOnce();
     let drained = false;
     const shutdown = registry.shutdown({ timeoutMs: 100 }).then(() => { drained = true; });
@@ -43,7 +55,7 @@ it('rejects the drain deadline while initial work still owns the database', asyn
   const pending = new Promise<void>(resolve => { release = resolve; });
   const stop = startCarpoolMaintenance({ run: async () => pending, taskRegistry: registry });
   try {
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(30_001);
     const shutdown = registry.shutdown({ timeoutMs: 10 }).then(() => null, error => error);
     await vi.advanceTimersByTimeAsync(11);
     expect(await shutdown).toBeInstanceOf(Error);
@@ -61,7 +73,7 @@ it('releases but never uses a lease that arrives after stop', async () => {
     acquireLease: async () => { await pending; return true; }, releaseLease,
   } as unknown as EnterpriseSharedCache });
   try {
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(30_001);
     stop();
     const shutdown = registry.shutdown({ timeoutMs: 100 });
     release();
@@ -83,7 +95,7 @@ it('drains an in-flight lease renewal before closing cache ownership', async () 
     acquireLease: async () => true, renewLease: async () => { await renewal; return true; }, releaseLease,
   } as unknown as EnterpriseSharedCache });
   try {
-    await vi.advanceTimersByTimeAsync(40_001);
+    await vi.advanceTimersByTimeAsync(70_001);
     stop();
     let drained = false;
     const shutdown = registry.shutdown({ timeoutMs: 100 }).then(() => { drained = true; });
@@ -114,7 +126,7 @@ it('continues scheduled maintenance after lease release fails', async () => {
     } as unknown as EnterpriseSharedCache,
   });
   try {
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(30_001);
     expect(runs).toBe(1);
     expect(errors).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(60_000);
@@ -159,7 +171,7 @@ it.each([false, 'throws'])('aborts outstanding work when renewal fails: %s', asy
     cache: {acquireLease:async()=>true, renewLease:async()=>{if(failure==='throws')throw new Error('lost');return false;}, releaseLease:async()=>false} as unknown as EnterpriseSharedCache,
     onError:error=>errors.push(error),
   });
-  try {await vi.advanceTimersByTimeAsync(40_001);expect(signal?.aborted).toBe(true);expect(errors.length).toBeGreaterThan(0);}
+  try {await vi.advanceTimersByTimeAsync(70_001);expect(signal?.aborted).toBe(true);expect(errors.length).toBeGreaterThan(0);}
   finally {stop();vi.useRealTimers();}
 });
 
@@ -169,7 +181,7 @@ it('does not start work from a successful lease response delivered after its TTL
  const delayed=new Promise<void>(resolve=>{release=resolve;});
  const work=vi.fn(async()=>{});
  const stop=startCarpoolMaintenance({run:work,onError:()=>{},cache:{acquireLease:async()=>{await delayed;return true;},renewLease:async()=>false,releaseLease:async()=>false} as unknown as EnterpriseSharedCache});
- try{await vi.advanceTimersByTimeAsync(121000);release();await vi.advanceTimersByTimeAsync(1);expect(work).not.toHaveBeenCalled();}
+ try{await vi.advanceTimersByTimeAsync(151000);release();await vi.advanceTimersByTimeAsync(1);expect(work).not.toHaveBeenCalled();}
  finally{stop();vi.useRealTimers();}
 });
 
@@ -200,7 +212,7 @@ it('owns lease heartbeats in a separate registry and drains renewal before relea
     } as unknown as EnterpriseSharedCache,
   });
   try {
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(30_001);
     const heartbeatIndex = register.mock.calls.findIndex(
       ([definition]) =>
         definition.name === 'enterprise.park-carpool-lease-renewal',
@@ -265,7 +277,7 @@ it('stops the child registry immediately while cancelled main work still drains'
     } as unknown as EnterpriseSharedCache,
   });
   try {
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(30_001);
     const heartbeatIndex = register.mock.calls.findIndex(
       ([definition]) =>
         definition.name === 'enterprise.park-carpool-lease-renewal',
@@ -329,7 +341,7 @@ it('anchors a successful renewal deadline to request start rather than delayed r
     } as unknown as EnterpriseSharedCache,
   });
   try {
-    await vi.advanceTimersByTimeAsync(90_000);
+    await vi.advanceTimersByTimeAsync(120_000);
     expect(renewLease).toHaveBeenCalledOnce();
     pending.shift()!();
     await vi.advanceTimersByTimeAsync(69_999);

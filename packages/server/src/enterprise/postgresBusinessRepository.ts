@@ -7,6 +7,7 @@
  */
 
 import { readCarpoolPostgresPrincipal } from '../modules/park_carpool/parkCarpoolPostgresPrincipal.js';
+import { advanceCarpoolMaintenanceCursor, CARPOOL_BACKGROUND, CarpoolMaintenanceDeferred, type CarpoolMaintenanceCursor, type CarpoolMaintenanceResult } from '../modules/park_carpool/parkCarpoolRetention.js';
 import type { ParkCarpoolPrincipal } from '../modules/park_carpool/parkCarpoolService.js';
 import { randomUUID } from 'node:crypto';
 
@@ -685,38 +686,97 @@ export function createPostgresEnterpriseBusinessRepository(input: {
     });
   }
 
-  async function maintainCarpoolRecords(raw:{now:string;positionRetentionHours:number;deleteAccountId?:string;rewriteWorkflow(parkId:string,encrypted:string,removedAccounts:string[]):string}) {
-    return transaction(input.pool,async client=>{
+  let maintenanceCursors: Record<string, CarpoolMaintenanceCursor> = {};
+  let maintenanceFlight: Promise<CarpoolMaintenanceResult> | undefined;
+  function maintainCarpoolRecords(raw:{now:string;positionRetentionHours:number;deleteAccountId?:string;rewriteWorkflow(parkId:string,encrypted:string,removedAccounts:string[],getPrincipal:(id:string)=>Promise<ParkCarpoolPrincipal|null>):string|Promise<string>}) {
+    if (!raw.deleteAccountId && maintenanceFlight) return maintenanceFlight;
+    const cursors = structuredClone(maintenanceCursors);
+    const work = transaction(input.pool,async client=>{
+      if (!raw.deleteAccountId) await client.query("SET LOCAL statement_timeout='5s'; SET LOCAL lock_timeout='1s'");
+      const page = async (name: string, table: string, columns: string[], filter: string, limit: number) => {
+        const cursor = cursors[name] ??= {};
+        const tuple = columns.length === 1 ? columns[0] : `(${columns.join(',')})`;
+        if (!cursor.end) {
+          const high = await client.query<Record<string, string>>(`SELECT ${columns.join(',')} FROM ${table} WHERE ${filter} ORDER BY ${columns.map(key => `${key} DESC`).join(',')} LIMIT 1`);
+          if (!high.rows[0]) return [];
+          cursor.end = columns.map(key => high.rows[0][key]);
+        }
+        const values: unknown[] = [];
+        const bind = (keys: string[]) => {
+          const marks = keys.map(key => { values.push(key); return `$${values.length}`; });
+          return marks.length === 1 ? marks[0] : `(${marks.join(',')})`;
+        };
+        const where = `${filter} AND ${tuple} <= ${bind(cursor.end)}${cursor.after ? ` AND ${tuple} > ${bind(cursor.after)}` : ''}`;
+        values.push(limit);
+        const projection = table === 'park_carpool_workflow' ? `park_id, CASE WHEN octet_length(encrypted_payload)<=${CARPOOL_BACKGROUND.workflowBytes} THEN encrypted_payload END AS encrypted_payload` : '*';
+        const result = await client.query<Record<string, unknown>>(`SELECT ${projection} FROM ${table} WHERE ${where} ORDER BY ${columns.join(',')} LIMIT $${values.length} FOR UPDATE`, values);
+        advanceCarpoolMaintenanceCursor(cursor, result.rows.map(row => columns.map(key => String(row[key]))), limit);
+        return result.rows;
+      };
       // Same lock order as request/group transitions: workflow before intent rows.
-      const workflows=await client.query<{park_id:string;encrypted_payload:string}>('SELECT park_id,encrypted_payload FROM park_carpool_workflow ORDER BY park_id FOR UPDATE');
-      const records=await client.query<BusinessRecordRow>("SELECT * FROM enterprise_business_records WHERE domain='park' AND resource_type IN ('carpool_intent','carpool_publication') ORDER BY CASE WHEN resource_type='carpool_intent' THEN 0 ELSE 1 END,resource_id FOR UPDATE");
+      const workflows = (raw.deleteAccountId
+        ? (await client.query('SELECT park_id,encrypted_payload FROM park_carpool_workflow ORDER BY park_id FOR UPDATE')).rows
+        : await page('workflows', 'park_carpool_workflow', ['park_id'], 'TRUE', 4)) as Array<{park_id:string;encrypted_payload:string}>;
+      const records = (raw.deleteAccountId
+        ? (await client.query<BusinessRecordRow>("SELECT * FROM enterprise_business_records WHERE domain='park' AND resource_type IN ('carpool_intent','carpool_publication') ORDER BY CASE WHEN resource_type='carpool_intent' THEN 0 ELSE 1 END,resource_id,organization_id FOR UPDATE")).rows
+        : [...await page('intents', 'enterprise_business_records', ['resource_id','organization_id'], "domain='park' AND resource_type='carpool_intent'", 4),
+          ...await page('publications', 'enterprise_business_records', ['resource_id','organization_id'], "domain='park' AND resource_type='carpool_publication'", 32)]) as BusinessRecordRow[];
       const removed=new Set<string>(raw.deleteAccountId?[raw.deleteAccountId]:[]);const accounts=new Set<string>();let deletedPositions=0;const cutoff=Date.parse(raw.now)-raw.positionRetentionHours*3600_000;
       const principals=new Map<string,ParkCarpoolPrincipal|null>();
-      for(const row of records.rows){const id=row.owner_account_id;if(id&&!principals.has(id))principals.set(id,await readCarpoolPostgresPrincipal(client,id));if(id){const actor=principals.get(id);if(!actor?.active||!actor.parkServiceEnabled)removed.add(id);}}
-      for(const row of records.rows){const expiry=typeof jsonObject<Record<string,unknown>>(row.payload).expiresAt==='string'?Date.parse(jsonObject<Record<string,unknown>>(row.payload).expiresAt as string):new Date(row.created_at).getTime()+86400_000;const actor=principals.get(row.owner_account_id!);const invalidScope=actor?.organizationId!==row.organization_id||(row.resource_type==='carpool_intent'&&actor?.parkId!==jsonObject<Record<string,unknown>>(row.payload).parkId);const remove=removed.has(row.owner_account_id!)||invalidScope||expiry<=cutoff;
+      const getPrincipal = async (id: string) => {
+        if (!principals.has(id)) principals.set(id, await readCarpoolPostgresPrincipal(client, id));
+        return principals.get(id)!;
+      };
+      for(const row of records){const id=row.owner_account_id;if(id){const actor=await getPrincipal(id);if(!actor?.active||!actor.parkServiceEnabled)removed.add(id);}}
+      for(const row of records){const expiry=typeof jsonObject<Record<string,unknown>>(row.payload).expiresAt==='string'?Date.parse(jsonObject<Record<string,unknown>>(row.payload).expiresAt as string):new Date(row.created_at).getTime()+86400_000;const actor=principals.get(row.owner_account_id!);const invalidScope=actor?.organizationId!==row.organization_id||(row.resource_type==='carpool_intent'&&actor?.parkId!==jsonObject<Record<string,unknown>>(row.payload).parkId);const remove=removed.has(row.owner_account_id!)||invalidScope||expiry<=cutoff;
         if(remove){await client.query('DELETE FROM enterprise_business_records WHERE organization_id=$1 AND domain=$2 AND resource_type=$3 AND resource_id=$4',[row.organization_id,row.domain,row.resource_type,row.resource_id]);if(row.resource_type==='carpool_intent')deletedPositions+=1;}
         else if(row.resource_type==='carpool_intent'){accounts.add(row.owner_account_id!);if(row.status==='active'&&expiry<=Date.parse(raw.now))await client.query("UPDATE enterprise_business_records SET status='expired',version=version+1,updated_at=$3 WHERE organization_id=$1 AND domain='park' AND resource_type='carpool_intent' AND resource_id=$2",[row.organization_id,row.resource_id,raw.now]);}
       }
-      for(const row of workflows.rows)if(row.encrypted_payload)await client.query('UPDATE park_carpool_workflow SET encrypted_payload=$2,version=version+1 WHERE park_id=$1',[row.park_id,raw.rewriteWorkflow(row.park_id,row.encrypted_payload,[...removed,...[...principals].filter(([,principal])=>principal?.parkId!==row.park_id).map(([id])=>id)])]);
-      return {accountIds:[...accounts],deletedPositions};
+      const deferred: Array<{parkId:string;reason:string}> = [];
+      for(const row of workflows) {
+        if (row.encrypted_payload === null) { deferred.push({ parkId: row.park_id, reason: 'workflow_bytes' }); continue; }
+        if (!row.encrypted_payload) continue;
+        try {
+        const updated = await raw.rewriteWorkflow(row.park_id,row.encrypted_payload,[...removed,...[...principals].filter(([,principal])=>principal?.parkId!==row.park_id).map(([id])=>id)],getPrincipal);
+        if (updated !== row.encrypted_payload) await client.query('UPDATE park_carpool_workflow SET encrypted_payload=$2,version=version+1 WHERE park_id=$1',[row.park_id,updated]);
+        } catch (error) { if (!(error instanceof CarpoolMaintenanceDeferred)) throw error; deferred.push({ parkId: row.park_id, reason: error.reason }); }
+      }
+      return {accountIds:[...accounts],deletedPositions,deferred,checkedParkIds:workflows.map(row=>row.park_id), scanned: {
+        intents: records.filter(row => row.resource_type === 'carpool_intent').length,
+        publications: records.filter(row => row.resource_type === 'carpool_publication').length,
+        workflows: workflows.length,
+      }};
+    }).then(result => {
+      // Never advance past rolled-back work. Restarting safely rescans from the
+      // beginning; progress is not claimed durable or shared between processes.
+      if (!raw.deleteAccountId) maintenanceCursors = cursors;
+      return result;
     });
+    if (raw.deleteAccountId) return work;
+    maintenanceFlight = work;
+    void work.then(() => { maintenanceFlight = undefined; }, () => { maintenanceFlight = undefined; });
+    return work;
   }
 
-  async function transactCarpoolWorkflow<T>(parkId: string, actorId: string, operation: (encrypted: string | null, records: PostgresBusinessRecord[], devices: Array<{accountId:string;organizationId:string;deviceId:string;identitySigningPublicKey?:string}>, principals: Map<string,ParkCarpoolPrincipal|null>) => Promise<{ encrypted: string; result: T; stoppedIntentIds?: string[] }>): Promise<T> {
+  async function transactCarpoolWorkflow<T>(parkId: string, actorId: string, operation: (encrypted: string | null, records: PostgresBusinessRecord[], devices: Array<{accountId:string;organizationId:string;deviceId:string;identitySigningPublicKey?:string}>, principals: Map<string,ParkCarpoolPrincipal|null>) => Promise<{ encrypted: string; result: T; stoppedIntentIds?: string[] }>, maintenance = false): Promise<T> {
     return transaction(input.pool, async client => {
+      if (maintenance) await client.query("SET LOCAL statement_timeout='5s'; SET LOCAL lock_timeout='1s'");
       await client.query("INSERT INTO park_carpool_workflow(park_id,encrypted_payload) VALUES ($1,'') ON CONFLICT DO NOTHING", [parkId]);
-      const workflow = await client.query<{ encrypted_payload: string }>('SELECT encrypted_payload FROM park_carpool_workflow WHERE park_id=$1 FOR UPDATE', [parkId]);
-      const records = await client.query<BusinessRecordRow>("SELECT * FROM enterprise_business_records WHERE domain='park' AND resource_type='carpool_intent' AND payload->>'parkId'=$1 ORDER BY resource_id FOR SHARE", [parkId]);
+      const workflow = await client.query<{ encrypted_payload: string }>(maintenance ? `SELECT CASE WHEN octet_length(encrypted_payload)<=${CARPOOL_BACKGROUND.workflowBytes} THEN encrypted_payload END AS encrypted_payload FROM park_carpool_workflow WHERE park_id=$1 FOR UPDATE` : 'SELECT encrypted_payload FROM park_carpool_workflow WHERE park_id=$1 FOR UPDATE', [parkId]);
+      if (maintenance && workflow.rows[0]?.encrypted_payload === null) throw new CarpoolMaintenanceDeferred(parkId, 'workflow_bytes');
+      const records = await client.query<BusinessRecordRow>(`SELECT * FROM enterprise_business_records WHERE domain='park' AND resource_type='carpool_intent' AND payload->>'parkId'=$1 ORDER BY resource_id,organization_id${maintenance ? ` LIMIT ${CARPOOL_BACKGROUND.intents + 1}` : ''} FOR SHARE`, [parkId]);
+      if (maintenance && records.rows.length > CARPOOL_BACKGROUND.intents) throw new CarpoolMaintenanceDeferred(parkId, 'park_intents');
       const accountIds = [...new Set([actorId, ...records.rows.map(row => row.owner_account_id).filter(Boolean)])];
       await client.query('SELECT id FROM accounts WHERE id=ANY($1::text[]) ORDER BY id FOR SHARE', [accountIds]);
       await client.query('SELECT id FROM organizations WHERE id IN (SELECT organization_id FROM accounts WHERE id=ANY($1::text[])) ORDER BY id FOR SHARE', [accountIds]);
-      const deviceRows = await client.query<{account_id:string;organization_id:string;device_id:string;identity_signing_public_key:string}>("SELECT account_id,organization_id,device_id,identity_signing_public_key FROM e2ee_devices WHERE account_id=ANY($1::text[]) AND approval_state='approved' AND revoked_at IS NULL ORDER BY account_id,device_id FOR SHARE", [accountIds]);
+      const deviceRows = await client.query<{account_id:string;organization_id:string;device_id:string;identity_signing_public_key:string}>(`SELECT account_id,organization_id,device_id,identity_signing_public_key FROM e2ee_devices WHERE account_id=ANY($1::text[]) AND approval_state='approved' AND revoked_at IS NULL ORDER BY account_id,device_id${maintenance ? ` LIMIT ${CARPOOL_BACKGROUND.devices + 1}` : ''} FOR SHARE`, [accountIds]);
+      if (maintenance && deviceRows.rows.length > CARPOOL_BACKGROUND.devices) throw new CarpoolMaintenanceDeferred(parkId, 'approved_devices');
       const devices=deviceRows.rows.map(d=>({accountId:d.account_id,organizationId:d.organization_id,deviceId:d.device_id,identitySigningPublicKey:d.identity_signing_public_key}));
       const principals = new Map<string,ParkCarpoolPrincipal|null>();
       for (const accountId of accountIds) if(accountId) principals.set(accountId, await readCarpoolPostgresPrincipal(client,accountId));
       const updated = await operation(workflow.rows[0]!.encrypted_payload || null, records.rows.map(record => recordView(record)), devices, principals);
       if (updated.stoppedIntentIds?.length) await client.query("UPDATE enterprise_business_records SET status='paused',version=version+1,updated_at=CURRENT_TIMESTAMP WHERE domain='park' AND resource_type='carpool_intent' AND owner_account_id=$1 AND resource_id=ANY($2::text[]) AND payload->>'parkId'=$3 AND status='active'", [actorId, updated.stoppedIntentIds, parkId]);
-      await client.query('UPDATE park_carpool_workflow SET encrypted_payload=$2,version=version+1 WHERE park_id=$1', [parkId,updated.encrypted]);
+      if (updated.encrypted !== workflow.rows[0]!.encrypted_payload) await client.query('UPDATE park_carpool_workflow SET encrypted_payload=$2,version=version+1 WHERE park_id=$1', [parkId,updated.encrypted]);
       return updated.result;
     });
   }

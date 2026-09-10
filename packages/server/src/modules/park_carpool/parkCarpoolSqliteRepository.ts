@@ -1,4 +1,4 @@
-import { pruneCarpoolWorkflow } from './parkCarpoolRetention.js';
+import { pruneCarpoolWorkflow, carpoolWorkflowAccountScopes, advanceCarpoolMaintenanceCursor, CARPOOL_BACKGROUND, CarpoolMaintenanceDeferred, type CarpoolMaintenanceCursor } from './parkCarpoolRetention.js';
 /**
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
@@ -84,6 +84,7 @@ export function createParkCarpoolSqliteStore(input: {
   fieldCipher: EncryptedFieldCipher;
   getPrincipal(accountId: string): ParkCarpoolPrincipal | null;
 }): ParkCarpoolStore {
+  let maintenanceCursors: Record<string, CarpoolMaintenanceCursor> = {};
   function toIntent(row: CarpoolIntentRow): ParkCarpoolIntent | null {
     const principal = input.getPrincipal(row.account_id);
     if (
@@ -134,13 +135,28 @@ export function createParkCarpoolSqliteStore(input: {
   return {
     async maintain(options) {
       const database = input.db();
+      const cursors = structuredClone(maintenanceCursors);
+      // SQL identifiers are fixed internal call sites, never request input.
+      const page = (table: string, columns: string[], limit: number) => {
+        if (options.deleteAccountId) return database.prepare(`SELECT * FROM ${table} ORDER BY ${columns.join(',')}`).all();
+        const cursor = cursors[table] ??= {};
+        const tuple = columns.length === 1 ? columns[0] : `(${columns.join(',')})`;
+        const marks = columns.length === 1 ? '?' : `(${columns.map(() => '?').join(',')})`;
+        if (!cursor.end) {
+          const high = database.prepare(`SELECT ${columns.join(',')} FROM ${table} ORDER BY ${columns.map(key => `${key} DESC`).join(',')} LIMIT 1`).get() as Record<string, string> | undefined;
+          if (!high) return [];
+          cursor.end = columns.map(key => high[key]);
+        }
+        const projection = table === 'park_carpool_workflow' ? `park_id, CASE WHEN length(CAST(encrypted_payload AS BLOB))<=${CARPOOL_BACKGROUND.workflowBytes} THEN encrypted_payload END AS encrypted_payload` : '*';
+        const rows = database.prepare(`SELECT ${projection} FROM ${table} WHERE ${tuple} <= ${marks}${cursor.after ? ` AND ${tuple} > ${marks}` : ''} ORDER BY ${columns.join(',')} LIMIT ?`).all(...cursor.end, ...(cursor.after ?? []), limit) as Array<Record<string, string>>;
+        advanceCarpoolMaintenanceCursor(cursor, rows.map(row => columns.map(key => row[key])), limit);
+        return rows;
+      };
       database.exec('SAVEPOINT carpool_maintenance');
       try {
         const cutoff =
           Date.parse(options.now) - options.positionRetentionHours * 3600_000;
-        const rows = database
-          .prepare('SELECT * FROM park_carpool_intents ORDER BY id')
-          .all() as CarpoolIntentRow[];
+        const rows = page('park_carpool_intents', ['id'], 4) as unknown as CarpoolIntentRow[];
         const removed = new Set<string>(
           options.deleteAccountId ? [options.deleteAccountId] : [],
         );
@@ -181,16 +197,13 @@ export function createParkCarpoolSqliteStore(input: {
                 .run(options.now, row.id);
           }
         }
-        const publications = database
-          .prepare(
-            'SELECT account_id,request_key,encrypted_payload FROM park_carpool_publications',
-          )
-          .all() as Array<{
+        const publications = page('park_carpool_publications', ['account_id', 'request_key'], 32) as Array<{
           account_id: string;
           request_key: string;
           encrypted_payload: string;
         }>;
         for (const row of publications) {
+          const actor = input.getPrincipal(row.account_id);
           const record = JSON.parse(
             input.fieldCipher.decryptText(
               JSON.parse(row.encrypted_payload),
@@ -199,11 +212,12 @@ export function createParkCarpoolSqliteStore(input: {
           ) as PublicationRecord;
           if (
             removed.has(row.account_id) ||
+            !actor?.active || !actor.parkServiceEnabled ||
             (record.receipt &&
               (record.receipt.parkId !==
-                input.getPrincipal(row.account_id)?.parkId ||
+                actor.parkId ||
                 record.receipt.organizationId !==
-                  input.getPrincipal(row.account_id)?.organizationId)) ||
+                  actor.organizationId)) ||
             (record.receipt
               ? Date.parse(record.receipt.expiresAt)
               : record.leaseUntil) < cutoff
@@ -214,22 +228,29 @@ export function createParkCarpoolSqliteStore(input: {
               )
               .run(row.account_id, row.request_key);
         }
-        const workflows = database
-          .prepare(
-            'SELECT park_id,encrypted_payload FROM park_carpool_workflow ORDER BY park_id',
-          )
-          .all() as Array<{ park_id: string; encrypted_payload: string }>;
+        const workflows = page('park_carpool_workflow', ['park_id'], 4) as Array<{ park_id: string; encrypted_payload: string }>;
+        const deferred: Array<{ parkId: string; reason: string }> = [];
         for (const row of workflows) {
+          if (row.encrypted_payload === null) { deferred.push({ parkId: row.park_id, reason: 'workflow_bytes' }); continue; }
           const state = JSON.parse(
             input.fieldCipher.decryptText(
               JSON.parse(row.encrypted_payload),
               `park-carpool-workflow:${row.park_id}`,
             ),
           ) as CarpoolWorkflowState;
+          const before = JSON.stringify(state);
+          const scopes = carpoolWorkflowAccountScopes(state);
+          if (!options.deleteAccountId && scopes.size > CARPOOL_BACKGROUND.principals) { deferred.push({ parkId: row.park_id, reason: 'workflow_principals' }); continue; }
+          const revoked = [...scopes].filter(([id, organizations]) => {
+            const actor = input.getPrincipal(id);
+            return !actor?.active || !actor.parkServiceEnabled || actor.parkId !== row.park_id || [...organizations].some(org => org !== actor.organizationId);
+          }).map(([id]) => id);
           pruneCarpoolWorkflow(state, options.now, [
             ...removed,
             ...(removedByPark.get(row.park_id) ?? []),
+            ...revoked,
           ], options.communicationRetentionDays);
+          if (JSON.stringify(state) === before) continue;
           database
             .prepare(
               'UPDATE park_carpool_workflow SET encrypted_payload=?,version=version+1 WHERE park_id=?',
@@ -245,9 +266,13 @@ export function createParkCarpoolSqliteStore(input: {
             );
         }
         database.exec('RELEASE carpool_maintenance');
+        if (!options.deleteAccountId) maintenanceCursors = cursors;
         return {
           accountIds: [...accountIds].filter((id) => !removed.has(id)),
           deletedPositions,
+          deferred,
+          checkedParkIds: workflows.map(row => row.park_id),
+          scanned: { intents: rows.length, publications: publications.length, workflows: workflows.length },
         };
       } catch (error) {
         database.exec('ROLLBACK TO carpool_maintenance');
@@ -255,15 +280,16 @@ export function createParkCarpoolSqliteStore(input: {
         throw error;
       }
     },
-    async transactWorkflow(parkId, actorId, operation) {
+    async transactWorkflow(parkId, actorId, operation, maintenance = false) {
       const database = input.db();
       database.exec('SAVEPOINT carpool_workflow');
       try {
         const row = database
           .prepare(
-            'SELECT encrypted_payload FROM park_carpool_workflow WHERE park_id = ?',
+            maintenance ? `SELECT CASE WHEN length(CAST(encrypted_payload AS BLOB))<=${CARPOOL_BACKGROUND.workflowBytes} THEN encrypted_payload END AS encrypted_payload FROM park_carpool_workflow WHERE park_id=?` : 'SELECT encrypted_payload FROM park_carpool_workflow WHERE park_id = ?',
           )
           .get(parkId) as { encrypted_payload: string } | undefined;
+        if (maintenance && row?.encrypted_payload === null) throw new CarpoolMaintenanceDeferred(parkId, 'workflow_bytes');
         const state = row
           ? (JSON.parse(
               input.fieldCipher.decryptText(
@@ -272,9 +298,12 @@ export function createParkCarpoolSqliteStore(input: {
               ),
             ) as CarpoolWorkflowState)
           : emptyCarpoolWorkflow();
+        const before = JSON.stringify(state);
+        if (maintenance && carpoolWorkflowAccountScopes(state).size > CARPOOL_BACKGROUND.principals) throw new CarpoolMaintenanceDeferred(parkId, 'workflow_principals');
         const rows = database
-          .prepare('SELECT * FROM park_carpool_intents WHERE park_id = ?')
+          .prepare(`SELECT * FROM park_carpool_intents WHERE park_id = ?${maintenance ? ` LIMIT ${CARPOOL_BACKGROUND.intents + 1}` : ''}`)
           .all(parkId) as CarpoolIntentRow[];
+        if (maintenance && rows.length > CARPOOL_BACKGROUND.intents) throw new CarpoolMaintenanceDeferred(parkId, 'park_intents');
         const intents = rows.flatMap((value) => {
           const intent = toIntent(value);
           return intent ? [intent] : [];
@@ -284,19 +313,22 @@ export function createParkCarpoolSqliteStore(input: {
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='e2ee_devices'",
           )
           .get();
-        const devices = hasDevices
+        const deviceAccounts = maintenance ? [...new Set([actorId, ...intents.map(intent => intent.accountId)])] : [];
+        const deviceRows = hasDevices
           ? (
               database
                 .prepare(
-                  "SELECT * FROM e2ee_devices WHERE approval_state='approved' AND revoked_at IS NULL",
+                  `SELECT * FROM e2ee_devices WHERE approval_state='approved' AND revoked_at IS NULL${maintenance ? ` AND account_id IN (${deviceAccounts.map(() => '?').join(',')}) LIMIT ${CARPOOL_BACKGROUND.devices + 1}` : ''}`,
                 )
-                .all() as Array<{
+                .all(...deviceAccounts) as Array<{
                 organization_id: string;
                 account_id: string;
                 device_id: string;
                 identity_signing_public_key?: string;
               }>
-            )
+            ) : [];
+        if (maintenance && deviceRows.length > CARPOOL_BACKGROUND.devices) throw new CarpoolMaintenanceDeferred(parkId, 'approved_devices');
+        const devices = deviceRows
               .filter((d) => {
                 const principal = input.getPrincipal(d.account_id);
                 return (
@@ -311,8 +343,7 @@ export function createParkCarpoolSqliteStore(input: {
                 accountId: d.account_id,
                 deviceId: d.device_id,
                 identitySigningPublicKey: d.identity_signing_public_key,
-              }))
-          : [];
+              }));
         const stoppedIntentIds: string[] = [];
         const result = operation({
           state,
@@ -327,7 +358,8 @@ export function createParkCarpoolSqliteStore(input: {
               "UPDATE park_carpool_intents SET status='paused',version=version+1,updated_at=? WHERE id=? AND account_id=? AND park_id=? AND status='active'",
             )
             .run(new Date().toISOString(), intentId, actorId, parkId);
-        const encrypted = input.fieldCipher.encryptText(
+        if (!row || JSON.stringify(state) !== before) {
+          const encrypted = input.fieldCipher.encryptText(
           JSON.stringify(state),
           `park-carpool-workflow:${parkId}`,
         );
@@ -337,6 +369,7 @@ export function createParkCarpoolSqliteStore(input: {
           ON CONFLICT(park_id) DO UPDATE SET encrypted_payload=excluded.encrypted_payload, version=park_carpool_workflow.version+1`,
           )
           .run(parkId, JSON.stringify(encrypted));
+        }
         database.exec('RELEASE carpool_workflow');
         return result;
       } catch (error) {

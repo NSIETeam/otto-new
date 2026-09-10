@@ -1,6 +1,7 @@
 import { carpoolParkEnabled } from './parkCarpoolConfig.js';
 import type { CarpoolConfig } from './parkCarpoolConfig.js';
 import { carpoolMeasurement } from './parkCarpoolMetrics.js';
+import { CarpoolMaintenanceDeferred } from './parkCarpoolRetention.js';
 import {
   createCarpoolResultPage,
   type CarpoolResultsQuery,
@@ -63,6 +64,7 @@ export interface ParkCarpoolStore {
     parkId: string,
     actorId: string,
     operation: (context: CarpoolWorkflowContext) => T,
+    maintenance?: boolean,
   ): Promise<T>;
   publications?: PublicationStore;
   getPrincipal(accountId: string): Promise<ParkCarpoolPrincipal | null>;
@@ -137,6 +139,7 @@ export interface ParkCarpoolState {
   >;
   generatedAt: string;
   failedCandidateCount?: number;
+  backgroundRefresh?: { status: 'deferred'; reason: string; at: string };
   resultPage?: { total: number; nextCursor?: string };
 }
 
@@ -179,8 +182,16 @@ export function createParkCarpoolService(input: {
   minimumOverlap?: number;
 }) {
   const config = input.config ?? readCarpoolConfig();
-  let maintenanceCursor = '';
+  const maintenancePages = new Map<string, { intentId?: string; candidates?: string; groups?: string; touchedAt: number; deferred?: ParkCarpoolState['backgroundRefresh'] }>();
+  const maintenanceDeferrals = new Map<string, NonNullable<ParkCarpoolState['backgroundRefresh']>>();
   const now = input.now ?? (() => new Date());
+  function trimMaintenancePages() {
+    const cutoff = now().getTime() - 86400_000;
+    for (const [id, value] of maintenancePages) if (value.touchedAt <= cutoff) maintenancePages.delete(id);
+    while (maintenancePages.size > 1024) maintenancePages.delete(maintenancePages.keys().next().value!);
+    for (const [park, value] of maintenanceDeferrals) if (Date.parse(value.at) <= cutoff) maintenanceDeferrals.delete(park);
+    while (maintenanceDeferrals.size > 1024) maintenanceDeferrals.delete(maintenanceDeferrals.keys().next().value!);
+  }
 
   async function principal(accountId: string) {
     const value = await input.store.getPrincipal(accountId);
@@ -236,8 +247,14 @@ export function createParkCarpoolService(input: {
       (!Number.isFinite(expiry) || expiry <= generatedAt.getTime())
         ? { ...currentIntent, status: 'expired' as const }
         : currentIntent;
+    trimMaintenancePages();
+    const previousPage = maintenancePages.get(actor.accountId);
+    const backgroundPage = !sampleCandidates && effectiveIntent?.status === 'active'
+      ? (previousPage?.intentId === effectiveIntent.id ? { ...previousPage } : { intentId: effectiveIntent.id, touchedAt: generatedAt.getTime() })
+      : undefined;
+    if (!sampleCandidates && !backgroundPage) maintenancePages.delete(actor.accountId);
     const workflow = input.store.transactWorkflow
-      ? await createCarpoolWorkflow({ config, signal, store: input.store, now }).read(
+      ? await createCarpoolWorkflow({ config, signal, maintenance: !sampleCandidates, store: input.store, now }).read(
           actor.accountId,
         )
       : null;
@@ -267,7 +284,7 @@ export function createParkCarpoolService(input: {
     };
     if (effectiveIntent?.status === 'active') {
       if (input.store.listIntentPage) {
-        let cursor: string | undefined;
+        let cursor: string | undefined = backgroundPage?.candidates;
         do {
           const page = await input.store.listIntentPage(
             actor.parkId,
@@ -281,6 +298,7 @@ export function createParkCarpoolService(input: {
           if (page.nextCursor && page.nextCursor === cursor)
             throw new Error('候选分页未前进，请稍后重试');
           cursor = page.nextCursor;
+          if (backgroundPage) { backgroundPage.candidates = cursor; break; }
           if (cursor)
             await new Promise<void>((resolve) => setImmediate(resolve));
         } while (cursor);
@@ -293,12 +311,13 @@ export function createParkCarpoolService(input: {
         );
     }
     const groups = input.store.transactWorkflow
-      ? await createCarpoolWorkflow({ config, signal,
+      ? await createCarpoolWorkflow({ config, signal, maintenance: !sampleCandidates,
           store: input.store,
           now,
           mapProvider: input.mapProvider,
-        }).groupMatches(actor.accountId, (match) => resultPage.add(match))
+        }).groupMatches(actor.accountId, (match) => resultPage.add(match), backgroundPage ? { after: backgroundPage.groups, limit: 1 } : undefined)
       : { failedCount: 0 };
+    if (backgroundPage) backgroundPage.groups = 'nextCursor' in groups ? groups.nextCursor : undefined;
     const page = resultPage.finish();
     for(const match of page.results){
       const pending=workflow?.requests.find(request=>['pending','ignored'].includes(request.status)&&request.intentBindings.some(binding=>binding.intentId===match.intentId));
@@ -312,7 +331,7 @@ export function createParkCarpoolService(input: {
         'groupId' in match,
     );
     if (input.store.transactWorkflow && effectiveIntent?.status === 'active') {
-      await createCarpoolWorkflow({ config, signal, store: input.store, now }).withContext(
+      await createCarpoolWorkflow({ config, signal, maintenance: !sampleCandidates, store: input.store, now }).withContext(
         actor.accountId,
         (ctx) => {
           if (
@@ -364,6 +383,13 @@ export function createParkCarpoolService(input: {
       );
     }
     signal?.throwIfAborted();
+    if (backgroundPage) {
+      delete backgroundPage.deferred;
+      backgroundPage.touchedAt = generatedAt.getTime();
+      maintenancePages.delete(actor.accountId);
+      maintenancePages.set(actor.accountId, backgroundPage);
+      trimMaintenancePages();
+    }
     return {
       capabilities: carpoolCommunicationCapabilities(config, actor.parkId),
       hasGroup: Boolean(workflow?.myGroup),
@@ -372,6 +398,7 @@ export function createParkCarpoolService(input: {
       groupMatches,
       resultPage: { total: page.total, nextCursor: page.nextCursor },
       failedCandidateCount: failedCandidateCount + groups.failedCount,
+      backgroundRefresh: maintenancePages.get(actor.accountId)?.deferred ?? maintenanceDeferrals.get(actor.parkId),
       capability: 'park_carpool_v1',
       mapConfigured: input.mapProvider.configured,
       availability: {
@@ -662,19 +689,23 @@ export function createParkCarpoolService(input: {
         communicationRetentionDays: config.communicationRetentionDays,
       });
       let failures = 0;
-      const sorted = [...result.accountIds].sort();
-      const next = sorted.filter((id) => id > maintenanceCursor).slice(0, 20);
-      const batch = next.length ? next : sorted.slice(0, 20);
+      const deferred = [...(result.deferred ?? [])];
+      for (const park of result.checkedParkIds ?? []) if (!deferred.some(item => item.parkId === park)) maintenanceDeferrals.delete(park);
+      for (const item of deferred) maintenanceDeferrals.set(item.parkId, { status: 'deferred', reason: item.reason, at: now().toISOString() });
+      const batch = result.accountIds.slice(0, 4);
       for (const accountId of batch)
         try {
           signal?.throwIfAborted();
           await getState(accountId, {}, signal, false);
-        } catch {
+        } catch (error) {
           signal?.throwIfAborted();
-          failures += 1;
+          if (error instanceof CarpoolMaintenanceDeferred) {
+            deferred.push({ parkId: error.parkId, reason: error.reason });
+            maintenancePages.set(accountId, { touchedAt: now().getTime(), deferred: { status: 'deferred', reason: error.reason, at: now().toISOString() } });
+          } else failures += 1;
         }
-      maintenanceCursor = batch.at(-1) ?? '';
-      return { ...result, failures };
+      trimMaintenancePages();
+      return { ...result, deferred, failures };
     },
     deleteData: async (accountId: string) => {
       await principal(accountId);
@@ -685,6 +716,7 @@ export function createParkCarpoolService(input: {
         communicationRetentionDays: config.communicationRetentionDays,
         deleteAccountId: accountId,
       });
+      maintenancePages.delete(accountId);
       return { deleted: true };
     },
     routePreview: async (

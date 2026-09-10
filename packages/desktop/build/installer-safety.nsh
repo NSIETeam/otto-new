@@ -6,9 +6,11 @@
 
 Var OttoSafetyPath
 Var OttoSafetyReason
+!ifndef BUILD_UNINSTALLER
 Var OttoSafetyOldPath
 Var OttoSafetyOldCommand
 Var OttoSafetyOldExe
+!endif
 Var OttoSafetyScanPath
 Var OttoSafetyEntries
 Var OttoSafetyDepth

@@ -101,21 +101,6 @@
       "!**/*.map",
       "!**/!(*LICENSE*|*license*|*License*|*LICENCE*|*licence*|*Licence*|*NOTICE*|*notice*|*Notice*|*COPYING*|*copying*|*Copying*).md",
       "!**/!(*LICENSE*|*license*|*License*|*LICENCE*|*licence*|*Licence*|*NOTICE*|*notice*|*Notice*|*COPYING*|*copying*|*Copying*).markdown",
-      {
-        "from": "../server",
-        "to": "node_modules/otto-server",
-        "filter": ["NOTICE"]
-      },
-      {
-        "from": "../core/skills-seed",
-        "to": "node_modules/otto-core/skills-seed",
-        "filter": [
-          "**/SKILL.md",
-          "**/references/**/*",
-          "**/NOTICE.txt",
-          "**/LICENSE.txt"
-        ]
-      },
       "!**/*.ts",
       "!**/*.tsx",
       "!**/*.mts",
@@ -184,7 +169,22 @@
       "!**/*.spec.*",
       "!**/tsconfig*.json",
       "!**/.last_build",
-      "!**/__tests__/**"
+      "!**/__tests__/**",
+      {
+        "from": "../server",
+        "to": "node_modules/otto-server",
+        "filter": ["NOTICE"]
+      },
+      {
+        "from": "../core/skills-seed",
+        "to": "node_modules/otto-core/skills-seed",
+        "filter": [
+          "**/SKILL.md",
+          "**/references/**/*",
+          "**/NOTICE.txt",
+          "**/LICENSE.txt"
+        ]
+      }
     ],
     "extraMetadata": {
       "main": "dist/main/index.js"

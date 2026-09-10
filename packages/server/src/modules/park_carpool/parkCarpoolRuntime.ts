@@ -124,7 +124,7 @@ export function startCarpoolMaintenance(input: {
     name: 'enterprise.park-carpool-maintenance',
     source: 'packages/server/src/modules/park_carpool/parkCarpoolRuntime.ts',
     intervalMs: 60_000,
-    initialDelayMs: 0,
+    initialDelayMs: 30_000,
     missedRunPolicy: 'run-once',
     estimatedCostUsdPerRun: 0,
     getInputVersion: () => String(Math.floor(Date.now() / 60_000)),

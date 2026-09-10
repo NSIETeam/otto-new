@@ -926,7 +926,7 @@ jobs:
     name: Verify Windows installer and packaged runtime
     needs: build
     runs-on: windows-2025
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
       attestations: read
@@ -969,6 +969,10 @@ jobs:
             throw "Windows Authenticode verification failed: $($signature.Status) $($signature.StatusMessage)"
           }
           Write-Host "Authenticode signer: $($signature.SignerCertificate.Subject)"
+
+      - name: Seed the fixed historical Windows installation
+        shell: pwsh
+        run: ./scripts/seed-windows-legacy-install.ps1
 
       - name: Install and load the packaged SQLCipher binding
         shell: pwsh
@@ -1059,6 +1063,15 @@ jobs:
           if ($runtimeVerificationExitCode -ne 0) {
             throw "Packaged desktop runtime verification failed: $runtimeVerificationExitCode"
           }
+
+      - name: Preserve historical Windows seed evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-legacy-seed-${{ needs.build.outputs.version }}
+          path: ${{ runner.temp }}/otto-legacy-seed-*/*.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Preserve Windows candidate upgrade evidence
         if: always()

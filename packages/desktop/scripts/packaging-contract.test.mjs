@@ -19,6 +19,67 @@ const require = createRequire(import.meta.url);
 const afterPack = require('./after-pack.cjs');
 
 describe('desktop packaging contract', () => {
+  it.each(['mac', 'win'])('excludes compiled tests after real %s builder configuration normalization', async (platform) => {
+    const desktop = JSON.parse(
+      await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+    );
+    const { doMergeConfigs } = require('app-builder-lib/out/util/config/config.js');
+    const { getMainFileMatchers } = require('app-builder-lib/out/fileMatcher.js');
+    // FileMatcher alone misses normalizeFiles/mergeFileSets reordering when
+    // custom FileSets split the root include/exclude strings into two blocks.
+    const config = doMergeConfigs([desktop.build]);
+    const matchers = getMainFileMatchers(
+      packageRoot,
+      path.join(packageRoot, 'release/contract-app'),
+      (value) => value,
+      config[platform],
+      { info: {
+        projectDir: packageRoot,
+        buildResourcesDir: 'build',
+        config,
+        debugLogger: { isEnabled: false },
+      } },
+      path.join(packageRoot, 'release'),
+      false,
+    );
+    const main = matchers.filter((matcher) => matcher.from === packageRoot);
+    expect(main).toHaveLength(1);
+    const filter = main[0].createFilter();
+    const metadata = { isDirectory: () => false };
+    for (const relative of [
+      'dist/main/account-data-sync.test.js',
+      'dist/main/channel-identity-ipc.test.js',
+      'dist/main/desktop-pet-drag.test.js',
+      'dist/main/nested/service.spec.js',
+      'dist/main/__tests__/fixture.js',
+      'dist/main/index.js.map',
+      'dist/main/index.d.ts',
+      'dist/main/coverage/coverage-final.json',
+    ]) {
+      expect(filter(path.join(packageRoot, relative), metadata), relative).toBe(false);
+    }
+    for (const relative of [
+      'package.json',
+      'dist/main/index.js',
+      'dist/main/enterprise-client.js',
+      'dist/main/desktop-pet-drag.js',
+      'dist/preload/index.js',
+      'dist/renderer/index.html',
+      'dist/renderer/main.js',
+    ]) {
+      expect(filter(path.join(packageRoot, relative), metadata), relative).toBe(true);
+    }
+    expect(matchers.some((matcher) =>
+      matcher.from === path.resolve(packageRoot, '../server')
+      && matcher.to.endsWith(path.join('node_modules', 'otto-server'))
+      && matcher.patterns.includes('NOTICE'),
+    )).toBe(true);
+    expect(matchers.some((matcher) =>
+      matcher.from === path.resolve(packageRoot, '../core/skills-seed')
+      && matcher.patterns.includes('**/SKILL.md'),
+    )).toBe(true);
+  });
+
   it('explicitly carries the server notice and preserves upstream license Markdown', async () => {
     const desktop = JSON.parse(
       await readFile(path.join(packageRoot, 'package.json'), 'utf8'),

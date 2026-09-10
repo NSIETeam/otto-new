@@ -2023,6 +2023,8 @@ jobs:
             "Otto-Setup-${VERSION}-win-x64.exe"
             "Otto-Setup-${VERSION}-win-x64.exe.blockmap"
             'latest.json'
+            "otto-${VERSION}-corresponding-source.tar.gz"
+            "otto-${VERSION}-corresponding-source.tar.gz.sha256"
             'SHA256SUMS'
             'SHA256SUMS.sig'
             'UPDATE-MIRROR-SHA256SUMS'

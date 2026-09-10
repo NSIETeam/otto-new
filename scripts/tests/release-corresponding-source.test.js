@@ -220,6 +220,111 @@ describe('corresponding-source release binding', () => {
 });
 
 describe('source sidecar workflow contract', () => {
+  it('matches all canonical identities before mirror publication without adding source to mirror payload', async () => {
+    const repo = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../..',
+    );
+    const workflow = parse(
+      await readFile(path.join(repo, '.github/workflows/release.yml'), 'utf8'),
+    );
+    const mirrorSteps = workflow.jobs['deploy-update-mirror'].steps;
+    const publish = mirrorSteps.find(
+      (step) => step.name === 'Upload and atomically publish mirror',
+    ).run;
+    const vector = publish.match(/EXPECTED_PATTERNS=\(\n([\s\S]*?)\n\)/)?.[1];
+    expect(vector).toBeDefined();
+    const patterns = vector
+      .trim()
+      .split('\n')
+      .map((line) => {
+        const quoted = line.trim().match(/^(?:"([^"]+)"|'([^']+)')$/);
+        expect(quoted, line).not.toBeNull();
+        return (quoted[1] ?? quoted[2]).replaceAll('${VERSION}', version);
+      });
+    const options = await fixture();
+    const packageIdentity = '1'.repeat(12) + '-' + '2'.repeat(12);
+    const installers = [
+      `Otto-${version}-arm64.dmg`,
+      `Otto-${version}-x64.dmg`,
+      `Otto-Setup-${version}-win-x64.exe`,
+    ];
+    const publicNames = [
+      ...installers.flatMap((installer) => [
+        installer,
+        `${installer}.blockmap`,
+      ]),
+      'latest.json',
+      'SHA256SUMS',
+      'SHA256SUMS.sig',
+      'UPDATE-MIRROR-SHA256SUMS',
+      'UPDATE-MIRROR-SHA256SUMS.sig',
+      name,
+      `${name}.sha256`,
+      ...['', '.sha256', '.sig'].map(
+        (suffix) =>
+          `otto-enterprise-oneclick-v${version}-${packageIdentity}.tar.gz${suffix}`,
+      ),
+    ];
+    const directory = path.join(options.root, 'canonical');
+    await mkdir(directory);
+    for (const filename of [...publicNames, 'release-notes.md']) {
+      await writeFile(path.join(directory, filename), `locked:${filename}`);
+    }
+    const canonical = await buildExpectedDraftIdentity({
+      artifactDirectory: directory,
+      version,
+      packageIdentity,
+      prerelease: false,
+      assetProfile: 'production',
+    });
+    const matched = patterns.map((pattern) => {
+      const expression = new RegExp(
+        '^' +
+          pattern
+            .split('*')
+            .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+            .join('.*') +
+          '$',
+      );
+      const matches = canonical.assets.filter((asset) =>
+        expression.test(asset.name),
+      );
+      expect(matches, pattern).toHaveLength(1);
+      return matches[0];
+    });
+    expect(matched.map((asset) => asset.name).sort()).toEqual(
+      canonical.assets.map((asset) => asset.name).sort(),
+    );
+    expect(new Set(matched.map((asset) => asset.name)).size).toBe(16);
+    expect(publish).toContain(
+      '[ "${#actual_assets[@]}" -eq "${#expected_assets[@]}" ]',
+    );
+    expect(publish).toContain(
+      '"${actual_assets[$index]}" != "${expected_assets[$index]}"',
+    );
+    const prepare = mirrorSteps.find(
+      (step) => step.name === 'Prepare and verify mirror payload',
+    ).run;
+    const copied = [...prepare.matchAll(/^copy_one "([^"]+)"$/gm)].map(
+      (match) => match[1].replaceAll('${VERSION}', version),
+    );
+    expect(copied.sort()).toEqual(
+      [
+        ...installers.flatMap((installer) => [
+          installer,
+          `${installer}.blockmap`,
+        ]),
+        'latest.mirror.json',
+        'UPDATE-MIRROR-SHA256SUMS',
+        'UPDATE-MIRROR-SHA256SUMS.sig',
+      ].sort(),
+    );
+    expect(prepare).toContain(
+      'mv -- mirror-upload/latest.mirror.json mirror-upload/latest.json',
+    );
+  });
+
   it('builds/recombines clean source outside checkout and attests/uploads both exact assets', async () => {
     const repo = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),

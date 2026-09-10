@@ -436,6 +436,9 @@ try {
     ...filesBelow(path.join(serverDist, 'src'))
       .filter((relative) => relative.endsWith('.js'))
       .map((relative) => path.posix.join('src', relative)),
+    // Static ESM imports need these data files; do not admit arbitrary fixture JSON.
+    'src/modules/policy_intelligence/policy-sources.json',
+    'src/modules/park_services/enterpriseIndustryTaxonomy.json',
   ];
   for (const relative of serverFiles) {
     const source = path.join(serverDist, relative);

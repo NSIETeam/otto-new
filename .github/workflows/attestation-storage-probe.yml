@@ -1,0 +1,101 @@
+name: Diagnostic attestation storage probe
+
+# Isolated diagnostic branch only. Never merge this workflow into a release.
+# These disposable subjects are NOT Otto runtime or release acceptance evidence.
+on:
+  push:
+    branches: [diagnostics/attestation-storage-20260910]
+    paths: [.github/workflows/attestation-storage-probe.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: isolated-attestation-storage-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: >-
+      github.repository == 'NSIETeam/otto-new' &&
+      github.ref == 'refs/heads/diagnostics/attestation-storage-20260910' &&
+      github.event_name == 'push' && github.run_attempt == 1
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-24.04
+          - platform: darwin-x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Use the release Node version without product dependencies
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.23.1'
+
+      - name: Generate unique explicitly non-release subject
+        shell: bash
+        env:
+          PROBE_PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { mkdirSync, writeFileSync } from 'node:fs';
+          import { createHash, randomUUID } from 'node:crypto';
+          import path from 'node:path';
+          const env = process.env;
+          if (process.version !== 'v22.23.1' || !/^[a-f0-9]{40}$/.test(env.GITHUB_SHA)
+              || !/^[0-9]+$/.test(env.GITHUB_RUN_ID) || env.GITHUB_RUN_ATTEMPT !== '1') {
+            throw new Error('Unexpected diagnostic execution identity');
+          }
+          const root = path.join(env.RUNNER_TEMP, 'otto-attestation-storage-probe');
+          mkdirSync(root, { mode: 0o700 });
+          const data = Buffer.from(JSON.stringify({
+            kind: 'otto-attestation-service-probe-v1',
+            releaseAcceptance: false,
+            repository: env.GITHUB_REPOSITORY,
+            diagnosticCommit: env.GITHUB_SHA,
+            runId: env.GITHUB_RUN_ID,
+            runAttempt: env.GITHUB_RUN_ATTEMPT,
+            platform: env.PROBE_PLATFORM,
+            nonce: randomUUID(),
+          }, null, 2) + '\n');
+          writeFileSync(path.join(root, 'probe.json'), data, { flag: 'wx', mode: 0o600 });
+          console.log(JSON.stringify({ probeOnly: true, bytes: data.length,
+            sha256: createHash('sha256').update(data).digest('hex') }));
+          NODE
+
+      - name: Persist probe using the exact release attestation action
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: ${{ runner.temp }}/otto-attestation-storage-probe/probe.json
+
+      - name: Retrieve and independently verify the stored proof
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "$RUNNER_TEMP/otto-attestation-storage-probe/probe.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/attestation-storage-probe.yml" \
+            --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners --format json \
+            > "$RUNNER_TEMP/otto-attestation-storage-probe/verification.json"
+
+      - name: Retain diagnostic bytes and verification if available
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: attestation-service-probe-${{ matrix.platform }}
+          path: ${{ runner.temp }}/otto-attestation-storage-probe/*.json
+          if-no-files-found: error
+          retention-days: 7

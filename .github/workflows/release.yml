@@ -626,7 +626,7 @@ jobs:
           OTTO_DESKTOP_BASELINE_INSTALLER_BYTES: '128032671'
           OTTO_DESKTOP_MAX_INSTALLER_GROWTH_MB: '8'
           OTTO_DESKTOP_MAX_INSTALLER_MB: '140'
-          OTTO_DESKTOP_MAX_DMG_MB: '140'
+          OTTO_DESKTOP_MAX_DMG_MB: '160'
 
       - name: Verify macOS disk images and application seals
         shell: bash

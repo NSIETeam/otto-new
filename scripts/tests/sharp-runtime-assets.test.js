@@ -1,11 +1,13 @@
 /** Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0 */
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { materializeSharpRuntimeAssets, resolveSharpRuntimePackages, verifiedPackageFiles, verifySharpRuntimeAssets } from '../sharp-runtime-assets.mjs';
+import { materializeSharpRuntimeAssets, prepareEnterpriseSharpSmokeHost, resolveSharpRuntimePackages, verifiedPackageFiles, verifySharpRuntimeAssets } from '../sharp-runtime-assets.mjs';
 import { collectEnterpriseRuntimeDependencies, copyEnterpriseRuntimeDependencies } from '../enterprise-runtime-dependencies.mjs';
 
 const digest = bytes => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
@@ -102,14 +104,15 @@ describe('integrity-checked bounded npm archive (never executes package code)', 
 });
 
 async function stagedFixture(operation) {
-  const temporary = mkdtempSync(path.join(os.tmpdir(), 'otto-sharp-assets-test-'));
+  // Match native require.resolve, including macOS /var -> /private/var.
+  const temporary = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'otto-sharp-assets-test-')));
   try {
     const repoRoot = path.join(temporary, 'repo');
     mkdirSync(path.join(repoRoot, 'node_modules/sharp'), { recursive: true });
     const lock = lockFixture();
     const archives = new Map();
-    for (const spec of resolveSharpRuntimePackages(lock)) {
-      const bytes = archive([{ name: 'package/package.json', value: JSON.stringify({ name: spec.name, version: spec.version, os: ['linux'], cpu: [spec.arch], libc: ['glibc'] }) },
+    for (const spec of resolveSharpRuntimePackages(lock, ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64'])) {
+      const bytes = archive([{ name: 'package/package.json', value: JSON.stringify({ name: spec.name, version: spec.version, os: [spec.platform], cpu: [spec.arch], ...(spec.platform === 'linux' ? { libc: ['glibc'] } : {}) }) },
         { name: 'package/lib/runtime.node', value: spec.name }]);
       archives.set(spec.name, bytes);
       lock.packages[spec.location].integrity = digest(bytes);
@@ -117,7 +120,7 @@ async function stagedFixture(operation) {
     writeFileSync(path.join(repoRoot, 'package-lock.json'), JSON.stringify(lock));
     writeFileSync(path.join(repoRoot, 'node_modules/sharp/package.json'), JSON.stringify({ name: 'sharp', version: '0.35.4' }));
     const assets = await materializeSharpRuntimeAssets({ repoRoot, destination: path.join(temporary, 'assets'), fetchArchive: async spec => archives.get(spec.name) });
-    await operation({ repoRoot, assets, temporary, lock });
+    await operation({ repoRoot, assets, temporary, lock, fetchArchive: async spec => archives.get(spec.name) });
   } finally { rmSync(temporary, { recursive: true, force: true }); }
 }
 
@@ -150,4 +153,74 @@ describe('materialized runtime source and copy boundary', () => {
     expect(() => copyEnterpriseRuntimeDependencies({ repoRoot, releaseRoot, sharpAssetRoot: assets.root })).toThrow();
     expect(existsSync(releaseRoot)).toBe(false);
   }));
+});
+
+describe('enterprise cross-host smoke bridge (not delivered)', () => {
+  it.each(['darwin-arm64', 'darwin-x64', 'win32-x64'])('resolves only %s native smoke assets for staging and extracted archive', async hostTarget => stagedFixture(async ({ repoRoot, assets, temporary, fetchArchive }) => {
+    const packageRoot = path.join(temporary, 'package');
+    const releaseRoot = path.join(packageRoot, 'release');
+    copyEnterpriseRuntimeDependencies({ repoRoot, releaseRoot, sharpAssetRoot: assets.root });
+    const before = readFileSync(path.join(releaseRoot, 'sharp-runtime-provenance.json'));
+    const hostName = `@img/sharp-${hostTarget}`;
+    const requireFrom = root => createRequire(path.join(root, 'node_modules/sharp/dist/sharp.mjs'));
+    expect(() => requireFrom(releaseRoot).resolve(`${hostName}/package.json`)).toThrow();
+    const receipt = await prepareEnterpriseSharpSmokeHost({ repoRoot, temporaryRoot: temporary, hostTarget, fetchArchive });
+    expect(receipt.target).toBe(hostTarget);
+    expect(receipt.packages).toHaveLength(hostTarget === 'win32-x64' ? 1 : 2);
+    for (const relative of ['package/release', 'archive-smoke/package/release']) {
+      const root = path.join(temporary, relative);
+      if (root !== releaseRoot) copyEnterpriseRuntimeDependencies({ repoRoot, releaseRoot: root, sharpAssetRoot: assets.root });
+      const require = requireFrom(root);
+      for (const name of receipt.packages) {
+        expect(require.resolve(`${name}/package.json`)).toBe(path.join(temporary, 'node_modules', name, 'package.json'));
+        expect(existsSync(path.join(root, 'node_modules', name))).toBe(false);
+      }
+      expect(require.resolve('@img/sharp-linux-x64/package.json')).toBe(path.join(root, 'node_modules/@img/sharp-linux-x64/package.json'));
+      expect(require.resolve('@img/sharp-linux-arm64/package.json')).toBe(path.join(root, 'node_modules/@img/sharp-linux-arm64/package.json'));
+    }
+    expect(readFileSync(path.join(releaseRoot, 'sharp-runtime-provenance.json'))).toEqual(before);
+    expect(JSON.parse(before).targets).toEqual(['linux-x64', 'linux-arm64']);
+    expect(existsSync(path.join(packageRoot, 'node_modules'))).toBe(false);
+    expect(existsSync(path.join(temporary, 'node_modules/sharp'))).toBe(false);
+    for (const name of receipt.packages) {
+      const original = path.join(temporary, 'node_modules', name);
+      renameSync(original, `${original}-missing`);
+      // A fresh process avoids require.resolve's path cache masking removal.
+      const result = spawnSync(process.execPath, ['--input-type=module', '--eval', `
+        import { createRequire } from 'node:module';
+        createRequire(${JSON.stringify(path.join(releaseRoot, 'node_modules/sharp/dist/sharp.mjs'))}).resolve(${JSON.stringify(`${name}/package.json`)});
+      `], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+      expect(result.error).toBeUndefined();
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('MODULE_NOT_FOUND');
+      renameSync(`${original}-missing`, original);
+    }
+  }));
+
+  it.each(['linux-x64', 'linux-arm64'])('does not bridge or download on supported native %s', async hostTarget => stagedFixture(async ({ repoRoot, temporary }) => {
+    const result = await prepareEnterpriseSharpSmokeHost({ repoRoot, temporaryRoot: temporary, hostTarget, fetchArchive: () => { throw new Error('unexpected download'); } });
+    expect(result.packages).toEqual([]);
+    expect(existsSync(path.join(temporary, 'node_modules'))).toBe(false);
+  }));
+
+  it('rejects corrupted host archives before adding resolution paths', async () => stagedFixture(async ({ repoRoot, temporary }) => {
+    await expect(prepareEnterpriseSharpSmokeHost({ repoRoot, temporaryRoot: temporary, hostTarget: 'darwin-arm64', fetchArchive: async () => Buffer.from('corrupt') })).rejects.toThrow(/integrity/);
+    expect(existsSync(path.join(temporary, 'node_modules'))).toBe(false);
+  }));
+
+  it('rejects an existing parent dependency tree without changing it', async () => stagedFixture(async ({ repoRoot, temporary, fetchArchive }) => {
+    mkdirSync(path.join(temporary, 'node_modules'));
+    writeFileSync(path.join(temporary, 'node_modules/keep.txt'), 'preserve');
+    await expect(prepareEnterpriseSharpSmokeHost({ repoRoot, temporaryRoot: temporary, hostTarget: 'darwin-arm64', fetchArchive })).rejects.toThrow(/already exists/);
+    expect(readFileSync(path.join(temporary, 'node_modules/keep.txt'), 'utf8')).toBe('preserve');
+  }));
+
+  it('connects the bridge before both genuine startup probes, outside the archived root', () => {
+    const source = readFileSync(new URL('../build-enterprise-oneclick.mjs', import.meta.url), 'utf8');
+    const prepare = source.indexOf('await prepareEnterpriseSharpSmokeHost(');
+    expect(prepare).toBeGreaterThan(0);
+    expect(prepare).toBeLessThan(source.indexOf('smokeEnterpriseRuntime(releaseRoot, smokeDataRoot)'));
+    expect(prepare).toBeLessThan(source.indexOf("const archiveSmokeRoot ="));
+    expect(source).toContain("['--no-xattrs', '-cf', temporaryTar, '-C', temporaryRoot, finalPackageName]");
+  });
 });

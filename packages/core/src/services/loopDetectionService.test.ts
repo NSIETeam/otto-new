@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Config } from '../config/config.js';
 import {
@@ -123,23 +124,18 @@ describe('LoopDetectionService', () => {
   });
 
   describe('Content Loop Detection', () => {
-    const generateRandomString = (length: number) => {
+    const generateContent = (length: number, seed: string) => {
       let result = '';
-      const characters =
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-      const charactersLength = characters.length;
-      for (let i = 0; i < length; i++) {
-        result += characters.charAt(
-          Math.floor(Math.random() * charactersLength),
-        );
+      for (let i = 0; result.length < length; i++) {
+        result += createHash('sha256').update(`${seed}:${i}`).digest('hex');
       }
-      return result;
+      return result.slice(0, length);
     };
 
-    it('should not detect a loop for random content', () => {
+    it('should not detect a loop for deterministic varied content', () => {
       service.reset('');
       for (let i = 0; i < 1000; i++) {
-        const content = generateRandomString(10);
+        const content = generateContent(10, `non-repeating-${i}`);
         const isLoop = service.addAndCheck(createContentEvent(content));
         expect(isLoop).toBe(false);
       }
@@ -160,13 +156,29 @@ describe('LoopDetectionService', () => {
       expect(loggers.logLoopDetected).toHaveBeenCalledTimes(1);
     });
 
+    it.each([[750, true], [751, false]] as const)(
+      'keeps the existing distance boundary at gap %i',
+      (gap, expectedLoop) => {
+        service.reset('distance-boundary');
+        const block = 'b'.repeat(501)
+          + 'X' + generateContent(gap - 502, 'distance-filler') + 'X';
+        let loop = false;
+        for (const char of block.repeat(CONTENT_LOOP_THRESHOLD)) {
+          loop = service.addAndCheck(createContentEvent(char));
+          if (loop) break;
+        }
+        expect(loop).toBe(expectedLoop);
+        expect(loggers.logLoopDetected).toHaveBeenCalledTimes(expectedLoop ? 1 : 0);
+      },
+    );
+
     it('should not detect a loop if repetitions are very far apart', () => {
       service.reset('');
       const repeatedContent = 'b'.repeat(CONTENT_CHUNK_SIZE);
-      // 填充内容需要足够长，使得平均距离超过 CONTENT_CHUNK_SIZE * 1.5
+      // 填充内容需要足够长，使得相邻重复段的距离超过 CONTENT_CHUNK_SIZE * 1.5
       // 默认 maxAllowedDistance 是 1.5 * 500 = 750
       // 如果 fillerContent 长度为 500，则两次重复之间的距离是 1000
-      const fillerContent = generateRandomString(500);
+      const fillerContent = `X${generateContent(498, 'far-apart')}X`;
 
       let isLoop = false;
       for (let i = 0; i < CONTENT_LOOP_THRESHOLD; i++) {
@@ -183,6 +195,32 @@ describe('LoopDetectionService', () => {
       }
       expect(isLoop).toBe(false);
       expect(loggers.logLoopDetected).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['leading b', 'b', 'X', 1],
+      ['trailing b', 'X', 'b', 1],
+      ['both boundaries', 'b', 'b', 1],
+      ['fragmented events', 'b', 'b', 137],
+      ['whole blocks', 'b', 'b', 1000],
+    ] as const)('does not average away distant gaps with %s', (_label, start, end, eventSize) => {
+      service.reset('far-apart-boundary');
+      // A boundary b extends b x 500 into multiple overlapping 500-char
+      // matches. Those matches must not hide the ~1000-char gap to the next
+      // burst. Run past history truncation as well, with reproducible input.
+      const block = 'b'.repeat(CONTENT_CHUNK_SIZE)
+        + start + generateContent(498, 'boundary-filler') + end;
+      const content = block.repeat(CONTENT_LOOP_THRESHOLD + 5);
+      for (let offset = 0; offset < content.length; offset += eventSize) {
+        expect(service.addAndCheck(createContentEvent(
+          content.slice(offset, offset + eventSize),
+        )), `unexpected loop at offset ${offset}`).toBe(false);
+      }
+      expect(loggers.logLoopDetected).not.toHaveBeenCalled();
+
+      // Sparse history must not mask a genuine new, tightly repeated burst.
+      expect(service.addAndCheck(createContentEvent('b'.repeat(600)))).toBe(true);
+      expect(loggers.logLoopDetected).toHaveBeenCalledTimes(1);
     });
   });
 

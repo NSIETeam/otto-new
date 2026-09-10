@@ -17,6 +17,12 @@ it('runs the entire scripts suite as a mandatory merge gate before long builds',
   expect(gate['continue-on-error']).toBeUndefined();
   expect(job['continue-on-error']).toBeUndefined();
   expect(steps.indexOf(gate)).toBeGreaterThan(steps.findIndex(step => step.run === 'npm ci'));
+  const runtime = steps.find(step => step.id === 'scripts_workflow_runtime');
+  expect(runtime?.run).toBe('npm run build --workspace=packages/workflow');
+  expect(runtime.if).toBeUndefined();
+  expect(runtime['continue-on-error']).toBeUndefined();
+  expect(steps.indexOf(runtime)).toBeGreaterThan(steps.findIndex(step => step.run === 'npm ci'));
+  expect(steps.indexOf(runtime)).toBeLessThan(steps.indexOf(gate));
   expect(steps.indexOf(gate)).toBeLessThan(steps.findIndex(
     step => step.name === 'Build current-source native integration test runtime',
   ));

@@ -89,6 +89,12 @@ jobs:
 
       # Exercise packaging, path guards and deployment fixtures on the actual
       # macOS host before merge, not only in the long formal release build.
+      # The scripts gate loads the real copied workflow runtime, not a fixture
+      # replacement; a clean runner must compile it first.
+      - name: Build workflow runtime for script acceptance
+        id: scripts_workflow_runtime
+        run: npm run build --workspace=packages/workflow
+
       - name: Test release and safety scripts
         id: scripts_tests
         run: npm run test:scripts

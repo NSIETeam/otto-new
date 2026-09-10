@@ -454,7 +454,7 @@ export class LoopDetectionService {
    * 2. Verify actual content matches to prevent hash collisions
    * 3. Track all positions where this chunk appears
    * 4. A loop is detected when the same chunk appears CONTENT_LOOP_THRESHOLD times
-   *    within a small average distance (≤ 1.5 * chunk size)
+   *    with every consecutive gap within the chunk-type distance limit
    */
   private isLoopDetectedForChunk(chunk: string, hash: string): boolean {
     // Filter out chunks with no meaningful content
@@ -481,9 +481,6 @@ export class LoopDetectionService {
 
     // Analyze the most recent occurrences to see if they're clustered closely together
     const recentIndices = existingIndices.slice(-CONTENT_LOOP_THRESHOLD);
-    const totalDistance =
-      recentIndices[recentIndices.length - 1] - recentIndices[0];
-    const averageDistance = totalDistance / (CONTENT_LOOP_THRESHOLD - 1);
 
     // Use adaptive distance threshold based on chunk type
     let maxAllowedDistance = CONTENT_CHUNK_SIZE * 1.5;
@@ -497,7 +494,13 @@ export class LoopDetectionService {
       maxAllowedDistance = CONTENT_CHUNK_SIZE * 3;
     }
 
-    return averageDistance <= maxAllowedDistance;
+    // Overlapping matches inside one burst can be one character apart. Their
+    // small gaps must not average away a large gap between separate bursts.
+    // Only inspect the recent threshold-sized cluster so an old distant match
+    // cannot prevent detection once genuinely continuous repetition starts.
+    return recentIndices.every((index, position) =>
+      position === 0 || index - recentIndices[position - 1] <= maxAllowedDistance,
+    );
   }
 
   /**

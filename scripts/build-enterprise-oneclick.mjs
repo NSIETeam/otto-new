@@ -336,6 +336,7 @@ const sourceScope = [
   'packages/core/src/services/aliyunSmsSender.ts',
   'packages/core/src/services/recurringTaskRegistry.ts',
   'packages/core/src/memory/globalMemoryMaintenance.ts',
+  'packages/core/src/utils/workspacePathIdentity.ts',
   'packages/core/src/customer-modules',
   'deployment/enterprise-oneclick',
   'scripts/build-enterprise-oneclick.mjs',
@@ -372,6 +373,7 @@ const sourceInputFiles = [
   'packages/core/src/services/aliyunSmsSender.ts',
   'packages/core/src/services/recurringTaskRegistry.ts',
   'packages/core/src/memory/globalMemoryMaintenance.ts',
+  'packages/core/src/utils/workspacePathIdentity.ts',
   ...filesBelow(
     path.join(repoRoot, 'packages', 'core', 'src', 'customer-modules'),
   ).map((relative) =>
@@ -461,6 +463,7 @@ try {
     'services/aliyunSmsSender.js',
     'services/recurringTaskRegistry.js',
     'memory/globalMemoryMaintenance.js',
+    'utils/workspacePathIdentity.js',
     ...filesBelow(path.join(coreDist, 'customer-modules'))
       .filter((file) => file.endsWith('.js'))
       .map((file) => path.posix.join('customer-modules', file)),
@@ -479,6 +482,7 @@ try {
 export * from './src/services/recurringTaskRegistry.js';
 export * from './src/memory/globalMemoryMaintenance.js';
 export * from './src/customer-modules/index.js';
+export { WorkspacePathIdentity } from './src/utils/workspacePathIdentity.js';
 
 export const FEATURE_FLAGS = {
   park_service: '公园服务',
@@ -565,7 +569,10 @@ export class FeatureFlagManager {
         private: true,
         type: 'module',
         main: 'dist/index.js',
-        exports: { '.': './dist/index.js' },
+        exports: {
+          '.': './dist/index.js',
+          './recurring-tasks': './dist/src/services/recurringTaskRegistry.js',
+        },
         dependencies: {},
       },
       null,

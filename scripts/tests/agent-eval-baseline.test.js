@@ -58,6 +58,8 @@ afterEach(() => {
 });
 
 describe('immutable source baseline, no API calls', () => {
+  // Real Git child processes plus multiple disk inventories exceeded 5 s in
+  // the combined Windows suite. Keep assertions and product budgets unchanged.
   it('captures current dirty and untracked source, not HEAD content', () => {
     const f = fixture();
     f.put('packages/server/src/runtime.ts', 'export const value = 2;');
@@ -79,7 +81,7 @@ describe('immutable source baseline, no API calls', () => {
       ),
     ).toContain('2');
     expect(verifyBaseline(f.destination).valid).toBe(true);
-  });
+  }, 15_000);
   it('records deleted tracked files without resurrecting them', () => {
     const f = fixture();
     rmSync(path.join(f.root, 'packages/server/src/runtime.ts'));
@@ -143,7 +145,7 @@ describe('immutable source baseline, no API calls', () => {
     const check = verifyBaseline(f.destination);
     expect(check.missing).toContain('packages/server/src/runtime.ts');
     expect(check.unexpected).toContain('injected.cjs');
-  });
+  }, 15_000);
   it('is insensitive to traversal order but sensitive to path and contents', () => {
     const a = [
       { path: 'a', sha256: '1', bytes: 1 },

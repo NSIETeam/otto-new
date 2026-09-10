@@ -724,6 +724,69 @@ describe('ParkServicesPlugin', () => {
     expect(screen.queryByText(/模拟发布/)).toBeNull();
   });
 
+  it('问卷从已预热缓存打开时只显示调查，身份未返回时明确显示当前用户', async () => {
+    installPublicationBridge('satisfaction');
+    const session = await window.otto.enterpriseSession();
+    const [survey] = await window.otto.enterpriseParkPublications();
+    const publications = [
+      { ...survey!, id: 'cached-announcement', kind: 'announcement' as const, title: '缓存中的公告不是调查' },
+      survey!,
+    ];
+    let releaseSession!: () => void;
+    const pendingSession = new Promise<typeof session>(resolve => {
+      releaseSession = () => resolve(session);
+    });
+    Object.assign(window.otto, {
+      enterpriseSession: vi.fn(() => pendingSession),
+      enterpriseParkPublications: vi.fn(async () => publications),
+    });
+
+    render(<ParkServicesPlugin />);
+    try {
+      // The real background notification is emitted only after the shared
+      // publications cache settles. Do not race opening against an IPC call.
+      await screen.findByRole('button', { name: '打开园区通知' });
+      openDialog('satisfaction');
+      const form = screen.getByLabelText('员工填写满意度调查');
+      expect(within(form).getByRole('heading', { name: '第三季度满意度调查' })).toBeTruthy();
+      expect(within(form).queryByText('缓存中的公告不是调查')).toBeNull();
+      expect(within(form).getByText('提交人：当前用户')).toBeTruthy();
+
+      await act(async () => { releaseSession(); });
+      await waitFor(() => expect(within(form).getByText('提交人：报修员工')).toBeTruthy());
+      expect((within(form).getByLabelText('联系人') as HTMLInputElement).value).toBe('报修员工');
+    } finally {
+      await act(async () => { releaseSession(); });
+    }
+  });
+
+  it('问卷冷缓存读取未完成时显示等待，真实回执返回后再呈现表单', async () => {
+    installPublicationBridge('satisfaction');
+    const publications = await window.otto.enterpriseParkPublications();
+    let releasePublications!: () => void;
+    const pendingPublications = new Promise<EnterpriseParkPublication[]>(resolve => {
+      releasePublications = () => resolve(publications);
+    });
+    Object.assign(window.otto, {
+      enterpriseParkPublications: vi.fn(() => pendingPublications),
+    });
+    render(<ParkServicesPlugin />);
+    try {
+      openDialog();
+      fireEvent.click(await screen.findByText('满意度调查'));
+      const dialog = screen.getByRole('dialog', { name: '满意度调查' });
+      expect(within(dialog).queryByLabelText('员工填写满意度调查')).toBeNull();
+      expect(within(dialog).getAllByText('正在读取问卷…').length).toBeGreaterThan(0);
+
+      await act(async () => { releasePublications(); });
+      const form = await within(dialog).findByLabelText('员工填写满意度调查');
+      expect(within(form).getByRole('heading', { name: '第三季度满意度调查' })).toBeTruthy();
+      expect(within(dialog).queryByText('暂无需要填写的满意度调查。')).toBeNull();
+    } finally {
+      await act(async () => { releasePublications(); });
+    }
+  });
+
   it('满意度调查实名提交一次，界面不包含发布端', async () => {
     const bridge = installPublicationBridge('satisfaction');
     render(<ParkServicesPlugin />);

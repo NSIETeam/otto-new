@@ -24,6 +24,10 @@ const manifestPath = fileURLToPath(
 const reviewedInputs = JSON.parse(readFileSync(manifestPath, 'utf8'));
 export const HEIC_SOURCE_INPUTS = Object.freeze(reviewedInputs.sources);
 export const SHARP_RUNTIME_INPUTS = Object.freeze(reviewedInputs.sharpRuntimeInputs);
+const BUNDLED_LICENSE_FILES = Object.freeze([
+  'GNU-LGPL-3.0.txt',
+  'GNU-GPL-3.0.txt',
+]);
 const requireThat = (condition, message) => {
   if (!condition) throw new Error(message);
 };
@@ -140,6 +144,20 @@ export function readVerifiedCache(cacheDir, spec) {
   requireThat(metadata.size === spec.bytes, 'source cache length mismatch');
   return verifyDownload(readFileSync(filename), spec);
 }
+export function readBundledLicense(repoRoot, sourceCommit, spec) {
+  if (!BUNDLED_LICENSE_FILES.includes(spec.file)) return undefined;
+  requireThat(
+    HEIC_SOURCE_INPUTS.some(source => JSON.stringify(source) === JSON.stringify(spec)),
+    'unreviewed bundled license input',
+  );
+  // Read the immutable Git blob, not a mutable checkout file. The surrounding
+  // build still requires clean HEAD before and after assembling the sidecar.
+  // Missing/corrupt tracked licenses fail closed, never fall back to the web.
+  return verifyDownload(
+    git(repoRoot, 'show', `${sourceCommit}:scripts/licenses/${inputName(spec)}`),
+    spec,
+  );
+}
 export async function downloadSource(spec, fetchImpl = globalThis.fetch) {
   requireThat(
     HEIC_SOURCE_INPUTS.some(
@@ -183,10 +201,14 @@ export async function downloadSource(spec, fetchImpl = globalThis.fetch) {
         url = new URL(location, url);
         continue;
       }
-      requireThat(
-        response.ok && response.body,
-        'official source download failed',
-      );
+      if (!response.ok || !response.body) {
+        // Preserve enough public identity to diagnose the exact pinned input.
+        // Never log an upstream body, statusText or a signed redirect URL.
+        try { await response.body?.cancel(); } catch { /* Keep the HTTP failure. */ }
+        throw new Error(
+          `official source download failed: ${inputName(spec)} (${url.hostname}, HTTP ${response.status})`,
+        );
+      }
       const length = response.headers.get('content-length');
       requireThat(
         !length || Number(length) === spec.bytes,
@@ -408,6 +430,7 @@ export async function buildCorrespondingSource({
     const selected = [];
     for (const spec of HEIC_SOURCE_INPUTS) {
       const bytes =
+        readBundledLicense(repoRoot, snapshot.sourceCommit, spec) ||
         (cacheDir && readVerifiedCache(cacheDir, spec)) ||
         (await downloadSource(spec));
       writeFileSync(path.join(tree, 'upstream', inputName(spec)), bytes, {
@@ -453,6 +476,12 @@ export async function buildCorrespondingSource({
       },
       packageLockSha256: sha256(snapshot.lockBytes),
       upstreamInputs: selected,
+      bundledLicenseSources: BUNDLED_LICENSE_FILES.map(file => ({
+        file,
+        trackedPath: `scripts/licenses/${file}`,
+        sourceCommit: snapshot.sourceCommit,
+        acquisition: 'vendored-reviewed',
+      })),
       codecLocks,
       reviewedSharpRuntimeInputs: SHARP_RUNTIME_INPUTS,
       completeTrackedSource: source.files,

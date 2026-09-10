@@ -38,6 +38,7 @@ function nativeFixture({
   uninstall = false,
   changeAfterInit = false,
   useProfileRoot = false,
+  executionTimeoutMs = 15_000,
 }) {
   const fixture = mkdtempSync(path.join(os.tmpdir(), 'otto-nsis-safety-'));
   const target = path.join(fixture, 'Otto destination');
@@ -115,7 +116,7 @@ ${uninstall ? `Function un.onInit\n  StrCpy $INSTDIR "${nsis(options.target)}"\n
   ).toBe(0);
   let executed = spawnSync(path.join(fixture, 'fixture.exe'), ['/S'], {
     encoding: 'utf8',
-    timeout: 15_000,
+    timeout: executionTimeoutMs,
     windowsHide: true,
   });
   if (uninstall) {
@@ -449,6 +450,9 @@ describe.skipIf(process.platform !== 'win32' || !compiler)(
     it('fails closed at the bounded runtime entry limit', () => {
       expect(
         nativeFixture({
+          // The unchanged 8193-file scan measured ~21s on a busy Windows host.
+          // Only this stress fixture gets extra time; rejection stays required.
+          executionTimeoutMs: 45_000,
           arrange: ({ target }) => {
             runtime(target);
             const directory = path.join(target, 'resources/app.asar.unpacked');
@@ -462,7 +466,7 @@ describe.skipIf(process.platform !== 'win32' || !compiler)(
         mainReached: false,
         reason: 'runtime directory inspection limit exceeded',
       });
-    }, 20_000);
+    }, 60_000);
 
     it('rejects a redirect within a recognised runtime subtree', () => {
       expect(

@@ -21,6 +21,7 @@ import {
   SHARP_RUNTIME_INPUTS,
   gitArchivePaths,
   readVerifiedCache,
+  readBundledLicense,
   sourceAssetName,
   verifyDownload,
   writeGitSourceArchive,
@@ -144,6 +145,53 @@ describe('HEIC corresponding-source release inputs', () => {
     await expect(
       downloadSource(spec, async () => new Response('wrong bytes')),
     ).rejects.toThrow('length mismatch');
+  });
+
+  it.each([403, 404, 503])('identifies a failed reviewed source and HTTP %i without exposing response data', async (status) => {
+    const spec = HEIC_SOURCE_INPUTS.find(source => source.file === 'heic-decode-2.1.0-npm.tgz');
+    const response = new Response('private upstream diagnostics must not be logged', { status });
+    await expect(downloadSource(spec, async () => response)).rejects.toThrow(
+      `official source download failed: ${spec.file} (registry.npmjs.org, HTTP ${status})`,
+    );
+    expect(response.body.locked).toBe(false);
+    expect(response.bodyUsed).toBe(true);
+  });
+
+  it('uses only byte-verified license text from the exact committed source', () => {
+    const root = repo();
+    mkdirSync(path.join(root, 'scripts/licenses'), { recursive: true });
+    for (const name of ['GNU-LGPL-3.0.txt', 'GNU-GPL-3.0.txt']) {
+      const spec = HEIC_SOURCE_INPUTS.find(source => source.file === name);
+      const original = Buffer.from(readFileSync(new URL(`../licenses/${name}`, import.meta.url), 'utf8').replaceAll('\r\n', '\n'));
+      expect(verifyDownload(original, spec)).toEqual(original);
+      writeFileSync(path.join(root, 'scripts/licenses', name), original);
+    }
+    git(root, 'add', 'scripts/licenses');
+    git(root, '-c', 'user.name=Source test', '-c', 'user.email=source-test@invalid.example', 'commit', '-qm', 'reviewed licenses');
+    const commit = assertCleanSource(root).sourceCommit;
+    for (const name of ['GNU-LGPL-3.0.txt', 'GNU-GPL-3.0.txt']) {
+      const spec = HEIC_SOURCE_INPUTS.find(source => source.file === name);
+      expect(readBundledLicense(root, commit, spec)).toHaveLength(spec.bytes);
+      writeFileSync(path.join(root, 'scripts/licenses', name), 'uncommitted replacement');
+      expect(readBundledLicense(root, commit, spec)).toHaveLength(spec.bytes);
+      expect(() => assertCleanSource(root)).toThrow('clean HEAD');
+      expect(() => readBundledLicense(root, commit, { ...spec, sha256: '0'.repeat(64) })).toThrow('unreviewed');
+    }
+    git(root, 'add', 'scripts/licenses');
+    git(root, '-c', 'user.name=Source test', '-c', 'user.email=source-test@invalid.example', 'commit', '-qm', 'corrupted licenses');
+    for (const name of ['GNU-LGPL-3.0.txt', 'GNU-GPL-3.0.txt']) {
+      const spec = HEIC_SOURCE_INPUTS.find(source => source.file === name);
+      expect(() => readBundledLicense(root, assertCleanSource(root).sourceCommit, spec)).toThrow('length mismatch');
+    }
+  }, 15000);
+
+  it('does not replace non-license downloads and refuses missing tracked license bytes', () => {
+    const root = repo();
+    const commit = assertCleanSource(root).sourceCommit;
+    const library = HEIC_SOURCE_INPUTS.find(source => source.file === 'heic-decode-2.1.0-npm.tgz');
+    expect(readBundledLicense(root, commit, library)).toBeUndefined();
+    const license = HEIC_SOURCE_INPUTS.find(source => source.file === 'GNU-LGPL-3.0.txt');
+    expect(() => readBundledLicense(root, commit, license)).toThrow();
   });
 
   it('refuses in-checkout output before performing a build or download', async () => {

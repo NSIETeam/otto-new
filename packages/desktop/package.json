@@ -22,7 +22,7 @@
     "dist": "npm run prepare:ripgrep:mac && npm run build && electron-builder --mac --dir",
     "dist:dmg": "npm run prepare:ripgrep:mac && npm run build && electron-builder --mac dmg --arm64",
     "dist:dmg:x64": "npm run prepare:ripgrep:mac && npm run build && electron-builder --mac dmg --x64",
-    "dist:win": "node scripts/fetch-win-ripgrep.mjs && npm run build && electron-builder --win --x64 --publish never && node scripts/verify-packaged-runtime.mjs release/win-unpacked/resources/app.asar --platform win32 --arch x64 --probe-server-bin",
+    "dist:win": "node scripts/fetch-win-ripgrep.mjs && npm run build && electron-builder --win --x64 --publish never && node scripts/verify-packaged-runtime.mjs release/win-unpacked/resources/app.asar --platform win32 --arch x64 --probe-server-bin-if-host",
     "dist:portable:win": "npm run dist:win && node scripts/portable-usb.mjs",
     "package": "node scripts/make-delivery-zip.mjs",
     "lint": "eslint . --ext .ts,.tsx",

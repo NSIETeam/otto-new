@@ -60,7 +60,28 @@ function requireAsarEntry(entries, archiveEntry) {
   }
 }
 
-export function probePackagedServerBin(archivePath) {
+function assertServerBinProbeTarget(platform, arch) {
+  if (
+    !['win32', 'darwin', 'linux'].includes(platform) ||
+    !['x64', 'arm64'].includes(arch)
+  ) {
+    throw new Error(`unsupported server bin probe target: ${platform}-${arch}`);
+  }
+}
+
+export function probePackagedServerBin(
+  archivePath,
+  { platform = process.platform, arch = process.arch, ifHost = false } = {},
+) {
+  assertServerBinProbeTarget(platform, arch);
+  const host = `${process.platform}-${process.arch}`;
+  const target = `${platform}-${arch}`;
+  if (host !== target) {
+    if (ifHost) return { status: 'deferred-native-probe', host, target };
+    throw new Error(
+      `packaged server bin probe requires a matching host: target=${target} host=${host}`,
+    );
+  }
   const probeRoot = mkdtempSync(path.join(tmpdir(), 'otto-server-bin-probe-'));
   const extractedRoot = path.join(probeRoot, 'app');
   try {
@@ -99,6 +120,7 @@ export function probePackagedServerBin(archivePath) {
         `packaged otto-server bin probe failed: status=${String(result.status)} signal=${String(result.signal)} stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`,
       );
     }
+    return { status: 'verified', host, target };
   } finally {
     rmSync(probeRoot, {
       recursive: true,
@@ -436,7 +458,7 @@ function main() {
   const archiveArgument = process.argv[2];
   if (!archiveArgument) {
     throw new Error(
-      'usage: verify-packaged-runtime.mjs <app.asar> [--platform win32|darwin] [--arch x64|arm64] [--probe-server-bin]',
+      'usage: verify-packaged-runtime.mjs <app.asar> [--platform win32|darwin|linux] [--arch x64|arm64] [--probe-server-bin | --probe-server-bin-if-host]',
     );
   }
   const platformIndex = process.argv.indexOf('--platform');
@@ -444,6 +466,14 @@ function main() {
     platformIndex === -1 ? process.platform : process.argv[platformIndex + 1];
   const archIndex = process.argv.indexOf('--arch');
   const arch = archIndex === -1 ? process.arch : process.argv[archIndex + 1];
+  const probeServer = process.argv.includes('--probe-server-bin');
+  const probeServerIfHost = process.argv.includes('--probe-server-bin-if-host');
+  if (probeServer && probeServerIfHost) {
+    throw new Error('server bin probe modes are mutually exclusive');
+  }
+  if (probeServer || probeServerIfHost) {
+    assertServerBinProbeTarget(platform, arch);
+  }
   const buildCommitIndex = process.argv.indexOf('--expected-build-commit');
   const expectedBuildCommit =
     buildCommitIndex === -1
@@ -459,10 +489,19 @@ function main() {
     process.argv.includes('--require-native-authenticode'),
     process.argv.includes('--require-native-code-signature'),
   );
-  if (process.argv.includes('--probe-server-bin')) {
-    probePackagedServerBin(archivePath);
+  let serverBinProbe;
+  if (probeServer || probeServerIfHost) {
+    // Cross-building can prove package integrity, not execute another target's
+    // native dependencies. The hosted target job still requires strict probing.
+    serverBinProbe = probePackagedServerBin(archivePath, {
+      platform,
+      arch,
+      ifHost: probeServerIfHost,
+    });
   }
-  console.log(`[packaged-runtime] verified ${JSON.stringify(versions)}`);
+  console.log(
+    `[packaged-runtime] verified ${JSON.stringify({ ...versions, serverBinProbe })}`,
+  );
 }
 
 if (

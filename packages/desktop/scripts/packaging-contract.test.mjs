@@ -3,12 +3,15 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import asar from '@electron/asar';
+import { probePackagedServerBin } from './verify-packaged-runtime.mjs';
 
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -17,6 +20,78 @@ const packageRoot = path.resolve(
 const repoRoot = path.resolve(packageRoot, '../..');
 const require = createRequire(import.meta.url);
 const afterPack = require('./after-pack.cjs');
+
+describe('packaged server bin host boundary', () => {
+  const host = `${process.platform}-${process.arch}`;
+  const targets = [
+    { platform: process.platform === 'win32' ? 'darwin' : 'win32', arch: process.arch },
+    { platform: process.platform, arch: process.arch === 'x64' ? 'arm64' : 'x64' },
+  ];
+
+  it.each(targets)('rejects strict foreign target $platform-$arch before extraction', (target) => {
+    expect(() => probePackagedServerBin('nonexistent-probe.asar', target))
+      .toThrow('requires a matching host');
+  });
+
+  it.each(targets)('explicitly defers only a foreign target $platform-$arch', (target) => {
+    expect(probePackagedServerBin('nonexistent-probe.asar', { ...target, ifHost: true }))
+      .toEqual({ status: 'deferred-native-probe', host, target: `${target.platform}-${target.arch}` });
+  });
+
+  it.each([
+    { platform: 'unknown', arch: process.arch },
+    { platform: process.platform, arch: 'unknown' },
+  ])('rejects invalid target $platform-$arch instead of deferring', (target) => {
+    expect(() => probePackagedServerBin('nonexistent-probe.asar', { ...target, ifHost: true }))
+      .toThrow('unsupported server bin probe target');
+  });
+
+  it.each([false, true])('really executes matching-host ASAR and propagates failures (ifHost=%s)', async (ifHost) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-server-probe-contract-'));
+    try {
+      const source = path.join(root, 'source');
+      const bin = path.join(source, 'node_modules/otto-server/dist/bin.js');
+      await mkdir(path.dirname(bin), { recursive: true });
+      await writeFile(bin, "console.log('未发现运行中的 server'); process.exitCode = 1;\n");
+      const goodArchive = path.join(root, 'good.asar');
+      await asar.createPackage(source, goodArchive);
+      expect(probePackagedServerBin(goodArchive, { ifHost }))
+        .toEqual({ status: 'verified', host, target: host });
+      await writeFile(bin, "throw new Error('Could not load the sharp module');\n");
+      const badArchive = path.join(root, 'bad.asar');
+      await asar.createPackage(source, badArchive);
+      expect(() => probePackagedServerBin(badArchive, { ifHost }))
+        .toThrow('Could not load the sharp module');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps CLI static verification mandatory and rejects conflicting probe modes', () => {
+    const verifier = path.join(packageRoot, 'scripts/verify-packaged-runtime.mjs');
+    const run = (flags) => spawnSync(process.execPath, [verifier, 'nonexistent-probe.asar', ...flags], {
+      cwd: os.tmpdir(), encoding: 'utf8', windowsHide: true, timeout: 10_000,
+    });
+    const conflict = run(['--probe-server-bin', '--probe-server-bin-if-host']);
+    expect(conflict.status).toBe(1);
+    expect(conflict.stderr).toContain('server bin probe modes are mutually exclusive');
+    for (const flags of [
+      ['--platform', 'unknown', '--probe-server-bin-if-host'],
+      ['--arch', 'unknown', '--probe-server-bin'],
+      ['--probe-server-bin-if-host', '--arch'],
+    ]) {
+      const invalid = run(flags);
+      expect(invalid.status).toBe(1);
+      expect(invalid.stderr).toContain('unsupported server bin probe target');
+      expect(invalid.stdout).not.toContain('deferred-native-probe');
+    }
+    const foreign = targets[0];
+    const incomplete = run(['--platform', foreign.platform, '--arch', foreign.arch, '--probe-server-bin-if-host']);
+    expect(incomplete.status).toBe(1);
+    expect(incomplete.stderr).toContain('app.asar not found');
+    expect(incomplete.stdout).not.toContain('deferred-native-probe');
+  });
+});
 
 describe('desktop packaging contract', () => {
   it.each(['mac', 'win'])('excludes compiled tests after real %s builder configuration normalization', async (platform) => {
@@ -462,7 +537,7 @@ describe('desktop packaging contract', () => {
     expect(runtimeVerifier).toContain(
       "'node_modules/qrcode-terminal/lib/main.js'",
     );
-    expect(runtimeVerifier).toContain('probePackagedServerBin(archivePath)');
+    expect(runtimeVerifier).toContain('probePackagedServerBin(archivePath, {');
   });
 
   it('builds, authenticates, and probes one Otto native runtime per packaged architecture', async () => {
@@ -540,9 +615,20 @@ describe('desktop packaging contract', () => {
       },
     ]);
     expect(packageJson.scripts['dist:win']).toContain(
-      'node scripts/verify-packaged-runtime.mjs release/win-unpacked/resources/app.asar --platform win32 --arch x64 --probe-server-bin',
+      'node scripts/verify-packaged-runtime.mjs release/win-unpacked/resources/app.asar --platform win32 --arch x64 --probe-server-bin-if-host',
     );
     expect(packageJson.scripts['dist:win']).toContain('--publish never');
+    const workflow = await readFile(path.join(repoRoot, '.github/workflows/release.yml'), 'utf8');
+    const windows = workflow.slice(workflow.indexOf('  verify-windows-signature:'), workflow.indexOf('  prepare-release-creation-intent:'));
+    expect(windows).toContain("'--probe-native'");
+    expect(windows).toContain("'--probe-server-bin'");
+    expect(windows).not.toContain('--probe-server-bin-if-host');
+    expect(windows.indexOf('probe-packaged-sqlcipher.mjs')).toBeLessThan(windows.indexOf('verify-packaged-runtime.mjs'));
+    const creation = require('yaml').parse(workflow).jobs['create-release-drafts'];
+    expect(creation.needs).toContain('verify-windows-signature');
+    // No explicit if: means GitHub's default success(), not always() or a
+    // failure-tolerant draft path.
+    expect(creation.if ?? 'success()').toBe('success()');
   });
 
   it('keeps update manifest download URLs bound to the no-proxy update mirror', async () => {

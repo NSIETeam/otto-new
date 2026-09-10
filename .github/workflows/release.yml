@@ -586,18 +586,19 @@ jobs:
 
       - name: Focused regression tests
         run: |
-          npx vitest run \
-            packages/core/src/config/lazy-heavy-tools.registration.test.ts \
-            packages/core/src/core/customModelAdapter.test.ts \
-            packages/desktop/src/main/enterprise-client.test.ts \
-            packages/desktop/scripts/packaging-contract.test.mjs \
-            packages/desktop/src/main/video-editor-resource.test.ts \
-            packages/desktop/scripts/make-latest-json.test.mjs \
-            packages/desktop/scripts/update-mirror-config.test.mjs \
-            packages/server/src/enterprise/db.test.ts \
-            packages/server/src/enterprise/parkEndpoints.test.ts \
-            packages/server/src/server.test.ts \
-            packages/server/src/enterprise/server.test.ts
+          npm --workspace otto-core run test -- \
+            src/config/lazy-heavy-tools.registration.test.ts \
+            src/core/customModelAdapter.test.ts
+          npm --workspace otto-desktop run test -- \
+            src/main/enterprise-client.test.ts \
+            scripts/packaging-contract.test.mjs \
+            src/main/video-editor-resource.test.ts \
+            scripts/make-latest-json.test.mjs \
+            scripts/update-mirror-config.test.mjs
+          npm --workspace otto-server run test -- src/enterprise/db.test.ts
+          npm --workspace otto-server run test -- src/enterprise/parkEndpoints.test.ts
+          npm --workspace otto-server run test -- src/server.test.ts
+          npm --workspace otto-server run test -- src/enterprise/server.test.ts
 
       - name: Verify legacy desktop and V1.9.13 database upgrade acceptance
         run: npm run release:upgrade:verify
@@ -2023,6 +2024,8 @@ jobs:
             "Otto-Setup-${VERSION}-win-x64.exe"
             "Otto-Setup-${VERSION}-win-x64.exe.blockmap"
             'latest.json'
+            "otto-${VERSION}-corresponding-source.tar.gz"
+            "otto-${VERSION}-corresponding-source.tar.gz.sha256"
             'SHA256SUMS'
             'SHA256SUMS.sig'
             'UPDATE-MIRROR-SHA256SUMS'

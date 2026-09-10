@@ -193,6 +193,7 @@ export async function downloadSource(spec, fetchImpl = globalThis.fetch) {
       const response = await fetchImpl(url, {
         redirect: 'manual',
         signal: controller.signal,
+        headers: { 'accept-encoding': 'identity' },
       });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get('location');
@@ -209,22 +210,50 @@ export async function downloadSource(spec, fetchImpl = globalThis.fetch) {
           `official source download failed: ${inputName(spec)} (${url.hostname}, HTTP ${response.status})`,
         );
       }
-      const length = response.headers.get('content-length');
-      requireThat(
-        !length || Number(length) === spec.bytes,
-        'source content length mismatch',
-      );
-      const chunks = [];
-      let total = 0;
-      for await (const chunk of response.body) {
-        total += chunk.length;
+      try {
+        // Fetch decodes HTTP content codings but retains the wire headers.
+        // Prefer identity; if a server still compresses, Content-Length is NOT
+        // the decoded artifact length. Cap any declared wire length; the
+        // streamed decoded size/SHA256/npm SHA512 below remain mandatory.
+        const encoding = response.headers.get('content-encoding')?.trim().toLowerCase() ?? 'identity';
         requireThat(
-          total <= spec.bytes && total <= 64 * 1024 * 1024,
-          'source download exceeded bound',
+          ['identity', 'gzip', 'deflate', 'br'].includes(encoding),
+          'source content encoding unsupported',
         );
-        chunks.push(Buffer.from(chunk));
+        const length = response.headers.get('content-length');
+        requireThat(
+          length === null || (/^[0-9]+$/.test(length) && Number.isSafeInteger(Number(length))
+            && Number(length) <= 64 * 1024 * 1024),
+          'source content length invalid',
+        );
+        requireThat(
+          encoding !== 'identity' || length === null || Number(length) === spec.bytes,
+          'source content length mismatch',
+        );
+        const chunks = [];
+        let total = 0;
+        for await (const chunk of response.body) {
+          total += chunk.length;
+          requireThat(
+            total <= spec.bytes && total <= 64 * 1024 * 1024,
+            'source download exceeded bound',
+          );
+          chunks.push(Buffer.from(chunk));
+        }
+        return verifyDownload(Buffer.concat(chunks), spec);
+      } catch (error) {
+        try { await response.body?.cancel(); } catch { /* Already locked/closed. */ }
+        const reasons = [
+          'source content encoding unsupported', 'source content length invalid',
+          'source content length mismatch', 'source download exceeded bound',
+          'source archive length mismatch', 'source archive hash mismatch',
+          'source npm integrity mismatch',
+        ];
+        const reason = reasons.includes(error?.message) ? error.message : 'source response could not be read';
+        // Only our fixed reason and public input identity; no response headers,
+        // body, upstream exception text or signed redirect query is printed.
+        throw new Error(`${reason}: ${inputName(spec)} (${url.hostname})`);
       }
-      return verifyDownload(Buffer.concat(chunks), spec);
     }
     throw new Error('source download redirect limit exceeded');
   } finally {

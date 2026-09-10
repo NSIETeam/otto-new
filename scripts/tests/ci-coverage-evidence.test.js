@@ -3,6 +3,31 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { expect, it } from 'vitest';
 
+it('runs the entire scripts suite as a mandatory merge gate before long builds', () => {
+  const workflow = parse(readFileSync(
+    new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8',
+  ));
+  const job = workflow.jobs['build-and-test'];
+  const steps = job.steps;
+  const scriptTests = steps.filter(step => step.id === 'scripts_tests');
+  expect(scriptTests).toHaveLength(1);
+  const [gate] = scriptTests;
+  expect(gate.run).toBe('npm run test:scripts');
+  expect(gate.if).toBeUndefined();
+  expect(gate['continue-on-error']).toBeUndefined();
+  expect(job['continue-on-error']).toBeUndefined();
+  expect(steps.indexOf(gate)).toBeGreaterThan(steps.findIndex(step => step.run === 'npm ci'));
+  const runtime = steps.find(step => step.id === 'scripts_workflow_runtime');
+  expect(runtime?.run).toBe('npm run build --workspace=packages/workflow');
+  expect(runtime.if).toBeUndefined();
+  expect(runtime['continue-on-error']).toBeUndefined();
+  expect(steps.indexOf(runtime)).toBeGreaterThan(steps.findIndex(step => step.run === 'npm ci'));
+  expect(steps.indexOf(runtime)).toBeLessThan(steps.indexOf(gate));
+  expect(steps.indexOf(gate)).toBeLessThan(steps.findIndex(
+    step => step.name === 'Build current-source native integration test runtime',
+  ));
+});
+
 it('retains actual desktop coverage after a completed test step without bypassing its result', () => {
   const workflow = parse(
     readFileSync(

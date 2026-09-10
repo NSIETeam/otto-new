@@ -813,7 +813,7 @@ for carpool_key in \
   OTTO_PARK_CARPOOL_COMMUNICATION_RETENTION_DAYS \
   OTTO_PARK_CARPOOL_DRIVER_MINIMUM_OVERLAP OTTO_PARK_CARPOOL_TAXI_MINIMUM_OVERLAP \
   OTTO_PARK_CARPOOL_MAXIMUM_DETOUR_SECONDS; do
-  if [[ -v "$carpool_key" ]]; then
+  if [ "${!carpool_key+x}" = x ]; then
     CARPOOL_RUNTIME_ENV_ARGS+=("$carpool_key" "${!carpool_key}")
   fi
 done

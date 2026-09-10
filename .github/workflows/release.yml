@@ -337,11 +337,11 @@ jobs:
             HOMEBREW_NO_AUTO_UPDATE=1 brew install postgresql@17
           fi
           pg_bin="$(brew --prefix postgresql@17)/bin"
-          [[ "$pg_bin" = /* && "$pg_bin" != *$'\n'* && "$pg_bin" != *$'\r'* ]]
+          [[ "$pg_bin" = /* && "$pg_bin" != *$'\n'* && "$pg_bin" != *$'\r'* ]] || { printf '%s\n' 'Invalid PostgreSQL binary directory' >&2; exit 1; }
           for pg_tool in initdb postgres pg_ctl; do
             test -x "$pg_bin/$pg_tool"
             pg_version="$("$pg_bin/$pg_tool" --version)"
-            [[ "$pg_version" =~ ^${pg_tool}\ \(PostgreSQL\)\ 17\.[0-9]+($|\ ) ]]
+            [[ "$pg_version" =~ ^${pg_tool}\ \(PostgreSQL\)\ 17\.[0-9]+($|\ ) ]] || { printf '%s\n' 'PostgreSQL 17 binaries are required' >&2; exit 1; }
             printf '%s\n' "$pg_version"
           done
           {

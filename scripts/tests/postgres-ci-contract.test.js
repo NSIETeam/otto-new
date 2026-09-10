@@ -28,7 +28,7 @@ function preparation(source) {
     .map(line => line.slice(10)).join('\n');
 }
 
-function exercise(script, { installed = true, major = 17, missingTool, installStatus = 0, runnerOS = 'macOS', relativePrefix = false } = {}) {
+function exercise(script, { installed = true, major = 17, missingTool, installStatus = 0, runnerOS = 'macOS', relativePrefix = false, errexitSuppressed = false } = {}) {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'otto-postgres-ci-'));
   try {
     mkdirSync(path.join(directory, 'postgres/bin'), { recursive: true });
@@ -45,11 +45,11 @@ brew() {
   case "$*" in
     'list --versions postgresql@17') return ${installed ? 0 : 1} ;;
     'install postgresql@17') return ${installStatus} ;;
-    '--prefix postgresql@17') printf '%s\\n' ${relativePrefix ? 'relative-prefix' : '"$PWD/postgres"'} ;;
+    '--prefix postgresql@17') printf '%s\\n' ${relativePrefix ? 'postgres' : '"$PWD/postgres"'} ;;
     *) return 99 ;;
   esac
 }
-${script}
+${errexitSuppressed ? `postgres_prepare() {\n${script}\n}\npostgres_prepare || exit $?` : script}
 `;
     const result = spawnSync(bash, [], {
       input, encoding: 'utf8', timeout: 10_000,
@@ -73,8 +73,8 @@ describe.each(workflows)('$name PostgreSQL acceptance wiring (not a real databas
     expect(script).toContain('HOMEBREW_NO_AUTO_UPDATE=1 brew install postgresql@17');
   });
 
-  it('accepts installed 17 binaries and opts both modules into the same isolated-cluster harness', () => {
-    const result = exercise(preparation(source));
+  it.each([false, true])('accepts installed 17 binaries and opts both modules into the same isolated-cluster harness (errexit suppressed: %s)', errexitSuppressed => {
+    const result = exercise(preparation(source), { errexitSuppressed });
     expect(result.status, result.stderr).toBe(0);
     expect(result.calls).not.toContain('install postgresql@17');
     const values = Object.fromEntries(result.exported.trim().split('\n').map(line => line.split('=')));
@@ -107,6 +107,17 @@ describe.each(workflows)('$name PostgreSQL acceptance wiring (not a real databas
     expect(result.status).not.toBe(0);
     expect(result.exported).toBe('');
   });
+
+  it.each([{ major: 18 }, { relativePrefix: true }])(
+    'explicitly rejects invalid version/path even when compound-command errexit is suppressed: %j', options => {
+      // Bash 3.2 does not apply -e to a failing [[ compound command as modern
+      // Bash does. The OR-list context reproduces the absence of automatic exit
+      // without pretending that a modern shell is a complete Bash 3.2 runtime.
+      const result = exercise(preparation(source), { ...options, errexitSuppressed: true });
+      expect(result.status, result.stderr || result.stdout).not.toBe(0);
+      expect(result.exported).toBe('');
+    },
+  );
 });
 
 it('keeps CI and the mandatory release build on the same PostgreSQL setup contract', () => {

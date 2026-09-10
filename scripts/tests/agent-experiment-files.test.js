@@ -5,6 +5,7 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
+  realpathSync,
   rmSync,
   existsSync,
   symlinkSync,
@@ -22,8 +23,10 @@ import {
 } from '../agent-experiment-files.mjs';
 import { hashEntries, verifyBaseline } from '../agent-eval-baseline.mjs';
 const temporary = [];
+// Use a canonical fixture base without relaxing the product's link checks.
+const temporaryRoot = realpathSync(tmpdir());
 const parent = () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'otto-experiment-unit-'));
+  const dir = mkdtempSync(path.join(temporaryRoot, 'otto-experiment-unit-'));
   temporary.push(dir);
   return dir;
 };
@@ -31,7 +34,7 @@ afterEach(() => {
   for (const dir of temporary.splice(0)) {
     if (
       !path.isAbsolute(dir) ||
-      path.dirname(dir) !== path.resolve(tmpdir()) ||
+      path.dirname(dir) !== temporaryRoot ||
       !path.basename(dir).startsWith('otto-experiment-unit-')
     )
       throw new Error('Unsafe test cleanup');
@@ -118,6 +121,7 @@ it('creates traceable separate variants and changes only dependency files in the
   const dir = parent(),
     old = path.join(dir, 'old'),
     next = path.join(dir, 'next');
+  expect(realpathSync(dir)).toBe(dir);
   const a = snapshot(old, false, 'old dirty code'),
     b = snapshot(next, true, 'new dirty code');
   const derived = path.join(dir, 'derived');
@@ -198,8 +202,14 @@ it('refuses nested source outputs and destination junctions', () => {
   expect(() => newDirectory(path.join(source, 'out'), [source])).toThrow(
     /outside/,
   );
+  expect(existsSync(path.join(source, 'out'))).toBe(false);
   const target = path.join(dir, 'target');
   mkdirSync(target);
+  writeFileSync(path.join(target, 'sentinel'), 'user-owned');
   symlinkSync(target, path.join(dir, 'linked'), 'junction');
   expect(() => newDirectory(path.join(dir, 'linked/out'), [])).toThrow(/link/);
+  expect(existsSync(path.join(target, 'out'))).toBe(false);
+  expect(readFileSync(path.join(target, 'sentinel'), 'utf8')).toBe(
+    'user-owned',
+  );
 });

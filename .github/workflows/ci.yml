@@ -61,11 +61,11 @@ jobs:
             HOMEBREW_NO_AUTO_UPDATE=1 brew install postgresql@17
           fi
           pg_bin="$(brew --prefix postgresql@17)/bin"
-          [[ "$pg_bin" = /* && "$pg_bin" != *$'\n'* && "$pg_bin" != *$'\r'* ]]
+          [[ "$pg_bin" = /* && "$pg_bin" != *$'\n'* && "$pg_bin" != *$'\r'* ]] || { printf '%s\n' 'Invalid PostgreSQL binary directory' >&2; exit 1; }
           for pg_tool in initdb postgres pg_ctl; do
             test -x "$pg_bin/$pg_tool"
             pg_version="$("$pg_bin/$pg_tool" --version)"
-            [[ "$pg_version" =~ ^${pg_tool}\ \(PostgreSQL\)\ 17\.[0-9]+($|\ ) ]]
+            [[ "$pg_version" =~ ^${pg_tool}\ \(PostgreSQL\)\ 17\.[0-9]+($|\ ) ]] || { printf '%s\n' 'PostgreSQL 17 binaries are required' >&2; exit 1; }
             printf '%s\n' "$pg_version"
           done
           {
@@ -86,6 +86,18 @@ jobs:
         env:
           PYTHON: python3.11
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Exercise packaging, path guards and deployment fixtures on the actual
+      # macOS host before merge, not only in the long formal release build.
+      # The scripts gate loads the real copied workflow runtime, not a fixture
+      # replacement; a clean runner must compile it first.
+      - name: Build workflow runtime for script acceptance
+        id: scripts_workflow_runtime
+        run: npm run build --workspace=packages/workflow
+
+      - name: Test release and safety scripts
+        id: scripts_tests
+        run: npm run test:scripts
 
       - name: Build current-source native integration test runtime
         shell: bash

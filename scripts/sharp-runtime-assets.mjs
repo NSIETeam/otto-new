@@ -1,6 +1,6 @@
 /** Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0 */
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
@@ -186,4 +186,26 @@ export function verifySharpRuntimeAssets({ repoRoot, destination, targets = ENTE
   }
   requireThat(JSON.stringify(filesBelow(destination)) === JSON.stringify(expectedFiles.sort()), 'sharp staging contains unexpected files');
   return { root: path.resolve(destination), ...receipt };
+}
+
+// The Linux payload is also import-tested on macOS/Windows release builders.
+// Put ONLY verified host Sharp optionals in its fresh temporary ancestor, not
+// in either release tree. Node's normal resolution serves both staging and
+// extracted-archive probes; target manifests/archives remain Linux-only.
+export async function prepareEnterpriseSharpSmokeHost({ repoRoot, temporaryRoot, hostTarget = `${process.platform}-${process.arch}`, fetchArchive }) {
+  if (ENTERPRISE_SHARP_TARGETS.includes(hostTarget)) return { target: hostTarget, packages: [] };
+  temporaryRoot = realpathSync(temporaryRoot);
+  assertDirectoryChain(temporaryRoot);
+  requireThat(!readdirSync(temporaryRoot).some(name => name.toLowerCase() === 'node_modules'), 'smoke parent node_modules already exists');
+  const targets = [hostTarget];
+  const assets = await materializeSharpRuntimeAssets({
+    repoRoot, destination: path.join(temporaryRoot, 'sharp-host-smoke-assets'), targets, fetchArchive,
+  });
+  const verified = verifySharpRuntimeAssets({ repoRoot, destination: assets.root, targets });
+  for (const spec of verified.packages) {
+    const destination = path.join(temporaryRoot, spec.location);
+    mkdirSync(path.dirname(destination), { recursive: true });
+    cpSync(path.join(verified.root, spec.location), destination, { recursive: true, force: false, errorOnExist: true });
+  }
+  return { target: hostTarget, packages: verified.packages.map(spec => spec.name) };
 }

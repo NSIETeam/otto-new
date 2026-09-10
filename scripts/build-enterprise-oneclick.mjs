@@ -24,7 +24,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { supportedEnterpriseSchemaVersions } from './enterprise-release-contract.mjs';
 import { copyEnterpriseRuntimeDependencies } from './enterprise-runtime-dependencies.mjs';
-import { materializeSharpRuntimeAssets } from './sharp-runtime-assets.mjs';
+import { materializeSharpRuntimeAssets, prepareEnterpriseSharpSmokeHost } from './sharp-runtime-assets.mjs';
 import { copyEnterpriseServerNotice } from './server-notice.mjs';
 import { copyEnterpriseWorkflowRuntime } from './enterprise-workflow-runtime.mjs';
 import {
@@ -657,6 +657,8 @@ export class FeatureFlagManager {
   );
 
   const smokeDataRoot = path.join(temporaryRoot, 'smoke-data');
+  const hostSmoke = await prepareEnterpriseSharpSmokeHost({ repoRoot, temporaryRoot });
+  console.log(`[bundle] offline startup host=${hostSmoke.target}; isolated host Sharp packages=${hostSmoke.packages.length}; Linux install canary remains required`);
   smokeEnterpriseRuntime(releaseRoot, smokeDataRoot);
 
   const releaseFiles = filesBelow(releaseRoot);
@@ -826,9 +828,10 @@ export class FeatureFlagManager {
       `archive contains non-portable entries: ${nonPortableEntries.join(', ')}`,
     );
   }
-  // Test the bytes that will actually be delivered, not only the staging
-  // directory. Extraction followed by an offline bind/close catches missing
-  // ESM exports and incomplete workspace dependency closures in the archive.
+  // Extract the delivered bytes and repeat the bind/close probe. Non-Linux
+  // hosts resolve only their Sharp native bridge from temporaryRoot, outside
+  // this archive. This proves JS closure/startup, not native Linux operation;
+  // the Linux installation canary remains the target-platform proof.
   const archiveSmokeRoot = path.join(temporaryRoot, 'archive-smoke');
   mkdirSync(archiveSmokeRoot, { recursive: true });
   run('tar', ['-xzf', archive, '-C', archiveSmokeRoot]);

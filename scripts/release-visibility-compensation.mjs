@@ -304,7 +304,8 @@ function assertInitialSnapshots(snapshots, expected, prePublicationLatest) {
     legacy.identity.tagName !== expected.tag ||
     canonical.identity.targetCommitish !== expected.canonicalTarget ||
     legacy.identity.targetCommitish !== expected.legacyTarget ||
-    canonical.canonicalTagCommit !== expected.canonicalTagCommit ||
+    (canonical.canonicalTagCommit !== expected.canonicalTagCommit &&
+      !(canonical.visibility.draft && canonical.canonicalTagCommit === null)) ||
     canonical.identity.name !== expected.releaseName ||
     legacy.identity.name !== expected.releaseName ||
     canonical.identity.bodySha256 !== expected.bodySha256 ||
@@ -731,6 +732,16 @@ function latestPointerFromGitHubRelease(release) {
 }
 
 export function createGitHubAdapter({ tag, tokens }) {
+  async function readPages(token, route) {
+    const pages = JSON.parse(await runGh(token, [
+      'api', '--method', 'GET', route, '--paginate', '--slurp',
+    ]));
+    if (!Array.isArray(pages) || !pages.every(Array.isArray) ||
+      pages.flat().some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+      throw new Error('GitHub paginated response is invalid');
+    }
+    return pages.flat();
+  }
   async function getLatestRelease(endpoint) {
     const token = tokens[endpoint.key];
     const repositoryIdentity = (
@@ -761,27 +772,44 @@ export function createGitHubAdapter({ tag, tokens }) {
   return {
     async getState(endpoint) {
       const token = tokens[endpoint.key];
+      // The tag endpoint only returns published releases. Drafts can also have
+      // no Git tag yet, so resolve the exact release ID from the complete list.
+      const matches = (await readPages(token,
+        `repos/${endpoint.repository}/releases?per_page=100`,
+      )).filter(release => release?.tag_name === tag);
+      if (matches.length !== 1 || !Number.isSafeInteger(matches[0].id) || matches[0].id <= 0) {
+        throw new Error('GitHub release tag must identify one unique release');
+      }
       const release = JSON.parse(
         await runGh(token, [
           'api',
           '--method',
           'GET',
-          `repos/${endpoint.repository}/releases/tags/${encodeURIComponent(tag)}`,
+          `repos/${endpoint.repository}/releases/${matches[0].id}`,
         ]),
       );
-      const canonicalTagCommit =
-        endpoint.key === 'canonical'
-          ? (
-              await runGh(token, [
-                'api',
-                '--method',
-                'GET',
-                `repos/${endpoint.repository}/commits/${encodeURIComponent(tag)}`,
-                '--jq',
-                '.sha',
-              ])
-            ).trim()
-          : null;
+      if (release?.id !== matches[0].id || release.tag_name !== tag) {
+        throw new Error('GitHub release identity changed after listing');
+      }
+      release.assets = await readPages(token,
+        `repos/${endpoint.repository}/releases/${release.id}/assets?per_page=100`,
+      );
+      let canonicalTagCommit = null;
+      if (endpoint.key === 'canonical') {
+        const refs = (await readPages(token,
+          `repos/${endpoint.repository}/git/matching-refs/tags/${encodeURIComponent(tag)}`,
+        )).filter(ref => ref?.ref === `refs/tags/${tag}`);
+        if (refs.length > 1 || (refs.length === 0 && release.draft !== true)) {
+          throw new Error('Published release tag is missing or ambiguous');
+        }
+        if (refs.length === 1) {
+          canonicalTagCommit = (await runGh(token, [
+            'api', '--method', 'GET',
+            `repos/${endpoint.repository}/commits/${encodeURIComponent(tag)}`,
+            '--jq', '.sha',
+          ])).trim();
+        }
+      }
       const latestRelease = await getLatestRelease(endpoint);
       return normalizeReleaseState({
         repository: endpoint.repository,

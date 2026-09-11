@@ -1771,13 +1771,23 @@ jobs:
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]
-          [[ "$DEPLOY_HOST" != *'..'* ]]
-          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
-          [[ "$ROLLBACK_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          for required_name in DEPLOY_HOST DEPLOY_USER ROLLBACK_DEPLOY_USER DEPLOY_PORT \
+            DEPLOY_SSH_KEY ROLLBACK_DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            if [ -z "${!required_name:-}" ]; then
+              echo "::error::Missing required deployment configuration: ${required_name} (production-automation)." >&2
+              exit 1
+            fi
+          done
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]] || exit 1
+          [[ "$DEPLOY_HOST" != *'..'* ]] || exit 1
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || exit 1
+          [[ "$ROLLBACK_DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || exit 1
           [ "$DEPLOY_USER" != "$ROLLBACK_DEPLOY_USER" ]
-          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]]
-          [ "$DEPLOY_PORT" -ge 1 ] && [ "$DEPLOY_PORT" -le 65535 ]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]+$ ]] || exit 1
+          [ "$DEPLOY_PORT" -ge 1 ] && [ "$DEPLOY_PORT" -le 65535 ] || {
+            echo '::error::DEPLOY_PORT must be between 1 and 65535.' >&2
+            exit 1
+          }
           test -n "$DEPLOY_SSH_KEY"
           test -n "$ROLLBACK_DEPLOY_SSH_KEY"
           test -n "$DEPLOY_KNOWN_HOSTS"
@@ -1874,6 +1884,9 @@ jobs:
         )
       }}
     uses: ./.github/workflows/deploy-server.yml
+    # Required for called jobs to resolve their protected environment secrets.
+    # Keep this same-commit local call and the callee's environment protection.
+    secrets: inherit
     with:
       version: ${{ needs.build.outputs.version }}
       package_identity: ${{ needs.build.outputs.package_identity }}

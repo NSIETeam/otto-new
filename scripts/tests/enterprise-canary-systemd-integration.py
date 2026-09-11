@@ -208,7 +208,17 @@ def main():
                 destination = package / 'tools' / name; destination.parent.mkdir(exist_ok=True); shutil.copyfile(source / 'tools' / name, destination); destination.chmod(0o600)
             write(package / 'tools/migrate-check.mjs', MIGRATION)
             write(package / 'release/run.mjs', RUNTIME)
-            write(package / 'release/manifest.json', json.dumps({'version':'1.9.15','buildCommit':'a'*40,'database':{'schemaTo':41}}))
+            manifest = {'version':'1.9.15','buildCommit':'a'*40,'database':{'schemaTo':41}}
+            # Real 1.9.15 inventories exceed the 1 MiB IPC receipt limit. Exercise
+            # the real root controller with a bounded, large inventory on every
+            # existing lifecycle case; no increase to worker/control limits.
+            manifest['files'] = {
+                f'node_modules/component-{i}/distribution/server-long-file-name-{i}.js': 'a'*64
+                for i in range(8000)
+            }
+            manifest_raw = json.dumps(manifest)
+            require(1024*1024 < len(manifest_raw.encode()) < 16*1024*1024, 'large manifest fixture missing')
+            write(package / 'release/manifest.json', manifest_raw)
             txn = case / 'txn'; txn.mkdir(mode=0o700); owned_transactions.append(txn)
             work = txn / 'canary/work'; work.mkdir(parents=True, mode=0o700); work.parent.chmod(0o700)
             rollback = txn / 'data.db.before'; write(rollback,'immutable rollback fixture')
@@ -232,6 +242,7 @@ def main():
                 require('populated 0' in (group / 'cgroup.events').read_text() and not (group / 'cgroup.procs').read_text().strip(), 'unit has remaining processes')
             positive = mode in ['success','drain45','ready-link-delay']
             report['cases'].append({'mode': mode, 'exit': result.returncode, 'seconds': round(elapsed, 2),
+                'manifestBytes': len(manifest_raw.encode()),
                 # Only root-produced fixed enums, never raw runner stderr or config.
                 'launchDiagnostic': json.loads((txn / 'canary-launch-diagnostic.json').read_text())
                     if (txn / 'canary-launch-diagnostic.json').exists() else None,

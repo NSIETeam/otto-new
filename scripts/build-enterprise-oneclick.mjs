@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { assertPortableTarMetadata } from './enterprise-archive-portability.mjs';
+import { assertPortableArchiveEntries, assertPortableTarMetadata } from './enterprise-archive-portability.mjs';
 import { supportedEnterpriseSchemaVersions } from './enterprise-release-contract.mjs';
 import { copyEnterpriseRuntimeDependencies } from './enterprise-runtime-dependencies.mjs';
 import { materializeSharpRuntimeAssets, prepareEnterpriseSharpSmokeHost } from './sharp-runtime-assets.mjs';
@@ -808,19 +808,7 @@ export class FeatureFlagManager {
   writeFileSync(archive, gzipSync(readFileSync(temporaryTar), { level: 9 }));
   const archiveTar = gunzipSync(readFileSync(archive));
   assertPortableTarMetadata(archiveTar);
-  const archiveEntries = run('tar', ['-tzf', archive], { capture: true })
-    .split('\n')
-    .filter(Boolean);
-  const nonPortableEntries = archiveEntries.filter(
-    (entry) =>
-      path.basename(entry).startsWith('._') ||
-      path.basename(entry) === '.DS_Store',
-  );
-  if (nonPortableEntries.length > 0) {
-    throw new Error(
-      `archive contains non-portable entries: ${nonPortableEntries.join(', ')}`,
-    );
-  }
+  assertPortableArchiveEntries(archive);
   // Extract the delivered bytes and repeat the bind/close probe. Non-Linux
   // hosts resolve only their Sharp native bridge from temporaryRoot, outside
   // this archive. This proves JS closure/startup, not native Linux operation;

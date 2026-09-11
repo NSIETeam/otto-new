@@ -32,3 +32,24 @@ Verification before review:
 
 These local checks do not substitute for a fresh formal release, actual
 Windows upgrade cases, Linux installation or production/publication receipts.
+
+## Full archive listings above 1 MiB
+
+The next original release run `34551454348` passed metadata validation, desktop
+packaging and macOS seals, then stopped at `tar -tzf` with a null exit status.
+Its error contained a truncated listing above Node's default 1 MiB pipe limit.
+The complete old payload with real-length release paths independently reproduced
+`ENOBUFS`: the full 9,139-entry listing is 1,221,194 bytes. This did not deploy.
+
+Only archive listing now uses a 16 MiB output limit and a 60-second timeout.
+Spawn errors, nonzero exits, empty or incomplete output still fail closed;
+partial stdout is never accepted or dumped into an enormous error message.
+Every returned name remains checked, including AppleDouble and `.DS_Store`
+entries after the former cutoff. Other build subprocess limits are unchanged.
+
+The real TAR regression first failed with `ENOBUFS` in three cases (normal list
+and two forbidden tail entries), with four failure-handling cases already
+passing. After the fix all 11 listing cases pass, including missing/truncated
+stdout. The four focused archive/dependency suites passed 42 cases with one
+existing platform skip. The preserved full-payload reproduction and these
+tests are not a substitute for the next actual macOS enterprise build.

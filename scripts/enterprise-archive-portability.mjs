@@ -1,5 +1,33 @@
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+
 const BLOCK_SIZE = 512;
 const utf8 = new TextDecoder('utf-8', { fatal: true });
+
+/** List every extracted name before rejecting AppleDouble and Finder metadata. */
+export function assertPortableArchiveEntries(archivePath) {
+  const result = spawnSync('tar', ['-tzf', archivePath], {
+    encoding: 'utf8',
+    stdio: 'pipe',
+    shell: false,
+    windowsHide: true,
+    // Real production paths make the complete list exceed Node's 1 MiB default.
+    // This bound is local to listing, not a blanket increase for build commands.
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 60_000,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`enterprise archive listing failed (${result.error?.code ?? result.signal ?? result.status}); incomplete output rejected`);
+  }
+  if (typeof result.stdout !== 'string' || !result.stdout.endsWith('\n')) {
+    throw new Error('enterprise archive listing missing or incomplete');
+  }
+  const entries = result.stdout.split(/\r?\n/).filter(Boolean);
+  if (!entries.length) throw new Error('enterprise archive listing is empty');
+  const forbidden = entries.filter(entry => path.basename(entry).startsWith('._') || path.basename(entry) === '.DS_Store');
+  if (forbidden.length) throw new Error(`archive contains non-portable entries: ${forbidden.slice(0, 10).join(', ')}`);
+  return entries;
+}
 
 function readOctal(bytes, label) {
   const raw = bytes.toString('latin1');

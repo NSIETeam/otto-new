@@ -1179,8 +1179,11 @@ describe('desktop packaging contract', () => {
     );
     expect(enterpriseJob).toContain('use_workflow_artifact: true');
     expect(enterpriseJob).toContain('defer_finalize: true');
-    expect(enterpriseJob).not.toContain('secrets: inherit');
-    expect(enterpriseJob).not.toContain('    secrets:');
+    // The same-commit local callee resolves its own protected environment;
+    // require explicit context inheritance, not arbitrary named mappings.
+    expect(enterpriseJob.match(/^ {4}secrets:.*$/gm)).toEqual([
+      '    secrets: inherit',
+    ]);
     expect(buildJob).toContain('    environment: production-approval');
     expect(buildJob).toContain('cd "$(dirname -- "$ENTERPRISE_SHA")"');
     expect(buildJob).toContain(

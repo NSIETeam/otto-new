@@ -1216,8 +1216,10 @@ if [ "$COMMAND" = 'finalize-deployment' ]; then
   DEPLOYMENT_STATE_DIR="$(require_deployment_transaction \
     "$TRANSACTION_ID" "$EXPECTED_VERSION" "$PACKAGE_ID" \
     "$EXPECTED_SOURCE_COMMIT")"
+  # Keep verifier diagnostics off the exact machine-readable finalization
+  # receipt, for both the first commit and an idempotent replay.
   verify_current_deployment \
-    "$EXPECTED_VERSION" "$PACKAGE_ID" "$EXPECTED_SOURCE_COMMIT"
+    "$EXPECTED_VERSION" "$PACKAGE_ID" "$EXPECTED_SOURCE_COMMIT" >&2
   # Re-establish the live-filesystem durability barrier before either the
   # first terminal marker or an idempotent replay after a lost SSH response.
   sync_live_deployment_filesystems

@@ -997,9 +997,35 @@ case "$RECOVERED_DEPLOYMENT" in
     exit 1
     ;;
 esac
-SUDO_USER=nobody "$GATEWAY" finalize-deployment \
-  "$VERIFY_TRANSACTION" 1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT" >/dev/null
+# Finalization must retain health failures and isolate noisy successful health
+# checks from its exact stdout receipt, including an idempotent replay.
+printf '%s\n' '#!/bin/bash' 'set -Eeuo pipefail' \
+  "printf '%s\\n' '{\"ok\":false}' '[Otto Deploy] health rejected'" 'exit 7' \
+  > /opt/otto-enterprise/deploy/verify.sh
+chmod 0755 /opt/otto-enterprise/deploy/verify.sh
+if SUDO_USER=nobody "$GATEWAY" finalize-deployment \
+  "$VERIFY_TRANSACTION" 1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT"; then
+  printf 'gateway finalized despite failed health verification\n' >&2
+  exit 1
+fi
+[ ! -e "$VERIFY_TRANSACTION_DIR/finalized" ]
+printf '%s\n' '#!/bin/bash' 'set -Eeuo pipefail' \
+  "printf '%s\\n' '{\"ok\":true}' '[Otto Deploy] health checked'" \
+  > /opt/otto-enterprise/deploy/verify.sh
+chmod 0755 /opt/otto-enterprise/deploy/verify.sh
+EXPECTED_FINALIZED="finalized ${RECOVERED_DEPLOYMENT#recovered_}"
+for FINALIZE_ATTEMPT in initial replay; do
+  FINALIZED_DEPLOYMENT="$(SUDO_USER=nobody "$GATEWAY" finalize-deployment \
+    "$VERIFY_TRANSACTION" 1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT")"
+  [ "$FINALIZED_DEPLOYMENT" = "$EXPECTED_FINALIZED" ] || {
+    printf 'gateway finalization receipt mismatch (%s)\nexpected: %s\nactual:   %s\n' \
+      "$FINALIZE_ATTEMPT" "$EXPECTED_FINALIZED" "$FINALIZED_DEPLOYMENT" >&2
+    exit 1
+  }
+done
 [ -f "$VERIFY_TRANSACTION_DIR/finalized" ]
+[ "$(<"$VERIFY_TRANSACTION_DIR/finalized")" = \
+  "${EXPECTED_FINALIZED#finalized }" ]
 
 # Simulate an upgrade that failed before cutover after its transaction state
 # became durable. Reconciliation must verify the still-running previous release,

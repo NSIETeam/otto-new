@@ -680,8 +680,12 @@ complete_rolled_back_receipt_if_previous() {
     /usr/bin/sync -f "$witness_path"
   done
   /usr/bin/sync -f "$transaction_dir"
+  # This function is captured by $(...). Verifier stdout is diagnostic, not
+  # part of the single-line receipt; explicitly reject failure because Bash
+  # command substitutions do not inherit errexit by default.
   verify_current_deployment \
-    "$previous_version" "$previous_package" "$previous_source"
+    "$previous_version" "$previous_package" "$previous_source" >&2 \
+    || fail 'restored enterprise deployment failed health verification'
   sync_live_deployment_filesystems
   expected_receipt="$(rollback_receipt_for_state "$transaction_dir")"
   write_once_durable "${transaction_dir}/rolled-back" "$expected_receipt"

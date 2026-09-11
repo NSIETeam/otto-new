@@ -856,6 +856,10 @@ export function createGitHubAdapter({ tag, tokens }) {
         '--method',
         'PATCH',
         `repos/${endpoint.repository}/releases/${releaseId}`,
+        // GitHub can replace an unpublished draft's omitted tag with untagged-*.
+        // Preserve the tag already locked by the full pre-mutation identity check.
+        '-f',
+        `tag_name=${tag}`,
         '-F',
         `draft=${visibility.draft}`,
         '-F',

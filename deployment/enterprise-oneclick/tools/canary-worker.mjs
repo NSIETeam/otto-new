@@ -65,6 +65,14 @@ function json(file, owner = 0) {
   if (st.size > 1024 * 1024) reject('canary-receipt-too-large');
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
+export function readPackageManifest(file) {
+  // This root-owned, signature-verified inventory contains thousands of file
+  // hashes; it is not an untrusted worker/control receipt. Keep that IPC limit
+  // at 1 MiB while separately bounding the package manifest's memory use.
+  const st = ordinary(file);
+  if (st.size > 16 * 1024 * 1024) reject('canary-manifest-too-large');
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
 function writeJson(file, value, exclusive = true) {
   fs.writeFileSync(file, `${JSON.stringify(value)}\n`, {
     flag: exclusive ? 'wx' : 'w',
@@ -517,7 +525,7 @@ async function prepare(transaction) {
   );
   if (transaction.startsWith(`${packageRoot}/`))
     reject('canary-transaction-inside-package');
-  const manifest = json(`${packageRoot}/release/manifest.json`);
+  const manifest = readPackageManifest(`${packageRoot}/release/manifest.json`);
   ordinary(`${transaction}/enterprise.env.before`);
   ordinary(`${transaction}/database-inspection.before.json`);
   const configuration = fs.readFileSync(

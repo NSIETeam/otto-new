@@ -1036,6 +1036,25 @@ chown root:root \
 chmod 0600 \
   "$FAILED_TRANSACTION_DIR/rollback-witness.expected" \
   "$FAILED_TRANSACTION_DIR/upgrade/rollback-verified"
+# The production verifier emits health JSON and a status line on stdout.
+# A silent stub masked corruption of the machine-readable recovered_ prefix.
+printf '%s\n' '#!/bin/bash' 'set -Eeuo pipefail' \
+  "printf '%s\\n' '{\"ok\":false}' '[Otto Deploy] health rejected'" 'exit 7' \
+  > /opt/otto-enterprise/deploy/verify.sh
+chmod 0755 /opt/otto-enterprise/deploy/verify.sh
+if SUDO_USER=nobody "$GATEWAY" reconcile-deployment \
+  "$FAILED_TRANSACTION" 1.9.15 "$FAILED_PACKAGE" "$FAILED_SOURCE"; then
+  printf 'gateway accepted a failed restored-release health check\n' >&2
+  exit 1
+fi
+[ ! -e "$FAILED_TRANSACTION_DIR/rolled-back" ] || {
+  printf 'failed health verification created a successful rollback receipt\n' >&2
+  exit 1
+}
+printf '%s\n' '#!/bin/bash' 'set -Eeuo pipefail' \
+  "printf '%s\\n' '{\"ok\":true}' '[Otto Deploy] health checked'" \
+  > /opt/otto-enterprise/deploy/verify.sh
+chmod 0755 /opt/otto-enterprise/deploy/verify.sh
 RECOVERED_ROLLBACK="$(SUDO_USER=nobody "$GATEWAY" reconcile-deployment \
   "$FAILED_TRANSACTION" 1.9.15 "$FAILED_PACKAGE" "$FAILED_SOURCE")"
 EXPECTED_RECOVERED_ROLLBACK="recovered_rolled_back transaction=$FAILED_TRANSACTION restored_version=1.9.14 restored_package=$PACKAGE_ID restored_source=$SOURCE_COMMIT replaced_version=1.9.15 replaced_package=$FAILED_PACKAGE replaced_source=$FAILED_SOURCE"

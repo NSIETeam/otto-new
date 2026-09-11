@@ -13,6 +13,7 @@ import {
   parseConfiguration,
   publishControlHandshake,
   readinessPublicationComplete,
+  readPackageManifest,
 } from '../../deployment/enterprise-oneclick/tools/canary-worker.mjs';
 import {
   fetchHealthJson,
@@ -20,6 +21,72 @@ import {
 } from '../../deployment/enterprise-oneclick/tools/health-check.mjs';
 
 describe('signed upgrade canary isolation contract', () => {
+  it('accepts a root-owned package manifest larger than a control receipt', () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 8000 }, (_, i) => [
+        `node_modules/component-${i}/distribution/server-long-file-name-${i}.js`,
+        'a'.repeat(64),
+      ]),
+    );
+    const raw = JSON.stringify({ version: '1.9.15', files });
+    expect(Buffer.byteLength(raw)).toBeGreaterThan(1024 * 1024);
+    vi.spyOn(fs, 'lstatSync').mockReturnValue({
+      isSymbolicLink: () => false,
+      isFile: () => true,
+      uid: 0,
+      nlink: 1,
+      mode: 0o444,
+      size: Buffer.byteLength(raw),
+    });
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(raw);
+    try {
+      expect(
+        Object.keys(readPackageManifest('/package/manifest.json').files),
+      ).toHaveLength(8000);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+  it('bounds package manifests separately without relaxing custody or readiness limits', () => {
+    const metadata = {
+      isSymbolicLink: () => false,
+      isFile: () => true,
+      uid: 0,
+      nlink: 1,
+      mode: 0o444,
+      size: 16 * 1024 * 1024,
+    };
+    const stat = vi.spyOn(fs, 'lstatSync').mockReturnValue(metadata);
+    const read = vi.spyOn(fs, 'readFileSync').mockReturnValue('{}');
+    try {
+      expect(readPackageManifest('/package/manifest.json')).toEqual({});
+      read.mockClear();
+      stat.mockReturnValue({ ...metadata, size: metadata.size + 1 });
+      expect(() => readPackageManifest('/package/manifest.json')).toThrow(
+        'canary-manifest-too-large',
+      );
+      expect(read).not.toHaveBeenCalled();
+      for (const changed of [
+        { uid: 1 },
+        { nlink: 2 },
+        { mode: 0o666 },
+        { isSymbolicLink: () => true },
+        { isFile: () => false },
+      ]) {
+        stat.mockReturnValue({ ...metadata, ...changed });
+        expect(() => readPackageManifest('/package/manifest.json')).toThrow(
+          'canary-path-custody-invalid',
+        );
+      }
+      stat.mockReturnValue({ ...metadata, size: 1024 * 1024 + 1 });
+      expect(() => readinessPublicationComplete('/work/ready.json', 0)).toThrow(
+        'canary-receipt-too-large',
+      );
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
   it.each(['writeFileSync', 'fchmodSync', 'fsyncSync', 'linkSync'])(
     'never publishes partial control bytes after %s fails and removes only its own staging file',
     (operation) => {

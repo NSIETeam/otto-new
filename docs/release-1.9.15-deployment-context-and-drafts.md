@@ -18,6 +18,9 @@ return the unpublished draft. Production remained on 1.9.14.
 - Reject missing configuration before creating private-key files or executing
   SSH. Report variable names only. Both principal checks remain identical;
   reject ports outside 1–65535 explicitly, including under Bash `set -e`.
+  The first macOS CI run exposed four rejected-configuration cases returning
+  success with its older Bash. Grammar checks now explicitly exit on failure;
+  the original negative assertions are unchanged and must pass on that runner.
 - Resolve an exact draft tag across all release pages, then recheck its numeric
   ID and tag through the ID endpoint. Read all assets from their paginated
   endpoint instead of trusting an embedded list.

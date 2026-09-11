@@ -22,6 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
+import { assertPortableTarMetadata } from './enterprise-archive-portability.mjs';
 import { supportedEnterpriseSchemaVersions } from './enterprise-release-contract.mjs';
 import { copyEnterpriseRuntimeDependencies } from './enterprise-runtime-dependencies.mjs';
 import { materializeSharpRuntimeAssets, prepareEnterpriseSharpSmokeHost } from './sharp-runtime-assets.mjs';
@@ -340,6 +341,7 @@ const sourceScope = [
   'packages/core/src/customer-modules',
   'deployment/enterprise-oneclick',
   'scripts/build-enterprise-oneclick.mjs',
+  'scripts/enterprise-archive-portability.mjs',
   'scripts/enterprise-runtime-dependencies.mjs',
   'scripts/sharp-runtime-assets.mjs',
   'scripts/server-notice.mjs',
@@ -380,6 +382,7 @@ const sourceInputFiles = [
     path.join('packages/core/src/customer-modules', relative),
   ),
   'scripts/build-enterprise-oneclick.mjs',
+  'scripts/enterprise-archive-portability.mjs',
   'scripts/enterprise-runtime-dependencies.mjs',
   'scripts/sharp-runtime-assets.mjs',
   'scripts/server-notice.mjs',
@@ -804,17 +807,7 @@ export class FeatureFlagManager {
   normalizeTarExecutableModes(temporaryTar, finalPackageName, executableFiles);
   writeFileSync(archive, gzipSync(readFileSync(temporaryTar), { level: 9 }));
   const archiveTar = gunzipSync(readFileSync(archive));
-  for (const forbiddenMetadataMarker of [
-    'LIBARCHIVE.xattr.',
-    'SCHILY.xattr.',
-    'com.apple.provenance',
-  ]) {
-    if (archiveTar.includes(Buffer.from(forbiddenMetadataMarker))) {
-      throw new Error(
-        `archive contains non-portable metadata marker: ${forbiddenMetadataMarker}`,
-      );
-    }
-  }
+  assertPortableTarMetadata(archiveTar);
   const archiveEntries = run('tar', ['-tzf', archive], { capture: true })
     .split('\n')
     .filter(Boolean);

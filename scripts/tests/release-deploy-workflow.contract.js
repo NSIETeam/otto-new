@@ -292,8 +292,9 @@ describe('release workflow production privilege boundary', () => {
       'source_commit: ${{ needs.build.outputs.source_commit }}',
     );
     expect(deployJob).toContain('use_workflow_artifact: true');
-    expect(deployJob).not.toContain('secrets: inherit');
-    expect(deployJob).not.toContain('    secrets:');
+    // The same-commit callee must inherit context to resolve its own protected
+    // environment secrets; named caller mappings cannot replace that boundary.
+    expect(deployJob.match(/^ {4}secrets:.*$/gm)).toEqual(['    secrets: inherit']);
     expect(deployWorkflow).not.toMatch(/workflow_call:[\s\S]*?\n\s{4}secrets:/);
     expect(deployJob).not.toContain('runs-on:');
     expect(deployJob).not.toContain('upgrade.sh');

@@ -185,6 +185,51 @@ function applyVisibility(states, endpoint, visibility) {
 }
 
 describe('release visibility compensation', () => {
+  it('keeps exact pre-public drafts and old latest when the canonical Git tag does not exist yet', async () => {
+    const states = fixtureStates({ canonical: { draft: true }, legacy: { draft: true } });
+    states.canonical.canonicalTagCommit = null;
+    const calls = [];
+    const adapter = withLatestControl(states, {
+      async getState(endpoint) { return clone(states[endpoint.key]); },
+      async setVisibility(endpoint, id, visibility) {
+        calls.push({ key: endpoint.key, id, visibility });
+        applyVisibility(states, endpoint, visibility);
+      },
+    });
+    const result = await compensateReleaseVisibility({
+      adapter, endpoints: endpoints(), expected: expected(states),
+      prePublicationLatest: prePublicationLatest(),
+    });
+    expect(result.finalStates.canonical.canonicalTagCommit).toBeNull();
+    for (const key of ['canonical', 'legacy']) {
+      expect(result.finalStates[key].visibility.draft).toBe(true);
+      expect(result.finalStates[key].latest).toEqual(prePublicationLatest().latest[key]);
+    }
+    expect(calls.every(call => call.visibility.draft && !call.visibility.makeLatest)).toBe(true);
+  });
+
+  it.each(['wrong-target', 'wrong-existing-tag', 'missing-public-tag', 'wrong-assets'])(
+    'still refuses %s before any visibility change', async (kind) => {
+      const states = fixtureStates({ canonical: { draft: true }, legacy: { draft: true } });
+      const locked = expected(states);
+      states.canonical.canonicalTagCommit = null;
+      if (kind === 'wrong-target') states.canonical.identity.targetCommitish = 'f'.repeat(40);
+      if (kind === 'wrong-existing-tag') states.canonical.canonicalTagCommit = 'f'.repeat(40);
+      if (kind === 'missing-public-tag') states.canonical.visibility.draft = false;
+      if (kind === 'wrong-assets') states.canonical.assets[0].digest = `sha256:${'f'.repeat(64)}`;
+      let writes = 0;
+      const adapter = withLatestControl(states, {
+        async getState(endpoint) { return clone(states[endpoint.key]); },
+        async setVisibility() { writes += 1; },
+      });
+      await expect(compensateReleaseVisibility({
+        adapter, endpoints: endpoints(), expected: locked,
+        prePublicationLatest: prePublicationLatest(),
+      })).rejects.toThrow(/identity|assets/);
+      expect(writes).toBe(0);
+    },
+  );
+
   it('requires an exact legacy commit SHA in compensation CLI bindings', () => {
     const argv = [
       '--tag',

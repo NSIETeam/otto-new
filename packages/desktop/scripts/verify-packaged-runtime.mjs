@@ -171,6 +171,7 @@ export function verifyPackagedRuntime(
     'dist/main/index.js',
     'dist/preload/index.js',
     'dist/renderer/index.html',
+    'dist/renderer/desktop-pet.html',
     'node_modules/otto-server/dist/bin.js',
     'node_modules/otto-server/dist/src/bin.js',
     'node_modules/otto-server/dist/src/channelCli.js',

@@ -326,8 +326,16 @@ export function createPolicyModelFromEnv(): PolicyModel | undefined {
     );
     return object(JSON.parse(content));
   }
+  return createPolicyModelWithInvoker(model, invoke);
+}
+
+/** Shared prompts and evidence validation; only the credential transport differs. */
+export function createPolicyModelWithInvoker(
+  name: string,
+  invoke: import('./policyClientExecution.js').PolicyModelInvoker,
+): PolicyModel {
   return {
-    name: model,
+    name,
     async extract(document, signal) {
       const raw = await invoke(
         '提取申报条件及 AND/OR 关系，不能遗漏。类别可自由扩展，不限定五类。返回 summary,supportText,categories,referenceOnly,conditions:[{id,label,quote,factKeys,question,comparison?:{field,operator:gte|lte|eq,value}}],conditionTree:{all:[id或嵌套any/all]},materials:[{label,quote}],resources:[{label,url,quote}]。原文未出现的链接不输出。可选 publishedAt/startsAt/deadline/validFrom/validUntil 均用 YYYY-MM-DD 并附对应字段名+Quote 的原文；validFrom/validUntil 是文件效力期限，不是申报窗口。常年受理须 evergreen:true 和 evergreenQuote，否则留空。factKeys 优先 registeredRegion,industry,establishedAt,enterpriseType,mainBusiness,qualifications,annualRevenueCny,rdExpenseCny,fiscalYear；额外条件允许新的 camelCase 字段。数值换算为元。非申报类一般政策标 referenceOnly:true。' +

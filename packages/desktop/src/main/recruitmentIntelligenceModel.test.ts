@@ -67,6 +67,53 @@ const modelJson = JSON.stringify({
 });
 
 describe('recruitment semantic model boundary', () => {
+  const request = { candidateId: 'repair', jobTitle: '平台工程师', jobDescription: '系统交付', redactedResume: resume };
+  const invalidJson = JSON.stringify({ ...JSON.parse(modelJson), dimensions: JSON.parse(modelJson).dimensions.slice(1) });
+  function repairHarness(sendMessage: (input: unknown) => Promise<ReturnType<typeof response>>, getScope?: () => string) {
+    return createRecruitmentIntelligenceAnalyzer({ getScope, loadConfig: async () => ({
+      initialize: vi.fn(), refreshAuth: vi.fn(), getModel: () => 'fixed-model', getCustomModelConfig: () => undefined,
+      getOttoClient: () => ({ createTemporaryChat: async () => ({ sendMessage }) }),
+    }) });
+  }
+  const response = (text: string, usage = true) => ({ candidates: [{ content: { parts: [{ text }] } }],
+    ...(usage ? { usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 50 } } : {}) });
+
+  it('repairs an incomplete response once using the same model and accounts for both calls', async () => {
+    const sendMessage = vi.fn().mockResolvedValueOnce(response(invalidJson)).mockResolvedValueOnce(response(modelJson));
+    const analyzer = repairHarness(sendMessage);
+    const result = await analyzer(request);
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(result.dimensions).toHaveLength(5);
+    expect(result.execution).toMatchObject({ inputTokens: 200, outputTokens: 100 });
+    expect(sendMessage.mock.calls[1][0].message).toContain('核心能力');
+    expect(sendMessage.mock.calls[1][0].message).toContain('不得编造');
+    await analyzer(request);
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+  });
+  it('still rejects missing dimensions after one repair, and never caches a failed result', async () => {
+    const sendMessage = vi.fn().mockResolvedValue(response(invalidJson));
+    const analyzer = repairHarness(sendMessage);
+    await expect(analyzer(request)).rejects.toThrow('自动修正后仍不完整');
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    sendMessage.mockResolvedValue(response(modelJson));
+    await expect(analyzer(request)).resolves.toHaveProperty('dimensions');
+    expect(sendMessage).toHaveBeenCalledTimes(3);
+  });
+  it('preserves unknown usage when either model call omits usage', async () => {
+    const sendMessage = vi.fn().mockResolvedValueOnce(response(invalidJson, false)).mockResolvedValueOnce(response(modelJson));
+    expect((await repairHarness(sendMessage)(request)).execution).toMatchObject({ inputTokens: null, outputTokens: null });
+  });
+  it('does not retry network failures or replay a paid call whose result is unknown', async () => {
+    const sendMessage = vi.fn().mockRejectedValue(new Error('network timeout'));
+    await expect(repairHarness(sendMessage)(request)).rejects.toThrow('network timeout');
+    expect(sendMessage).toHaveBeenCalledOnce();
+  });
+  it('does not start repair after the account changes', async () => {
+    let scope = 'a';
+    const sendMessage = vi.fn(async () => { scope = 'b'; return response(invalidJson); });
+    await expect(repairHarness(sendMessage, () => scope)(request)).rejects.toThrow('已变化');
+    expect(sendMessage).toHaveBeenCalledOnce();
+  });
   it('does not spend a model call on an interview-only placeholder without actual material', async () => {
     const loadConfig = vi.fn(async () => { throw new Error('unexpected model call'); });
     const analyzer = createRecruitmentIntelligenceAnalyzer({ loadConfig });

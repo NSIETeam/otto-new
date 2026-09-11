@@ -113,6 +113,7 @@ packages/web/out/
 
 # Local unpacked Electron used as offline electronDist for packaging
 packages/desktop/electron-dist/
+packages/desktop/build/InstallerRecovery.exe
 
 # Local SQLCipher native binding used by Desktop development/tests. Release
 # assets are produced and attested by the dedicated CI workflow instead.

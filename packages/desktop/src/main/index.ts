@@ -2797,7 +2797,7 @@ function ensureDesktopPetWindow(): BrowserWindow {
     desktopPetOuterSize = undefined;
     desktopPetWindow = undefined;
   });
-  void win.loadFile(path.join(RENDERER_DIR, 'index.html'), {
+  void win.loadFile(path.join(RENDERER_DIR, 'desktop-pet.html'), {
     query: { surface: 'desktop-pet' },
   });
   return win;

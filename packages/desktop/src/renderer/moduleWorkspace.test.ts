@@ -66,6 +66,35 @@ const sampleLayout = (): ModuleWorkspaceLayout => ({
 });
 
 describe('module workspace defaults', () => {
+  it('migrates the official recruitment group into one module without touching unrelated groups', () => {
+    const old: ModuleWorkspaceLayout = { version: 1, groups: [
+      { id: 'daily-office', name: '我的办公', rows: 2, moduleIds: ['agent-ppt'] },
+      { id: 'smart-recruitment', name: '智能招聘', rows: 3, moduleIds: ['recruitment-resume-analysis', 'recruitment-interview-kit'],
+        package: { source: 'official', packageId: 'otto.group.smart-recruitment', publisherId: 'otto.official', version: '2.0.0' } },
+    ] };
+    const next = parseModuleWorkspace(JSON.stringify(old), enterpriseCapabilities);
+    expect(next.groups).toHaveLength(1);
+    expect(next.groups[0]).toMatchObject({ name: '我的办公', moduleIds: ['agent-ppt', 'recruitment-intelligence'] });
+    expect(parseModuleWorkspace(JSON.stringify(next), enterpriseCapabilities)).toEqual(next);
+    const removed = removeModuleFromGroup(next, 'daily-office', 'recruitment-intelligence');
+    expect(parseModuleWorkspace(JSON.stringify(removed), enterpriseCapabilities).groups[0].moduleIds).toEqual(['agent-ppt']);
+  });
+  it('keeps custom layouts and modules while deduplicating legacy recruitment shortcuts', () => {
+    const layout = parseModuleWorkspace(JSON.stringify({ version: 1, groups: [
+      { id: 'custom', name: '我的招聘', rows: 3, moduleIds: ['recruitment-evidence-graph', 'custom-tool'] },
+      { id: 'smart-recruitment', name: '智能招聘', rows: 3, moduleIds: ['recruitment-interview-audio', 'agent-ppt'],
+        package: { source: 'official', packageId: 'otto.group.smart-recruitment', publisherId: 'otto.official', version: '2.0.0' } },
+    ] }), enterpriseCapabilities);
+    expect(layout.groups[0]).toMatchObject({ name: '我的招聘', rows: 3, moduleIds: ['recruitment-intelligence', 'custom-tool'] });
+    expect(layout.groups[1]).toMatchObject({ moduleIds: ['agent-ppt'] });
+    expect(layout.groups.flatMap(group => group.moduleIds).filter(id => id === 'recruitment-intelligence')).toHaveLength(1);
+  });
+  it('creates a daily-office destination when the only installed group is recruitment', () => {
+    const result = parseModuleWorkspace(JSON.stringify({ version: 1, groups: [
+      { id: 'smart-recruitment', name: '智能招聘', rows: 3, moduleIds: ['recruitment-privacy-audit'] },
+    ] }), enterpriseCapabilities);
+    expect(result.groups).toEqual([{ id: 'daily-office', name: '日常办公', rows: 2, moduleIds: ['recruitment-intelligence'] }]);
+  });
   it('auto-installs only the official daily-office group for a new enterprise workspace', () => {
     expect(createDefaultModuleWorkspace(enterpriseCapabilities)).toEqual({
       version: 1,

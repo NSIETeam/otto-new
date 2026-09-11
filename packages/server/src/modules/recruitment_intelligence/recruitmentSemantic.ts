@@ -2,7 +2,7 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-export const RECRUITMENT_SEMANTIC_ANALYSIS_VERSION = 'otto-recruitment-semantic-v3.3';
+export const RECRUITMENT_SEMANTIC_ANALYSIS_VERSION = 'otto-recruitment-semantic-v3.4';
 
 export const RECRUITMENT_SEMANTIC_DIMENSIONS = [
   { id: 'core_capability', label: '核心能力', weight: 0.3 },

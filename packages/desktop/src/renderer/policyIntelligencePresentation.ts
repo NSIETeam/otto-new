@@ -26,6 +26,23 @@ export const POLICY_CONCLUSION_LABELS = {
   unlikely: '本批次命中排除',
   unknown: '待补充／待核实',
 };
+export function policyErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  const message = raw.replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/u, '');
+  if (/502|503|504|Bad Gateway/iu.test(message))
+    return '政策服务连接暂时异常，请稍后刷新。刚提交的操作可能已保存，请先核对状态，不要连续提交。';
+  if (/超时|Timeout|AbortError|aborted/iu.test(message))
+    return '等待政策服务响应超时。操作结果尚未确认，请先刷新状态，不要重复提交。';
+  if (/fetch failed|无法连接|ECONN|NetworkError/iu.test(message))
+    return '暂时无法连接政策服务，请检查网络后刷新。已有资料不会因此删除。';
+  if (/模型.*未配置|未配置.*模型/u.test(message))
+    return '政策分析模型尚未就绪；公共政策仍可浏览，请检查正常对话的模型是否可用。';
+  // Known business validation messages are useful; IPC wrappers, endpoints and
+  // provider diagnostics are not a user-facing error contract.
+  if (/^[\u3400-\u9fff]/u.test(message) && !/https?:|Bearer|api[_-]?key|token[=:]/iu.test(message))
+    return message.slice(0, 300);
+  return '政策操作未完成，请刷新状态后重试；如仍失败，请联系管理员。';
+}
 // Browser-safe date logic; the parity regression checks the server implementation.
 // Do not import policyDomain at runtime: it also depends on node:crypto.
 function policyDisplayDate(value?: string, end = false): number {

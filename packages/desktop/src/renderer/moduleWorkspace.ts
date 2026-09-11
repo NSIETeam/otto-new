@@ -216,6 +216,41 @@ function reconcileDailyOfficePolicyIntelligence(
   return normalizeModuleWorkspace({ ...layout, groups });
 }
 
+/** Layout-only migration; never touches candidate storage or analysis history. */
+function reconcileRecruitmentModule(layout: ModuleWorkspaceLayout): ModuleWorkspaceLayout {
+  const legacy = new Set(['recruitment-resume-analysis', 'recruitment-candidate-screening',
+    'recruitment-evidence-graph', 'recruitment-interview-audio', 'recruitment-interview-kit',
+    'recruitment-interview-copilot', 'recruitment-work-sample', 'recruitment-privacy-audit']);
+  const moduleId = 'recruitment-intelligence';
+  const isOfficial = (group: ModuleGroupLayout): boolean => group.package
+    ? group.package.source === 'official' && group.package.publisherId === 'otto.official'
+      && group.package.packageId === 'otto.group.smart-recruitment'
+    : group.id === 'smart-recruitment' && group.name === '智能招聘';
+  let needsPlacement = false;
+  let installed = false;
+  const groups = layout.groups.flatMap((group) => {
+    const official = isOfficial(group);
+    const moduleIds: string[] = [];
+    for (const id of group.moduleIds) {
+      if (legacy.has(id) && official) { needsPlacement = true; continue; }
+      const next = legacy.has(id) ? moduleId : id;
+      if (next === moduleId) { if (installed) continue; installed = true; }
+      moduleIds.push(next);
+    }
+    // Custom modules placed in the old group must not disappear with its shortcuts.
+    return official && moduleIds.length === 0 ? [] : [{ ...group, moduleIds }];
+  });
+  if (needsPlacement && !installed) {
+    let target = groups.find(group => group.id === 'daily-office' || group.package?.packageId === 'otto.group.daily-office');
+    if (!target) {
+      target = { id: uniqueGroupId('daily-office', new Set(groups.map(group => group.id))), name: '日常办公', rows: 2, moduleIds: [] };
+      groups.push(target);
+    }
+    target.moduleIds.push(moduleId);
+  }
+  return { ...layout, groups };
+}
+
 function reconcileDailyOfficeMemoryIntelligence(
   layout: ModuleWorkspaceLayout,
 ): ModuleWorkspaceLayout {
@@ -305,7 +340,7 @@ export function parseModuleWorkspace(
     const normalized = reconcileDailyOfficeMemoryIntelligence(
       reconcileDailyOfficePolicyIntelligence(
         reconcileParkCarpool(
-          reconcileLegacyParkModules(normalizeModuleWorkspace(parsed), capabilities),
+          reconcileLegacyParkModules(reconcileRecruitmentModule(normalizeModuleWorkspace(parsed)), capabilities),
           capabilities,
         ),
         capabilities,

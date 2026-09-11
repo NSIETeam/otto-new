@@ -1577,6 +1577,7 @@ export class EnterpriseClient {
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly onSessionInvalidated: () => void = () => undefined,
     private readonly e2ee?: EnterpriseE2eeCrypto,
+    private readonly loadPolicyModel: () => Promise<import('./policyDialogueModel.js').PolicyDialogueModel> = async () => (await import('./policyDialogueModel.js')).loadPolicyDialogueModel(),
   ) {}
 
   restore(session: StoredSession): void {
@@ -3701,8 +3702,13 @@ export class EnterpriseClient {
   }
 
   async getPolicyIntelligence(): Promise<import('otto-server').PolicyIntelligenceState> {
-    await this.assertCompatibleServer(this.serverUrl, ['policy_intelligence_v3']);
-    return (await this.request<{ state: import('otto-server').PolicyIntelligenceState }>('/enterprise/policy-intelligence')).state;
+    const generation = this.authOperationGeneration;
+    const session = this.snapshot();
+    await this.assertCompatibleServer(session.serverUrl, ['policy_intelligence_v3']);
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    const result = await this.request<{ state: import('otto-server').PolicyIntelligenceState }>('/enterprise/policy-intelligence', {}, {serverUrl:session.serverUrl,authorizationToken:session.token,timeoutMs:20_000});
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    return result.state;
   }
   async getPolicyInbox(): Promise<import('otto-server').PolicyInbox> {
     const generation = this.authOperationGeneration;
@@ -3724,8 +3730,51 @@ export class EnterpriseClient {
   }
 
   async actPolicyIntelligence(action: import('otto-server').PolicyAction): Promise<import('otto-server').PolicyIntelligenceState> {
-    await this.assertCompatibleServer(this.serverUrl, ['policy_intelligence_v3']);
-    return (await this.request<{ state: import('otto-server').PolicyIntelligenceState }>('/enterprise/policy-intelligence/actions', { method: 'POST', body: JSON.stringify(action) })).state;
+    const generation = this.authOperationGeneration;
+    const session = this.snapshot();
+    await this.assertCompatibleServer(session.serverUrl, ['policy_intelligence_v3']);
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    if (['sync', 'diagnose', 'answer'].includes(action.action) && !this.compatibleCapabilities.has('policy_client_model_v1')) {
+      throw new Error('请升级企业服务端，政策分析才能使用当前对话模型；公共政策仍可浏览。');
+    }
+    if (['sync', 'diagnose', 'answer'].includes(action.action) && this.compatibleCapabilities.has('policy_client_model_v1')) {
+      const model = await this.loadPolicyModel();
+      const assertCurrent = () => this.assertAuthOperationCurrent(generation, session.serverUrl);
+      assertCurrent();
+      const options = { serverUrl: session.serverUrl, authorizationToken: session.token, timeoutMs: 20_000 };
+      const base = '/enterprise/policy-intelligence/executions';
+      const { runId } = await this.request<{ runId: string }>(base, { method: 'POST', body: JSON.stringify({ action, modelName: model.name }) }, options);
+      if (!/^[a-f0-9-]{36}$/u.test(runId)) throw new Error('政策任务回执无效，请先刷新状态');
+      const seen = new Set<string>();
+      const deadline = AbortSignal.timeout(210_000);
+      try {
+        for (let poll = 0; poll < 100; poll += 1) {
+          assertCurrent(); deadline.throwIfAborted();
+          const view = await this.request<import('otto-server').PolicyExecutionView>(`${base}/${runId}`, {}, options);
+          assertCurrent(); deadline.throwIfAborted();
+          if (view.status === 'done') return view.result as import('otto-server').PolicyIntelligenceState;
+          if (view.status === 'failed') throw new Error(view.error);
+          if (view.status === 'model') {
+            if (seen.has(view.requestId) || seen.size >= 16) throw new Error('政策模型请求重复或超出上限，已停止，避免重复计费');
+            seen.add(view.requestId);
+            const result = await model.invoke(view.instruction, view.data, AbortSignal.any([deadline, AbortSignal.timeout(90_000)]));
+            assertCurrent(); deadline.throwIfAborted();
+            await this.request(`${base}/${runId}/reply`, { method: 'POST', body: JSON.stringify({ requestId: view.requestId, result }) }, options);
+          } else if (view.status !== 'running') throw new Error('政策任务状态无效，请刷新');
+        }
+        throw new Error('政策分析超时，请先核对已有结果');
+      } catch (error) {
+        // Cancel only our captured run. Never resend the action or model call.
+        await this.request(`${base}/${runId}/cancel`, { method: 'POST', body: '{}' }, { ...options, preserveSessionOnUnauthorized: true, timeoutMs: 5000 }).catch(() => undefined);
+        throw error;
+      }
+    }
+    // Diagnosis may first interpret (90s), then assess (90s). Never replay a
+    // timed-out mutation: its result must be checked with a subsequent GET.
+    const timeoutMs = ['diagnose','answer'].includes(action.action) ? 210_000 : action.action === 'sync' ? 120_000 : 20_000;
+    const result = await this.request<{ state: import('otto-server').PolicyIntelligenceState }>('/enterprise/policy-intelligence/actions', { method: 'POST', body: JSON.stringify(action) }, {serverUrl:session.serverUrl,authorizationToken:session.token,timeoutMs});
+    this.assertAuthOperationCurrent(generation, session.serverUrl);
+    return result.state;
   }
 
   async listRecruitmentSources(requisitionId?: string): Promise<Array<import('otto-server').RecruitmentSourceRuntimeView>> {

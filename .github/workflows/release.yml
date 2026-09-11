@@ -260,6 +260,25 @@ jobs:
             --toolchain "$RUST_TOOLCHAIN" \
             --probe
 
+      - name: Build Windows installer recovery helper
+        if: matrix.target == 'win32-x64'
+        shell: pwsh
+        run: node packages/desktop/scripts/installer-recovery-build.mjs build-artifact "$env:RUNNER_TEMP/otto-installer-recovery" "$env:GITHUB_SHA"
+
+      - name: Attest Windows installer recovery helper
+        if: matrix.target == 'win32-x64'
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: ${{ runner.temp }}/otto-installer-recovery/*
+
+      - name: Upload Windows installer recovery helper
+        if: matrix.target == 'win32-x64'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: otto-installer-recovery-win32-x64
+          path: ${{ runner.temp }}/otto-installer-recovery
+          if-no-files-found: error
+
       - name: Attest Otto native runtime and manifest
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
@@ -502,6 +521,22 @@ jobs:
             done < <(find "native/otto-native/$target" -maxdepth 1 -type f -print0)
           done
 
+      - name: Download Windows installer recovery helper
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: otto-installer-recovery-win32-x64
+          path: ${{ runner.temp }}/otto-installer-recovery
+
+      - name: Verify Windows recovery source and provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node packages/desktop/scripts/installer-recovery-build.mjs verify-artifact "$RUNNER_TEMP/otto-installer-recovery" "$GITHUB_SHA"
+          gh attestation verify "$RUNNER_TEMP/otto-installer-recovery/InstallerRecovery.exe" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify "$RUNNER_TEMP/otto-installer-recovery/manifest.json" --repo "$GITHUB_REPOSITORY"
+
       - name: Validate enterprise license trust anchor
         if: ${{ !(inputs.unsigned_mac_transition == true && inputs.release_channel == 'transition' && inputs.draft == true && inputs.prerelease == true) }}
         shell: bash
@@ -607,6 +642,7 @@ jobs:
         run: node scripts/make-delivery-zip.mjs --build
         working-directory: packages/desktop
         env:
+          OTTO_INSTALLER_RECOVERY_ARTIFACT: ${{ runner.temp }}/otto-installer-recovery
           OTTO_RELEASES_REPO: ${{ env.RELEASES_REPO }}
           OTTO_UPDATE_ASSET_BASE_URL: https://github.com/${{ env.RELEASES_REPO }}/releases/download/v${{ needs.validate-source.outputs.version }}
           OTTO_UPDATE_MIRROR_ASSET_BASE_URL: ${{ env.UPDATE_MIRROR_ASSET_BASE_URL }}

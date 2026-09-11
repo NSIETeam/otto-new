@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { RecruitmentAnalysisCache } from './recruitmentAnalysisCache.js';
 import { captureRecruitmentAssessmentContext } from './recruitmentAssessment.js';
 import { RECRUITMENT_SEMANTIC_ANALYSIS_VERSION, type RecruitmentSemanticAnalysisInput, type RecruitmentSemanticEvaluation } from './recruitmentSemantic.js';
-import { buildRecruitmentPrompt as buildPrompt, parseRecruitmentSemanticAnalysis, sanitizeRecruitmentModelInput } from 'otto-server/recruitment';
+import { buildRecruitmentPrompt as buildPrompt, parseRecruitmentSemanticAnalysis, sanitizeRecruitmentModelInput, RecruitmentResponseValidationError } from 'otto-server/recruitment';
 export { parseRecruitmentSemanticAnalysis, sanitizeRecruitmentModelInput } from 'otto-server/recruitment';
 
 interface ModelRuntimeConfig {
@@ -108,20 +108,37 @@ export function createRecruitmentIntelligenceAnalyzer(options: {
         SceneType.CHAT_CONVERSATION, model, { type: 'sub', agentId: 'RecruitmentSemanticAnalyzer' }, { emptySystemPrompt: true },
       );
       assertCurrent();
-      const response = await chat.sendMessage({
-        message: prompt,
-        config: { maxOutputTokens: 4_096, temperature: 0.1, abortSignal: signal },
-      }, `recruitment-semantic-${input.candidateId}-${Date.now()}`, SceneType.CHAT_CONVERSATION);
-      const raw = response.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
       const count = (value: number | undefined): number | null => Number.isSafeInteger(value) && value! >= 0 ? value! : null;
-      const inputTokens = count(response.usageMetadata?.promptTokenCount);
-      const outputTokens = count(response.usageMetadata?.candidatesTokenCount);
-      assertCurrent();
-      return { evaluation: { ...parseRecruitmentSemanticAnalysis(raw, input.resumeProvided === false ? '' : sanitizedResume, {
-        modelProvider: custom?.provider ?? model, inputTokens: inputTokens ?? 0, outputTokens: outputTokens ?? 0,
-        interviewTranscript: sanitizedInterview, workSampleArtifact: sanitizedWorkSample,
-        enterpriseContextUsed: Boolean(input.enterpriseContext?.trim()),
-      }), assessmentContext }, inputTokens, outputTokens };
+      const add = (total: number | null, next: number | null): number | null => total === null || next === null ? null : total + next;
+      let inputTokens: number | null = 0;
+      let outputTokens: number | null = 0;
+      let message = prompt;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        assertCurrent();
+        // Transport failures are outside the validation catch: an unknown paid
+        // result must not be replayed. Repair uses the same model and authority.
+        const response = await chat.sendMessage({ message,
+          config: { maxOutputTokens: 4_096, temperature: 0.1, abortSignal: signal },
+        }, `recruitment-semantic-${randomUUID()}`, SceneType.CHAT_CONVERSATION);
+        inputTokens = add(inputTokens, count(response.usageMetadata?.promptTokenCount));
+        outputTokens = add(outputTokens, count(response.usageMetadata?.candidatesTokenCount));
+        assertCurrent();
+        const raw = response.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
+        try {
+          return { evaluation: { ...parseRecruitmentSemanticAnalysis(raw, input.resumeProvided === false ? '' : sanitizedResume, {
+            modelProvider: custom?.provider ?? model, inputTokens: inputTokens ?? 0, outputTokens: outputTokens ?? 0,
+            interviewTranscript: sanitizedInterview, workSampleArtifact: sanitizedWorkSample,
+            enterpriseContextUsed: Boolean(input.enterpriseContext?.trim()),
+          }), assessmentContext }, inputTokens, outputTokens };
+        } catch (error) {
+          if (!(error instanceof RecruitmentResponseValidationError)) throw error;
+          if (attempt === 1) throw new Error('招聘分析结果经一次自动修正后仍不完整，未生成有效评价。已保留材料，请稍后重新分析。');
+          // Use only our validator's fixed diagnostic, not arbitrary model output
+          // as new instructions. Never fill missing evidence or scores locally.
+          message = `${prompt}\n结构校验未通过：${error.message}。请按原材料重新输出完整 JSON；不得编造证据，也不得省略缺少材料的维度。这是唯一一次结构修正。`;
+        }
+      }
+      throw new Error('招聘分析未完成');
     });
     assertCurrent();
     return { ...result.value.evaluation, execution: {

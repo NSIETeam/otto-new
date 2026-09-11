@@ -1,0 +1,756 @@
+{
+  "schemaVersion": 1,
+  "reference": "https://github.com/NSIETeam/otto-new/pull/80",
+  "status": "reviewed-scoped-file-and-version-measurement-update",
+  "recordedAt": "2026-09-11T13:10:18.451Z",
+  "reviewer": "Otto release owner (root agent), explicit user-authorized 1.9.16 single-person emergency release; not independent human review",
+  "sourceCommit": "c2def97dfb3a49cc78c8753b7b69891f3447d8bf",
+  "testedMerge": "6fe5577a676777bb9a47841a5c8305afca091f99",
+  "ciRun": "https://github.com/NSIETeam/otto-new/actions/runs/34599540083",
+  "runId": "741fa26a-5a21-47d7-bb48-7159379ddc5f",
+  "parentBaselineSha256": "ed7ac3928a6bf2b894b6218a582c91f62ef86c913cf3101e972d9c2c41b78159",
+  "receiptSha256": "fa7f62b0addde4572f48a51a55a37689ceae8baa66a9c408a50a4099ac09ed90",
+  "sourceManifestSha256": "f01fe0f00561b777d7e25016de95a8b22472d242180e147293ad5fa5ae1b387d",
+  "coverageSha256": "5135f0c0d2cf0b9471f3bb8af733c7e0b19bc1788c2848e92ad9eac4ac818300",
+  "testResultsSha256": "834e6b86d08230efd516eb586dd00888bcb0f31d75cea098bba6e0798c16a6ec",
+  "nativeExitCode": 0,
+  "originalGate": {
+    "status": "failed",
+    "reason": "[desktop-coverage-ratchet] measurement environment differs or is unsupported"
+  },
+  "assertionsPassed": 2161,
+  "testFiles": 269,
+  "environmentBefore": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "9bf3ec93187c192686e30fdea62e62a769734405085d6e49d675c5efc2723600"
+  },
+  "environmentAfter": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "4f3617daa88375604ab3bfabdbb067651daabf1da6d322bdadb35dcb0077dc16"
+  },
+  "dependencyChange": "Exactly root package version, packages[empty].version and desktop workspace version from 1.9.15 to 1.9.16. All dependency entries, config and tool versions identical.",
+  "unchangedEntriesPreserved": 266,
+  "files": [
+    {
+      "file": "src/main/enterprise-client.ts",
+      "reason": "Foreground policy exchange using the dialogue model; credential isolation, bounded polling, duplicate request rejection and captured-run cancellation. Additional explicit failure-branch tests required in PR 80.",
+      "beforeEntrySha256": "1d04ed78b6ff5c45eb8bcf5b7215b99ec0df6ae1af26110ad6ba539d2601ea5f",
+      "afterEntrySha256": "27f515876e02a970765fbd326fc7582c7fea837b8636f9ab37165e375995050f",
+      "sourceSha256": "87e5f4143f4a7ee13eb2e6711b850a8826a111974f717e11616f62c54e8cc1ef",
+      "before": {
+        "lines": {
+          "total": 1199,
+          "uncovered": 492
+        },
+        "statements": {
+          "total": 1316,
+          "uncovered": 586
+        },
+        "functions": {
+          "total": 245,
+          "uncovered": 114
+        },
+        "branches": {
+          "total": 1131,
+          "uncovered": 502
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 1240,
+          "uncovered": 494
+        },
+        "statements": {
+          "total": 1369,
+          "uncovered": 593
+        },
+        "functions": {
+          "total": 248,
+          "uncovered": 116
+        },
+        "branches": {
+          "total": 1158,
+          "uncovered": 510
+        }
+      }
+    },
+    {
+      "file": "src/main/index.ts",
+      "reason": "Dedicated desktop-pet HTML entry. Existing uninstrumented Electron bootstrap debt is retained, not called unit coverage; separate actual Electron transparent-pixel evidence is documented.",
+      "beforeEntrySha256": "31668e713a53cad2050b558768460d984fb67dc5f391f7d8c500c6fc98097fef",
+      "afterEntrySha256": "8f9e42c5243f689c0ea357128329fe060cf8241e51a23d6d5c18010294269abb",
+      "sourceSha256": "08d7964c734525b992861177fd2a0308c23124a37e5ff52453aa60f1c3206766",
+      "before": {
+        "lines": {
+          "total": 2593,
+          "uncovered": 2593
+        },
+        "statements": {
+          "total": 2856,
+          "uncovered": 2856
+        },
+        "functions": {
+          "total": 587,
+          "uncovered": 587
+        },
+        "branches": {
+          "total": 2295,
+          "uncovered": 2295
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 2593,
+          "uncovered": 2593
+        },
+        "statements": {
+          "total": 2856,
+          "uncovered": 2856
+        },
+        "functions": {
+          "total": 587,
+          "uncovered": 587
+        },
+        "branches": {
+          "total": 2295,
+          "uncovered": 2295
+        }
+      }
+    },
+    {
+      "file": "src/main/policyDialogueModel.ts",
+      "reason": "New tools-disabled dialogue configuration adapter, bounded untrusted material and strict object output. Additional invalid/oversized input/output tests required in PR 80; default auth setup remains integration debt.",
+      "beforeEntrySha256": null,
+      "afterEntrySha256": "886c0a4f1781e2b41f451fa245b9391bcd7ed0f4dd9e25706ab58828fb613a26",
+      "sourceSha256": "df1b0ff89431ed0829ffa8937db0170a437be9e7b3811dde65f297f5b532f3c2",
+      "before": null,
+      "after": {
+        "lines": {
+          "total": 22,
+          "uncovered": 5
+        },
+        "statements": {
+          "total": 26,
+          "uncovered": 8
+        },
+        "functions": {
+          "total": 4,
+          "uncovered": 1
+        },
+        "branches": {
+          "total": 16,
+          "uncovered": 6
+        }
+      }
+    },
+    {
+      "file": "src/main/recruitmentIntelligenceModel.ts",
+      "reason": "One bounded schema-repair attempt with no invented evidence and no network replay; prior uncovered provider/configuration paths retained.",
+      "beforeEntrySha256": "b99d7d23338234a13d0b8d4f7f7ff93b0063a5e8ce6b66afbb052f19691e469a",
+      "afterEntrySha256": "0b3af3e9ccbb6175bc4f08bc1879d3818e960faa8ea61aa424b8286034f108fb",
+      "sourceSha256": "c5d5e95501a957ff8d891f2a570b3fc417d31011e0252bdebbb6859f77fa95d7",
+      "before": {
+        "lines": {
+          "total": 52,
+          "uncovered": 7
+        },
+        "statements": {
+          "total": 68,
+          "uncovered": 12
+        },
+        "functions": {
+          "total": 11,
+          "uncovered": 2
+        },
+        "branches": {
+          "total": 59,
+          "uncovered": 11
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 63,
+          "uncovered": 7
+        },
+        "statements": {
+          "total": 83,
+          "uncovered": 13
+        },
+        "functions": {
+          "total": 12,
+          "uncovered": 2
+        },
+        "branches": {
+          "total": 67,
+          "uncovered": 11
+        }
+      }
+    },
+    {
+      "file": "src/renderer/App.tsx",
+      "reason": "Move pet CSS to its independent entry; business coverage counts unchanged.",
+      "beforeEntrySha256": "0eb89fc4f7d10832216cdc9e3bb34d1650a93a73ce046ed290cdb587c2c83c20",
+      "afterEntrySha256": "d849d04ea3d9baf7f6a058b55fd976b19d0f00eddb36b2c4914934ccdc9e15d1",
+      "sourceSha256": "8354e39545c234abd13ccec2680ff82a56d58d7c1f8388b9a3b8f1ce2253ad69",
+      "before": {
+        "lines": {
+          "total": 961,
+          "uncovered": 455
+        },
+        "statements": {
+          "total": 1124,
+          "uncovered": 574
+        },
+        "functions": {
+          "total": 311,
+          "uncovered": 189
+        },
+        "branches": {
+          "total": 713,
+          "uncovered": 404
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 961,
+          "uncovered": 455
+        },
+        "statements": {
+          "total": 1124,
+          "uncovered": 574
+        },
+        "functions": {
+          "total": 311,
+          "uncovered": 189
+        },
+        "branches": {
+          "total": 713,
+          "uncovered": 404
+        }
+      }
+    },
+    {
+      "file": "src/renderer/browserPreviewBridge.ts",
+      "reason": "Preview version string only; unchanged historical preview bridge coverage debt.",
+      "beforeEntrySha256": "47ad4099634a401270c3c805b5fbd1f8a7d0673e8cf93995bc8b98e63f989f07",
+      "afterEntrySha256": "7f4b627244d07451689c160c3653134f35f6ae388599eb191b2ca9631b2f1015",
+      "sourceSha256": "e178ad79491516da49a17e212bd997dda2e0574012856b845d614fd094619e73",
+      "before": {
+        "lines": {
+          "total": 275,
+          "uncovered": 275
+        },
+        "statements": {
+          "total": 295,
+          "uncovered": 295
+        },
+        "functions": {
+          "total": 147,
+          "uncovered": 147
+        },
+        "branches": {
+          "total": 157,
+          "uncovered": 157
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 275,
+          "uncovered": 275
+        },
+        "statements": {
+          "total": 295,
+          "uncovered": 295
+        },
+        "functions": {
+          "total": 147,
+          "uncovered": 147
+        },
+        "branches": {
+          "total": 157,
+          "uncovered": 157
+        }
+      }
+    },
+    {
+      "file": "src/renderer/moduleCatalog.ts",
+      "reason": "Replace duplicate recruitment entry points with one module.",
+      "beforeEntrySha256": "b7c044c2a5b261b177e6f6ce7e5baea37160b0c44aab96fff5cc4ff253f8d301",
+      "afterEntrySha256": "48e66a51bb3d32869758355c75d4f64b7ee784f634d95c15f3ba8fe6f8a68583",
+      "sourceSha256": "db8da00b386db694938279544808cfd66de92e72f2ce57db80eac4bcf2be42ed",
+      "before": {
+        "lines": {
+          "total": 45,
+          "uncovered": 0
+        },
+        "statements": {
+          "total": 59,
+          "uncovered": 2
+        },
+        "functions": {
+          "total": 14,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 67,
+          "uncovered": 4
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 45,
+          "uncovered": 0
+        },
+        "statements": {
+          "total": 59,
+          "uncovered": 2
+        },
+        "functions": {
+          "total": 14,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 67,
+          "uncovered": 4
+        }
+      }
+    },
+    {
+      "file": "src/renderer/moduleGroupCatalog.ts",
+      "reason": "Remove obsolete official recruitment template, preserve other templates and entitlement checks.",
+      "beforeEntrySha256": "9c08aa50ae1c0bbcf7ab500daaea10d596330d26da8194e8e891731ca1f61e27",
+      "afterEntrySha256": "1686ac37b6ba8779c029e55431283bf0322fe2ebbc3c7b8f00511ac037ab45db",
+      "sourceSha256": "4d93ce469f4f13600b094c91c346213b014219c3a72a394eaf5121f5d5ae5e70",
+      "before": {
+        "lines": {
+          "total": 43,
+          "uncovered": 6
+        },
+        "statements": {
+          "total": 55,
+          "uncovered": 8
+        },
+        "functions": {
+          "total": 16,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 34,
+          "uncovered": 4
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 42,
+          "uncovered": 6
+        },
+        "statements": {
+          "total": 54,
+          "uncovered": 8
+        },
+        "functions": {
+          "total": 16,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 34,
+          "uncovered": 4
+        }
+      }
+    },
+    {
+      "file": "src/renderer/moduleWorkspace.ts",
+      "reason": "Layout-only recruitment migration with retained custom modules and no candidate-store changes; idempotence, deletion and empty-destination tests.",
+      "beforeEntrySha256": "49bd29a4fc0984a4d947b75cdbf3a29219f00446f7b92a9b10ffe121a140d18a",
+      "afterEntrySha256": "fe44b3afdd557ff4cf8c04c1fd6a6246678b81a02ed3961e2d383f0387cee485",
+      "sourceSha256": "9484eeb1df819c354afdab7919a6d35032e008ffdcf74e52ff1d5d96e643d8d3",
+      "before": {
+        "lines": {
+          "total": 170,
+          "uncovered": 5
+        },
+        "statements": {
+          "total": 208,
+          "uncovered": 15
+        },
+        "functions": {
+          "total": 70,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 160,
+          "uncovered": 19
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 191,
+          "uncovered": 5
+        },
+        "statements": {
+          "total": 237,
+          "uncovered": 17
+        },
+        "functions": {
+          "total": 75,
+          "uncovered": 1
+        },
+        "branches": {
+          "total": 189,
+          "uncovered": 21
+        }
+      }
+    },
+    {
+      "file": "src/renderer/policyIntelligencePresentation.ts",
+      "reason": "Chinese state-aware failures; preserve unknown mutation outcome and hide credentials. Extra network/model-not-configured tests in PR 80.",
+      "beforeEntrySha256": "9667b583bc05e41f1b7e0bb71a34e6c81462c2758b478b9477016af09ab4e493",
+      "afterEntrySha256": "4595056d8e25ad1a274eecc38019c7c0b5c5a18c15a4a3c78a818beb68ce158c",
+      "sourceSha256": "735ddcb07cc93bb79e86ea9040d17d006ae091b03801d2d104f5cdf0510e580f",
+      "before": {
+        "lines": {
+          "total": 63,
+          "uncovered": 5
+        },
+        "statements": {
+          "total": 81,
+          "uncovered": 17
+        },
+        "functions": {
+          "total": 6,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 109,
+          "uncovered": 23
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 76,
+          "uncovered": 7
+        },
+        "statements": {
+          "total": 94,
+          "uncovered": 19
+        },
+        "functions": {
+          "total": 7,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 125,
+          "uncovered": 26
+        }
+      }
+    },
+    {
+      "file": "src/renderer/recruitmentError.ts",
+      "reason": "New safe Chinese error adapter; extra timeout/cancellation tests in PR 80.",
+      "beforeEntrySha256": null,
+      "afterEntrySha256": "79b742fa2b4cc88fdadb4d153276d3bdbe05ef4bf88f90f2ad9ae462041d4ccc",
+      "sourceSha256": "e29306703efb372eadfe7b1d3de20891ebfc8c133735b068dacf2e4cb6cfafdf",
+      "before": null,
+      "after": {
+        "lines": {
+          "total": 9,
+          "uncovered": 0
+        },
+        "statements": {
+          "total": 12,
+          "uncovered": 2
+        },
+        "functions": {
+          "total": 1,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 16,
+          "uncovered": 3
+        }
+      }
+    },
+    {
+      "file": "src/renderer/components/DesktopPetSurface.tsx",
+      "reason": "Independent CSS import; unchanged business coverage counts, separate rendered transparency probe.",
+      "beforeEntrySha256": "fe19197462e927947e1fd44075e4adc36eef1fa730a25012ac8f962e73ae2587",
+      "afterEntrySha256": "03e553a28336364687e22bca3a18da2df2c32086b289ca122bdc362688c0d627",
+      "sourceSha256": "f17ada568d4399d58a1e3924b25b3bfad0fa0c19522063f5da77a40809799194",
+      "before": {
+        "lines": {
+          "total": 104,
+          "uncovered": 13
+        },
+        "statements": {
+          "total": 118,
+          "uncovered": 20
+        },
+        "functions": {
+          "total": 27,
+          "uncovered": 8
+        },
+        "branches": {
+          "total": 50,
+          "uncovered": 17
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 104,
+          "uncovered": 13
+        },
+        "statements": {
+          "total": 118,
+          "uncovered": 20
+        },
+        "functions": {
+          "total": 27,
+          "uncovered": 8
+        },
+        "branches": {
+          "total": 50,
+          "uncovered": 17
+        }
+      }
+    },
+    {
+      "file": "src/renderer/components/PolicyIntelligenceDialog.tsx",
+      "reason": "Single inline consent toggle, bounded source coverage at bottom, reconcile failed mutation by GET; prior UI callbacks remain debt.",
+      "beforeEntrySha256": "ec87cc0d0d92ca7e3c1d26447d15906862ef1b6c3871b63dff4d74ae392fb7fe",
+      "afterEntrySha256": "2163e6f3c7a5887a309c211ad8a78964fdb0808db4ac5ff5d1d70e15db6592dc",
+      "sourceSha256": "6aadd455f347e724b8f21355e7b1a9c1ee039c4efe8b4deb7794804ade100b0e",
+      "before": {
+        "lines": {
+          "total": 164,
+          "uncovered": 80
+        },
+        "statements": {
+          "total": 173,
+          "uncovered": 86
+        },
+        "functions": {
+          "total": 74,
+          "uncovered": 50
+        },
+        "branches": {
+          "total": 233,
+          "uncovered": 109
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 190,
+          "uncovered": 80
+        },
+        "statements": {
+          "total": 206,
+          "uncovered": 92
+        },
+        "functions": {
+          "total": 77,
+          "uncovered": 52
+        },
+        "branches": {
+          "total": 267,
+          "uncovered": 107
+        }
+      }
+    },
+    {
+      "file": "src/renderer/components/RecruitmentWorkbenchDialog.tsx",
+      "reason": "Use safe errors with retained materials and explicit retry; no broadened automatic screening.",
+      "beforeEntrySha256": "ee508811e2bf8b5aa059fa3bb15349134fbd55ae32209835b67c5b79f6712e4f",
+      "afterEntrySha256": "949ea0bb763eb13bb9a32dcf1c2db62570526d0974bd812d17c4750159dc2205",
+      "sourceSha256": "45fbe3f60041d288f741fd7fca6705b047f1fe17bdec786e74ac397e103f2ad7",
+      "before": {
+        "lines": {
+          "total": 421,
+          "uncovered": 78
+        },
+        "statements": {
+          "total": 555,
+          "uncovered": 139
+        },
+        "functions": {
+          "total": 168,
+          "uncovered": 52
+        },
+        "branches": {
+          "total": 535,
+          "uncovered": 198
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 421,
+          "uncovered": 78
+        },
+        "statements": {
+          "total": 555,
+          "uncovered": 139
+        },
+        "functions": {
+          "total": 168,
+          "uncovered": 52
+        },
+        "branches": {
+          "total": 531,
+          "uncovered": 196
+        }
+      }
+    },
+    {
+      "file": "src/renderer/components/WorkspaceDialogs.tsx",
+      "reason": "Per-request scan feedback and bounded uncertain state; no automatic skill installation.",
+      "beforeEntrySha256": "74bfb38454aacd970054bf4767a35a684a49c014f324f4bdc3e9294b0e65649e",
+      "afterEntrySha256": "1b79c3f0169c43cc6bb4ab82a3ed5f8c427a3b59748c66338582ff73c1db2cb6",
+      "sourceSha256": "e3740b7ad5f69b3c475def4228eb2ee8a7a08bcde160853da5a68e75e4c33667",
+      "before": {
+        "lines": {
+          "total": 327,
+          "uncovered": 43
+        },
+        "statements": {
+          "total": 511,
+          "uncovered": 118
+        },
+        "functions": {
+          "total": 141,
+          "uncovered": 27
+        },
+        "branches": {
+          "total": 589,
+          "uncovered": 208
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 330,
+          "uncovered": 43
+        },
+        "statements": {
+          "total": 514,
+          "uncovered": 118
+        },
+        "functions": {
+          "total": 141,
+          "uncovered": 27
+        },
+        "branches": {
+          "total": 607,
+          "uncovered": 207
+        }
+      }
+    },
+    {
+      "file": "src/renderer/state/useOttoStore.ts",
+      "reason": "Discard stale-session errors; preserve foreground errors and await authoritative reconnect state.",
+      "beforeEntrySha256": "fb1bc4a52cbcfad2a17ffee90ca5a0a811b72735c47f705f5479ed72d08066b1",
+      "afterEntrySha256": "1661edaa9b41d9ebbe8a0059173baa44b39570f6ba8e8d00eaff09c394db74d6",
+      "sourceSha256": "a568f250d354d0a25d009dc523c0a24da2629b00c2e2c3a9707bca56ccb2b721",
+      "before": {
+        "lines": {
+          "total": 440,
+          "uncovered": 97
+        },
+        "statements": {
+          "total": 497,
+          "uncovered": 127
+        },
+        "functions": {
+          "total": 82,
+          "uncovered": 24
+        },
+        "branches": {
+          "total": 433,
+          "uncovered": 118
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 447,
+          "uncovered": 97
+        },
+        "statements": {
+          "total": 506,
+          "uncovered": 127
+        },
+        "functions": {
+          "total": 83,
+          "uncovered": 24
+        },
+        "branches": {
+          "total": 453,
+          "uncovered": 117
+        }
+      }
+    },
+    {
+      "file": "src/renderer/state/useProductWorkspace.ts",
+      "reason": "Single-flight scan request identity with bounded timeout and late-response filtering; callback coverage improves.",
+      "beforeEntrySha256": "6d4d9cc22067609c89f451172f6be783ae1eb130bb942d9e5db8db29b1948326",
+      "afterEntrySha256": "44949f4ba39d11ea2d340da74de446f64d9297e0d056bf0a4766803dc303f091",
+      "sourceSha256": "b13cad87fa92b6264b3d4507fbadd7866957294c62e754d679886438e7462251",
+      "before": {
+        "lines": {
+          "total": 58,
+          "uncovered": 38
+        },
+        "statements": {
+          "total": 69,
+          "uncovered": 45
+        },
+        "functions": {
+          "total": 28,
+          "uncovered": 27
+        },
+        "branches": {
+          "total": 53,
+          "uncovered": 20
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 91,
+          "uncovered": 26
+        },
+        "statements": {
+          "total": 111,
+          "uncovered": 32
+        },
+        "functions": {
+          "total": 33,
+          "uncovered": 21
+        },
+        "branches": {
+          "total": 98,
+          "uncovered": 21
+        }
+      }
+    }
+  ],
+  "boundaries": [
+    "Native raw reports and failed gate receipts remain unchanged. This is not a rerun or production acceptance.",
+    "All unchanged file entries, AST maps, uncovered-site budgets, previous review and required old tests are preserved.",
+    "The unchanged ModuleGroupCatalogDialog branch regression is NOT adopted: an explicit fully-enabled park-template test must restore it.",
+    "PR 80 adds invalid/oversized policy model output, pre-call input limits, failed/unknown/exhausted execution and cancellation-failure assertions, and timeout/network/model error presentation tests.",
+    "Full Windows and macOS final-source runs must pass the unchanged mandatory verifier before release.",
+    "Legacy Electron entry-point, default model authentication setup and some UI callbacks retain coverage debt; unit coverage does not prove production model quality or every installation history."
+  ],
+  "readOnlyHistoricalRevalidation": {
+    "preservedRejection": "[desktop-coverage-ratchet] increased uncovered branches count in src/renderer/components/ModuleGroupCatalogDialog.tsx",
+    "requiresFinalRunWithNewAssertions": true
+  }
+}

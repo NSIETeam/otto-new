@@ -17,6 +17,7 @@ import {
 import { CustomAgentIconPicker } from './CustomAgentIconPicker.js';
 import { ModuleIcon } from './ModuleIcon.js';
 import { SkillFunctionCard, SkillVersionPanel } from './SkillVersionPanel.js';
+import type { AutoSkillScanState } from '../state/useProductWorkspace.js';
 import { EnterpriseMemoryVersions, MemoryContentComparison } from './EnterpriseMemoryVersions.js';
 
 export function DialogFrame({ title, onClose, children, size = 'standard', className = '', icon, subtitle }: {
@@ -517,8 +518,9 @@ export function EnterpriseMemoryDialog({ open, role, onClose }: {
   </DialogFrame>;
 }
 
-export function AutoSkillDialog({ open, candidates, lastAction, onRefresh, onConfirm, onReject, onClose, releases = [], releaseBusy = false, releaseError = null, releaseStatus, onRefreshReleases, onRollback, onRecord }: {
+export function AutoSkillDialog({ open, candidates, lastAction, scan, onRefresh, onConfirm, onReject, onClose, releases = [], releaseBusy = false, releaseError = null, releaseStatus, onRefreshReleases, onRollback, onRecord }: {
   open: boolean; candidates: AutoSkillCandidateInfo[];
+  scan?: AutoSkillScanState | null;
   lastAction: { kind: 'confirmed' | 'rejected'; candidateId: string; savedPath?: string } | null;
   onRefresh(): void; onConfirm(id: string): void; onReject(id: string): void; onClose(): void;
   releases?: InstalledSkillReleases[]; releaseBusy?: boolean; releaseError?: string | null; releaseStatus?: string;
@@ -526,9 +528,18 @@ export function AutoSkillDialog({ open, candidates, lastAction, onRefresh, onCon
 }): React.JSX.Element | null {
   useEffect(() => { if (open) onRefreshReleases?.(); }, [open, onRefreshReleases, lastAction]);
   if (!open) return null;
+  const scanning = scan?.status === 'running';
+  const scanPending = scanning || scan?.status === 'uncertain';
+  const scanFailed = scan?.status === 'failed' || scan?.status === 'uncertain';
   return <DialogFrame title="Skill 功能、草稿与版本" size="compact" onClose={onClose}>
     {onRefreshReleases && onRollback && onRecord ? <SkillVersionPanel skills={releases} busy={releaseBusy} error={releaseError} status={releaseStatus} onRefresh={onRefreshReleases} onRollback={onRollback} onRecord={onRecord} /> : null}
-    <h2>待确认的新功能与更新</h2><div className="otto-workspace-dialog__toolbar"><p>先说明能做什么，再披露检查与风险。你确认后才安装；安装不代表业务效果已获验证。</p><button type="button" onClick={onRefresh}>立即分析</button></div>{lastAction?.kind === 'confirmed' ? <p role="status">Skill 已确认安装{lastAction.savedPath ? `：${lastAction.savedPath}` : ''}</p> : null}<div className="otto-workspace-dialog__list">{candidates.length ? candidates.map((candidate) => {
+    <h2>待确认的新功能与更新</h2>
+    <div className="otto-workspace-dialog__toolbar otto-auto-skill-toolbar">
+      <p>扫描最近成果，发现可复用的 Skill 草稿。你确认后才安装。</p>
+      <button type="button" disabled={scanning} aria-busy={scanning} onClick={onRefresh}>{scanning ? '分析中…' : scanFailed ? '重新分析' : '立即分析'}</button>
+    </div>
+    {scan ? <p role={scanFailed ? 'alert' : 'status'} className={scanFailed ? 'otto-workspace-dialog__error' : undefined}>{scan.message}</p> : null}
+    {lastAction?.kind === 'confirmed' ? <p role="status">Skill 已确认安装{lastAction.savedPath ? `：${lastAction.savedPath}` : ''}</p> : null}<div className="otto-workspace-dialog__list">{candidates.length ? candidates.map((candidate) => {
     const ready = candidate.draft?.validationPassed === true && candidate.draft.packageReady === true;
     return <article key={candidate.id} aria-label={`${candidate.name} Skill 草稿`}>
       <h3>{candidate.function?.title ?? candidate.name}</h3>
@@ -543,9 +554,9 @@ export function AutoSkillDialog({ open, candidates, lastAction, onRefresh, onCon
         <details><summary>测试与校验（{candidate.draft.tests.length}）</summary><ul>{candidate.draft.tests.map((test) => <li key={test.name}>{test.status === 'passed' ? '通过' : test.status === 'failed' ? '失败' : '需人工确认'} · {test.name}：{test.detail}</li>)}</ul>{candidate.draft.validationErrors.map((error) => <p role="alert" key={error}>{error}</p>)}</details>
         {candidate.draft.risk.executionBlocked ? <p role="note">此草稿包含脚本：生成、打包和安装均不会执行；以后首次执行仍需单独授权。</p> : null}
       </div> : <p role="alert">旧候选尚未生成受控草稿；确认时会先完成校验和打包。</p>}
-      <footer><button type="button" disabled={candidate.draft ? !ready : false} onClick={() => onConfirm(candidate.id)}>{candidate.recommendation === 'enhance' ? '确认更新并试用' : '确认安装'}</button><button type="button" onClick={() => onReject(candidate.id)}>拒绝草稿</button></footer>
+      <footer><button type="button" disabled={scanPending || (candidate.draft ? !ready : false)} onClick={() => onConfirm(candidate.id)}>{candidate.recommendation === 'enhance' ? '确认更新并试用' : '确认安装'}</button><button type="button" disabled={scanPending} onClick={() => onReject(candidate.id)}>拒绝草稿</button></footer>
     </article>;
-  }) : <p>暂无草稿或候选。点击“立即分析”扫描最近成果；也可以直接让 Otto 创建一个 Skill。</p>}</div></DialogFrame>;
+  }) : !scan ? <p>暂无草稿或候选。点击“立即分析”扫描最近成果；也可以直接让 Otto 创建一个 Skill。</p> : null}</div></DialogFrame>;
 }
 
 export function CustomAgentManagerDialog({

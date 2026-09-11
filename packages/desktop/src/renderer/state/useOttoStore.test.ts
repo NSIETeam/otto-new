@@ -127,6 +127,57 @@ afterEach(() => {
 });
 
 describe('applyFrame 各帧分支', () => {
+  it('后台清理旧企业会话的拒绝回包不弹系统通知，也不污染当前错误栏', () => {
+    const notify = vi.fn().mockResolvedValue(undefined);
+    Object.assign(window.otto, { notificationShow: notify });
+    const { view, push } = setup();
+    push({ type: 'sessions_list', payload: { sessions: [makeSession({ sessionId: 'old-enterprise' })] } });
+    push({ type: 'sessions_list', payload: { sessions: [] } });
+    for (const code of ['forbidden_session', 'forbidden_agent_profile', 'no_session']) {
+      push({ type: 'error', payload: { sessionId: 'old-enterprise', code, message: '该企业会话需要重新登录原中心企业账号。' } });
+    }
+    expect(notify).not.toHaveBeenCalled();
+    expect(view.result.current.state.lastError).toBeNull();
+  });
+
+  it('未运行的后台会话访问失败不伪装成后台任务失败通知', () => {
+    const notify = vi.fn().mockResolvedValue(undefined);
+    Object.assign(window.otto, { notificationShow: notify });
+    const { view, push } = setup();
+    push({ type: 'sessions_list', payload: { sessions: [makeSession({ sessionId: 'active' }), makeSession({ sessionId: 'idle-background' })] } });
+    push({ type: 'error', payload: { sessionId: 'idle-background', code: 'forbidden_session', message: '企业身份不可用' } });
+    expect(notify).not.toHaveBeenCalled();
+    // Known-session errors remain visible in-app; this is not an authorization bypass.
+    expect(view.result.current.state.lastError).toBe('企业身份不可用');
+  });
+
+  it('实际运行的后台任务失败仍提醒，当前会话登录错误仍显示', () => {
+    const notify = vi.fn().mockResolvedValue(undefined);
+    Object.assign(window.otto, { notificationShow: notify });
+    const { view, push } = setup();
+    push({ type: 'sessions_list', payload: { sessions: [makeSession({ sessionId: 'active' }), makeSession({ sessionId: 'working', status: 'thinking' })] } });
+    push({ type: 'error', payload: { sessionId: 'working', code: 'forbidden_session', message: '任务执行时身份已失效' } });
+    expect(notify).toHaveBeenCalledOnce();
+    push({ type: 'error', payload: { sessionId: 'active', code: 'forbidden_session', message: '请重新登录' } });
+    expect(view.result.current.state.lastError).toBe('请重新登录');
+    expect(notify).toHaveBeenCalledOnce();
+  });
+
+  it('重连后先取得可见会话快照，不自动读取旧账号会话', () => {
+    const { view, push } = setup();
+    push({ type: 'sessions_list', payload: { sessions: [makeSession({ sessionId: 'old-enterprise' })] } });
+    sendSpy.mockClear();
+    act(() => _capturedConnHandler?.(false));
+    expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'unsubscribe' }));
+    act(() => _capturedConnHandler?.(true));
+    expect(sendSpy).toHaveBeenCalledWith({ type: 'list_sessions', payload: {} });
+    expect(sendSpy.mock.calls.some(([frame]) => ['subscribe', 'get_history'].includes(frame.type))).toBe(false);
+    push({ type: 'sessions_list', payload: { sessions: [makeSession({ sessionId: 'current-enterprise' })] } });
+    expect(sendSpy).toHaveBeenCalledWith({ type: 'subscribe', payload: { sessionId: 'current-enterprise' } });
+    expect(view.result.current.state.activeSessionId).toBe('current-enterprise');
+    expect(sendSpy).not.toHaveBeenCalledWith({ type: 'get_history', payload: { sessionId: 'old-enterprise' } });
+  });
+
   it('sends safe-point edits only with negotiated capability and the latest accepted revision', () => {
     const { view, push } = setup();
     push({ type: 'sessions_list', payload: { sessions: [makeSession({ status: 'thinking' })] } });

@@ -366,6 +366,46 @@ describe('OttoServer WS（v1.7 产品工作区）', () => {
     client.close();
   });
 
+  it('立即分析经真实 WS 返回对应扫描回执，空结果也明确结束且不会安装', async () => {
+    const client = await connectWs(baseUrl);
+    client.send({ type: 'scan_pending_auto_skills', payload: { requestId: 'manual-empty-scan' } });
+    const result = await client.waitFor(frame => frame.type === 'pending_auto_skills' && frame.payload.scan?.requestId === 'manual-empty-scan');
+    expect(result).toMatchObject({ type: 'pending_auto_skills', payload: { candidates: [], scan: { requestId: 'manual-empty-scan', candidateCount: 0 } } });
+    // Core config may seed official built-ins; scanning must not install any candidate.
+    const builtins = fs.readdirSync(new URL('../../core/skills-seed/', import.meta.url));
+    const skillsPath = path.join(tmpHome, 'user/skills');
+    const installed = fs.existsSync(skillsPath) ? fs.readdirSync(skillsPath) : [];
+    expect(installed.every(name => builtins.includes(name))).toBe(true);
+    client.close();
+  });
+
+  it('立即分析暂存失败经真实 WS 返回本次请求错误，不冒充空结果', async () => {
+    fs.mkdirSync(path.join(tmpHome, 'user'), { recursive: true });
+    fs.writeFileSync(path.join(tmpHome, 'user/memory'), 'block-directory-for-test');
+    const client = await connectWs(baseUrl);
+    client.send({ type: 'scan_pending_auto_skills', payload: { requestId: 'manual-failed-scan' } });
+    const result = await client.waitFor(frame => frame.type === 'error' && frame.payload.requestId === 'manual-failed-scan');
+    expect(result).toMatchObject({ type: 'error', payload: { code: 'auto_skill_failed', requestId: 'manual-failed-scan' } });
+    expect(client.frames.some(frame => frame.type === 'pending_auto_skills' && frame.payload.scan?.requestId === 'manual-failed-scan')).toBe(false);
+    client.close();
+  });
+
+  it('立即分析重复请求复用在途扫描，并分别返回对应回执', async () => {
+    const candidate = { id: 'shared-result', name: 'report', description: '报告草稿', detectedPattern: '报告', occurrenceCount: 3, reason: '重复工作' };
+    // Hold the existing operation at its async boundary; do not run a paid model.
+    let finish!: (items: Array<typeof candidate>) => void;
+    (server as unknown as { manualAutoSkillScan?: Promise<Array<typeof candidate>> }).manualAutoSkillScan = new Promise(resolve => { finish = resolve; });
+    const client = await connectWs(baseUrl);
+    client.send({ type: 'scan_pending_auto_skills', payload: { requestId: 'shared-a' } });
+    client.send({ type: 'scan_pending_auto_skills', payload: { requestId: 'shared-b' } });
+    finish([candidate]);
+    for (const requestId of ['shared-a', 'shared-b']) {
+      const result = await client.waitFor(frame => frame.type === 'pending_auto_skills' && frame.payload.scan?.requestId === requestId);
+      expect(result).toMatchObject({ payload: { candidates: [candidate], scan: { requestId, candidateCount: 1 } } });
+    }
+    client.close();
+  });
+
   it('自动 Skill 候选可读取并仅在明确确认后写入用户 Skill 目录', async () => {
     const userDir = path.join(tmpHome, 'user');
     const pendingPath = path.join(userDir, 'memory', 'worklog', 'pending_skills.json');
@@ -934,7 +974,32 @@ describe('OttoServer WS（v1.7 产品工作区）', () => {
     expect(clearedBody.data?.context.edition).toBe('personal');
   });
 
-  it('中心会话绑定账号和组织；legacy/错租户会话不会被列出且所有 sessionId 操作统一拒绝', async () => {
+  it('旧身份及不存在会话的取消订阅安静幂等，读取和发送仍被拒绝', async () => {
+    server.setAuthenticatedEnterpriseAccount(authenticatedAccount());
+    const session = server.store.createSession({
+      title: '只测试清理', productEdition: 'enterprise',
+      enterpriseAccountId: 'central-account-1', enterpriseOrganizationId: 'central-org-1',
+    });
+    const client = await connectWs(baseUrl);
+    client.send({ type: 'subscribe', payload: { sessionId: session.sessionId } });
+    await client.waitFor(frame => frame.type === 'history' && frame.payload.sessionId === session.sessionId);
+    server.setAuthenticatedEnterpriseAccount(null);
+    for (const sessionId of [session.sessionId, session.sessionId, 'nonexistent-session']) {
+      client.send({ type: 'unsubscribe', payload: { sessionId } });
+    }
+    // A following known-denied request is the ordering barrier, not a timed sleep.
+    client.send({ type: 'get_history', payload: { sessionId: session.sessionId } });
+    await client.waitFor(frame => frame.type === 'error' && frame.payload.sessionId === session.sessionId);
+    expect(client.frames.filter(frame => frame.type === 'error')).toHaveLength(1);
+    expect(client.frames.find(frame => frame.type === 'error')).toMatchObject({ payload: { code: 'forbidden_session' } });
+    client.send({ type: 'send_user_message', payload: { sessionId: session.sessionId, content: [{ type: 'text', value: '不应执行' }], source: 'local' } });
+    await client.waitFor(frame => frame.type === 'error' && client.frames.filter(item => item.type === 'error').length === 2);
+    expect(server.store.getHistory(session.sessionId)).toEqual([]);
+    expect(server.store.getSession(session.sessionId)).toBeDefined();
+    client.close();
+  });
+
+  it('中心会话绑定账号和组织；legacy/错租户会话不会被列出且所有会话读写操作统一拒绝', async () => {
     server.setAuthenticatedEnterpriseAccount(authenticatedAccount());
     const legacy = server.store.createSession({
       title: '旧版无租户会话',

@@ -4,6 +4,7 @@ import { MemoryPolicyStore } from './policyStore.js';
 import { initialPolicyCollection } from './policyCollection.js';
 import { policyCollectionSlot } from './policyCollectionCycle.js';
 import { policyHash } from './policyDomain.js';
+import { createPolicyModelWithInvoker } from './policyModel.js';
 import type {
   OfficialPolicyDocument,
   PolicyActor,
@@ -120,6 +121,34 @@ async function finishCollection(
   throw new Error('Bounded collection did not complete');
 }
 describe('policy reminders use the persistent account-scoped inbox', () => {
+  it('completes real diagnosis through the client model exchange without changing the shared server model', async () => {
+    const h = harness();
+    await enabled(h);
+    const scope = await h.service.clientExecutionScope('a');
+    const id = h.service.clientExecutions.start('a', scope, invoke => h.service.actWithModel('a',
+      { action: 'diagnose', policyId: 'p1', consent: true }, createPolicyModelWithInvoker('dialogue-model', invoke), scope));
+    const view = await h.service.clientExecutions.poll(id, 'a', scope);
+    expect(view.status).toBe('model');
+    if (view.status !== 'model') throw new Error('missing model request');
+    expect(view.instruction).toContain('反面核验');
+    h.service.clientExecutions.reply(id, 'a', scope, view.requestId, {
+      relevant: true, summary: '请补充收入资料', conditions: [{ id: 'revenue', result: 'unknown' }], refutation: { checked: true, concerns: [] },
+    });
+    const done = await h.service.clientExecutions.poll(id, 'a', scope);
+    expect(done.status).toBe('done');
+    if (done.status !== 'done') throw new Error('diagnosis not saved');
+    expect(done.result).toMatchObject({ modelName: 'dialogue-model', diagnoses: [expect.objectContaining({ policyId: 'p1' })] });
+    expect(h.model.analyze).not.toHaveBeenCalled();
+    expect((await h.service.state('a')).modelName).toBe('test-model');
+    expect((await h.service.state('other')).diagnoses).toEqual([]);
+  });
+  it('does not enter an action under another organization or bypass administrator authorization', async () => {
+    const h = harness();
+    await enabled(h);
+    await expect(h.service.clientExecutionScope('member')).rejects.toThrow('管理员');
+    await expect(h.service.actWithModel('a', { action: 'configure', enabled: false }, h.model, 'other-org')).rejects.toThrow('账号已变化');
+    expect((await h.service.state('a')).enabled).toBe(true);
+  });
   it('shows source failure immediately before its bounded document reconciliation finishes', async () => {
     const h = harness();
     await enabled(h);

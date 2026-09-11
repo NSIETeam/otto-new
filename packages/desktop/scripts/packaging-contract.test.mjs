@@ -140,6 +140,7 @@ describe('desktop packaging contract', () => {
       'dist/main/desktop-pet-drag.js',
       'dist/preload/index.js',
       'dist/renderer/index.html',
+      'dist/renderer/desktop-pet.html',
       'dist/renderer/main.js',
     ]) {
       expect(filter(path.join(packageRoot, relative), metadata), relative).toBe(true);

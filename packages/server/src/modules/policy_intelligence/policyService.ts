@@ -1,5 +1,7 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { PolicyClientExecutions } from './policyClientExecution.js';
 import { annotatePolicyBatches } from './policyLineage.js';
 import {
   emptyPolicyMailbox,
@@ -160,6 +162,17 @@ export function sanitizePolicyProfile(
 }
 
 export class EnterprisePolicyService {
+  readonly clientExecutions = new PolicyClientExecutions();
+  private readonly requestModel = new AsyncLocalStorage<{ model: PolicyModel; scope: string }>();
+  private get model(): PolicyModel | undefined { return this.requestModel.getStore()?.model ?? this.options.model; }
+  async clientExecutionScope(accountId: string): Promise<string> {
+    const actor = await this.actor(accountId);
+    if (!actor.isAdmin) throw new PolicyOperationError('仅企业管理员可发起政策分析');
+    return actor.organizationId;
+  }
+  actWithModel(accountId: string, action: PolicyAction, model: PolicyModel, scope: string): Promise<PolicyIntelligenceState> {
+    return this.requestModel.run({ model, scope }, () => this.act(accountId, action));
+  }
   private readonly controllers = new Map<string, Set<AbortController>>();
   private notificationFlight?: Promise<void>;
   private collectionFlight?: Promise<void>;
@@ -185,6 +198,8 @@ export class EnterprisePolicyService {
     const actor = await this.options.getActor(id);
     if (!actor?.active || !actor.organizationId || actor.id !== id)
       throw new PolicyOperationError('企业账号不可用');
+    const scope = this.requestModel.getStore()?.scope;
+    if (scope && actor.organizationId !== scope) throw new PolicyOperationError('企业账号已变化，本次分析已取消');
     return actor;
   }
   private async workspace(
@@ -414,7 +429,7 @@ export class EnterprisePolicyService {
       syncStatus: lastError ? 'error' : 'idle',
       lastSyncAt: collection?.at,
       lastError,
-      modelName: this.options.model?.name ?? '服务端尚未配置分析模型',
+      modelName: this.model?.name ?? '使用当前对话模型（分析时读取）',
       usedAnalysesToday:
         (await this.store.get<number>(this.usageKey(actor))) ?? 0,
       dailyAnalysisLimit: this.limit(),
@@ -860,7 +875,7 @@ export class EnterprisePolicyService {
         Object.fromEntries(preconditions.map((c) => [c.id, c.result])),
       ) === 'has_gaps';
     const skipModel = policyHit || policyPending || hardGap;
-    if (!skipModel && !this.options.model)
+    if (!skipModel && !this.model)
       throw new PolicyOperationError('企业服务端尚未配置政策分析模型');
     if (!skipModel)
       await this.store.update<number>(this.usageKey(actor), (used) => {
@@ -885,7 +900,7 @@ export class EnterprisePolicyService {
       if (!skipModel) onModelDispatch?.();
       const result: Awaited<ReturnType<PolicyModel['analyze']>> = skipModel
         ? { relevant: true, summary: '', conditions: preconditions }
-        : await this.options.model!.analyze(
+        : await this.model!.analyze(
             doc,
             policyModelProfile(doc, profile),
             signal,
@@ -1040,7 +1055,7 @@ export class EnterprisePolicyService {
         ),
         modelProvider: skipModel
           ? '证据规则核验（本次未调用模型）'
-          : this.options.model!.name,
+          : this.model!.name,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
       };
@@ -1149,7 +1164,7 @@ export class EnterprisePolicyService {
     boundedReads = false,
     authorize?: () => Promise<boolean>,
   ): Promise<OfficialPolicyDocument> {
-    if (!this.options.model) return doc;
+    if (!this.model) return doc;
     const leaseKey = `extract-lease:${doc.id}`;
     const token = randomUUID();
     let accepted = false;
@@ -1185,7 +1200,7 @@ export class EnterprisePolicyService {
       let next = doc;
       let providerReturned = false;
       try {
-        const extracted = await this.options.model.extract(doc, signal);
+        const extracted = await this.model.extract(doc, signal);
         providerReturned = true;
         next = {
           ...doc,

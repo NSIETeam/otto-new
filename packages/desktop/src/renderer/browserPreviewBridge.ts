@@ -378,7 +378,7 @@ if (!previewWindow.otto) {
     conversationDraftLoad: () => Promise.resolve(null),
     conversationDraftSave: () => Promise.resolve(),
     conversationDraftRemove: () => Promise.resolve(),
-    appVersion: () => Promise.resolve('1.9.15-browser-preview'),
+    appVersion: () => Promise.resolve('1.9.16-browser-preview'),
     getWorkspaceDirectories: () => Promise.resolve({
       defaultPath: '/Users/demo',
       recentPaths: ['/Users/demo'],
@@ -435,7 +435,7 @@ if (!previewWindow.otto) {
     updateCheck: () =>
       Promise.resolve({
         status: 'up-to-date',
-        currentVersion: '1.9.15',
+        currentVersion: '1.9.16',
         latestVersion: null,
       }),
     updateDownload: () =>

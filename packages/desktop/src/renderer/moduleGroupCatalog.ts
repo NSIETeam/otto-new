@@ -64,17 +64,6 @@ export const HONGCHUANG_PARK_SERVICE_MODULE_IDS = [
   'park-flea-market',
 ] as const;
 
-export const SMART_RECRUITMENT_MODULE_IDS = [
-  'recruitment-resume-analysis',
-  'recruitment-candidate-screening',
-  'recruitment-evidence-graph',
-  'recruitment-interview-audio',
-  'recruitment-interview-kit',
-  'recruitment-interview-copilot',
-  'recruitment-work-sample',
-  'recruitment-privacy-audit',
-] as const;
-
 export const OFFICIAL_MODULE_GROUP_TEMPLATES: readonly ModuleGroupTemplateDefinition[] = [
   {
     package: {
@@ -92,23 +81,6 @@ export const OFFICIAL_MODULE_GROUP_TEMPLATES: readonly ModuleGroupTemplateDefini
     moduleIds: HONGCHUANG_PARK_SERVICE_MODULE_IDS,
     autoInstall: false,
     access: 'hongchuang-park-members',
-  },
-  {
-    package: {
-      source: 'official',
-      packageId: 'otto.group.smart-recruitment',
-      publisherId: OTTO_OFFICIAL_PUBLISHER_ID,
-      version: '2.0.0',
-    },
-    groupId: 'smart-recruitment',
-    name: '智能招聘',
-    description: '企业记忆驱动岗位标准，把简历、面试和实战成果汇成可追溯证据图谱，并按缺口动态追问；最终决定仍由招聘人员确认。',
-    icon: 'generated:agent-hr-recruiting',
-    editions: ['enterprise'],
-    rows: 3,
-    moduleIds: SMART_RECRUITMENT_MODULE_IDS,
-    autoInstall: false,
-    access: 'all-enterprises',
   },
   {
     package: {

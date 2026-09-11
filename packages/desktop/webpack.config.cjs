@@ -88,6 +88,11 @@ module.exports = (_env, argv) => {
         filename: 'index.html',
         inject: 'body',
       }),
+      new HtmlWebpackPlugin({
+        template: path.resolve(__dirname, 'src/renderer/desktop-pet.html'),
+        filename: 'desktop-pet.html',
+        inject: 'body',
+      }),
     ],
     performance: { hints: false },
   };

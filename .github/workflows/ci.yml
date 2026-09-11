@@ -15,6 +15,45 @@ permissions:
   contents: read
 
 jobs:
+  linux-enterprise-deployment-integration:
+    name: Verify Linux Root Deployment Transactions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout this PR revision without retained credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+          lfs: false
+
+      - name: Exercise root gateway, signatures, locks and mirror rollback
+        id: linux_gateway_integration
+        shell: bash
+        env:
+          TEST_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          test "$(git rev-parse HEAD)" = "$TEST_COMMIT"
+          docker run --rm \
+            --network none \
+            --pids-limit 256 \
+            --memory 512m \
+            --cpus 2 \
+            --security-opt no-new-privileges \
+            --user 0:0 \
+            -e OTTO_CI_INTEGRATION_CONTAINER=1 \
+            -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+            python@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 \
+            bash /workspace/scripts/tests/enterprise-ci-linux-integration.sh
+
   build-and-test:
     runs-on: macos-latest
     # desktop 走 electron-builder，用 macOS runner 更贴近实际交付平台

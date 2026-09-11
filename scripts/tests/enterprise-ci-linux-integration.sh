@@ -999,33 +999,87 @@ case "$RECOVERED_DEPLOYMENT" in
 esac
 # Finalization must retain health failures and isolate noisy successful health
 # checks from its exact stdout receipt, including an idempotent replay.
-printf '%s\n' '#!/bin/bash' 'set -Eeuo pipefail' \
-  "printf '%s\\n' '{\"ok\":false}' '[Otto Deploy] health rejected'" 'exit 7' \
-  > /opt/otto-enterprise/deploy/verify.sh
-chmod 0755 /opt/otto-enterprise/deploy/verify.sh
-if SUDO_USER=nobody "$GATEWAY" finalize-deployment \
-  "$VERIFY_TRANSACTION" 1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT"; then
-  printf 'gateway finalized despite failed health verification\n' >&2
-  exit 1
-fi
-[ ! -e "$VERIFY_TRANSACTION_DIR/finalized" ]
-printf '%s\n' '#!/bin/bash' 'set -Eeuo pipefail' \
-  "printf '%s\\n' '{\"ok\":true}' '[Otto Deploy] health checked'" \
-  > /opt/otto-enterprise/deploy/verify.sh
-chmod 0755 /opt/otto-enterprise/deploy/verify.sh
 EXPECTED_FINALIZED="finalized ${RECOVERED_DEPLOYMENT#recovered_}"
 for FINALIZE_ATTEMPT in initial replay; do
-  FINALIZED_DEPLOYMENT="$(SUDO_USER=nobody "$GATEWAY" finalize-deployment \
-    "$VERIFY_TRANSACTION" 1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT")"
-  [ "$FINALIZED_DEPLOYMENT" = "$EXPECTED_FINALIZED" ] || {
-    printf 'gateway finalization receipt mismatch (%s)\nexpected: %s\nactual:   %s\n' \
-      "$FINALIZE_ATTEMPT" "$EXPECTED_FINALIZED" "$FINALIZED_DEPLOYMENT" >&2
-    exit 1
-  }
+  for FINALIZE_HEALTH_STATUS in 7 0; do
+    printf '%s\n' '#!/bin/bash' 'set -Eeuo pipefail' \
+      "printf '%s\\n' '{\"status\":$FINALIZE_HEALTH_STATUS}' '[Otto Deploy] finalize health fixture'" \
+      "exit $FINALIZE_HEALTH_STATUS" > /opt/otto-enterprise/deploy/verify.sh
+    chmod 0755 /opt/otto-enterprise/deploy/verify.sh
+    if [ "$FINALIZE_HEALTH_STATUS" -ne 0 ]; then
+      FINALIZE_MARKERS_BEFORE="$(find "$VERIFY_TRANSACTION_DIR" -type f -exec sha256sum {} + | sort)"
+      if SUDO_USER=nobody "$GATEWAY" finalize-deployment \
+        "$VERIFY_TRANSACTION" 1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT" \
+        > "$TEST_ROOT/finalize-$FINALIZE_ATTEMPT.stdout" \
+        2> "$TEST_ROOT/finalize-$FINALIZE_ATTEMPT.stderr"; then
+        printf 'gateway finalized despite failed health verification (%s)\n' "$FINALIZE_ATTEMPT" >&2
+        exit 1
+      else
+        FINALIZE_EXIT_STATUS="$?"
+      fi
+      [ "$FINALIZE_EXIT_STATUS" -eq "$FINALIZE_HEALTH_STATUS" ]
+      [ ! -s "$TEST_ROOT/finalize-$FINALIZE_ATTEMPT.stdout" ]
+      grep -Fq '[Otto Deploy] finalize health fixture' "$TEST_ROOT/finalize-$FINALIZE_ATTEMPT.stderr"
+      [ "$(find "$VERIFY_TRANSACTION_DIR" -type f -exec sha256sum {} + | sort)" = "$FINALIZE_MARKERS_BEFORE" ] || {
+        printf 'gateway changed markers after failed finalization health\n' >&2
+        exit 1
+      }
+    else
+      FINALIZED_DEPLOYMENT="$(SUDO_USER=nobody "$GATEWAY" finalize-deployment \
+        "$VERIFY_TRANSACTION" 1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT")"
+      [ "$FINALIZED_DEPLOYMENT" = "$EXPECTED_FINALIZED" ] || {
+        printf 'gateway finalization receipt mismatch (%s)\nexpected: %s\nactual:   %s\n' \
+          "$FINALIZE_ATTEMPT" "$EXPECTED_FINALIZED" "$FINALIZED_DEPLOYMENT" >&2
+        exit 1
+      }
+    fi
+    printf 'finalization acceptance passed: state=%s health=%s\n' "$FINALIZE_ATTEMPT" "$FINALIZE_HEALTH_STATUS"
+  done
 done
 [ -f "$VERIFY_TRANSACTION_DIR/finalized" ]
 [ "$(<"$VERIFY_TRANSACTION_DIR/finalized")" = \
   "${EXPECTED_FINALIZED#finalized }" ]
+
+# Even if a later transaction has installed the same target again, an older
+# rolled-back transaction cannot be finalized. Use a distinct historical state
+# whose target matches current, so identity checks cannot mask this rejection.
+ROLLED_FINALIZE_TRANSACTION='v1.9.14-304-1'
+ROLLED_FINALIZE_DIR="$STATE_ROOT/deployments/$ROLLED_FINALIZE_TRANSACTION"
+install -d -o root -g root -m 0700 "$ROLLED_FINALIZE_DIR"
+sed "s/^transaction=$VERIFY_TRANSACTION$/transaction=$ROLLED_FINALIZE_TRANSACTION/" \
+  "$VERIFY_TRANSACTION_DIR/state" > "$ROLLED_FINALIZE_DIR/state"
+printf '%s\n' "rolled_back transaction=$ROLLED_FINALIZE_TRANSACTION restored_version=1.9.13 restored_package=dddddddddddd-eeeeeeeeeeee restored_source=ffffffffffffffffffffffffffffffffffffffff replaced_version=1.9.14 replaced_package=$PACKAGE_ID replaced_source=$SOURCE_COMMIT" \
+  > "$ROLLED_FINALIZE_DIR/rolled-back"
+chmod 0600 "$ROLLED_FINALIZE_DIR/state" "$ROLLED_FINALIZE_DIR/rolled-back"
+ROLLED_FINALIZE_BEFORE="$(find "$ROLLED_FINALIZE_DIR" -type f -exec sha256sum {} + | sort)"
+for ROLLED_FINALIZE_HEALTH_STATUS in 0 7; do
+  printf '%s\n' '#!/bin/bash' 'set -Eeuo pipefail' \
+    "printf '%s\\n' '{\"status\":$ROLLED_FINALIZE_HEALTH_STATUS}' '[Otto Deploy] finalize health fixture'" \
+    "exit $ROLLED_FINALIZE_HEALTH_STATUS" > /opt/otto-enterprise/deploy/verify.sh
+  chmod 0755 /opt/otto-enterprise/deploy/verify.sh
+  if SUDO_USER=nobody "$GATEWAY" finalize-deployment \
+    "$ROLLED_FINALIZE_TRANSACTION" 1.9.14 "$PACKAGE_ID" "$SOURCE_COMMIT" \
+    > "$TEST_ROOT/finalize-rolled-back.stdout" \
+    2> "$TEST_ROOT/finalize-rolled-back.stderr"; then
+    printf 'gateway finalized a rolled-back transaction\n' >&2
+    exit 1
+  else
+    ROLLED_FINALIZE_EXIT_STATUS="$?"
+  fi
+  [ ! -s "$TEST_ROOT/finalize-rolled-back.stdout" ]
+  grep -Fq '[Otto Deploy] finalize health fixture' "$TEST_ROOT/finalize-rolled-back.stderr"
+  if [ "$ROLLED_FINALIZE_HEALTH_STATUS" -eq 0 ]; then
+    [ "$ROLLED_FINALIZE_EXIT_STATUS" -eq 2 ]
+    grep -Fq 'cannot finalize a rolled-back enterprise deployment' "$TEST_ROOT/finalize-rolled-back.stderr"
+  else
+    [ "$ROLLED_FINALIZE_EXIT_STATUS" -eq "$ROLLED_FINALIZE_HEALTH_STATUS" ]
+  fi
+  [ "$(find "$ROLLED_FINALIZE_DIR" -type f -exec sha256sum {} + | sort)" = "$ROLLED_FINALIZE_BEFORE" ] || {
+    printf 'gateway changed a rolled-back transaction during finalization\n' >&2
+    exit 1
+  }
+  printf 'finalization acceptance passed: state=rolled-back health=%s\n' "$ROLLED_FINALIZE_HEALTH_STATUS"
+done
 
 # Simulate an upgrade that failed before cutover after its transaction state
 # became durable. Reconciliation must verify the still-running previous release,

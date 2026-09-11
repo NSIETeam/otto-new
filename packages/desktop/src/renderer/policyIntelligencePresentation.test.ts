@@ -9,6 +9,11 @@ import { policyApplicationStatus } from 'otto-server';
 import type { OfficialPolicyDocument } from 'otto-server';
 
 describe('扩展政策条件的补充回答', () => {
+  it('keeps public-policy access and saved data visible when networking or the model is unavailable', () => {
+    expect(policyErrorMessage(new Error('fetch failed'))).toContain('已有资料不会因此删除');
+    expect(policyErrorMessage('分析模型未配置')).toContain('公共政策仍可浏览');
+    expect(policyErrorMessage('分析模型未配置')).toContain('正常对话');
+  });
   it('explains connection failures without exposing IPC or credentials', () => {
     expect(policyErrorMessage("Error invoking remote method 'policy-intelligence:action': Error: 服务器返回 502")).toContain('先核对状态');
     expect(policyErrorMessage('等待超时')).toContain('不要重复提交');

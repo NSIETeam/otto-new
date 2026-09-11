@@ -49,6 +49,15 @@ function renderDialog(overrides: Partial<React.ComponentProps<typeof ModuleGroup
 }
 
 describe('ModuleGroupCatalogDialog', () => {
+  it('shows fully enabled template availability independently of removed recruitment templates', () => {
+    renderDialog({ modules: modules.map(module => ({ ...module, availability: 'available', disabledReason: undefined })) });
+    const dialog = screen.getByRole('dialog', { name: '新增功能组' });
+    expect(within(dialog).getAllByText(/当前均可用/).length).toBeGreaterThan(0);
+    const parkCard = within(dialog).getByRole('heading', { name: '宏创园区服务' }).closest('article');
+    if (!parkCard) throw new Error('missing park card');
+    expect(within(parkCard).getByText('12 个功能 · 当前均可用')).toBeTruthy();
+    expect(within(parkCard).queryByText(/将在企业启用对应服务后可用/)).toBeNull();
+  });
   it('shows the official Hongchuang template with all nine functions and installs it atomically', () => {
     const { onConfirm, onClose } = renderDialog();
     const dialog = screen.getByRole('dialog', { name: '新增功能组' });

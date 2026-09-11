@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { recruitmentErrorMessage } from './recruitmentError.js';
 describe('recruitment errors', () => {
+  it('distinguishes an unknown timeout result from an explicit cancellation', () => {
+    expect(recruitmentErrorMessage(new Error('request timed out'))).toContain('避免重复提交');
+    expect(recruitmentErrorMessage(new Error('AbortError'))).toContain('已取消');
+  });
   it('explains incomplete model results and preserves actionable business errors', () => {
     expect(recruitmentErrorMessage("Error invoking remote method 'otto:recruitment-analyze-resume': Error: 招聘分析缺少维度：核心能力")).toContain('模型返回的评价不完整');
     expect(recruitmentErrorMessage('请先确认已取得授权')).toBe('请先确认已取得授权');

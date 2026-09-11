@@ -3,6 +3,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import './DesktopPetSurface.css';
 import type {
   DesktopPetBehaviorEvent,
   DesktopPetState,

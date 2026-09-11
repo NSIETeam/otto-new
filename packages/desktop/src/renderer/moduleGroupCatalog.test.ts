@@ -4,7 +4,6 @@ import {
   getModuleGroupTemplateAccess,
   getModuleGroupTemplateInstallState,
   HONGCHUANG_PARK_SERVICE_MODULE_IDS,
-  SMART_RECRUITMENT_MODULE_IDS,
   installModuleGroupTemplate,
   listModuleGroupTemplates,
 } from './moduleGroupCatalog.js';
@@ -56,24 +55,8 @@ describe('official module group catalog', () => {
     })).toMatchObject({ allowed: false });
   });
 
-  it('defines intelligent recruitment as one official evidence-driven group', () => {
-    expect(recruitmentTemplate).toMatchObject({
-      name: '智能招聘',
-      groupId: 'smart-recruitment',
-      rows: 3,
-      autoInstall: false,
-      package: {
-        source: 'official',
-        packageId: 'otto.group.smart-recruitment',
-        publisherId: 'otto.official',
-        version: '2.0.0',
-      },
-    });
-    expect(recruitmentTemplate.moduleIds).toEqual(SMART_RECRUITMENT_MODULE_IDS);
-    expect(recruitmentTemplate.moduleIds).toHaveLength(8);
-    expect(recruitmentTemplate.moduleIds).toContain('recruitment-evidence-graph');
-    expect(recruitmentTemplate.moduleIds).toContain('recruitment-interview-copilot');
-    expect(recruitmentTemplate.moduleIds).toContain('recruitment-work-sample');
+  it('no longer offers the redundant recruitment group', () => {
+    expect(recruitmentTemplate).toBeUndefined();
   });
 
   it('upgrades daily office with the evidence-driven enterprise memory experience', () => {

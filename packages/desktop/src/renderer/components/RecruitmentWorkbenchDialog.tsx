@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } fro
 import { createPortal } from 'react-dom';
 import { RecurringTaskRegistry } from 'otto-core/recurring-tasks';
 import { withRecruitmentIntakeContext } from '../recruitmentIntakeContext.js';
+import { recruitmentErrorMessage } from '../recruitmentError.js';
 
 import type { RecruitmentModuleTarget } from '../moduleCatalog.js';
 import {
@@ -471,7 +472,7 @@ export function RecruitmentWorkbenchDialog({
               ...(enterpriseContext ? { enterpriseContext } : {}),
             });
           } catch (cause) {
-            semanticError = cause instanceof Error ? cause.message : String(cause);
+            semanticError = recruitmentErrorMessage(cause);
           }
           guard.assertCurrent();
           imported.push({
@@ -588,7 +589,7 @@ export function RecruitmentWorkbenchDialog({
       ));
       setNotice(semanticEvaluation.execution?.disposition === 'reused' ? '材料、岗位和模型配置未变化，本次复用已有结果，没有新增模型调用。' : '已按当前岗位说明完成新一版全文分析，旧结果可在“分析历史与用量”回查。');
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
+      const message = recruitmentErrorMessage(cause);
       if (guard.isCurrent()) updateCandidate(activeCandidate.id, (candidate) => ({ ...candidate, semanticError: message }));
       setError(`全文智能分析失败：${message}`);
     } finally {
@@ -944,7 +945,7 @@ export function RecruitmentWorkbenchDialog({
                 {!candidates.length ? <div className="otto-recruitment-value"><span><b>1</b>一次读完整材料</span><span><b>2</b>简历与面试互证</span><span><b>3</b>持续保存候选人档案</span></div> : null}
               </section>
 
-              {error ? <p role="alert" className="otto-recruitment-message is-error">{error}</p> : null}
+              {error ? <p role="alert" className="otto-recruitment-message is-error">{recruitmentErrorMessage(error)}</p> : null}
               {notice ? <p role="status" className="otto-recruitment-message is-notice">{notice}</p> : null}
 
               {activePanel === 'sources' ? <section className="otto-recruitment-panel otto-recruitment-sources" aria-label="候选人来源中心">
@@ -1027,7 +1028,7 @@ export function RecruitmentWorkbenchDialog({
               </> : null}
 
               {activeCandidate && activePanel !== 'sources' ? <RecruitmentMaterialEvidence candidate={activeCandidate} /> : null}
-              {activeCandidate && !evaluation && activePanel !== 'sources' ? <section className="otto-recruitment-analysis-failed"><strong>Otto 暂时没有完成这份材料的智能分析</strong><p>{activeCandidate.semanticError || '候选人档案已保留，可以直接重试。'}</p><button type="button" disabled={Boolean(busy) || Boolean(activeCandidate.sourceMaterial && activeCandidate.sourceMaterial.material.completeness !== 'full_text')} onClick={() => void reanalyzeCandidate()}>重新分析</button><button type="button" disabled={Boolean(busy)} onClick={() => purgeCandidate(activeCandidate)}>清除这份材料</button></section> : null}
+              {activeCandidate && !evaluation && activePanel !== 'sources' ? <section className="otto-recruitment-analysis-failed"><strong>Otto 暂时没有完成这份材料的智能分析</strong><p>{activeCandidate.semanticError ? recruitmentErrorMessage(activeCandidate.semanticError) : '候选人档案已保留，可以直接重试。'}</p><button type="button" disabled={Boolean(busy) || Boolean(activeCandidate.sourceMaterial && activeCandidate.sourceMaterial.material.completeness !== 'full_text')} onClick={() => void reanalyzeCandidate()}>重新分析</button><button type="button" disabled={Boolean(busy)} onClick={() => purgeCandidate(activeCandidate)}>清除这份材料</button></section> : null}
 
               {activeCandidate && activePanel !== 'sources' ? <RecruitmentAnalysisHistoryPanel key={activeCandidate.id} candidate={activeCandidate} candidates={candidates} exporting={Boolean(busy)} onExport={() => void exportText('Otto-候选人完整档案与分析历史.json', JSON.stringify({ ...activeCandidate, archiveVersion: 1, archiveAudits: audits.filter((audit) => audit.candidateId === activeCandidate.id) }, null, 2), '已人工导出候选人完整档案与分析历史；导出副本由用户自行保管和清除。')} /> : null}
             </main>

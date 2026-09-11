@@ -1134,7 +1134,7 @@ export type GetPendingAutoSkillsMsg = Envelope<
 >;
 export type ScanPendingAutoSkillsMsg = Envelope<
   'scan_pending_auto_skills',
-  Record<string, never>
+  { requestId?: string }
 >;
 export type ConfirmPendingAutoSkillMsg = Envelope<
   'confirm_pending_auto_skill',
@@ -1558,6 +1558,7 @@ export type ErrorMsg = Envelope<
     sessionId?: string;
     code: string;
     message: string;
+    requestId?: string;
     modelRequestSafety?: {
       requestId: string;
       requestState: 'unknown_outcome';
@@ -2010,6 +2011,8 @@ export type PendingAutoSkillsMsg = Envelope<
   'pending_auto_skills',
   {
     candidates: AutoSkillCandidateInfo[];
+    /** Manual scan receipt, distinct from background/list/confirmation updates. */
+    scan?: { requestId: string; candidateCount: number };
     lastAction?: {
       kind: 'confirmed' | 'rejected';
       candidateId: string;
@@ -2565,8 +2568,11 @@ export function validateClientPayload(msg: {
     case 'get_product_workspace':
     case 'switch_to_personal':
     case 'get_pending_auto_skills':
-    case 'scan_pending_auto_skills':
       return isPlainObject(p) ? null : `${msg.type} payload 必须是对象`;
+    case 'scan_pending_auto_skills':
+      if (!isPlainObject(p)) return 'scan_pending_auto_skills payload 必须是对象';
+      return p['requestId'] === undefined || (isNonEmptyString(p['requestId']) && p['requestId'].length <= 128)
+        ? null : 'requestId 必须是 1 至 128 字符的字符串';
     case 'get_memory':
     case 'get_skills':
     case 'get_extensions':

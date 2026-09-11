@@ -68,11 +68,27 @@
 .otto-policy-v2__hero h3 {
   font-size: 23px;
 }
-.otto-policy-v2__hero > button,
+.otto-policy-v2__service-control > button,
 .otto-policy-v2__consent button:first-child {
   background: var(--otto-accent);
   color: white;
   white-space: nowrap;
+}
+.otto-policy-v2__hero > .otto-policy-v2__service-control {
+  flex: 0 1 300px;
+  display: grid;
+  gap: 10px;
+}
+.otto-policy-v2__sources {
+  border-top: 1px solid var(--otto-border);
+  padding-top: 14px;
+}
+.otto-policy-v2__sources summary { cursor: pointer; }
+.otto-policy-v2__sources-scroll {
+  max-height: min(320px, 45vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .otto-policy-v2__eyebrow {
   font-size: 12px;
@@ -236,6 +252,7 @@
   border-radius: 12px;
 }
 @media (max-width: 760px) {
+  .otto-policy-v2__hero > .otto-policy-v2__service-control { flex-basis: auto; }
   .otto-policy-v2__hero {
     flex-direction: column;
     align-items: stretch;

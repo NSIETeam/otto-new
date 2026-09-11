@@ -1,15 +1,22 @@
 ; Otto directory preservation. Extend, do not replace, electron-builder 26.15.3.
 ; This is an accidental data-loss guard, not a sandbox against a concurrent
-; privileged process. Unknown layouts stop for manual review; nothing is moved.
+; privileged process. Unknown layouts stop before cleanup. Interactive users may
+; explicitly choose a separate recovery helper; original directories stay put.
 !include LogicLib.nsh
 !include FileFunc.nsh
 
 Var OttoSafetyPath
 Var OttoSafetyReason
+Var OttoSafetyConflictPath
+Var OttoSafetyMessage
+!ifndef OTTO_RECOVERY_HELPER
+  !define OTTO_RECOVERY_HELPER "${__FILEDIR__}\InstallerRecovery.exe"
+!endif
 !ifndef BUILD_UNINSTALLER
 Var OttoSafetyOldPath
 Var OttoSafetyOldCommand
 Var OttoSafetyOldExe
+Var OttoSafetyRecovering
 !endif
 Var OttoSafetyScanPath
 Var OttoSafetyEntries
@@ -45,6 +52,10 @@ Var OttoSafetyNonempty
 !macro OttoSafetyCheckRegistry ROOT
   ReadRegStr $OttoSafetyOldPath ${ROOT} "${INSTALL_REGISTRY_KEY}" "InstallLocation"
   ReadRegStr $OttoSafetyOldCommand ${ROOT} "${UNINSTALL_REGISTRY_KEY}" "UninstallString"
+  StrCpy $OttoSafetyConflictPath $OttoSafetyOldPath
+  ${If} $OttoSafetyConflictPath == ""
+    StrCpy $OttoSafetyConflictPath "旧安装登记：${ROOT}\\${INSTALL_REGISTRY_KEY}"
+  ${EndIf}
   ${If} $OttoSafetyOldPath != ""
   ${OrIf} $OttoSafetyOldCommand != ""
     StrCpy $OttoSafetyReason "incomplete or ambiguous previous installation registration"
@@ -58,10 +69,12 @@ Var OttoSafetyNonempty
     GetFullPathName $0 $OttoSafetyOldPath
     ${GetParent} $OttoSafetyOldExe $1
     GetFullPathName $1 $1
+    StrCpy $OttoSafetyConflictPath "$OttoSafetyOldPath（卸载程序：$OttoSafetyOldExe）"
     StrCpy $OttoSafetyReason "previous uninstaller and installation directory disagree"
     ${If} $0 != $1
       Call OttoSafetyBlocked
     ${EndIf}
+    StrCpy $OttoSafetyConflictPath $OttoSafetyOldPath
     StrCpy $OttoSafetyReason "previous installation is incomplete; preserve files for manual recovery"
     IfFileExists "$0\${APP_EXECUTABLE_FILENAME}" 0 +2
       Goto +2
@@ -78,7 +91,62 @@ Var OttoSafetyNonempty
 !macro OttoSafetyFunctions PREFIX
 Function ${PREFIX}OttoSafetyBlocked
   DetailPrint "[otto-install-safety] blocked: $OttoSafetyReason"
-  MessageBox MB_OK|MB_ICONSTOP "[otto-install-safety] blocked: $OttoSafetyReason.$\r$\nOtto has preserved your files. Use a dedicated application directory; review the existing installation before retrying." /SD IDOK
+  DetailPrint "[otto-install-safety] conflict: $OttoSafetyConflictPath"
+  StrCpy $OttoSafetyMessage "无法安全检查这个目录，可能存在链接、权限限制或文件正在变化。"
+  ${If} $OttoSafetyReason == "incomplete or ambiguous previous installation registration"
+    StrCpy $OttoSafetyMessage "旧版安装登记不完整，不能安全调用旧卸载程序。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "previous uninstaller and installation directory disagree"
+    StrCpy $OttoSafetyMessage "旧卸载程序与登记的安装目录不一致。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "previous installation is incomplete; preserve files for manual recovery"
+    StrCpy $OttoSafetyMessage "旧版程序文件不完整，不能直接清理旧目录。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "previous uninstall command is not an exact recognised Otto command"
+    StrCpy $OttoSafetyMessage "旧版卸载信息异常，已停止调用旧卸载程序。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "installation contains a source, workspace or unknown directory"
+    StrCpy $OttoSafetyMessage "安装目录中发现源码、工作区或非程序文件夹。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "installation contains an unknown file; preserve it before upgrading"
+    StrCpy $OttoSafetyMessage "安装目录中发现非程序文件，覆盖升级可能误删它。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "resources contains an unknown file or source directory"
+    StrCpy $OttoSafetyMessage "程序资源目录中发现未知文件或源码。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "source repository or workspace found inside application files"
+    StrCpy $OttoSafetyMessage "程序目录中包含源码仓库或工作区。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "installation is inside a source repository"
+    StrCpy $OttoSafetyMessage "安装位置位于源码仓库内。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "nonempty directory is not a recognised Otto installation"
+    StrCpy $OttoSafetyMessage "所选目录非空，且不是完整的 Otto 安装目录。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "runtime directory inspection limit exceeded"
+    StrCpy $OttoSafetyMessage "目录内容过多或层级过深，无法安全确认全部文件。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "a system, profile or shared storage root is not a dedicated application directory"
+    StrCpy $OttoSafetyMessage "所选位置是系统、用户资料或共享目录，不能用作程序专用目录。"
+  ${EndIf}
+  ${If} $OttoSafetyReason == "installation path must be an ordinary local absolute directory"
+    StrCpy $OttoSafetyMessage "安装路径格式不规范，请使用普通本机目录。"
+  ${EndIf}
+  !ifndef BUILD_UNINSTALLER
+    IfSilent otto_safety_exit
+    ${If} $OttoSafetyRecovering == 1
+      MessageBox MB_OK|MB_ICONEXCLAMATION "安全恢复的临时位置也无法安全使用：$OttoSafetyConflictPath$\r$\n原文件已保留，请联系 Otto 支持。" /SD IDOK
+      Goto otto_safety_exit
+    ${EndIf}
+    MessageBox MB_YESNO|MB_ICONEXCLAMATION|MB_DEFBUTTON2 "$OttoSafetyMessage$\r$\n$\r$\n冲突位置：$OttoSafetyConflictPath$\r$\n检查的安装目录：$OttoSafetyPath$\r$\n$\r$\n已停止本次覆盖安装，保留原文件。请不要手动删除目录、修改注册表或反复卸载。$\r$\n$\r$\n选择【是】进入安全恢复向导；确认后将保留旧目录，在新的独立目录安装，并保存原安装登记。$\r$\n选择【否】退出。" /SD IDNO IDYES otto_safety_recovery IDNO otto_safety_exit
+    otto_safety_recovery:
+      Call OttoSafetyStartRecovery
+  !else
+    MessageBox MB_OK|MB_ICONSTOP "$OttoSafetyMessage$\r$\n$\r$\n冲突位置：$OttoSafetyConflictPath$\r$\n已停止卸载，保留原文件。请从新版 Otto 安装包进入【安全恢复】，不要手动删除目录。" /SD IDOK
+  !endif
+  !ifndef BUILD_UNINSTALLER
+    otto_safety_exit:
+  !endif
   SetErrorLevel 73
   Quit
 FunctionEnd
@@ -88,6 +156,7 @@ FunctionEnd
 ; Bounds deliberately fail closed and are not an approval to delete files.
 Function ${PREFIX}OttoSafetyScanTree
   !insertmacro OttoSafetySaveRegisters
+  StrCpy $OttoSafetyConflictPath $OttoSafetyScanPath
   IntOp $OttoSafetyDepth $OttoSafetyDepth + 1
   StrCpy $OttoSafetyReason "runtime directory inspection limit exceeded"
   ${If} $OttoSafetyDepth > 32
@@ -112,6 +181,7 @@ Function ${PREFIX}OttoSafetyScanTree
       System::Call 'kernel32::lstrcpynW(w .r2, p r6, i 260) p'
       ${If} $2 != "."
       ${AndIf} $2 != ".."
+        StrCpy $OttoSafetyConflictPath "$0\$2"
         IntOp $OttoSafetyEntries $OttoSafetyEntries + 1
         StrCpy $OttoSafetyReason "runtime directory inspection limit exceeded"
         ${If} $OttoSafetyEntries > 8192
@@ -182,6 +252,7 @@ FunctionEnd
 Function ${PREFIX}OttoSafetyValidatePath
   !insertmacro OttoSafetySaveRegisters
   StrCpy $OttoSafetyReason "installation path must be an ordinary local absolute directory"
+  StrCpy $OttoSafetyConflictPath $OttoSafetyPath
   StrCpy $0 $OttoSafetyPath
   StrCpy $1 $0 2 1
   ${If} $1 != ":\"
@@ -257,6 +328,7 @@ Function ${PREFIX}OttoSafetyValidatePath
   ; treat access denied as a new directory. This is not an atomic directory lock.
   StrCpy $1 $0
   ${Do}
+    StrCpy $OttoSafetyConflictPath $1
     System::Call 'kernel32::GetFileAttributesW(w r1) i.r2 ?e'
     Pop $3
     ${If} $2 == -1
@@ -272,10 +344,13 @@ Function ${PREFIX}OttoSafetyValidatePath
         Call ${PREFIX}OttoSafetyBlocked
       ${EndIf}
       StrCpy $OttoSafetyReason "installation is inside a source repository"
+      StrCpy $OttoSafetyConflictPath "$1\.git"
       IfFileExists "$1\.git" 0 +2
         Call ${PREFIX}OttoSafetyBlocked
+      StrCpy $OttoSafetyConflictPath "$1\.hg"
       IfFileExists "$1\.hg" 0 +2
         Call ${PREFIX}OttoSafetyBlocked
+      StrCpy $OttoSafetyConflictPath "$1\.svn"
       IfFileExists "$1\.svn" 0 +2
         Call ${PREFIX}OttoSafetyBlocked
     ${EndIf}
@@ -289,6 +364,7 @@ Function ${PREFIX}OttoSafetyValidatePath
       StrCpy $1 "$1\"
     ${EndIf}
   ${Loop}
+  StrCpy $OttoSafetyConflictPath $0
   System::Call 'kernel32::GetFileAttributesW(w r0) i.r1'
   ${If} $1 != -1
     StrCpy $OttoSafetyNonempty 0
@@ -311,6 +387,7 @@ Function ${PREFIX}OttoSafetyValidatePath
         System::Call 'kernel32::lstrcpynW(w .r2, p r6, i 260) p'
         ${If} $2 != "."
         ${AndIf} $2 != ".."
+          StrCpy $OttoSafetyConflictPath "$0\$2"
           StrCpy $OttoSafetyNonempty 1
           System::Call 'kernel32::GetFileAttributesW(w "$0\$2") i.r3'
           IntOp $4 $3 & 0x400
@@ -372,6 +449,7 @@ Function ${PREFIX}OttoSafetyValidatePath
     ${EndIf}
     System::Free $5
     ${If} $OttoSafetyNonempty == 1
+      StrCpy $OttoSafetyConflictPath $0
       StrCpy $OttoSafetyReason "nonempty directory is not a recognised Otto installation"
       IfFileExists "$0\${APP_EXECUTABLE_FILENAME}" 0 +2
         Goto +2
@@ -390,6 +468,33 @@ FunctionEnd
     !insertmacro OttoSafetyFunctions "un."
   !else
     !insertmacro OttoSafetyFunctions ""
+    Function OttoSafetyStartRecovery
+      ; Embed a native helper, never execute scripts or an old uninstaller.
+      StrCmp "${INSTALL_REGISTRY_KEY}" "Software\bc38908e-1ce2-5555-aca4-b7da2295894c" 0 otto_recovery_unavailable
+      System::Call 'ole32::CoCreateGuid(g .r0) i.r1'
+      ${If} $1 != 0
+        Goto otto_recovery_unavailable
+      ${EndIf}
+      StrCpy $2 "$TEMP\Otto-Recovery-$0"
+      IfFileExists "$2" otto_recovery_unavailable
+      StrCpy $OttoSafetyRecovering 1
+      StrCpy $OttoSafetyPath $2
+      Call OttoSafetyValidatePath
+      ClearErrors
+      CreateDirectory "$2"
+      IfErrors otto_recovery_unavailable
+      SetOutPath "$2"
+      File /oname=InstallerRecovery.exe "${OTTO_RECOVERY_HELPER}"
+      IfErrors otto_recovery_unavailable
+      System::Call 'kernel32::GetCurrentProcessId() i.r3'
+      ClearErrors
+      Exec '"$2\InstallerRecovery.exe" --installer "$EXEPATH" $3'
+      IfErrors otto_recovery_unavailable
+      Return
+      otto_recovery_unavailable:
+      MessageBox MB_OK|MB_ICONEXCLAMATION "无法打开安全恢复向导。原文件已保留。请保留冲突位置并联系 Otto 支持，无需手动卸载或修改注册表。" /SD IDOK
+    FunctionEnd
+
     Function OttoSafetyParseOldCommand
       StrCpy $OttoSafetyReason "previous uninstall command is not an exact recognised Otto command"
       StrCpy $0 $OttoSafetyOldCommand 1
@@ -439,6 +544,18 @@ FunctionEnd
 !macroend
 
 !macro customInit
+  ; Interactive startup can resume an interrupted recovery. /S still runs
+  ; the ordinary guard and never starts a recovery helper or renames registry keys.
+  IfSilent otto_recovery_checked
+  IfFileExists "$LOCALAPPDATA\OttoInstallRecovery\pending.json" 0 otto_recovery_checked
+    MessageBox MB_YESNO|MB_ICONEXCLAMATION|MB_DEFBUTTON2 "检测到上次安全恢复未完成。是否打开恢复向导核对安装结果？原目录和文件会保留。" /SD IDNO IDYES otto_pending_recovery
+    SetErrorLevel 73
+    Quit
+    otto_pending_recovery:
+    Call OttoSafetyStartRecovery
+    SetErrorLevel 73
+    Quit
+  otto_recovery_checked:
   Call OttoSafetyCheckAll
 !macroend
 

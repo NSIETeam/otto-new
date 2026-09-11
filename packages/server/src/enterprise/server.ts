@@ -104,12 +104,7 @@ export {
 } from './enterpriseHttpSecurity.js';
 
 const DEFAULT_PORT = 7777;
-const BODY_TOO_LARGE = Symbol('bodyTooLarge');
-
-interface RouteBody {
-  [key: string]: unknown;
-  [BODY_TOO_LARGE]?: true;
-}
+import { readEnterpriseRequestBody as readBody } from './enterpriseRequestBody.js';
 
 export interface EnterpriseServerOptions {
   port?: number;
@@ -219,6 +214,7 @@ export function createEnterpriseRecurringTaskRegistry(): RecurringTaskRegistry {
 export const ENTERPRISE_CAPABILITIES = [
   'policy_intelligence_v2',
   'policy_intelligence_v3',
+  'policy_client_model_v1',
   'policy_intelligence_inbox_v1',
   'park_flea_market_protocol_v1',
   'password_auth',
@@ -295,41 +291,6 @@ function sendJSON(res: ServerResponse, status: number, data: unknown): void {
     'X-Content-Type-Options': 'nosniff',
   });
   res.end(JSON.stringify(data));
-}
-
-function readBody(
-  req: IncomingMessage,
-  maxLength = 1_000_000,
-): Promise<RouteBody> {
-  if (req.readableEnded || req.complete) return Promise.resolve({});
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let bodyLength = 0;
-    let tooLarge = false;
-    req.on('data', (chunk) => {
-      if (tooLarge) return;
-      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      bodyLength += bytes.length;
-      if (bodyLength > maxLength) {
-        tooLarge = true;
-        chunks.length = 0;
-        return;
-      }
-      chunks.push(bytes);
-    });
-    req.on('end', () => {
-      if (tooLarge) {
-        resolve({ [BODY_TOO_LARGE]: true });
-        return;
-      }
-      try {
-        const body = Buffer.concat(chunks, bodyLength).toString('utf8');
-        resolve(body ? (JSON.parse(body) as RouteBody) : {});
-      } catch {
-        resolve({});
-      }
-    });
-  });
 }
 
 function makeHandler(

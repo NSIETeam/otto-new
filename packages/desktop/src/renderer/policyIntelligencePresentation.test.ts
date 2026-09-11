@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parsePolicyAnswer,
+  policyErrorMessage,
   policyDisplayStatus,
   policyDisplayValidity,
 } from './policyIntelligencePresentation.js';
@@ -8,6 +9,12 @@ import { policyApplicationStatus } from 'otto-server';
 import type { OfficialPolicyDocument } from 'otto-server';
 
 describe('扩展政策条件的补充回答', () => {
+  it('explains connection failures without exposing IPC or credentials', () => {
+    expect(policyErrorMessage("Error invoking remote method 'policy-intelligence:action': Error: 服务器返回 502")).toContain('先核对状态');
+    expect(policyErrorMessage('等待超时')).toContain('不要重复提交');
+    expect(policyErrorMessage('请同意保存企业资料')).toBe('请同意保存企业资料');
+    expect(policyErrorMessage('失败 Bearer SECRET https://private.example')).not.toMatch(/SECRET|private.example/);
+  });
   it('keeps desktop and server time classification consistent for invalid windows and future governance', () => {
     const now = new Date('2026-09-03T12:00:00+08:00');
     const cases: Array<Partial<OfficialPolicyDocument>> = [

@@ -17,6 +17,7 @@ import {
   parsePolicyAnswer,
   policyDisplayStatus,
   policyDisplayValidity,
+  policyErrorMessage,
   POLICY_CONCLUSION_LABELS,
   POLICY_LEVEL_LABELS,
   POLICY_STATUS_LABELS,
@@ -49,6 +50,10 @@ export function PolicyIntelligenceDialog({
   const [profile, setProfile] = useState<PolicyEnterpriseProfile>(seedProfile);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [enableConsent, setEnableConsent] = useState(false);
+  const [configurationUncertain, setConfigurationUncertain] = useState(false);
+  const [notice, setNotice] = useState('');
   const [tab, setTab] = useState<'evaluate' | 'prepare' | 'all'>('all');
   const [query, setQuery] = useState('');
   const [level, setLevel] = useState('all');
@@ -72,12 +77,16 @@ export function PolicyIntelligenceDialog({
       const current = ++epoch.current;
       setLoading(true);
       setError('');
+      setNotice('');
       try {
         const result = action
           ? await window.otto.policyIntelligenceAction({ scopeId, action })
           : await window.otto.policyIntelligenceGet(scopeId);
         if (current !== epoch.current) return;
         setState(result);
+        setLoaded(true);
+        setConfigurationUncertain(false);
+        if (action?.action === 'configure') setEnableConsent(false);
         if (!profileDirty.current || action?.action === 'profile') {
           setProfile({ ...seedRef.current, ...result.profile });
           profileDirty.current = false;
@@ -89,8 +98,25 @@ export function PolicyIntelligenceDialog({
         setConsent(false);
         }
       } catch (cause) {
-        if (current === epoch.current)
-          setError(cause instanceof Error ? cause.message : String(cause));
+        if (current !== epoch.current) return;
+        setError(policyErrorMessage(cause));
+        if (action?.action === 'configure') {
+          setConfigurationUncertain(true);
+          // A gateway failure is not proof that the write failed. Reconcile
+          // with a read only; never automatically submit the mutation twice.
+          try {
+            const confirmed = await window.otto.policyIntelligenceGet(scopeId);
+            if (current !== epoch.current) return;
+            setState(confirmed);
+            setLoaded(true);
+            setConfigurationUncertain(false);
+            setEnableConsent(false);
+            if (confirmed.enabled === action.enabled) {
+              setError('');
+              setNotice(`已重新核对：个性化服务现已${confirmed.enabled ? '开启' : '关闭'}。`);
+            }
+          } catch { /* Preserve the unknown outcome and require a read first. */ }
+        }
       } finally {
         if (current === epoch.current) setLoading(false);
       }
@@ -99,6 +125,9 @@ export function PolicyIntelligenceDialog({
   );
   useEffect(() => {
     setState(emptyPolicyState());
+    setLoaded(false);
+    setConfigurationUncertain(false);
+    setEnableConsent(false);
     setProfile(seedRef.current);
     setSelected(undefined);
     setConsentFor(undefined);
@@ -197,23 +226,29 @@ export function PolicyIntelligenceDialog({
               按企业注册所在地关联区县、市、省及国家级政策。也可以直接在对话中说“有哪些适合我们公司的政策”。
             </p>
           </div>
+          <div className="otto-policy-v2__service-control">
+          {loaded && state.canManage && !state.enabled && (
+            <label className="otto-policy-v2__check">
+              <input type="checkbox" checked={enableConsent} disabled={loading || configurationUncertain} onChange={(event) => setEnableConsent(event.target.checked)} />
+              我同意使用企业基础资料进行模型分析，可随时关闭；分析会消耗模型额度。
+            </label>
+          )}
           <button
             type="button"
-            disabled={loading || !state.canManage}
+            disabled={loading || !loaded || !state.canManage || configurationUncertain || (!state.enabled && !enableConsent)}
             onClick={() =>
-              state.enabled
-                ? void request({ action: 'configure', enabled: false })
-                : (setConsentFor('enable'), setConsent(false))
+              void request({ action: 'configure', enabled: !state.enabled, ...(!state.enabled ? {consent: true} : {}) })
             }
           >
             {state.enabled ? '关闭个性化服务' : '开启个性化服务'}
           </button>
+          </div>
         </section>
         <p className="otto-policy-v2__muted">
-          {state.enabled
+          {!loaded ? '尚未取得服务状态，请等待加载或刷新重试。' : state.enabled
             ? '个性化服务已开启。公共政策由服务端定时更新，未变化的分析结果复用。'
             : '个性化服务未开启：仍可查看已收录的公共政策，不发起本企业的模型分析。'}
-          {!state.canManage ? ' 企业管理员可以开启、完善资料和发起诊断。' : ''}
+          {loaded && !state.canManage ? ' 企业管理员可以开启、完善资料和发起诊断。' : ''}
         </p>
         <div
           className="otto-policy-v2__coverage"
@@ -234,41 +269,6 @@ export function PolicyIntelligenceDialog({
         <p className="otto-policy-v2__muted">
           已配置来源不代表该地区政策已全部收录；未接入地区不会误用其他城市政策。
         </p>
-        {!!state.sourceHealth?.length && (
-          <details>
-            <summary>全国官方来源接入情况</summary>
-            <p>
-              包含中国内地31个省级政府入口；市县和部门并非全量覆盖。数字为最近一次采集的条目数，不代表当地政策总数。
-            </p>
-            {state.sourceHealth.map((source) => (
-              <p key={source.sourceId}>
-                <button
-                  type="button"
-                  onClick={() => void window.otto.openExternal(source.url)}
-                >
-                  {source.name}
-                </button>
-                {' · '}
-                {
-                  {
-                    unverified: '尚未完成采集核验',
-                    available: '最近采集成功',
-                    partial: '部分条目失败',
-                    unavailable: '暂不可采集，需检查适配',
-                  }[source.status]
-                }
-                {' · '}
-                {source.documentCount} 条
-                {source.checkedAt && (
-                  <small>
-                    最近检查：
-                    {new Date(source.checkedAt).toLocaleString('zh-CN')}
-                  </small>
-                )}
-              </p>
-            ))}
-          </details>
-        )}
         <details
           className="otto-policy-v2__profile"
           open={state.missingProfileFields.length > 0}
@@ -418,7 +418,7 @@ export function PolicyIntelligenceDialog({
           </select>
         </div>
         <p className="otto-policy-v2__muted">
-          {loading ? '正在处理，请稍候…' : policies.length + ' 条政策'} ·{' '}
+          {loading ? '正在处理，请稍候…' : loaded ? policies.length + ' 条政策' : '政策列表未加载'} ·{' '}
           {state.lastSyncAt
             ? '来源最近更新 ' +
               new Date(state.lastSyncAt).toLocaleString('zh-CN')
@@ -428,9 +428,14 @@ export function PolicyIntelligenceDialog({
         </p>
         {(error || state.lastError) && (
           <p role="alert" className="otto-policy-v2__error">
-            {error || state.lastError}
+            {error || policyErrorMessage(state.lastError)}
           </p>
         )}
+        {notice && <p role="status">{notice}</p>}
+        {(error || configurationUncertain) && (
+          <button type="button" disabled={loading} onClick={() => void request()}>重新读取状态</button>
+        )}
+        {configurationUncertain && <p role="status">开关结果尚未确认，重新读取状态后再操作。</p>}
         {staleLatestDiagnoses.length > 0 && (
           <section className="otto-policy-v2__warning" role="status">
             <strong>已准备的政策有变化，需要重新核验</strong>
@@ -462,15 +467,9 @@ export function PolicyIntelligenceDialog({
         )}
         {consentFor && (
           <section className="otto-policy-v2__consent">
-            <h4>
-              {consentFor === 'enable'
-                ? '开启企业个性化政策服务'
-                : '开始本次政策诊断'}
-            </h4>
+            <h4>开始本次政策诊断</h4>
             <p>
-              {consentFor === 'enable'
-                ? '服务端将使用企业基础资料进行政策推荐，分析消耗已配置模型的 API 额度。可随时关闭；公共政策库仍可浏览。'
-                : '已配置模型仅读取基础资料及本政策实际需要的补充字段，逐项分析申报条件。补充回答默认私有，不会发送完整企业档案、替你提交申请或联系机构。'}
+              模型仅读取基础资料及本政策实际需要的补充字段，逐项分析申报条件。补充回答默认私有，不会发送完整企业档案、替你提交申请或联系机构。
             </p>
             <label>
               <input
@@ -486,9 +485,7 @@ export function PolicyIntelligenceDialog({
                 type="button"
                 onClick={() =>
                   void request(
-                    consentFor === 'enable'
-                      ? { action: 'configure', enabled: true, consent: true }
-                      : {
+                    {
                           action: 'diagnose',
                           policyId: consentFor,
                           consent: true,
@@ -496,7 +493,7 @@ export function PolicyIntelligenceDialog({
                   )
                 }
               >
-                {consentFor === 'enable' ? '确认开启' : '同意并开始诊断'}
+                同意并开始诊断
               </button>
               <button type="button" onClick={() => setConsentFor(undefined)}>
                 取消
@@ -938,21 +935,44 @@ export function PolicyIntelligenceDialog({
           {!loading && !policies.length && (
             <div className="otto-policy-v2__empty">
               <h4>
-                {tab === 'all'
+                {!loaded ? '暂时无法加载政策' : tab === 'all'
                   ? '当前筛选条件下暂无已收录政策'
                   : '还没有这类企业推荐'}
               </h4>
               <p>
-                {tab === 'all'
-                  ? '可以清除筛选条件，或检查所在地资料及来源覆盖。未收录不代表当地没有政策。'
-                  : '完善企业资料并开启服务后可更新推荐；也可先在“全部政策”中查看原文。'}
+                {!loaded ? '未取得服务器数据，不能据此判断有没有政策。请使用“重新读取状态”。'
+                  : state.policies.length === 0
+                  ? '公共政策库暂无可展示内容。请检查所在地资料和页面底部的来源采集情况；未收录不代表当地没有政策。'
+                  : tab === 'all'
+                  ? '已有政策，但没有符合当前筛选的条目；可以清除筛选条件。'
+                  : !state.enabled
+                  ? '个性化服务尚未开启；公共政策仍在“全部政策”中，不会因关闭而删除。'
+                  : '尚无这类推荐。请完善企业资料并更新推荐，也可先查看全部政策原文。'}
               </p>
+              {loaded && state.policies.length > 0 && (
+                <button type="button" onClick={() => { setTab('all'); setQuery(''); setLevel('all'); setCategory('all'); setStatus('all'); }}>查看全部政策</button>
+              )}
             </div>
           )}
         </div>
         <p className="otto-policy-v2__notice">
           分析仅辅助准备和人工决策，不保证获批。申报资格、具体批次、材料与期限以主管部门最新原文为准。
         </p>
+        {!!state.sourceHealth?.length && (
+          <details className="otto-policy-v2__sources">
+            <summary>全国官方来源接入情况</summary>
+            <p>包含中国内地31个省级政府入口；市县和部门并非全量覆盖。数字为最近一次采集条目数，不代表当地政策总数。</p>
+            <div className="otto-policy-v2__sources-scroll" role="region" aria-label="全国官方来源列表" tabIndex={0}>
+              {state.sourceHealth.map((source) => (
+                <p key={source.sourceId}>
+                  <button type="button" onClick={() => void window.otto.openExternal(source.url)}>{source.name}</button>
+                  {' · '}{({unverified:'尚未完成采集核验',available:'最近采集成功',partial:'部分条目失败',unavailable:'暂不可采集，需检查适配'})[source.status]}{' · '}{source.documentCount} 条
+                  {source.checkedAt && <small>最近检查：{new Date(source.checkedAt).toLocaleString('zh-CN')}</small>}
+                </p>
+              ))}
+            </div>
+          </details>
+        )}
       </div>
     </DialogFrame>
   );

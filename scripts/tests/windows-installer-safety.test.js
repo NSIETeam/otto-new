@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { buildInstallerRecovery } from '../../packages/desktop/scripts/installer-recovery-build.mjs';
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -18,6 +19,9 @@ const root = path.resolve(
 );
 const read = (relative) => readFileSync(path.join(root, relative), 'utf8');
 const compiler = process.env.OTTO_NSIS_SAFETY_MAKENSIS;
+const recoveryExe = process.platform === 'win32' && compiler
+  ? buildInstallerRecovery(path.join(mkdtempSync(path.join(os.tmpdir(), 'otto-recovery-nsis-build-')), 'InstallerRecovery.exe'))
+  : null;
 const nsis = (value) => value.replaceAll('$', '$$').replaceAll('"', '$\\"');
 
 function runtime(directory) {
@@ -57,9 +61,10 @@ function nativeFixture({
   // neither reads nor writes Otto/user registry keys and never runs an actual
   // uninstaller. The production include contains no test override switch.
   const include = read('packages/desktop/build/installer-safety.nsh')
+    .replace('!define OTTO_RECOVERY_HELPER "${__FILEDIR__}\\InstallerRecovery.exe"', `!define OTTO_RECOVERY_HELPER "${nsis(recoveryExe)}"`)
     .replace(
       'DetailPrint "[otto-install-safety] blocked: $OttoSafetyReason"',
-      `FileOpen $9 "${nsis(path.join(fixture, 'blocked-reason.txt'))}" w\n  FileWrite $9 "$OttoSafetyReason"\n  FileClose $9\n  DetailPrint "[otto-install-safety] blocked: $OttoSafetyReason"`,
+      `FileOpen $9 "${nsis(path.join(fixture, 'blocked-reason.txt'))}" w\n  FileWrite $9 "$OttoSafetyReason"\n  FileClose $9\n  FileOpen $9 "${nsis(path.join(fixture, 'conflict.txt'))}" w\n  FileWriteUTF16LE $9 "$OttoSafetyConflictPath"\n  FileClose $9\n  DetailPrint "[otto-install-safety] blocked: $OttoSafetyReason"`,
     )
     .replace(
       'ReadRegStr $OttoSafetyOldPath ${ROOT} "${INSTALL_REGISTRY_KEY}" "InstallLocation"',
@@ -163,6 +168,7 @@ ${uninstall ? `Function un.onInit\n  StrCpy $INSTDIR "${nsis(options.target)}"\n
     exitCode: executed.status,
     mainReached: existsSync(marker),
     reason,
+    conflict: existsSync(path.join(fixture, 'conflict.txt')) ? readFileSync(path.join(fixture, 'conflict.txt'), 'utf16le') : null,
   };
 }
 
@@ -190,7 +196,7 @@ describe('Windows installer directory preservation contract', () => {
     expect(guard).toContain('!insertmacro OttoSafetyCheckRegistry HKCU');
     expect(guard).toContain('!insertmacro OttoSafetyCheckRegistry HKLM');
     expect(guard).toContain('SetErrorLevel 73');
-    expect(guard).toMatch(/!ifndef BUILD_UNINSTALLER\r?\nVar OttoSafetyOldPath\r?\nVar OttoSafetyOldCommand\r?\nVar OttoSafetyOldExe\r?\n!endif/);
+    expect(guard).toMatch(/!ifndef BUILD_UNINSTALLER\r?\nVar OttoSafetyOldPath\r?\nVar OttoSafetyOldCommand\r?\nVar OttoSafetyOldExe\r?\nVar OttoSafetyRecovering\r?\n!endif/);
     expect(guard).not.toMatch(
       /^\s*(?:Delete|RMDir|Rename|WriteReg\w*|DeleteReg\w*)\s/m,
     );
@@ -212,6 +218,7 @@ RequestExecutionLevel user
 !define UNINSTALL_FILENAME "Uninstall Otto.exe"
 !define INSTALL_REGISTRY_KEY "Software\\OttoCompileOnly"
 !define UNINSTALL_REGISTRY_KEY "Software\\OttoCompileOnly\\Uninstall"
+!define OTTO_RECOVERY_HELPER "${nsis(recoveryExe)}"
 ${uninstall ? '!define BUILD_UNINSTALLER' : ''}
 !include "${nsis(path.join(root, 'packages/desktop/build/installer-safety.nsh'))}"
 !insertmacro customHeader
@@ -295,6 +302,7 @@ describe.skipIf(process.platform !== 'win32' || !compiler)(
         });
         expect(result).toMatchObject({ exitCode: 73, mainReached: false });
         expect(result.reason).toContain('unknown directory');
+        expect(result.conflict).toBe(path.join(result.old, 'source-project'));
         expect(
           readFileSync(
             path.join(result.old, 'source-project/keep.txt'),

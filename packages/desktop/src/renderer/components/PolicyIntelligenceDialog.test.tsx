@@ -45,6 +45,58 @@ const state = {
   ],
 };
 describe('全国企业政策服务界面', () => {
+  it('keeps one enable entry with nearby consent instead of a duplicate enable panel', async () => {
+    const act=vi.fn(async()=>({...state,enabled:true}));
+    Object.assign(window.otto,{policyIntelligenceGet:vi.fn(async()=>state),policyIntelligenceAction:act});
+    render(<PolicyIntelligenceDialog open scopeId="o:a" seedProfile={{}} onClose={vi.fn()} />);
+    await screen.findByText('绿色金融申报');
+    expect(screen.queryByText('开启企业个性化政策服务')).toBeNull();
+    expect(screen.queryByRole('button',{name:'确认开启'})).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox',{name:/同意.*企业基础资料/u}));
+    fireEvent.click(screen.getByRole('button',{name:'开启个性化服务'}));
+    await screen.findByRole('button',{name:'关闭个性化服务'});
+    expect(act).toHaveBeenCalledTimes(1);
+  });
+  it('reconciles a lost configure response with a read, without resubmitting', async () => {
+    const get=vi.fn().mockResolvedValueOnce({...state,enabled:true}).mockResolvedValue({...state,enabled:false});
+    const act=vi.fn().mockRejectedValue(new Error("Error invoking remote method 'policy-intelligence:action': Error: 服务器返回 502"));
+    Object.assign(window.otto,{policyIntelligenceGet:get,policyIntelligenceAction:act});
+    render(<PolicyIntelligenceDialog open scopeId="o:a" seedProfile={{}} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button',{name:'关闭个性化服务'}));
+    await screen.findByRole('button',{name:'开启个性化服务'});
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(act).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Error invoking/)).toBeNull();
+  });
+  it('does not present a failed initial load as an empty library', async () => {
+    Object.assign(window.otto,{policyIntelligenceGet:vi.fn().mockRejectedValue(new Error('服务器返回 502'))});
+    render(<PolicyIntelligenceDialog open scopeId="o:a" seedProfile={{}} onClose={vi.fn()} />);
+    await screen.findByText('暂时无法加载政策');
+    expect(screen.queryByText('当前筛选条件下暂无已收录政策')).toBeNull();
+    expect(screen.getByRole('button',{name:'重新读取状态'})).toBeTruthy();
+  });
+  it('blocks another toggle when both mutation and reconciliation fail, until a read confirms state', async () => {
+    const get = vi.fn().mockResolvedValueOnce({ ...state, enabled: true }).mockRejectedValue(new Error('服务器返回 502'));
+    const action = vi.fn().mockRejectedValue(new Error('服务器返回 502'));
+    Object.assign(window.otto, { policyIntelligenceGet: get, policyIntelligenceAction: action });
+    render(<PolicyIntelligenceDialog open scopeId="o:a" seedProfile={{}} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '关闭个性化服务' }));
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect((screen.getByRole('button', { name: '关闭个性化服务' }) as HTMLButtonElement).disabled).toBe(true);
+    get.mockResolvedValue({ ...state, enabled: false });
+    fireEvent.click(screen.getByRole('button', { name: '重新读取状态' }));
+    await screen.findByRole('button', { name: '开启个性化服务' });
+    expect(action).toHaveBeenCalledOnce();
+  });
+  it('places collapsed nationwide sources after the policy list in a bounded region', async () => {
+    Object.assign(window.otto,{policyIntelligenceGet:vi.fn(async()=>({...state,sourceHealth:[{sourceId:'s',name:'全国来源测试',url:'https://www.gov.cn',status:'available',documentCount:1}]}))});
+    render(<PolicyIntelligenceDialog open scopeId="o:a" seedProfile={{}} onClose={vi.fn()} />);
+    const title=await screen.findByText('绿色金融申报');
+    const details=screen.getByText('全国官方来源接入情况').closest('details')!;
+    expect(details.open).toBe(false);
+    expect(title.compareDocumentPosition(details)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(details?.querySelector('.otto-policy-v2__sources-scroll')).toBeTruthy();
+  });
   it('关闭重开保留已读政策，即使新的读取尚未结束', async () => {
     const get = vi.fn().mockResolvedValueOnce(state).mockImplementation(() => new Promise(() => {}));
     Object.assign(window.otto, { policyIntelligenceGet: get });
@@ -146,10 +198,9 @@ describe('全国企业政策服务界面', () => {
     );
     expect(await screen.findByText('绿色金融申报')).toBeTruthy();
     expect(screen.getByText(/浦东新区.*尚未接入/u)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '开启个性化服务' }));
     expect(act).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('checkbox', { name: /同意/u }));
-    fireEvent.click(screen.getByRole('button', { name: '确认开启' }));
+    fireEvent.click(screen.getByRole('button', { name: '开启个性化服务' }));
     await waitFor(() =>
       expect(act).toHaveBeenCalledWith({
         scopeId: 'o:a',

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-otto-surface="desktop-pet">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>Otto 桌面小宠物</title>
+    <style>
+      /* Transparent from the first paint, before the lazy pet component loads.
+         Do not inherit the main window's opaque theme or Chromium dark canvas. */
+      :root { color-scheme: light; }
+      html, body, #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: transparent !important;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body data-otto-surface="desktop-pet">
+    <div id="root"></div>
+  </body>
+</html>

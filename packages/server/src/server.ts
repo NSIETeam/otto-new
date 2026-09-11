@@ -596,6 +596,8 @@ export class OttoServer {
   /** 进程级自动 Skill 扫描器由当前 server 实例启动时，停机时负责释放。 */
   private autoSkillScannerStarted = false;
   private autoSkillScannerConfig?: CoreConfig;
+  /** Repeated manual clicks share the running scan instead of duplicating work. */
+  private manualAutoSkillScan?: Promise<AutoSkillCandidateInfo[]>;
   private readonly productWorkspace: ProductWorkspaceStore;
   private readonly chatFileCacheDir?: string;
   private readonly sessionTitleTimeoutMs: number;
@@ -3797,6 +3799,15 @@ export class OttoServer {
 
   /** 把一帧 ClientToServer 分发到对应处理。 */
   private async dispatch(conn: ClientConn, msg: ClientToServer): Promise<void> {
+    // Releasing this socket's listener reads no session data and grants no access.
+    // It must remain idempotent after logout, lease expiry, deletion or reconnect.
+    // Authorizing cleanup caused forbidden_session errors for invisible old chats.
+    if (msg.type === 'unsubscribe') {
+      const unsubscribe = conn.subscriptions.get(msg.payload.sessionId);
+      unsubscribe?.();
+      conn.subscriptions.delete(msg.payload.sessionId);
+      return;
+    }
     const payload = msg.payload as Record<string, unknown>;
     const scopedSessionId =
       typeof payload?.sessionId === 'string' ? payload.sessionId : undefined;
@@ -3846,12 +3857,6 @@ export class OttoServer {
         });
       case 'subscribe':
         return this.subscribeConn(conn, msg.payload.sessionId);
-      case 'unsubscribe': {
-        const unsub = conn.subscriptions.get(msg.payload.sessionId);
-        unsub?.();
-        conn.subscriptions.delete(msg.payload.sessionId);
-        return;
-      }
       case 'create_session': {
         const workspace = this.productWorkspace.snapshot();
         const profile = resolveAgentProfile(msg.payload.agentProfileId);
@@ -4125,21 +4130,27 @@ export class OttoServer {
       }
       case 'scan_pending_auto_skills': {
         try {
-          const candidates = (
-            await scanAndStageSkillCandidates(
+          if (!this.manualAutoSkillScan) {
+            this.manualAutoSkillScan = scanAndStageSkillCandidates(
               createCoreConfig({ sessionId: 'auto-skill-manual-scan' }),
               () => this.productWorkspace.snapshot().context.userId,
-            )
-          ).map(publicAutoSkillCandidate);
+            ).then(candidates => candidates.map(publicAutoSkillCandidate))
+              .finally(() => { this.manualAutoSkillScan = undefined; });
+          }
+          const candidates = await this.manualAutoSkillScan;
           return this.send(conn.socket, {
             type: 'pending_auto_skills',
-            payload: { candidates },
+            payload: {
+              candidates,
+              ...(msg.payload.requestId ? { scan: { requestId: msg.payload.requestId, candidateCount: candidates.length } } : {}),
+            },
           });
         } catch (error) {
           return this.send(conn.socket, {
             type: 'error',
             payload: {
               code: 'auto_skill_failed',
+              requestId: msg.payload.requestId,
               message: error instanceof Error ? error.message : String(error),
             },
           });
@@ -5636,8 +5647,8 @@ function browserBridgeScript(clientToken: string): string {
     skillShareList: () => Promise.resolve({ text: '浏览器模式暂未接入部门共享 Skill。' }),
     skillMarketplace: () => Promise.resolve({ text: '浏览器模式暂未接入公司 Skill 市场。' }),
     setLocalTestUrl: () => Promise.resolve(),
-    appVersion: () => Promise.resolve('1.9.15'),
-    updateCheck: () => Promise.resolve({ status: 'up-to-date', currentVersion: '1.9.15', latestVersion: null }),
+    appVersion: () => Promise.resolve('1.9.16'),
+    updateCheck: () => Promise.resolve({ status: 'up-to-date', currentVersion: '1.9.16', latestVersion: null }),
     updateDownload: () => Promise.resolve({ ok: false, error: '浏览器模式不支持下载安装包。' }),
     updateCancel: () => Promise.resolve(),
     updateInstall: () => Promise.resolve({ ok: false, message: '浏览器模式不支持安装更新。' }),

@@ -108,8 +108,8 @@ describe('ModuleGroupCatalogDialog', () => {
     });
     const dialog = screen.getByRole('dialog', { name: '新增功能组' });
     const parkCard = within(dialog).getByRole('heading', { name: '宏创园区服务' }).closest('article');
-    const recruitmentCard = within(dialog).getByRole('heading', { name: '智能招聘' }).closest('article');
-    if (!parkCard || !recruitmentCard) throw new Error('missing official template card');
+    const dailyCard = within(dialog).getByRole('heading', { name: '日常办公' }).closest('article');
+    if (!parkCard || !dailyCard) throw new Error('missing official template card');
 
     expect(within(parkCard).getByText(/仅北控宏创科技园企业可添加/)).toBeTruthy();
     const parkButton = within(parkCard).getByRole('button', { name: '仅园区企业可添加' }) as HTMLButtonElement;
@@ -117,40 +117,14 @@ describe('ModuleGroupCatalogDialog', () => {
     fireEvent.click(parkButton);
     expect(onConfirm).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
-    expect((within(recruitmentCard).getByRole('button', { name: '添加功能组' }) as HTMLButtonElement).disabled)
+    expect((within(dailyCard).getByRole('button', { name: /升级功能组|添加功能组/ }) as HTMLButtonElement).disabled)
       .toBe(false);
   });
 
-  it('shows and atomically installs the official intelligent recruitment group', () => {
-    const { onConfirm } = renderDialog();
+  it('does not offer eight duplicate recruitment entry points as a group', () => {
+    renderDialog();
     const dialog = screen.getByRole('dialog', { name: '新增功能组' });
-    const card = within(dialog).getByRole('heading', { name: '智能招聘' }).closest('article');
-    if (!card) throw new Error('missing recruitment template card');
-
-    expect(within(card).getByText('开始智能招聘')).toBeTruthy();
-    expect(within(card).getByText('候选人档案')).toBeTruthy();
-    expect(within(card).getByText('岗位证据图谱')).toBeTruthy();
-    expect(within(card).getByText('加入面试材料')).toBeTruthy();
-    expect(within(card).getByText('面试与比较')).toBeTruthy();
-    expect(within(card).getByText('动态面试追问')).toBeTruthy();
-    expect(within(card).getByText('岗位实战验证')).toBeTruthy();
-    expect(within(card).getByText('资料与隐私')).toBeTruthy();
-    fireEvent.click(within(card).getByRole('button', { name: '添加功能组' }));
-    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
-      groups: expect.arrayContaining([expect.objectContaining({
-        id: 'smart-recruitment',
-        moduleIds: [
-          'recruitment-resume-analysis',
-          'recruitment-candidate-screening',
-          'recruitment-evidence-graph',
-          'recruitment-interview-audio',
-          'recruitment-interview-kit',
-          'recruitment-interview-copilot',
-          'recruitment-work-sample',
-          'recruitment-privacy-audit',
-        ],
-      })]),
-    }));
+    expect(within(dialog).queryByRole('heading', { name: '智能招聘' })).toBeNull();
   });
 
   it('does not expose enterprise official templates in personal edition', () => {

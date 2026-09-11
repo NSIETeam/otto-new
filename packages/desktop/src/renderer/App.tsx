@@ -2514,6 +2514,7 @@ function WorkspaceContent({
         key={`${moduleWorkspaceScopeKey}:auto-skill`}
         open={moduleModal?.kind === 'auto-skill'}
         candidates={product.state.pendingAutoSkills}
+        scan={product.state.autoSkillScan}
         releases={product.state.skillReleases}
         releaseBusy={product.state.skillReleaseBusy}
         releaseError={product.state.skillReleaseError}

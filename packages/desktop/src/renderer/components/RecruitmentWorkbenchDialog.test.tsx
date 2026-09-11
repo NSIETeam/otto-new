@@ -358,6 +358,17 @@ describe('RecruitmentWorkbenchDialog', () => {
     expect(document.body.textContent).not.toContain('关键词命中率');
   });
 
+  it('explains the missing-dimension failure without exposing the Electron transport wrapper', async () => {
+    vi.mocked(window.otto.recruitmentAnalyzeResume).mockRejectedValue(new Error("Error invoking remote method 'otto:recruitment-analyze-resume': Error: 招聘分析缺少维度：核心能力"));
+    renderDialog();
+    await importResume();
+    expect(screen.getByText(/1 份可重试/)).toBeTruthy();
+    expect(screen.getByText(/模型返回的评价不完整/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain('Error invoking');
+    expect(document.body.textContent).not.toContain('otto:recruitment-analyze-resume');
+    expect(screen.getByRole('button', { name: '重新分析' })).toBeTruthy();
+  });
+
   it('uses WhisperX segments for timestamped content analysis and exposes privacy audit', async () => {
     renderDialog();
     await importResume();

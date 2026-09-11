@@ -118,8 +118,8 @@
     ]
   },
   "release": {
-    "clientVersion": "1.9.15",
-    "serverVersion": "1.9.15",
+    "clientVersion": "1.9.16",
+    "serverVersion": "1.9.16",
     "serverPackageVersion": "0.1.0",
     "apiVersion": 4,
     "enterpriseSchemaVersion": 26,
@@ -134,6 +134,7 @@
     "capabilities": [
       "policy_intelligence_v2",
       "policy_intelligence_v3",
+      "policy_client_model_v1",
       "policy_intelligence_inbox_v1",
       "park_flea_market_protocol_v1",
       "password_auth",

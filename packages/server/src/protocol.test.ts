@@ -317,6 +317,13 @@ describe('validateClientPayload 形状校验（第二道闸）', () => {
       expect(validateClientPayload({ type, payload: { candidateId: '' } })).not.toBeNull();
     }
   });
+
+  it('扫描请求支持有限长度的关联 ID，拒绝无效 ID', () => {
+    expect(validateClientPayload({ type: 'scan_pending_auto_skills', payload: { requestId: 'scan-123' } })).toBeNull();
+    for (const requestId of ['', 42, 'x'.repeat(129)]) {
+      expect(validateClientPayload({ type: 'scan_pending_auto_skills', payload: { requestId } })).not.toBeNull();
+    }
+  });
 });
 
 describe('frame 构造器', () => {

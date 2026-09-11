@@ -23,6 +23,11 @@ const EVIDENCE_GRAPH_STATUSES = new Set<RecruitmentEvidenceStatus>([
   'verified', 'partially_verified', 'contradicted', 'untested', 'unclear',
 ]);
 
+/** Only a received, structurally invalid response is eligible for one repair. */
+export class RecruitmentResponseValidationError extends Error {
+  constructor(message: string) { super(message); this.name = 'RecruitmentResponseValidationError'; }
+}
+
 function boundedText(value: unknown, maxLength: number): string {
   return typeof value === 'string'
     ? Array.from(value.trim()).slice(0, maxLength).join('')
@@ -48,13 +53,13 @@ function jsonObject(raw: string): Record<string, unknown> {
   const candidate = (fenced?.[1] ?? raw).trim();
   const start = candidate.indexOf('{');
   const end = candidate.lastIndexOf('}');
-  if (start < 0 || end <= start) throw new Error('招聘分析模型没有返回有效 JSON');
+  if (start < 0 || end <= start) throw new RecruitmentResponseValidationError('招聘分析模型没有返回有效 JSON');
   try {
     const parsed = JSON.parse(candidate.slice(start, end + 1)) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
     return parsed as Record<string, unknown>;
   } catch {
-    throw new Error('招聘分析模型没有返回有效 JSON');
+    throw new RecruitmentResponseValidationError('招聘分析模型没有返回有效 JSON');
   }
 }
 
@@ -131,7 +136,7 @@ function parseDimensions(
       item && typeof item === 'object' && !Array.isArray(item)
       && (item as Record<string, unknown>).id === definition.id
     ));
-    if (!source) throw new Error(`招聘分析缺少维度：${definition.label}`);
+    if (!source) throw new RecruitmentResponseValidationError(`招聘分析缺少维度：${definition.label}`);
     const item = source as Record<string, unknown>;
     const evidence = resolveEvidence(item.evidence, materialLines);
     const rawScore = numberInRange(item.score, 0, 100);
@@ -325,7 +330,7 @@ export function parseRecruitmentSemanticAnalysis(
       / RECRUITMENT_SEMANTIC_DIMENSIONS.length * 100,
   );
   const summary = boundedText(parsed.summary, 1_500);
-  if (!summary) throw new Error('招聘分析摘要为空');
+  if (!summary) throw new RecruitmentResponseValidationError('招聘分析摘要为空');
   const hardRequirements = parseHardRequirements(parsed.hardRequirements, materialLines);
   const interviewQuestions = parseInterviewQuestions(parsed.interviewQuestions);
   return {
@@ -387,6 +392,8 @@ export function buildRecruitmentPrompt(input: RecruitmentSemanticAnalysisInput, 
     '硬性条件不得因没看到关键词就直接判不符合：没有充分材料时用 not_demonstrated 或 unclear；只有明确相反证据时才说明不满足。',
     '输出只能是一个 JSON 对象，不要 Markdown。字段：summary、dimensions、hardRequirements、strengths、risks、missingInformation、interviewQuestions、evidenceGraph、workSample。',
     `dimensions 必须且只能包含：${RECRUITMENT_SEMANTIC_DIMENSIONS.map((item) => `${item.id}(${item.label})`).join('、')}。每项字段为 id、score、assessment、evidence、uncertainties；score 为 0-100，evidence 是材料原文短句数组。引用面试或实战时使用 {quote, source} 对象，source 为 resume、interview 或 work_sample，并与实际来源一致。`,
+    'dimensions 必须是含五个对象的数组，id 使用上述英文标识，不得用中文名称代替。缺少材料也必须保留该维度，evidence 留空并在 uncertainties 说明待核实内容，不得补造事实。',
+    '保持 JSON 紧凑完整：summary 不超过 300 字，每项 assessment 不超过 160 字，每个维度最多 2 条短引用、2 条疑点；面试问题最多 5 个。优先保证五个维度与对象完整闭合。',
     'hardRequirements 每项字段为 requirement、status、explanation、evidence；status 只能是 met、partially_met、not_met、not_demonstrated、unclear。not_met 仅可用于原文明示不满足且能引用直接证据的情况。',
     'interviewQuestions 每项字段为 criterion、question、rationale、followUps、goodSignals、concernSignals；问题应针对候选人全文中的强项深挖、风险核实和信息缺口，而不是套用统一模板。',
     'evidenceGraph 每项字段为 criterion、status、assessment、evidence、gaps、nextQuestion；status 只能是 verified、partially_verified、contradicted、untested、unclear。为兼容旧格式，verified 仅指材料支持，partially_verified 仅指部分材料支持，均不得解释为人工核实。每个 nextQuestion 应针对事实核实或证据缺口。禁止输出人工核实记录。',

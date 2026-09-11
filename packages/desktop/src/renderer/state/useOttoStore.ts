@@ -278,6 +278,10 @@ function isToolCallInFlight(status: ToolCallStatus): boolean {
   );
 }
 
+function isSessionAccessError(code: string): boolean {
+  return ['forbidden_session', 'forbidden_agent_profile', 'no_session'].includes(code);
+}
+
 /** 取消终态把仍在执行/等待的卡片一并收口，避免按钮恢复后卡片继续永久转圈。 */
 function maybeShowChatNotification(
   frame: ServerToClient,
@@ -306,6 +310,10 @@ function maybeShowChatNotification(
     const { sessionId, code, message } = frame.payload;
     if (sessionId === activeSessionId) return;
     const session = sessions[sessionId];
+    // Invisible/removed chats and idle subscription failures are not background
+    // task failures. Keep real current-session errors in the in-app error path.
+    if (!session) return;
+    if (isSessionAccessError(code) && session.status !== 'thinking' && session.status !== 'streaming') return;
     void window.otto.notificationShow?.({
       messageId: `chat-error:${code}:${message}`,
       sessionId,
@@ -378,7 +386,7 @@ function rollbackPendingModelSwitch(
 function reducer(state: OttoState, action: Action): OttoState {
   switch (action.kind) {
     case 'connection':
-      return { ...state, connection: action.value, ...(action.value === 'disconnected' ? { steeringVersion: undefined } : {}) };
+      return { ...state, connection: action.value, ...(action.value === 'disconnected' ? { steeringVersion: undefined, sessionsLoaded: false } : {}) };
 
     case 'select': {
       const pending = state.pendingModelSwitch;
@@ -696,6 +704,11 @@ function applyFrame(state: OttoState, frame: ServerToClient): OttoState {
     }
 
     case 'error':
+      // A delayed access denial for a session removed by the authoritative
+      // snapshot can only refer to stale UI work. Do not disturb another chat.
+      if (frame.payload.sessionId && isSessionAccessError(frame.payload.code)
+        && state.sessionsLoaded && !state.sessions[frame.payload.sessionId]
+        && state.activeSessionId !== frame.payload.sessionId) return state;
       // 收口在途消息再落错误：否则流式中途报错时那条 assistant 占位永远 isStreaming=true，
       // busy 卡死、发送键锁在「停止」，用户无法继续对话（见 settleInFlight 注释）。
       return frame.payload.sessionId &&
@@ -1106,15 +1119,20 @@ export function useOttoStore(
   }, []);
 
   // 选中会话变化 → 订阅 + 拉历史。
+  const activeSessionVisible = Boolean(state.activeSessionId && state.sessions[state.activeSessionId]);
   useEffect(() => {
     const id = state.activeSessionId;
-    if (!id || state.connection !== 'connected') return;
+    // Reconnect must reconcile the current identity's visible list before using
+    // an old selected session. Cached enterprise IDs may no longer be authorized.
+    if (!id || !state.sessionsLoaded || !activeSessionVisible || state.connection !== 'connected') return;
     transport.send({ type: 'subscribe', payload: { sessionId: id } });
     transport.send({ type: 'get_history', payload: { sessionId: id } });
     return () => {
-      transport.send({ type: 'unsubscribe', payload: { sessionId: id } });
+      if (connectionRef.current === 'connected') {
+        transport.send({ type: 'unsubscribe', payload: { sessionId: id } });
+      }
     };
-  }, [state.activeSessionId, state.connection]);
+  }, [state.activeSessionId, state.connection, state.sessionsLoaded, activeSessionVisible]);
 
   // ── 桌面通知订阅：未读闪烁 + 点击跳转 ──
   useEffect(() => {

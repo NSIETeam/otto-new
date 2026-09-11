@@ -33,15 +33,14 @@ const archive = (...entries) => Buffer.concat([...entries, Buffer.alloc(1024)]);
 describe('enterprise archive metadata portability', () => {
   it('is wired into packaging and both source identity inputs without weakening existing guards', () => {
     const builder = readFileSync(new URL('../build-enterprise-oneclick.mjs', import.meta.url), 'utf8');
-    expect(builder).toContain("import { assertPortableTarMetadata } from './enterprise-archive-portability.mjs'");
+    expect(builder).toContain("import { assertPortableArchiveEntries, assertPortableTarMetadata } from './enterprise-archive-portability.mjs'");
     expect(builder).toContain('assertPortableTarMetadata(archiveTar)');
     for (const name of ['sourceScope', 'sourceInputFiles']) {
       expect(builder.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\n\\]`))?.[1]).toContain("'scripts/enterprise-archive-portability.mjs'");
     }
     expect(builder).toContain("['--no-xattrs', '-cf'");
     expect(builder).toContain("COPYFILE_DISABLE: '1'");
-    expect(builder).toContain("path.basename(entry).startsWith('._')");
-    expect(builder).toContain("path.basename(entry) === '.DS_Store'");
+    expect(builder).toContain('assertPortableArchiveEntries(archive)');
     expect(builder).toContain("run('tar', ['-xzf', archive, '-C', archiveSmokeRoot])");
     expect(builder).toContain("path.join(archiveSmokeRoot, finalPackageName, 'release')");
   });

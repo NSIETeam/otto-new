@@ -1,6 +1,6 @@
 {
   "name": "otto-desktop",
-  "version": "1.9.16",
+  "version": "1.9.17",
   "description": "Otto Desktop - Electron app shell (main + preload + renderer reusing webview DOM UI)",
   "author": "Otto",
   "license": "Apache-2.0",
@@ -73,7 +73,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://59.110.154.44:7777/downloads"
+        "url": "https://101.200.190.204:7777/downloads"
       }
     ],
     "appId": "ai.otto.desktop",
@@ -173,7 +173,9 @@
       {
         "from": "../server",
         "to": "node_modules/otto-server",
-        "filter": ["NOTICE"]
+        "filter": [
+          "NOTICE"
+        ]
       },
       {
         "from": "../core/skills-seed",

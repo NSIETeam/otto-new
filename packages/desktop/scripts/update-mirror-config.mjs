@@ -1,5 +1,5 @@
 export const DEFAULT_UPDATE_ASSET_BASE_URL =
-  'https://59.110.154.44:7777/downloads';
+  'https://101.200.190.204:7777/downloads';
 
 export function resolveUpdateAssetBaseUrl(
   candidate = process.env.OTTO_UPDATE_ASSET_BASE_URL,

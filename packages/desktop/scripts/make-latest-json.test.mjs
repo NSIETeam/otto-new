@@ -49,7 +49,7 @@ describe('make-latest-json', () => {
     for (const asset of assets) {
       const bytes = await readFile(path.join(dir, asset.name));
       expect(asset.url).toBe(
-        `https://59.110.154.44:7777/downloads/${asset.name}`,
+        `https://101.200.190.204:7777/downloads/${asset.name}`,
       );
       expect(asset.size).toBe(bytes.length);
       expect(asset.sha256).toBe(

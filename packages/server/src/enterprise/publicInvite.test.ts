@@ -41,7 +41,7 @@ describe('企业公开引入链接', () => {
   });
 
   it('未配置时使用经过确认的 Otto 公网基址，而不是监听地址或请求 Host', () => {
-    expect(DEFAULT_ENTERPRISE_PUBLIC_URL).toBe('https://59.110.154.44:7777');
+    expect(DEFAULT_ENTERPRISE_PUBLIC_URL).toBe('https://101.200.190.204:7777');
     expect(resolveEnterprisePublicBaseUrl({ host: '127.0.0.1', port: 7777 }))
       .toBe(DEFAULT_ENTERPRISE_PUBLIC_URL);
     expect(resolveEnterprisePublicBaseUrl({ host: '0.0.0.0', port: 9999 }))

@@ -1085,7 +1085,7 @@ async function synchronizeAuthenticatedEnterpriseAccount(
       await enterpriseMlsInboundPoll.stop();
       try {
         await enterpriseMls.activate({
-          serverUrl: enterpriseClient.snapshot().serverUrl,
+          serverUrl: enterpriseClient.encryptionServerScope(),
           organizationId: account.organizationId,
           accountId: account.id,
           deviceId: e2eeDevice.deviceId,
@@ -1116,7 +1116,7 @@ async function synchronizeAuthenticatedEnterpriseAccount(
     await enterpriseMlsInboundPoll.stop();
     await enterpriseMls.close();
   }
-  if(e2eeDevice)parkCarpoolStartup.update({serverUrl:enterpriseClient.snapshot().serverUrl,organizationId:account.organizationId,accountId:account.id,deviceId:e2eeDevice.deviceId,approvalState:e2eeDevice.approvalState});
+  if(e2eeDevice)parkCarpoolStartup.update({serverUrl:enterpriseClient.encryptionServerScope(),organizationId:account.organizationId,accountId:account.id,deviceId:e2eeDevice.deviceId,approvalState:e2eeDevice.approvalState});
   const identity = accountDataSyncIdentity(account);
   if (!identity) return;
   try {
@@ -4335,7 +4335,7 @@ function registerIpc(): void {
       if (!account || !session.serverUrl)
         throw new Error('enterprise session has expired');
       return enterpriseE2eeVault.exportRecoveryBundle(
-        session.serverUrl,
+        enterpriseClient.encryptionServerScope(),
         account.id,
         passphrase,
       );
@@ -4358,7 +4358,7 @@ function registerIpc(): void {
       if (!account || !session.serverUrl)
         throw new Error('enterprise session has expired');
       enterpriseE2eeVault.importRecoveryBundle(
-        session.serverUrl,
+        enterpriseClient.encryptionServerScope(),
         account.id,
         bundle,
         passphrase,

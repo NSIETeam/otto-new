@@ -1,6 +1,6 @@
 {
   "name": "otto-core",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Otto Core - Core functionality for AI-powered coding assistant",
   "repository": {
     "type": "git",
@@ -9,8 +9,14 @@
   "type": "module",
   "main": "dist/index.js",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./recurring-tasks": { "types": "./dist/src/recurringTasks.d.ts", "default": "./dist/src/recurringTasks.js" },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./recurring-tasks": {
+      "types": "./dist/src/recurringTasks.d.ts",
+      "default": "./dist/src/recurringTasks.js"
+    },
     "./*": "./*"
   },
   "scripts": {

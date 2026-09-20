@@ -105,7 +105,7 @@ describe('桌面应用更新源', () => {
   it('主源使用企业 HTTPS 镜像，避开 GitHub release 资产直链不稳定', () => {
     const url = new URL(PRIMARY_MANIFEST_URL);
     expect(url.protocol).toBe('https:');
-    expect(url.origin).toBe('https://59.110.154.44:7777');
+    expect(url.origin).toBe('https://101.200.190.204:7777');
     expect(url.pathname).toBe('/otto-releases/latest.json');
   });
 

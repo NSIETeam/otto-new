@@ -3978,8 +3978,13 @@ export class EnterpriseClient {
     return {
       crypto: this.e2ee,
       account: this.currentAccount,
-      serverScope: this.serverUrl,
+      serverScope: this.e2ee.resolveServerScope(this.serverUrl, this.currentAccount.id),
     };
+  }
+
+  /** Local cryptographic identity only; all HTTP requests still use serverUrl. */
+  encryptionServerScope(): string {
+    return this.requireE2eeContext().serverScope;
   }
 
   private async registerLocalE2eeDevice(): Promise<EnterpriseE2eeDeviceBundle> {
@@ -4132,7 +4137,7 @@ export class EnterpriseClient {
       includePending: true,
     });
     const localDeviceId = this.requireE2eeContext().crypto.localDevice(
-      this.serverUrl,
+      this.encryptionServerScope(),
       account.id,
     ).deviceId;
     return devices.map((device) => ({

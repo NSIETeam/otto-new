@@ -83,7 +83,7 @@ export class ParkMarketMls {
       context.accountId,
     ).deviceId;
     const scope = {
-      serverUrl: context.serverUrl,
+      serverUrl: context.serverScope,
       organizationId: context.organizationId,
       accountId: context.accountId,
       deviceId,

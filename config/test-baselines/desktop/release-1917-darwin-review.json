@@ -1,0 +1,403 @@
+{
+  "schemaVersion": 1,
+  "reference": "https://github.com/NSIETeam/otto-new/pull/81",
+  "status": "reviewed-scoped-file-and-version-measurement-update",
+  "recordedAt": "2026-09-20T11:05:36.300Z",
+  "reviewer": "Root agent review within the user-authorized migration release; not independent human review",
+  "sourceCommit": "7ff686e3ae6f81f0c5931e53cc6b4d7c2771094f",
+  "ciRun": "https://github.com/NSIETeam/otto-new/actions/runs/35505754038",
+  "runId": "079898ec-8df4-4295-a1fd-beb30905d5a3",
+  "parentBaselineSha256": "1f570ce4ff019dac4590ad08d80544b3446834151904c54ac5b1f5b469f3bf3c",
+  "receiptSha256": "f959880faea0651dca1489deaead7d78883bdef511b3695a730ae63465500355",
+  "sourceManifestSha256": "6aad54cbfb2c0dbeebaffe88334850cbaf43971a6e9eec210811cb7c9cfa6063",
+  "coverageSha256": "7c080dcf6f9d574f1affce5b786b3cbc3b65da696a3472c67d87d76df40285aa",
+  "testResultsSha256": "1d8eb0fc24c5466128cdac2c3320fcbff4fbcf170a9179ff98e7f95a9618aea5",
+  "nativeExitCode": 0,
+  "originalGate": {
+    "status": "failed",
+    "reason": "[desktop-coverage-ratchet] measurement environment differs or is unsupported"
+  },
+  "assertionsPassed": 2214,
+  "testFiles": 270,
+  "environmentBefore": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "4f3617daa88375604ab3bfabdbb067651daabf1da6d322bdadb35dcb0077dc16"
+  },
+  "environmentAfter": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "6ecae0e1a327a59cea2fefb741e6ea495f99479fcee229bbd60d505c2cb20a43"
+  },
+  "dependencyChange": "Only root/desktop versions 1.9.16 to 1.9.17 and core workspace version 1.2.0 to 1.2.1; all third-party dependency records, coverage configuration and tools unchanged.",
+  "unchangedEntriesPreserved": 275,
+  "files": [
+    {
+      "file": "src/main/enterprise-client.ts",
+      "reason": "Use the preserved cryptographic scope for local identity while transport uses the recovered server. Identity and HTTP-destination regression assertions are added.",
+      "beforeEntrySha256": "27f515876e02a970765fbd326fc7582c7fea837b8636f9ab37165e375995050f",
+      "afterEntrySha256": "b0075136ea2909981e7a69b804474b0e849789c59d98a5616075e78e4eb9105e",
+      "before": {
+        "lines": {
+          "total": 1240,
+          "uncovered": 494
+        },
+        "statements": {
+          "total": 1369,
+          "uncovered": 593
+        },
+        "functions": {
+          "total": 248,
+          "uncovered": 116
+        },
+        "branches": {
+          "total": 1158,
+          "uncovered": 510
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 1241,
+          "uncovered": 487
+        },
+        "statements": {
+          "total": 1370,
+          "uncovered": 582
+        },
+        "functions": {
+          "total": 249,
+          "uncovered": 114
+        },
+        "branches": {
+          "total": 1158,
+          "uncovered": 504
+        }
+      }
+    },
+    {
+      "file": "src/main/enterprise-e2ee.ts",
+      "reason": "Resolve exactly one valid existing identity, fail closed on corrupt/unreadable/conflicting keyrings. New tests retain original key-file bytes, history and transparency pins.",
+      "beforeEntrySha256": "1df7873cf9a5b9d532a624272d8a68a3ecd6f1cedbfc3a2586ba6267a1b324e0",
+      "afterEntrySha256": "553c9417a78f104576170e81c2839f7529c16f01a3a591a732d96d889e64294d",
+      "before": {
+        "lines": {
+          "total": 489,
+          "uncovered": 71
+        },
+        "statements": {
+          "total": 508,
+          "uncovered": 82
+        },
+        "functions": {
+          "total": 98,
+          "uncovered": 7
+        },
+        "branches": {
+          "total": 420,
+          "uncovered": 80
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 506,
+          "uncovered": 66
+        },
+        "statements": {
+          "total": 527,
+          "uncovered": 75
+        },
+        "functions": {
+          "total": 100,
+          "uncovered": 3
+        },
+        "branches": {
+          "total": 434,
+          "uncovered": 79
+        }
+      }
+    },
+    {
+      "file": "src/main/enterprise-server-url.ts",
+      "reason": "Explicit known deployment aliases and separate crypto identity scope. Custom endpoints and lookalikes remain isolated; this module is fully covered in the observed run.",
+      "beforeEntrySha256": "9f6900e9c27c91e1d4c4dde5410a74c4cbb3a6a449e70bf01627baedd95233fa",
+      "afterEntrySha256": "0c64e2ffa1069c93a2493626e663fc14cbdfd0f291e766e2b24dafba2c011fc7",
+      "before": {
+        "lines": {
+          "total": 10,
+          "uncovered": 0
+        },
+        "statements": {
+          "total": 12,
+          "uncovered": 1
+        },
+        "functions": {
+          "total": 4,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 10,
+          "uncovered": 1
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 13,
+          "uncovered": 0
+        },
+        "statements": {
+          "total": 16,
+          "uncovered": 0
+        },
+        "functions": {
+          "total": 5,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 12,
+          "uncovered": 0
+        }
+      }
+    },
+    {
+      "file": "src/main/index.ts",
+      "reason": "Thread the preserved scope through MLS startup and recovery import/export. Existing unexecuted Electron entry-point debt is unchanged; real installed-app upgrade is a separate required release gate.",
+      "beforeEntrySha256": "8f9e42c5243f689c0ea357128329fe060cf8241e51a23d6d5c18010294269abb",
+      "afterEntrySha256": "290e8ca3699677eb605d8cc4ab5e6091b71a6ee9709d17c16ce75a7dd27576b7",
+      "before": {
+        "lines": {
+          "total": 2593,
+          "uncovered": 2593
+        },
+        "statements": {
+          "total": 2856,
+          "uncovered": 2856
+        },
+        "functions": {
+          "total": 587,
+          "uncovered": 587
+        },
+        "branches": {
+          "total": 2295,
+          "uncovered": 2295
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 2593,
+          "uncovered": 2593
+        },
+        "statements": {
+          "total": 2856,
+          "uncovered": 2856
+        },
+        "functions": {
+          "total": 587,
+          "uncovered": 587
+        },
+        "branches": {
+          "total": 2295,
+          "uncovered": 2295
+        }
+      }
+    },
+    {
+      "file": "src/main/park-market-messaging.ts",
+      "reason": "Pending encrypted messages use stable identity scope while network/context checks use the actual endpoint. Retry regression retains the original ciphertext.",
+      "beforeEntrySha256": "a612a18e181a283d163a152ef949810492d985594ee8e546eee9769aa2d52742",
+      "afterEntrySha256": "7431cdf027c44eb7cbd06c431ee7fa2045ca7f46a9f404d91d593ec07fb61d56",
+      "before": {
+        "lines": {
+          "total": 170,
+          "uncovered": 80
+        },
+        "statements": {
+          "total": 183,
+          "uncovered": 86
+        },
+        "functions": {
+          "total": 25,
+          "uncovered": 12
+        },
+        "branches": {
+          "total": 160,
+          "uncovered": 84
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 170,
+          "uncovered": 80
+        },
+        "statements": {
+          "total": 183,
+          "uncovered": 86
+        },
+        "functions": {
+          "total": 25,
+          "uncovered": 12
+        },
+        "branches": {
+          "total": 160,
+          "uncovered": 84
+        }
+      }
+    },
+    {
+      "file": "src/main/park-market-mls.ts",
+      "reason": "Use the preserved local scope for native MLS activation; existing uncovered runtime integration paths remain debt, not claimed as covered.",
+      "beforeEntrySha256": "06dfaf53e063b37bed3ff97fa70c5c514602694e950762e94a9e37a094c52c5c",
+      "afterEntrySha256": "ecd6fdb1a09963b796e55f15414a253494319a66cf9c7a3002ac508d0ffc0a34",
+      "before": {
+        "lines": {
+          "total": 105,
+          "uncovered": 64
+        },
+        "statements": {
+          "total": 110,
+          "uncovered": 67
+        },
+        "functions": {
+          "total": 25,
+          "uncovered": 15
+        },
+        "branches": {
+          "total": 58,
+          "uncovered": 49
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 105,
+          "uncovered": 64
+        },
+        "statements": {
+          "total": 110,
+          "uncovered": 67
+        },
+        "functions": {
+          "total": 25,
+          "uncovered": 15
+        },
+        "branches": {
+          "total": 58,
+          "uncovered": 49
+        }
+      }
+    },
+    {
+      "file": "src/main/update-sources.ts",
+      "reason": "Change only the recovered update mirror address; official and compatibility channels remain.",
+      "beforeEntrySha256": "1b282a0f1ef8630fb492b68afa859e0ddf288384a05583275c60dfcacf935fe0",
+      "afterEntrySha256": "aa2b42928f58013215aa11217d6ba4fad5057729a4e7cb0514c87810ffdad388",
+      "before": {
+        "lines": {
+          "total": 19,
+          "uncovered": 0
+        },
+        "statements": {
+          "total": 20,
+          "uncovered": 0
+        },
+        "functions": {
+          "total": 2,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 13,
+          "uncovered": 1
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 19,
+          "uncovered": 0
+        },
+        "statements": {
+          "total": 20,
+          "uncovered": 0
+        },
+        "functions": {
+          "total": 2,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 13,
+          "uncovered": 1
+        }
+      }
+    },
+    {
+      "file": "src/renderer/browserPreviewBridge.ts",
+      "reason": "Preview version string only, 1.9.16 to 1.9.17; coverage debt unchanged.",
+      "beforeEntrySha256": "7f4b627244d07451689c160c3653134f35f6ae388599eb191b2ca9631b2f1015",
+      "afterEntrySha256": "5e0b8e434454cd006e6f3224eb305492a84d4150f56412d73dc0c67897ed57dc",
+      "before": {
+        "lines": {
+          "total": 275,
+          "uncovered": 275
+        },
+        "statements": {
+          "total": 295,
+          "uncovered": 295
+        },
+        "functions": {
+          "total": 147,
+          "uncovered": 147
+        },
+        "branches": {
+          "total": 157,
+          "uncovered": 157
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 275,
+          "uncovered": 275
+        },
+        "statements": {
+          "total": 295,
+          "uncovered": 295
+        },
+        "functions": {
+          "total": 147,
+          "uncovered": 147
+        },
+        "branches": {
+          "total": 157,
+          "uncovered": 157
+        }
+      }
+    }
+  ],
+  "boundaries": [
+    "Raw reports and original failed gate receipt are preserved; this review does not retroactively mark CI passed.",
+    "Only the eight explicitly reviewed changed-source observations and workspace-version lock digest are adopted; every metric has no increase in uncovered count.",
+    "All unchanged source entries, source-site budgets, previous review provenance and required old tests remain intact.",
+    "Mandatory per-site verifier, percentage thresholds, coverage scope and ignore hints are not changed.",
+    "The Electron bootstrap and existing integration/UI paths retain reported unit-coverage debt; installed upgrade, real account history and fleet acceptance are separate.",
+    "Both final-source platform coverage runs and complete CI must pass before release."
+  ],
+  "readOnlyHistoricalRevalidation": {
+    "files": 283,
+    "tests": 2214,
+    "uncovered": {
+      "lines": 9141,
+      "statements": 11310,
+      "functions": 3114,
+      "branches": 10805
+    },
+    "anomalies": {
+      "negativeBranchHits": 1
+    }
+  }
+}

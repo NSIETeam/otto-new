@@ -2253,7 +2253,7 @@ export const HTTP_ROUTES = {
  * 探测接口只返回最小化只读信息，不暴露 session/工具操作面。
  */
 export const TRUSTED_ORIGINS: ReadonlySet<string> = new Set([
-  'https://59.110.154.44:7777',
+  'https://101.200.190.204:7777',
   // 本地开发
   'http://localhost:3000',
   'http://127.0.0.1:3000',

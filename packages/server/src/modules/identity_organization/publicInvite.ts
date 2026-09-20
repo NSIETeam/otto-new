@@ -8,7 +8,7 @@
  * client when a reverse proxy is misconfigured.
  */
 
-export const DEFAULT_ENTERPRISE_PUBLIC_URL = 'https://59.110.154.44:7777';
+export const DEFAULT_ENTERPRISE_PUBLIC_URL = 'https://101.200.190.204:7777';
 
 const ORGANIZATION_INVITE_CODE_PATTERN = /^[A-HJ-NP-Za-km-z2-9]{4}-[A-HJ-NP-Za-km-z2-9]{4}-[A-HJ-NP-Za-km-z2-9]{4}$/;
 

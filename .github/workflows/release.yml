@@ -60,8 +60,8 @@ env:
   SQLCIPHER_SOURCE_REVISION: e2a6040f2ae5cfff2b3e08eb3320007d93cdf3fc
   RELEASES_REPO: NSIETeam/otto-new
   LEGACY_RELEASES_REPO: Felix201209/otto-releases
-  UPDATE_MIRROR_ASSET_BASE_URL: 'https://59.110.154.44:7777/downloads'
-  UPDATE_MIRROR_MANIFEST_URL: 'https://59.110.154.44:7777/otto-releases/latest.json'
+  UPDATE_MIRROR_ASSET_BASE_URL: 'https://101.200.190.204:7777/downloads'
+  UPDATE_MIRROR_MANIFEST_URL: 'https://101.200.190.204:7777/otto-releases/latest.json'
   UPDATE_MIRROR_ROOT: '/opt/otto-website'
 
 jobs:
@@ -621,6 +621,7 @@ jobs:
 
       - name: Focused regression tests
         run: |
+          node node_modules/vitest/vitest.mjs run --config scripts/server-ip-migration.vitest.config.mjs
           npm --workspace otto-core run test -- \
             src/config/lazy-heavy-tools.registration.test.ts \
             src/core/customModelAdapter.test.ts

@@ -191,6 +191,13 @@ jobs:
       - name: 🏗️ Build desktop (independent electron/webpack chain)
         run: npm run build --workspace=packages/desktop
 
+      # Use the exact standalone migration runners used by release.yml. The
+      # desktop workspace runner alone cannot expose every host/mock boundary.
+      - name: Server migration continuity regressions before merge
+        run: |
+          node node_modules/vitest/vitest.mjs run --config scripts/server-ip-migration.vitest.config.mjs
+          node node_modules/vitest/vitest.mjs run --config scripts/crypto-migration.vitest.config.mjs --coverage
+
       - name: 🔍 Typecheck (all workspaces, including desktop)
         run: npm run typecheck --workspaces --if-present
 

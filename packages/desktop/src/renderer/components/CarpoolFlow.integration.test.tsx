@@ -225,6 +225,14 @@ it('real UI publishes, previews, requests, chats, groups, admits and leaves thro
     });
     fireEvent.click(screen.getByRole('button', { name: '发送加密消息' }));
     await screen.findByText('独立私聊历史');
+    // Polling can display the persisted message before the native send promise
+    // settles. Keep this conversation mounted until its actual send receipt
+    // clears the draft and releases busy state, not merely until text appears.
+    await waitFor(() => {
+      const composer = screen.getByLabelText('同行消息') as HTMLTextAreaElement;
+      expect(composer.value).toBe('');
+      expect(composer.disabled).toBe(false);
+    });
     await waitFor(async () =>
       expect((await chats.get('b')!.read(direct)).messages[0]?.text).toBe(
         '独立私聊历史',

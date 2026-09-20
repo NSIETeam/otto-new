@@ -619,10 +619,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Focused regression tests
+      - name: Server migration continuity regressions
         run: |
           node node_modules/vitest/vitest.mjs run --config scripts/server-ip-migration.vitest.config.mjs
           node node_modules/vitest/vitest.mjs run --config scripts/crypto-migration.vitest.config.mjs --coverage
+
+      - name: Focused regression tests
+        run: |
           npm --workspace otto-core run test -- \
             src/config/lazy-heavy-tools.registration.test.ts \
             src/core/customModelAdapter.test.ts

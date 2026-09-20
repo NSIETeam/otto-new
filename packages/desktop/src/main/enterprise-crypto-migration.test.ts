@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EnterpriseE2eeCrypto, EnterpriseE2eeKeyVault } from './enterprise-e2ee.js';
 import { FileEnterpriseMlsMessageHistory } from './enterprise-mls-private-messages.js';
+import { EnterpriseClient } from './enterprise-client.js';
 
 const oldUrl = 'https://59.110.154.44:7777';
 const newUrl = 'https://101.200.190.204:7777';
@@ -29,6 +30,31 @@ function snapshot(root: string) {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe('encrypted identity continuity after endpoint migration', () => {
+  it('registers the original device through the NEW endpoint after a real client login', async () => {
+    const original = endpoint();
+    const device = original.crypto.localDevice(oldUrl, 'alice');
+    const calls: string[] = [];
+    const client = new EnterpriseClient(async (input, init) => {
+      const url = String(input);
+      calls.push(url);
+      expect(url.startsWith(newUrl + '/')).toBe(true);
+      let body: unknown;
+      if (url.endsWith('/health')) body = { status: 'ok', apiVersion: 4, capabilities: ['password_auth', 'e2ee_private_messages_v1'] };
+      else if (url.endsWith('/auth/login')) body = { token: 'synthetic-token', account: { id: 'alice', organizationId: 'org' }, expiresAt: '2099-01-01' };
+      else if (url.endsWith('/e2ee/devices')) {
+        expect(JSON.parse(String(init?.body)).deviceId).toBe(device.deviceId);
+        body = { device: { ...device, approvalState: 'approved', revokedAt: null } };
+      } else if (url.includes('/key-transparency?')) body = { transparency: { accountId: 'alice', headSequence: 0, headHash: '0'.repeat(64), entries: [] } };
+      else throw new Error('Unexpected fixture request');
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    }, () => undefined, original.crypto);
+    await client.loginWithPassword(newUrl, 'alice', 'synthetic-password');
+    expect((await client.ensureE2eeDeviceReady()).deviceId).toBe(device.deviceId);
+    expect(client.encryptionServerScope()).toBe(oldUrl);
+    expect(client.snapshot().serverUrl).toBe(newUrl);
+    expect(calls.length).toBeGreaterThanOrEqual(4);
+  });
+
   it.each(legacyUrls)('retains device identity and every original byte from %s after restart', (origin) => {
     const original = endpoint();
     const device = original.crypto.localDevice(origin, 'alice');
@@ -83,6 +109,25 @@ describe('encrypted identity continuity after endpoint migration', () => {
     original.crypto.localDevice(oldUrl, 'alice');
     original.crypto.localDevice(legacyUrls[3], 'alice');
     expect(() => original.crypto.resolveServerScope(newUrl, 'alice')).toThrow(/多套.*身份/);
+  });
+
+  it('keeps the old transparency pin and rejects a restored-server rollback', () => {
+    const original = endpoint();
+    const device = original.crypto.localDevice(oldUrl, 'alice');
+    const entry = { sequence: 1, organizationId: 'org', accountId: 'alice', deviceId: device.deviceId, event: 'bootstrap_approved' as const, keyFingerprint: device.keyFingerprint, actorDeviceId: null, previousHash: '0'.repeat(64), createdAt: '2026-09-01T00:00:00Z' };
+    const entryHash = createHash('sha256').update('otto:e2ee-key-transparency:v1\n').update(JSON.stringify(entry)).digest('hex');
+    original.crypto.verifyAndPinKeyTransparency({ serverScope: oldUrl, organizationId: 'org', view: { accountId: 'alice', headSequence: 1, headHash: entryHash, entries: [{ ...entry, entryHash }] } });
+    const before = snapshot(original.root);
+    expect(() => original.crypto.verifyAndPinKeyTransparency({ serverScope: original.crypto.resolveServerScope(newUrl, 'alice'), organizationId: 'org', view: { accountId: 'alice', headSequence: 0, headHash: '0'.repeat(64), entries: [] } })).toThrow(/rollback/);
+    expect(snapshot(original.root)).toEqual(before);
+  });
+
+  it('rejects a keyring copied from a different account', () => {
+    const original = endpoint();
+    original.crypto.localDevice(oldUrl, 'bob');
+    const digest = (account: string) => `${createHash('sha256').update(`${oldUrl}\0${account}`).digest('hex')}.keyring`;
+    writeFileSync(join(original.root, digest('alice')), readFileSync(join(original.root, digest('bob'))));
+    expect(() => original.crypto.resolveServerScope(newUrl, 'alice')).toThrow(/keyring/);
   });
 
   it('does not silently create a replacement when the legacy keyring is corrupt', () => {

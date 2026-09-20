@@ -94,6 +94,7 @@ function mockE2eeCrypto(input: {
   encryptedAttachments?: Array<{ id: string; ciphertext: string; nonce: string }>;
 } = {}): EnterpriseE2eeCrypto {
   return {
+    resolveServerScope: vi.fn((url: string) => url),
     localDevice: vi.fn(() => E2EE_DEVICE),
     verifyLocalDeviceRegistration: vi.fn(
       (
@@ -327,6 +328,7 @@ function mockFederationCrypto(): EnterpriseE2eeCrypto {
     signature: 'local-card-signature',
   };
   return {
+    resolveServerScope: vi.fn((url: string) => url),
     verifyLocalDeviceRegistration: vi.fn((_, registered) => registered),
     verifyAndPinKeyTransparency: vi.fn(({ view }) => view),
     verifyDeviceDirectory: vi.fn(({ devices }) => devices),

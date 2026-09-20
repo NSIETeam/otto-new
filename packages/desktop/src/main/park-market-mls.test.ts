@@ -1,9 +1,10 @@
 import { it, expect, vi } from 'vitest';
 import { ParkMarketMls } from './park-market-mls.js';
-const native = vi.hoisted(() => ({ created: 0, retired: vi.fn() }));
+const native = vi.hoisted(() => ({ created: 0, retired: vi.fn(), scopes: [] as unknown[] }));
 vi.mock('@otto/native', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@otto/native')>()),
   ParkMlsNativeKernel: class {
+    constructor(scope: unknown) { native.scopes.push(scope); }
     deviceScope = 'server/org/account/device';
     async listKeyPackages() {
       return [
@@ -44,6 +45,7 @@ it('does not advertise expired native key packages and preserves their keys for 
     unprotect: (v) => v,
   });
   await client.activate();
+  expect(native.scopes.at(-1)).toMatchObject({ serverUrl: context.serverScope });
   expect(
     request.mock.calls.some(
       (call) =>

@@ -54,7 +54,7 @@ describe('enterprise server URL', () => {
   );
 
   it('uses the reachable IP HTTPS endpoint by default', () => {
-    expect(DEFAULT_ENTERPRISE_SERVER_URL).toBe('https://59.110.154.44:7777');
+    expect(DEFAULT_ENTERPRISE_SERVER_URL).toBe('https://101.200.190.204:7777');
     expect(defaultEnterpriseServerUrl(undefined)).toBe(
       DEFAULT_ENTERPRISE_SERVER_URL,
     );
@@ -82,5 +82,39 @@ describe('enterprise server URL', () => {
         DEFAULT_ENTERPRISE_SERVER_URL,
       ),
     ).toBe('https://otto.example.com/');
+  });
+
+  it.each([
+    'https://59.110.154.44:7777',
+    'https://59.110.154.44',
+    'https://59.110.154.44:443',
+    'https://59-110-154-44.sslip.io',
+    'https://59-110-154-44.sslip.io:443',
+    'https://59-110-154-44.sslip.io:7777',
+  ])('migrates the retired official endpoint %s without reusing its token', (url) => {
+    expect(restoreEnterpriseServerTarget(`  ${url}/  `, DEFAULT_ENTERPRISE_SERVER_URL, false))
+      .toEqual({ serverUrl: 'https://101.200.190.204:7777', endpointChanged: true });
+  });
+
+  it.each([
+    'https://59.110.154.44:7777/tenant',
+    'https://59.110.154.44:7777?tenant=example',
+    'https://59.110.154.44:7777#example',
+    'https://59.110.154.44:8888',
+    'https://59.110.154.44.example.com:7777',
+    'https://59-110-154-44.sslip.io.example.com',
+    'https://user@59.110.154.44:7777',
+    'http://127.0.0.1:7777',
+    'https://enterprise.example.com',
+    'https://101.200.190.204:7777',
+  ])('does not retarget an unrelated or already migrated deployment: %s', (url) => {
+    expect(restoreEnterpriseServerTarget(url, DEFAULT_ENTERPRISE_SERVER_URL, false))
+      .toEqual({ serverUrl: url, endpointChanged: false });
+  });
+
+  it('uses the new default for a first launch without reporting a session change', () => {
+    expect(restoreEnterpriseServerTarget(undefined, DEFAULT_ENTERPRISE_SERVER_URL, false))
+      .toEqual({ serverUrl: 'https://101.200.190.204:7777', endpointChanged: false });
+    expect(defaultEnterpriseServerUrl('  ')).toBe('https://101.200.190.204:7777');
   });
 });

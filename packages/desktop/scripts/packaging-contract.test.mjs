@@ -612,7 +612,7 @@ describe('desktop packaging contract', () => {
     expect(packageJson.build.publish).toEqual([
       {
         provider: 'generic',
-        url: 'https://59.110.154.44:7777/downloads',
+        url: 'https://101.200.190.204:7777/downloads',
       },
     ]);
     expect(packageJson.scripts['dist:win']).toContain(
@@ -643,7 +643,7 @@ describe('desktop packaging contract', () => {
     );
     expect(script).toContain('resolveUpdateAssetBaseUrl()');
     expect(mirrorConfig).toContain('process.env.OTTO_UPDATE_ASSET_BASE_URL');
-    expect(mirrorConfig).toContain('https://59.110.154.44:7777/downloads');
+    expect(mirrorConfig).toContain('https://101.200.190.204:7777/downloads');
     expect(script).not.toContain(
       'github.com/Felix201209/otto-releases/releases/download',
     );

@@ -8,7 +8,7 @@ describe('update mirror configuration', () => {
   it('defaults release assets to the Otto no-proxy mirror', () => {
     expect(resolveUpdateAssetBaseUrl('')).toBe(DEFAULT_UPDATE_ASSET_BASE_URL);
     expect(DEFAULT_UPDATE_ASSET_BASE_URL).toBe(
-      'https://59.110.154.44:7777/downloads',
+      'https://101.200.190.204:7777/downloads',
     );
   });
 

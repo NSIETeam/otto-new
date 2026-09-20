@@ -296,7 +296,14 @@ async function main() {
 }
 
 module.exports = { admittedPaths };
-if (require.main === module)
+// Electron 43's default app dynamically imports its entry; require.main is not
+// this module in that path. Still keep ordinary helper imports side-effect free.
+if (
+  require.main === module ||
+  (process.versions.electron &&
+    process.argv[1] &&
+    path.resolve(process.argv[1]) === __filename)
+)
   main().catch((error) => {
     // Do not log key contents, source material or raw persistence objects.
     console.error('Encrypted upgrade acceptance failed:', error.message);

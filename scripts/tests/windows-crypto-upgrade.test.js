@@ -1,10 +1,95 @@
 /** Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0 */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
 import { admittedPaths } from '../probe-windows-crypto-upgrade.cjs';
 
+const probe = fileURLToPath(
+  new URL('../probe-windows-crypto-upgrade.cjs', import.meta.url),
+);
+const rejectedEnvironment = { ...process.env, GITHUB_ACTIONS: 'false' };
+delete rejectedEnvironment.ELECTRON_RUN_AS_NODE;
+const electronExecutable =
+  process.env.OTTO_TEST_ELECTRON_EXECUTABLE ||
+  path.resolve('node_modules/electron/dist/electron.exe');
+
+function importProbe(entry, electron = true) {
+  return spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `
+    ${electron ? "Object.defineProperty(process.versions, 'electron', { value: '43.2.0' });" : ''}
+    process.argv = [process.execPath, ${JSON.stringify(entry)}, 'seed'];
+    await import(${JSON.stringify(pathToFileURL(probe).href)});
+  `,
+    ],
+    {
+      env: rejectedEnvironment,
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    },
+  );
+}
+
 describe('encrypted data acceptance is a publication gate', () => {
+  it('runs admission when Electron dynamically imports the exact entry file', () => {
+    const result = importProbe(probe);
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('GitHub-hosted Windows runner only');
+  });
+
+  it('does not run a helper import or an ordinary Node dynamic import', () => {
+    for (const result of [
+      importProbe(path.join(path.dirname(probe), 'other.cjs')),
+      importProbe(probe, false),
+    ]) {
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+    }
+  });
+
+  it('retains direct CommonJS admission without loading Electron', () => {
+    const result = spawnSync(process.execPath, [probe, 'seed'], {
+      env: rejectedEnvironment,
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('GitHub-hosted Windows runner only');
+  });
+
+  it.skipIf(
+    process.platform !== 'win32' ||
+      (!existsSync(electronExecutable) &&
+        process.env.OTTO_REQUIRE_ELECTRON_PROBE_ENTRY !== '1'),
+  )(
+    'real Electron enters the probe and rejects non-hosted execution without hanging',
+    () => {
+      expect(existsSync(electronExecutable)).toBe(true);
+      const result = spawnSync(electronExecutable, [probe, 'seed'], {
+        env: rejectedEnvironment,
+        encoding: 'utf8',
+        timeout: 15000,
+        windowsHide: true,
+      });
+      // A timeout must fail: a silent no-op is not a successful safety check.
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('GitHub-hosted Windows runner only');
+    },
+    20000,
+  );
+
   it('refuses a workstation before loading Electron or touching files', () => {
     expect(() => admittedPaths({ GITHUB_ACTIONS: 'false' }, 'win32')).toThrow(
       /GitHub-hosted/,

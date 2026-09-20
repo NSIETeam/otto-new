@@ -1,6 +1,7 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 import { EventEmitter } from 'node:events';
+import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -38,6 +39,10 @@ class InstallerProcess extends EventEmitter {
 
 const installerPath = 'C:\\Downloads\\Otto Setup & approved.exe';
 const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+// Resolve host IO before any test mocks process.platform. Node's os module
+// caches its platform branch when first loaded; restoring platform later does
+// not undo a lazy import made while this suite is pretending to be Windows.
+const hostTemporaryDirectory = tmpdir();
 
 function downloadedService() {
   const service = new UpdateService(() => undefined, 'update-progress');
@@ -233,7 +238,6 @@ describe('Windows update installer launch lifecycle', () => {
         'node:child_process',
       );
     const nativeFs = await vi.importActual<typeof import('node:fs')>('node:fs');
-    const nativeOs = await vi.importActual<typeof import('node:os')>('node:os');
     const nativePath =
       await vi.importActual<typeof import('node:path')>('node:path');
     const mockedPlatform = Object.getOwnPropertyDescriptor(
@@ -244,7 +248,7 @@ describe('Windows update installer launch lifecycle', () => {
     Object.defineProperty(process, 'platform', originalPlatform);
     try {
       temporaryDirectory = nativeFs.mkdtempSync(
-        nativePath.join(nativeOs.tmpdir(), 'otto-updater-spawn-'),
+        nativePath.join(hostTemporaryDirectory, 'otto-updater-spawn-'),
       );
     } finally {
       Object.defineProperty(process, 'platform', mockedPlatform);

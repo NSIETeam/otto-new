@@ -313,9 +313,11 @@ describe('paid server recruitment analysis', () => {
   it('does not transmit material removed after reservation but before invocation', async () => {
     const h = await fixture(); try {
       await h.add('one'); await h.configure();
-      const worker = new RecruitmentBackgroundWorker({ store: h.store, usageLedger: h.usageLedger, resolveModel: h.resolveModel, getActor: async () => ({ id: 'owner', organizationId: 'org', isAdmin: false, active: true }), isEntitled: h.entitled,
-        audit: async (event) => { if (event.phase === 'requested') { const job = (await h.store.get('org', 'job'))!; await h.store.compareAndSet('org', job.revision, { ...job, revision: job.revision + 1, incomingMaterials: [] }); } } });
-      await worker.tick(); expect(h.invoke).not.toHaveBeenCalled(); expect((await h.store.get('org', 'job'))?.incomingMaterials).toEqual([]);
+      let reservations = 0;
+      // Use the material/ledger clock so expiry cannot skip the race under test.
+      const worker = new RecruitmentBackgroundWorker({ store: h.store, usageLedger: h.usageLedger, resolveModel: h.resolveModel, now: h.now, getActor: async () => ({ id: 'owner', organizationId: 'org', isAdmin: false, active: true }), isEntitled: h.entitled,
+        audit: async (event) => { if (event.phase === 'requested') { reservations += 1; const job = (await h.store.get('org', 'job'))!; await h.store.compareAndSet('org', job.revision, { ...job, revision: job.revision + 1, incomingMaterials: [] }); } } });
+      await worker.tick(); expect(reservations).toBe(1); expect(h.invoke).not.toHaveBeenCalled(); expect((await h.store.get('org', 'job'))?.incomingMaterials).toEqual([]);
     } finally { h.db.close(); }
   });
 });

@@ -73,7 +73,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://59.110.154.44:7777/downloads"
+        "url": "https://101.200.190.204:7777/downloads"
       }
     ],
     "appId": "ai.otto.desktop",

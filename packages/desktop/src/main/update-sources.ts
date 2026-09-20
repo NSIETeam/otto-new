@@ -6,7 +6,7 @@
  */
 
 export const PRIMARY_MANIFEST_URL =
-  'https://59.110.154.44:7777/otto-releases/latest.json';
+  'https://101.200.190.204:7777/otto-releases/latest.json';
 
 export const GITHUB_MANIFEST_URL =
   'https://github.com/NSIETeam/otto-new/releases/latest/download/latest.json';
@@ -25,10 +25,10 @@ export const RELEASE_PAGE_URL =
   'https://github.com/NSIETeam/otto-new/releases/latest';
 
 /**
- * The two GitHub releases intentionally carry the same manifest as the
- * no-proxy mirror. Their assets therefore continue to point at this fixed
- * origin. Keep this allow-list entry derived from the primary manifest URL so
- * moving the official mirror remains an atomic configuration change.
+ * GitHub releases use GitHub asset URLs so old clients can upgrade even when
+ * the previous mirror is unavailable. New clients may additionally accept the
+ * current official mirror; never retain the retired server in this allow-list.
+ * The mirror-specific manifest is generated and signed separately at release.
  */
 export const OFFICIAL_UPDATE_MIRROR_ORIGIN = new URL(
   PRIMARY_MANIFEST_URL,

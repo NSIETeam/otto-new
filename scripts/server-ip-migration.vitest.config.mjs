@@ -11,7 +11,8 @@ export default defineConfig({
       'packages/desktop/src/main/enterprise-server-url.test.ts',
       'packages/desktop/src/main/enterprise-session-store.test.ts',
       'packages/desktop/src/main/update-sources.test.ts',
-      'packages/desktop/src/main/update-core.test.ts',
+      'packages/desktop/src/main/update-service.test.ts',
+      'packages/desktop/src/main/update-manifest-integrity.test.ts',
       'packages/desktop/scripts/update-mirror-config.test.mjs',
       'packages/desktop/scripts/make-latest-json.test.mjs',
       'packages/server/src/enterprise/publicInvite.test.ts',
@@ -19,6 +20,7 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
+      reportsDirectory: 'packages/desktop/coverage/server-ip-migration',
       include: [
         'packages/desktop/src/main/enterprise-server-url.ts',
         'packages/desktop/src/main/update-sources.ts',

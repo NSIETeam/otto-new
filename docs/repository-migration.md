@@ -5,7 +5,7 @@
 - `NSIETeam/otto-new`：唯一可写源码仓、默认开发推送目标、正式 GitHub Release 仓。
 - `Felix201209/otto`：旧源码仓，只保留历史查询，不再接收提交、分支或标签。
 - `Felix201209/otto-releases`：旧客户端兼容发布仓，不属于“旧源码仓只读”的范围。兼容期内必须继续接收与正式 Release 完全相同的安装包，以及使用 GitHub asset URL 的同一份 GitHub `latest.json`。
-- `https://59.110.154.44:7777/otto-releases/latest.json`：V1.9.11 至 V1.9.13 的首选更新入口，必须长期可用并保持原子更新。
+- `https://101.200.190.204:7777/otto-releases/latest.json`：新的官方镜像入口。旧版硬编码的 `59.110.154.44` 不再作为恢复前提，现有安装必须通过 GitHub 兼容渠道或人工分发的同一份迁移安装包升级；不能把新服务器健康检查通过当作全量迁移完成。
 
 ## 发版不变量
 

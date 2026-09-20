@@ -63,6 +63,8 @@ it('retains both ciphertext receipts across concurrent timeouts and retries iden
         .map((item) => item.id)
         .sort(),
     ).toEqual(['one', 'two']);
+    // The transport can move while the encrypted draft namespace stays stable.
+    context.serverUrl = 'https://new-market.test';
     fail = false;
     await Promise.all([messaging.send(one), messaging.send(two)]);
     expect(sent.slice(2)).toEqual(sent.slice(0, 2));

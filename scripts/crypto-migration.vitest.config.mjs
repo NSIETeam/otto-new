@@ -10,6 +10,7 @@ export default defineConfig({
       'packages/desktop/src/main/enterprise-mls.test.ts',
       'packages/desktop/src/main/enterprise-mls-private-messages.test.ts',
       'packages/desktop/src/main/park-market-mls.test.ts',
+      'packages/desktop/src/main/park-market-messaging.test.ts',
       'packages/desktop/src/main/enterprise-server-url.test.ts',
     ],
     coverage: {

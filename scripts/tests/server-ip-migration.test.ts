@@ -18,6 +18,11 @@ const oldOrigin = 'https://59.110.154.44:7777';
 const read = (relative: string) => readFileSync(new URL(`../../${relative}`, import.meta.url), 'utf8');
 
 describe('fleet server migration contract', () => {
+  it('uses the preserved encrypted identity for carpool startup, not the HTTP destination', () => {
+    const main = read('packages/desktop/src/main/index.ts');
+    expect(main).toContain('parkCarpoolStartup.update({serverUrl:enterpriseClient.encryptionServerScope()');
+    expect(main).not.toContain('parkCarpoolStartup.update({serverUrl:enterpriseClient.snapshot().serverUrl');
+  });
   it('aligns login, invitation, update, installer and release workflow defaults', () => {
     expect(DEFAULT_ENTERPRISE_SERVER_URL).toBe(origin);
     expect(DEFAULT_ENTERPRISE_PUBLIC_URL).toBe(origin);

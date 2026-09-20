@@ -622,6 +622,7 @@ jobs:
       - name: Focused regression tests
         run: |
           node node_modules/vitest/vitest.mjs run --config scripts/server-ip-migration.vitest.config.mjs
+          node node_modules/vitest/vitest.mjs run --config scripts/crypto-migration.vitest.config.mjs --coverage
           npm --workspace otto-core run test -- \
             src/config/lazy-heavy-tools.registration.test.ts \
             src/core/customModelAdapter.test.ts

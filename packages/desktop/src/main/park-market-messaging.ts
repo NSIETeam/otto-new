@@ -99,7 +99,7 @@ export class ParkMarketMessaging {
   ) {}
   private scope(context: Context): MarketDraftScope {
     return {
-      server: context.serverUrl,
+      server: context.serverScope,
       account: context.accountId,
       organization: context.organizationId,
     };

@@ -1116,7 +1116,7 @@ async function synchronizeAuthenticatedEnterpriseAccount(
     await enterpriseMlsInboundPoll.stop();
     await enterpriseMls.close();
   }
-  if(e2eeDevice)parkCarpoolStartup.update({serverUrl:enterpriseClient.snapshot().serverUrl,organizationId:account.organizationId,accountId:account.id,deviceId:e2eeDevice.deviceId,approvalState:e2eeDevice.approvalState});
+  if(e2eeDevice)parkCarpoolStartup.update({serverUrl:enterpriseClient.encryptionServerScope(),organizationId:account.organizationId,accountId:account.id,deviceId:e2eeDevice.deviceId,approvalState:e2eeDevice.approvalState});
   const identity = accountDataSyncIdentity(account);
   if (!identity) return;
   try {

@@ -11,6 +11,22 @@ const LEGACY_ENTERPRISE_SERVER_URLS = new Set([
   'https://59-110-154-44.sslip.io:7777',
 ]);
 
+// A transport move must not change the namespace authenticated by encrypted
+// state. This is a local, fixed allowlist, never a redirect supplied by a server.
+export function enterpriseCryptoScopeMigration(serverUrl: string): {
+  candidates: string[];
+  defaultScope: string;
+} | null {
+  const current = ['https://101.200.190.204:7777', 'https://101.200.190.204', 'https://101.200.190.204:443'];
+  if (!current.includes(serverUrl.trim().replace(/\/+$/, ''))) return null;
+  return {
+    candidates: [...LEGACY_ENTERPRISE_SERVER_URLS, ...current],
+    // New devices must use the same deployment identity as existing devices.
+    // This value is never used as the HTTP request destination.
+    defaultScope: 'https://59.110.154.44:7777',
+  };
+}
+
 export function defaultEnterpriseServerUrl(
   environmentValue: string | undefined,
 ): string {

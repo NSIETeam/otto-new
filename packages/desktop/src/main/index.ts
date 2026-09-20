@@ -1085,7 +1085,7 @@ async function synchronizeAuthenticatedEnterpriseAccount(
       await enterpriseMlsInboundPoll.stop();
       try {
         await enterpriseMls.activate({
-          serverUrl: enterpriseClient.snapshot().serverUrl,
+          serverUrl: enterpriseClient.encryptionServerScope(),
           organizationId: account.organizationId,
           accountId: account.id,
           deviceId: e2eeDevice.deviceId,
@@ -4335,7 +4335,7 @@ function registerIpc(): void {
       if (!account || !session.serverUrl)
         throw new Error('enterprise session has expired');
       return enterpriseE2eeVault.exportRecoveryBundle(
-        session.serverUrl,
+        enterpriseClient.encryptionServerScope(),
         account.id,
         passphrase,
       );
@@ -4358,7 +4358,7 @@ function registerIpc(): void {
       if (!account || !session.serverUrl)
         throw new Error('enterprise session has expired');
       enterpriseE2eeVault.importRecoveryBundle(
-        session.serverUrl,
+        enterpriseClient.encryptionServerScope(),
         account.id,
         bundle,
         passphrase,

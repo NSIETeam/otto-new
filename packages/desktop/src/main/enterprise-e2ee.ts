@@ -24,6 +24,7 @@ import {
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { enterpriseCryptoScopeMigration } from './enterprise-server-url.js';
 
 export const ENTERPRISE_E2EE_PROTOCOL_VERSION = 1 as const;
 export const ENTERPRISE_FEDERATION_E2EE_SCOPE = 'otto:federation-e2ee:v1';
@@ -845,6 +846,31 @@ export class EnterpriseE2eeKeyVault {
     return created;
   }
 
+  /** Read-only discovery. Never turn unreadable/corrupt old keys into a new device. */
+  resolveExistingServerScope(scopes: readonly string[], accountId: string): string | null {
+    const found: string[] = [];
+    for (const scope of new Set(scopes)) {
+      const filePath = this.keyringPath(scope, accountId);
+      let stat: fs.Stats;
+      try {
+        stat = fs.lstatSync(filePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        throw new Error('加密身份文件类型异常，迁移已停止；请勿删除原文件。');
+      }
+      // Validate the stored account/scope and OS protection before selecting it.
+      validateKeyring(JSON.parse(this.options.unprotect(fs.readFileSync(filePath, 'utf8'))), scope, accountId);
+      found.push(scope);
+    }
+    if (found.length > 1) {
+      throw new Error('发现多套加密设备身份，已暂停加密迁移，原密钥和历史均未修改。请联系管理员核对，勿清空数据或重新创建设备。');
+    }
+    return found[0] ?? null;
+  }
+
   private save(keyring: DeviceKeyring): void {
     const plaintext = JSON.stringify(keyring);
     atomicWrite(
@@ -1260,6 +1286,12 @@ function validateFederationIdentityCard(
 
 export class EnterpriseE2eeCrypto {
   constructor(private readonly vault: EnterpriseE2eeKeyVault) {}
+
+  resolveServerScope(serverUrl: string, accountId: string): string {
+    const migration = enterpriseCryptoScopeMigration(serverUrl);
+    if (!migration) return serverUrl;
+    return this.vault.resolveExistingServerScope(migration.candidates, accountId) ?? migration.defaultScope;
+  }
 
   verifyAndPinKeyTransparency(input: {
     serverScope: string;

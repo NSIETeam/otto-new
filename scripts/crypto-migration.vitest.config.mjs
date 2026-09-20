@@ -2,7 +2,9 @@
 import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
-    environment: 'node', maxWorkers: 1, fileParallelism: false,
+    environment: 'node',
+    maxWorkers: 1,
+    fileParallelism: false,
     include: [
       'packages/desktop/src/main/enterprise-crypto-migration.test.ts',
       'packages/desktop/src/main/enterprise-e2ee.test.ts',
@@ -15,7 +17,10 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      include: ['packages/desktop/src/main/enterprise-e2ee.ts', 'packages/desktop/src/main/enterprise-server-url.ts'],
+      include: [
+        'packages/desktop/src/main/enterprise-e2ee.ts',
+        'packages/desktop/src/main/enterprise-server-url.ts',
+      ],
       reportsDirectory: 'packages/desktop/coverage/crypto-migration',
       thresholds: { lines: 80, statements: 80, branches: 80, functions: 80 },
     },

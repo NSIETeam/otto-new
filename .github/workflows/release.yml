@@ -1012,12 +1012,13 @@ jobs:
         shell: pwsh
         run: ./scripts/seed-windows-legacy-install.ps1
 
+      - name: Prepare pinned Electron test host
+        shell: bash
+        run: node node_modules/electron/install.js
+
       - name: Seed OS-protected encrypted data with the historical installed app
         shell: pwsh
-        run: |
-          node node_modules/electron/install.js
-          if ($LASTEXITCODE -ne 0) { throw 'Pinned Electron test host installation failed' }
-          ./scripts/run-windows-crypto-upgrade.ps1 -Phase seed
+        run: ./scripts/run-windows-crypto-upgrade.ps1 -Phase seed
 
       - name: Install and load the packaged SQLCipher binding
         shell: pwsh

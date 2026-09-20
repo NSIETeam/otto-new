@@ -13,11 +13,14 @@ import {
   createAuditDiagnostic,
   findDirectImageSizeReferences,
   validateAuditReport,
+  validateCleanAuditReport,
   validateExceptionPolicy,
   validateInstalledReachability,
   validateLockfile,
   validateProjectSourceReachability,
+  validateRemediatedDependencyTree,
   validateWorkspaceManifests,
+  verifyReleaseDependencyAudit,
 } from '../verify-release-dependency-audit.mjs';
 
 const repoRoot = path.resolve(
@@ -44,6 +47,43 @@ async function readJson(filePath) {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+// The expired policy remains an immutable historical fixture, not the current
+// release dependency graph. Never move its deadline to make a build pass.
+async function historicalLock() {
+  const lock = await readJson(path.join(repoRoot, 'package-lock.json'));
+  const { exception } = await readJson(policyPath);
+  lock.packages['node_modules/image-size'] = {
+    version: exception.vulnerablePackage.version,
+    integrity: exception.vulnerablePackage.integrity,
+  };
+  return lock;
+}
+
+function cleanAudit() {
+  return {
+    auditReportVersion: 2,
+    vulnerabilities: {},
+    metadata: {
+      vulnerabilities: {
+        info: 0,
+        low: 0,
+        moderate: 0,
+        high: 0,
+        critical: 0,
+        total: 0,
+      },
+      dependencies: {
+        prod: 100,
+        dev: 100,
+        optional: 0,
+        peer: 0,
+        peerOptional: 0,
+        total: 200,
+      },
+    },
+  };
 }
 
 afterEach(async () => {
@@ -99,11 +139,24 @@ async function writeInstalledFixture(exception) {
 }
 
 describe('release dependency audit gate', () => {
+  it('accepts the remediated installed tree with zero findings after the old waiver expires', () => {
+    const result = verifyReleaseDependencyAudit({
+      auditReport: cleanAudit(),
+      now: new Date('2026-09-20T12:00:00Z'),
+    });
+    expect(result).toMatchObject({
+      policyId: 'otto-image-size-2.0.4-remediation',
+      dependencyPath: 'pptxgenjs@4.0.1 -> image-size@2.0.4',
+      advisories: [],
+    });
+    expect(result).not.toHaveProperty('expiresAt');
+  }, 30_000);
+
   it('accepts only the reviewed policy, exact lock path and exact audit snapshot', async () => {
     const [policy, auditReport, lock] = await Promise.all([
       readJson(policyPath),
       readJson(auditSnapshotPath),
-      readJson(path.join(repoRoot, 'package-lock.json')),
+      historicalLock(),
     ]);
     const exception = validateExceptionPolicy(
       policy,
@@ -111,7 +164,20 @@ describe('release dependency audit gate', () => {
     );
 
     expect(() => validateLockfile(lock, exception)).not.toThrow();
-    expect(() => validateWorkspaceManifests(repoRoot, lock)).not.toThrow();
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'otto-historical-workspaces-'),
+    );
+    temporaryDirectories.push(root);
+    for (const workspace of Object.keys(lock.packages).filter(
+      (key) => !key.includes('node_modules'),
+    )) {
+      await mkdir(path.join(root, workspace), { recursive: true });
+      await writeFile(
+        path.join(root, workspace, 'package.json'),
+        JSON.stringify(lock.packages[workspace]),
+      );
+    }
+    expect(() => validateWorkspaceManifests(root, lock)).not.toThrow();
     expect(() => validateProjectSourceReachability(repoRoot)).not.toThrow();
     expect(() => validateAuditReport(auditReport, exception)).not.toThrow();
     // This test reads every tracked source file. A cold Windows worktree took
@@ -126,10 +192,166 @@ describe('release dependency audit gate', () => {
     ).toThrow('exception expired');
   });
 
+  it.each(['info', 'low', 'moderate', 'high', 'critical'])(
+    'refuses even one %s finding after remediation',
+    (severity) => {
+      const report = cleanAudit();
+      report.metadata.vulnerabilities[severity] = 1;
+      report.metadata.vulnerabilities.total = 1;
+      expect(() => validateCleanAuditReport(report)).toThrow(
+        'zero severity totals',
+      );
+      report.vulnerabilities.example = { severity };
+      expect(() => validateCleanAuditReport(report)).toThrow(
+        'no vulnerability findings',
+      );
+    },
+  );
+
+  it('rejects missing, partial, failed and inconsistent clean audit responses', () => {
+    for (const report of [
+      undefined,
+      {},
+      { ...cleanAudit(), error: { code: 'EAUDIT' } },
+      { ...cleanAudit(), vulnerabilities: undefined },
+      { ...cleanAudit(), vulnerabilities: [] },
+      { ...cleanAudit(), auditReportVersion: 1 },
+      { ...cleanAudit(), metadata: {} },
+    ]) {
+      expect(() => validateCleanAuditReport(report)).toThrow();
+    }
+    for (const key of [
+      'prod',
+      'dev',
+      'optional',
+      'peer',
+      'peerOptional',
+      'total',
+    ]) {
+      const report = cleanAudit();
+      delete report.metadata.dependencies[key];
+      expect(() => validateCleanAuditReport(report)).toThrow('inventory');
+    }
+  });
+
+  it('does not accept the old affected resolution even with a clean audit response', async () => {
+    const lock = await historicalLock();
+    expect(() => validateRemediatedDependencyTree(repoRoot, lock)).toThrow(
+      'image-size lock identity changed',
+    );
+    const current = await readJson(path.join(repoRoot, 'package-lock.json'));
+    current.packages['node_modules/image-size'].integrity += 'tampered';
+    expect(() => validateRemediatedDependencyTree(repoRoot, current)).toThrow(
+      'image-size lock identity changed',
+    );
+  });
+
+  it('permits only the reviewed root override and rejects another route to image-size', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-fixed-override-'));
+    temporaryDirectories.push(root);
+    const lock = { packages: { '': {} } };
+    const manifest = { overrides: { pptxgenjs: { 'image-size': '2.0.4' } } };
+    const write = () =>
+      writeFile(path.join(root, 'package.json'), JSON.stringify(manifest));
+    await write();
+    expect(() =>
+      validateWorkspaceManifests(root, lock, { remediated: true }),
+    ).not.toThrow();
+    manifest.overrides.pptxgenjs['image-size'] = '^2.0.4';
+    await write();
+    expect(() =>
+      validateWorkspaceManifests(root, lock, { remediated: true }),
+    ).toThrow('reviewed image-size override');
+    manifest.overrides.pptxgenjs['image-size'] = '2.0.4';
+    manifest.overrides.another = { 'image-size': '1.2.1' };
+    await write();
+    expect(() =>
+      validateWorkspaceManifests(root, lock, { remediated: true }),
+    ).toThrow('workspace override');
+  });
+
+  it.each(['require', 'import'])(
+    'rejects malformed ICNS, HEIF and JXL without hanging (%s)',
+    (mode) => {
+      // Bound the actual installed parser in a child process: a regression must
+      // fail with a timeout, not hang the complete CI runner or exhaust memory.
+      const script = `
+      const assert = require('node:assert/strict');
+      (async () => {
+        const mod = ${mode === 'require' ? "require('image-size')" : "await import('image-size')"};
+        const imageSize = mod.imageSize;
+        const box = (type, length = 8) => { const b = Buffer.alloc(Math.max(length, 8)); b.writeUInt32BE(length); b.write(type, 4); return b; };
+        const icns = Buffer.alloc(16); icns.write('icns'); icns.writeUInt32BE(16, 4); icns.write('icp4', 8);
+        const heif = box('ftyp', 16); heif.write('heic', 8);
+        const jxlHeader = box('JXL ', 12); jxlHeader.set([13, 10, 135, 10], 8);
+        const jxlType = box('ftyp', 20); jxlType.write('jxl ', 8);
+        const meta = box('meta', 44); const iprp = box('iprp', 32); const ipco = box('ipco', 24);
+        box('ispe', 0).copy(ipco, 8); ipco.copy(iprp, 8); iprp.copy(meta, 12);
+        for (const data of [icns, Buffer.concat([heif, meta]), Buffer.concat([jxlHeader, jxlType, box('jxlp', 0)])]) {
+          assert.throws(() => imageSize(data));
+        }
+        const good = Buffer.alloc(16); good.write('icns'); good.writeUInt32BE(16, 4); good.write('icp4', 8); good.writeUInt32BE(8, 12);
+        assert.equal(imageSize(good).width, 16);
+        process.stdout.write('parser fixtures passed');
+      })().catch(e => { console.error(e); process.exitCode = 1; });
+    `;
+      const result = spawnSync(
+        process.execPath,
+        ['--max-old-space-size=64', '-e', script],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          timeout: 5_000,
+          maxBuffer: 64 * 1024,
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('parser fixtures passed');
+    },
+    10_000,
+  );
+
+  it.each(['require', 'import'])(
+    'exports a real PPTX with text, PNG and SVG through the installed %s entry',
+    (mode) => {
+      const script = `
+      const assert = require('node:assert/strict');
+      (async () => {
+        const Pptx = ${mode === 'require' ? "require('pptxgenjs')" : "(await import('pptxgenjs')).default"};
+        const JSZip = require('jszip');
+        const pptx = new Pptx(); const slide = pptx.addSlide();
+        slide.addText('Otto migration compatibility', { x: 1, y: 1, w: 4, h: 1 });
+        slide.addImage({ data: 'image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVfoAAAAASUVORK5CYII=', x: 1, y: 2, w: 1, h: 1 });
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="red"/></svg>';
+        slide.addImage({ data: 'image/svg+xml;base64,' + Buffer.from(svg).toString('base64'), x: 3, y: 2, w: 1, h: 1 });
+        const zip = await JSZip.loadAsync(await pptx.write({ outputType: 'nodebuffer' }));
+        assert.match(await zip.file('ppt/slides/slide1.xml').async('string'), /Otto migration compatibility/);
+        assert.ok(Object.keys(zip.files).some(p => p.startsWith('ppt/media/') && p.endsWith('.png')));
+        assert.ok(Object.keys(zip.files).some(p => p.startsWith('ppt/media/') && p.endsWith('.svg')));
+        assert.ok(!Object.keys(require.cache).some(p => /[\\\\/]image-size[\\\\/]/.test(p)));
+        process.stdout.write('PPTX compatibility passed');
+      })().catch(e => { console.error(e); process.exitCode = 1; });
+    `;
+      const result = spawnSync(process.execPath, ['-e', script], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        timeout: 10_000,
+        maxBuffer: 64 * 1024,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('PPTX compatibility passed');
+    },
+    15_000,
+  );
+
   it('fails when a package version or dependency edge changes', async () => {
     const [policy, lock] = await Promise.all([
       readJson(policyPath),
-      readJson(path.join(repoRoot, 'package-lock.json')),
+      historicalLock(),
     ]);
     const changedLock = clone(lock);
     changedLock.packages['node_modules/image-size'].version = '2.0.2';
@@ -449,6 +671,16 @@ describe('release dependency audit gate', () => {
       'security:dependencies:release -- --audit-json',
     );
     expect(verifier).toContain('--registry=https://registry.npmjs.org/');
+    for (const include of ['dev', 'optional', 'peer']) {
+      expect(verifier).toContain(`--include=${include}`);
+    }
+    const ci = await readFile(
+      path.join(repoRoot, '.github/workflows/ci.yml'),
+      'utf8',
+    );
+    expect(ci).toContain('name: Enforce live dependency audit before merge');
+    expect(ci).toContain('run: npm run security:dependencies:release');
+    expect(ci).not.toContain('security:dependencies:release -- --audit-json');
   });
 
   it('refuses the offline audit snapshot whenever CI is active', () => {

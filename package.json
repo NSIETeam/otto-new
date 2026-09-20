@@ -156,6 +156,9 @@
     "undici": "^7.10.0"
   },
   "overrides": {
+    "pptxgenjs": {
+      "image-size": "2.0.4"
+    },
     "eslint": {
       "ajv": "^6.12.6"
     },

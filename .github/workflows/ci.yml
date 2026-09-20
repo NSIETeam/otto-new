@@ -126,6 +126,9 @@ jobs:
           PYTHON: python3.11
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Enforce live dependency audit before merge
+        run: npm run security:dependencies:release
+
       # Exercise packaging, path guards and deployment fixtures on the actual
       # macOS host before merge, not only in the long formal release build.
       # The scripts gate loads the real copied workflow runtime, not a fixture

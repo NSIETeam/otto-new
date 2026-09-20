@@ -1011,6 +1011,13 @@ jobs:
         shell: pwsh
         run: ./scripts/seed-windows-legacy-install.ps1
 
+      - name: Seed OS-protected encrypted data with the historical installed app
+        shell: pwsh
+        run: |
+          node node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Electron test host installation failed' }
+          ./scripts/run-windows-crypto-upgrade.ps1 -Phase seed
+
       - name: Install and load the packaged SQLCipher binding
         shell: pwsh
         run: |
@@ -1100,6 +1107,21 @@ jobs:
           if ($runtimeVerificationExitCode -ne 0) {
             throw "Packaged desktop runtime verification failed: $runtimeVerificationExitCode"
           }
+
+      - name: Verify encrypted identity and history with the upgraded installed app
+        shell: pwsh
+        run: ./scripts/run-windows-crypto-upgrade.ps1 -Phase verify -Version '${{ needs.build.outputs.version }}'
+
+      - name: Preserve encrypted upgrade acceptance receipts only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-crypto-upgrade-${{ needs.build.outputs.version }}
+          path: |
+            ${{ runner.temp }}/otto-crypto-upgrade-fixture/seed.json
+            ${{ runner.temp }}/otto-crypto-upgrade-fixture/verified.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Preserve historical Windows seed evidence
         if: always()

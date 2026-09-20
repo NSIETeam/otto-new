@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "status": "reviewed-dependency-environment-only",
+  "reference": "docs/security/image-size-2.0.4-remediation.md",
+  "recordedAt": "2026-09-20T15:05:59.666Z",
+  "reviewer": "Root agent within user-authorized dependency repair; not independent human approval",
+  "sourceCommit": "1ff5306114bf5baf6c949198b1268ebe2fab87c6",
+  "lockBefore": "6ecae0e1a327a59cea2fefb741e6ea495f99479fcee229bbd60d505c2cb20a43",
+  "lockAfter": "859de95406f35cd4b254d9005cc77605e37a35dcdff45d5c4357c8fbfcacde5f",
+  "changedRecords": [
+    "node_modules/image-size",
+    "node_modules/queue"
+  ],
+  "reason": "Pin official MIT image-size 2.0.4 and remove its unused queue dependency. PptxGenJS runtime bytes, all other dependencies, coverage tools, configuration and desktop source remain unchanged.",
+  "boundaries": [
+    "Only the reviewed lock identity changes. No coverage metrics, sites, thresholds, required tests or previous evidence are replaced.",
+    "This metadata review is not a new coverage measurement. Full current Windows and macOS coverage must pass before release."
+  ],
+  "baselines": [
+    {
+      "name": "win32-x64",
+      "beforeSha256": "4661632f7fc335a04b50f953d80d8d0828cfdf81f13bd6b69208565743d54a5e",
+      "afterSha256": "1825f107a2a93f11eef563bc0ceeebc1e103b6e9cac48fba9002ce44c1dd6bec",
+      "unchangedFiles": 283,
+      "unchangedRequiredTests": 270
+    },
+    {
+      "name": "darwin-arm64",
+      "beforeSha256": "6746e67d8bdec42d8c8bc5d8a06cdfb338f3ef398b5613d508bb39210257bbcc",
+      "afterSha256": "d108e8006ba57f5779b56ac070a9fb15c391b81375296e4eede1341e5f7a7dc7",
+      "unchangedFiles": 283,
+      "unchangedRequiredTests": 270
+    }
+  ]
+}

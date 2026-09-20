@@ -18,12 +18,6 @@ import { fileURLToPath } from 'node:url';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), '..');
-const defaultPolicyPath = path.join(
-  repoRoot,
-  'config',
-  'security',
-  'npm-audit-exception-1.9.14.json',
-);
 
 export const POLICY_EXPIRES_AT = '2026-09-15T00:00:00Z';
 const EXPECTED_ADVISORIES = Object.freeze([
@@ -45,6 +39,25 @@ const EXPECTED_RUNTIME_HASHES = Object.freeze({
     '097f0b92e15035a72bba72b59ef1ece62ab45ec6075ac85fe0e2d80d3f59b8e3',
 });
 const EXPECTED_FORBIDDEN_RUNTIME_TOKENS = Object.freeze(['image-size']);
+// This is a compatibility contract, not a vulnerability exception. Every live
+// audit finding fails the release. Keep the historical waiver validator below
+// for regression tests; production no longer accepts that expired waiver.
+const REMEDIATED_CONTRACT = Object.freeze({
+  parentPackage: {
+    version: '4.0.1',
+    integrity: EXPECTED_PPTXGENJS_INTEGRITY,
+    dependencySpecifier: '^1.2.1',
+  },
+  vulnerablePackage: {
+    version: '2.0.4',
+    integrity:
+      'sha512-QRUkFFsRV/6fuESxb9Vkq+a0LkSrgKXuc2NEqfikiXxxN/G3tjWt5EVUlMaImRBZRZK/jRBEbYvpPYZL8t08Zw==',
+  },
+  installedContract: {
+    runtimeFiles: EXPECTED_RUNTIME_HASHES,
+    forbiddenRuntimeTokens: EXPECTED_FORBIDDEN_RUNTIME_TOKENS,
+  },
+});
 const DEPENDENCY_FIELDS = Object.freeze([
   'dependencies',
   'devDependencies',
@@ -268,6 +281,7 @@ export function validateLockfile(lock, exception) {
 }
 
 function containsDependencyKey(value, targetKey) {
+  if (typeof value === 'string') return value.startsWith(`npm:${targetKey}@`);
   if (!value || typeof value !== 'object') return false;
   if (
     Object.keys(value).some(
@@ -281,7 +295,11 @@ function containsDependencyKey(value, targetKey) {
   );
 }
 
-export function validateWorkspaceManifests(root, lock) {
+export function validateWorkspaceManifests(
+  root,
+  lock,
+  { remediated = false } = {},
+) {
   const workspaceLockPaths = Object.keys(lock.packages).filter(
     (lockPath) => !lockPath.includes('node_modules'),
   );
@@ -302,8 +320,17 @@ export function validateWorkspaceManifests(root, lock) {
       ),
       `workspace directly references image-size: ${lockPath || '.'}`,
     );
+    const overrides = { ...manifest.overrides };
+    if (remediated && lockPath === '') {
+      assertExact(
+        overrides.pptxgenjs,
+        { 'image-size': '2.0.4' },
+        'reviewed image-size override',
+      );
+      delete overrides.pptxgenjs;
+    }
     assert(
-      !containsDependencyKey(manifest.overrides, 'image-size') &&
+      !containsDependencyKey(overrides, 'image-size') &&
         !containsDependencyKey(manifest.resolutions, 'image-size'),
       `workspace override changed image-size resolution: ${lockPath || '.'}`,
     );
@@ -442,7 +469,7 @@ function advisoryId(via) {
 
 // Diagnostics are a projection of the real registry response, never a dump of
 // npm's environment, stderr, raw error text or unknown nested fields. The gate
-// below still validates the original report and its exact reviewed exception.
+// below still validates the original report, not this sanitized projection.
 export function createAuditDiagnostic(report) {
   const defined = (object) =>
     Object.fromEntries(
@@ -651,25 +678,54 @@ export function validateAuditReport(report, exception) {
   );
 }
 
+export function validateCleanAuditReport(report) {
+  assert(report && typeof report === 'object', 'npm audit report is required');
+  assert(!report.error, 'npm audit endpoint returned an error');
+  assert(report.auditReportVersion === 2, 'npm audit report version changed');
+  assertExact(
+    report.vulnerabilities,
+    {},
+    'npm audit must have no vulnerability findings',
+  );
+  assertExact(
+    report.metadata?.vulnerabilities,
+    { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 },
+    'npm audit must have zero severity totals',
+  );
+  const dependencies = report.metadata?.dependencies;
+  assert(
+    dependencies &&
+      ['prod', 'dev', 'optional', 'peer', 'peerOptional', 'total'].every(
+        (key) =>
+          Number.isSafeInteger(dependencies[key]) && dependencies[key] >= 0,
+      ) &&
+      dependencies.prod > 0 &&
+      dependencies.dev > 0 &&
+      dependencies.total > 0,
+    'npm audit dependency inventory is missing or incomplete',
+  );
+}
+
+export function validateRemediatedDependencyTree(
+  root,
+  lock = readJson(path.join(root, 'package-lock.json')),
+) {
+  validateLockfile(lock, REMEDIATED_CONTRACT);
+  validateWorkspaceManifests(root, lock, { remediated: true });
+  validateProjectSourceReachability(root);
+  validateInstalledReachability(root, REMEDIATED_CONTRACT);
+}
+
 export function verifyReleaseDependencyAudit({
   root = repoRoot,
-  policy = readJson(defaultPolicyPath),
   auditReport,
-  now = new Date(),
 } = {}) {
-  assert(auditReport, 'npm audit report is required');
-  const exception = validateExceptionPolicy(policy, now);
-  const lock = readJson(path.join(root, 'package-lock.json'));
-  validateLockfile(lock, exception);
-  validateWorkspaceManifests(root, lock);
-  validateProjectSourceReachability(root);
-  validateInstalledReachability(root, exception);
-  validateAuditReport(auditReport, exception);
+  validateCleanAuditReport(auditReport);
+  validateRemediatedDependencyTree(root);
   return {
-    policyId: policy.policyId,
-    expiresAt: policy.expiresAt,
-    advisories: EXPECTED_ADVISORIES,
-    dependencyPath: 'pptxgenjs@4.0.1 -> image-size@1.2.1',
+    policyId: 'otto-image-size-2.0.4-remediation',
+    advisories: [],
+    dependencyPath: 'pptxgenjs@4.0.1 -> image-size@2.0.4',
   };
 }
 
@@ -686,8 +742,23 @@ function runNpmAudit(root) {
       ? 'npm.cmd'
       : 'npm';
   const npmArguments = npmCli
-    ? [npmCli, 'audit', '--json', '--registry=https://registry.npmjs.org/']
-    : ['audit', '--json', '--registry=https://registry.npmjs.org/'];
+    ? [
+        npmCli,
+        'audit',
+        '--json',
+        '--include=dev',
+        '--include=optional',
+        '--include=peer',
+        '--registry=https://registry.npmjs.org/',
+      ]
+    : [
+        'audit',
+        '--json',
+        '--include=dev',
+        '--include=optional',
+        '--include=peer',
+        '--registry=https://registry.npmjs.org/',
+      ];
   const result = spawnSync(npmExecutable, npmArguments, {
     cwd: root,
     encoding: 'utf8',

@@ -2559,6 +2559,151 @@ describe('OttoServer runtimeFactory（非 mock 路径）', () => {
     client.close();
   });
 
+  it('服务器重启后读取旧会话工具清单会懒构建 runtime，而不是误报会话未初始化', async () => {
+    let factoryCalls = 0;
+    const factory: RuntimeFactory = async () => {
+      factoryCalls++;
+      return {
+        async run() {},
+        cancel() {},
+        setModel() {},
+        resolveToolConfirmation() {},
+        getConfig() {
+          return {
+            async getToolRegistry() {
+              return {
+                getAllTools: () => [
+                  {
+                    name: 'memory',
+                    displayName: '企业记忆',
+                    description: '读取当前用户有权访问的企业记忆。',
+                  },
+                ],
+              };
+            },
+          };
+        },
+        async dispose() {},
+      };
+    };
+    server = new OttoServer({
+      port: 0,
+      mock: false,
+      runtimeFactory: factory,
+      store: new InMemorySessionStore(),
+    });
+    baseUrl = await startServer(server);
+    const restored = server.store.createSession({ title: '重启前的会话' });
+    expect(server.store.getRuntime(restored.sessionId)).toBeUndefined();
+
+    const client = await connectWs(baseUrl);
+    await client.waitFor((frame) => frame.type === 'welcome');
+    client.send({
+      type: 'get_tools',
+      payload: { sessionId: restored.sessionId },
+    });
+    const result = await client.waitFor(
+      (frame) =>
+        frame.type === 'tools_list' ||
+        (frame.type === 'error' && frame.payload.code === 'no_session'),
+    );
+
+    expect(result.type).toBe('tools_list');
+    if (result.type !== 'tools_list') throw new Error('unreachable');
+    expect(result.payload).toEqual({
+      sessionId: restored.sessionId,
+      tools: [
+        {
+          name: 'memory',
+          displayName: '企业记忆',
+          description: '读取当前用户有权访问的企业记忆。',
+        },
+      ],
+    });
+    expect(factoryCalls).toBe(1);
+    expect(server.store.getRuntime(restored.sessionId)).toBeDefined();
+    client.close();
+  });
+
+  it('读取不存在或无权限会话的工具清单不会触发 runtime 初始化', async () => {
+    const factory = vi.fn<RuntimeFactory>(async () => {
+      throw new Error('不应初始化');
+    });
+    server = new OttoServer({
+      port: 0,
+      mock: false,
+      runtimeFactory: factory,
+      store: new InMemorySessionStore(),
+    });
+    baseUrl = await startServer(server);
+    const forbidden = server.store.createSession({
+      title: '其它版本会话',
+      productEdition: 'enterprise',
+    });
+    const client = await connectWs(baseUrl);
+    await client.waitFor((frame) => frame.type === 'welcome');
+
+    client.send({
+      type: 'get_tools',
+      payload: { sessionId: 'missing-session' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const missing = client.frames.find((frame) => frame.type === 'error');
+    expect(missing).toBeDefined();
+    if (!missing) throw new Error('unreachable');
+    expect(missing.type).toBe('error');
+    if (missing.type !== 'error') throw new Error('unreachable');
+    expect(missing.payload).toMatchObject({
+      code: 'no_session',
+      sessionId: 'missing-session',
+    });
+
+    client.send({
+      type: 'get_tools',
+      payload: { sessionId: forbidden.sessionId },
+    });
+    const denied = await client.waitFor(
+      (frame) =>
+        frame.type === 'error' &&
+        frame.payload.code === 'forbidden_agent_profile' &&
+        frame.payload.sessionId === forbidden.sessionId,
+    );
+    expect(denied.type).toBe('error');
+    expect(factory).not.toHaveBeenCalled();
+    client.close();
+  });
+
+  it('旧会话 runtime 初始化失败时向工具面板返回可重试错误', async () => {
+    const factory = vi.fn<RuntimeFactory>(async () => {
+      throw new Error('测试初始化失败');
+    });
+    server = new OttoServer({
+      port: 0,
+      mock: false,
+      runtimeFactory: factory,
+      store: new InMemorySessionStore(),
+    });
+    baseUrl = await startServer(server);
+    const restored = server.store.createSession({ title: '待恢复会话' });
+    const client = await connectWs(baseUrl);
+    await client.waitFor((frame) => frame.type === 'welcome');
+
+    client.send({
+      type: 'get_tools',
+      payload: { sessionId: restored.sessionId },
+    });
+    const result = await client.waitFor(
+      (frame) =>
+        frame.type === 'error' &&
+        frame.payload.code === 'get_tools_failed' &&
+        frame.payload.sessionId === restored.sessionId,
+    );
+    expect(result.type).toBe('error');
+    expect(factory).toHaveBeenCalledOnce();
+    expect(server.store.getRuntime(restored.sessionId)).toBeUndefined();
+    client.close();
+  });
+
   it('ensureRuntime 懒构建去重：并发两条 send 只建一次 runtime', async () => {
     let factoryCalls = 0;
     let runCalls = 0;

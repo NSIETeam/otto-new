@@ -2555,12 +2555,19 @@ export class OttoServer {
     msg: Extract<ClientToServer, { type: 'get_tools' }>,
   ): Promise<void> {
     const { sessionId } = msg.payload;
-    const runtime = this.store.getRuntime(sessionId);
+    // dispatch 已先验证会话存在性与当前身份权限；ensureRuntime 还会在
+    // 异步初始化前后复核同一边界，避免身份切换竞态复用旧权限上下文。
+    const runtime =
+      this.store.getRuntime(sessionId) ?? (await this.ensureRuntime(sessionId));
     const cfg = runtime?.getConfig?.() as CoreConfig | undefined;
     if (!cfg) {
       return this.send(
         conn.socket,
-        errorFrame(sessionId, 'no_session', '会话尚未初始化，暂无工具信息'),
+        errorFrame(
+          sessionId,
+          'get_tools_failed',
+          '会话初始化失败，暂时无法读取工具清单，请重试。',
+        ),
       );
     }
     try {

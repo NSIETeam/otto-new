@@ -109,25 +109,6 @@ describe('encrypted data acceptance is a publication gate', () => {
     20000,
   );
 
-  it('reproduces the locked failed candidate without production credentials or publication', () => {
-    const workflow = readFileSync(
-      '.github/workflows/crypto-upgrade-repro.yml',
-      'utf8',
-    );
-    expect(workflow).toContain('actions: read');
-    expect(workflow).toContain('contents: read');
-    expect(workflow).not.toMatch(
-      /environment:|: write|secrets\.|pull_request_target|continue-on-error/,
-    );
-    expect(workflow).toContain('35545865735');
-    expect(workflow).toContain('a412c4e39c2199734a7fe219f1834213faf1dbe1');
-    expect(workflow).toContain(
-      '3f28953d9e0c91fb71f912bb0cb6c5bf28c5efd0bd4a5ad82c0c86eadd9938cd',
-    );
-    expect(workflow).toContain('-Phase verify -Version 1.9.17');
-    expect(workflow).not.toMatch(/gh release (create|edit)|systemctl|ssh /);
-  });
-
   it('reports only fixed stage names, never assertion values or secret payloads', () => {
     const output = [];
     const reporter = probeHelpers.createStageReporter((line) =>

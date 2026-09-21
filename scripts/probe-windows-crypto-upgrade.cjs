@@ -8,6 +8,44 @@ const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
+function createStageReporter(write) {
+  const stages = new Set([
+    'admission',
+    'electron-host',
+    'secure-storage',
+    'installed-modules',
+    'installed-version',
+    'server-scope',
+    'device-identity',
+    'native-activation',
+    'seed-data',
+    'seed-receipt',
+    'identity-continuity',
+    'native-key-inventory',
+    'native-group',
+    'encrypted-history',
+    'pending-outbox',
+    'trust-rollback',
+    'key-files',
+    'history-files',
+    'verified-receipt',
+    'native-close',
+  ]);
+  let stage = 'admission';
+  return {
+    enter(next) {
+      if (!stages.has(next)) throw new Error('Invalid probe stage');
+      stage = next;
+      write(`OTTO_CRYPTO_STAGE ${stage}\n`);
+    },
+    failed() {
+      // Never accept an Error or assertion values as diagnostic output.
+      write(`OTTO_CRYPTO_FAILURE ${stage}\n`);
+    },
+  };
+}
+const reporter = createStageReporter((line) => fs.writeSync(2, line));
+
 function admittedPaths(env, platform) {
   if (
     platform !== 'win32' ||
@@ -45,7 +83,12 @@ function noRedirect(target) {
   }
 }
 function digest(file) {
-  return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  // Electron treats app.asar as a virtual directory. Checksums must read its
+  // physical bytes without toggling process.noAsar or changing module loading.
+  const physicalFs = process.versions.electron ? require('original-fs') : fs;
+  return createHash('sha256')
+    .update(physicalFs.readFileSync(file))
+    .digest('hex');
 }
 function files(root) {
   const result = {};
@@ -62,6 +105,7 @@ function files(root) {
 }
 
 async function main() {
+  reporter.enter('admission');
   const { profile, install } = admittedPaths(process.env, process.platform);
   const phase = process.argv[2];
   if (!['seed', 'verify'].includes(phase))
@@ -69,6 +113,7 @@ async function main() {
   noRedirect(profile);
   noRedirect(install);
   const executable = path.join(install, 'Otto.exe');
+  reporter.enter('electron-host');
   const electronHost = path.join(
     path.dirname(require.resolve('electron/package.json')),
     'dist',
@@ -86,6 +131,7 @@ async function main() {
   else assert(fs.statSync(profile).isDirectory(), 'Missing historical fixture');
   app.setPath('userData', profile);
   await app.whenReady();
+  reporter.enter('secure-storage');
   assert(
     safeStorage.isEncryptionAvailable(),
     'OS secure storage is unavailable',
@@ -102,6 +148,7 @@ async function main() {
     },
   };
   const archive = path.join(install, 'resources', 'app.asar');
+  reporter.enter('installed-modules');
   const load = (name) => require(path.join(archive, 'dist', 'main', name));
   const { EnterpriseE2eeCrypto, EnterpriseE2eeKeyVault } =
     load('enterprise-e2ee.js');
@@ -111,6 +158,7 @@ async function main() {
   );
   const metadata = require(path.join(archive, 'package.json'));
   const version = metadata.version;
+  reporter.enter('installed-version');
   const runtime = spawnSync(executable, ['-p', 'process.versions.electron'], {
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     encoding: 'utf8',
@@ -132,11 +180,13 @@ async function main() {
   );
   const oldUrl = 'https://59.110.154.44:7777';
   const newUrl = 'https://101.200.190.204:7777';
+  reporter.enter('server-scope');
   const serverScope =
     phase === 'seed'
       ? oldUrl
       : e2ee.resolveServerScope(newUrl, 'fixture-alice');
   assert.equal(serverScope, oldUrl, 'Cryptographic namespace changed');
+  reporter.enter('device-identity');
   const device = e2ee.localDevice(serverScope, 'fixture-alice');
   const scope = {
     serverUrl: serverScope,
@@ -162,8 +212,10 @@ async function main() {
   const receiptPath = path.join(profile, 'seed.json');
   const expectedContent = 'Synthetic upgrade continuity message';
   try {
+    reporter.enter('native-activation');
     await mls.activate({ ...scope, approvalState: 'approved' });
     if (phase === 'seed') {
+      reporter.enter('seed-data');
       const keyPackage = await mls.createKeyPackage();
       const group = await mls.createGroup('fixture-bob');
       const message = {
@@ -209,6 +261,7 @@ async function main() {
         },
       });
       await mls.close();
+      reporter.enter('seed-receipt');
       const receipt = {
         source: process.env.GITHUB_SHA,
         version,
@@ -221,27 +274,33 @@ async function main() {
       };
       fs.writeFileSync(receiptPath, JSON.stringify(receipt), { flag: 'wx' });
     } else {
+      reporter.enter('identity-continuity');
       const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'));
       assert.equal(receipt.source, process.env.GITHUB_SHA);
       assert.equal(device.deviceId, receipt.deviceId);
       assert.equal(device.keyFingerprint, receipt.fingerprint);
+      reporter.enter('native-key-inventory');
       assert(
         (await mls.listKeyPackages()).some(
           (key) => key.reference === receipt.keyReference,
         ),
         'MLS private key inventory was lost',
       );
+      reporter.enter('native-group');
       const group = await mls.inspectGroup('fixture-bob');
       assert.equal(group.group_id, receipt.group.group_id);
       assert.equal(group.epoch, receipt.group.epoch);
+      reporter.enter('encrypted-history');
       assert.equal(
         (await history.list(scope, 'fixture-bob'))[0].content,
         expectedContent,
       );
+      reporter.enter('pending-outbox');
       assert.equal(
         (await history.pendingOutgoing(scope, 'fixture-bob')).length,
         1,
       );
+      reporter.enter('trust-rollback');
       assert.throws(
         () =>
           e2ee.verifyAndPinKeyTransparency({
@@ -256,17 +315,20 @@ async function main() {
           }),
         /rollback/,
       );
+      reporter.enter('key-files');
       assert.deepEqual(
         files(vaultDirectory),
         receipt.keys,
         'Original key files changed',
       );
+      reporter.enter('history-files');
       assert.deepEqual(
         files(historyDirectory),
         receipt.history,
         'Original history files changed',
       );
       await mls.close();
+      reporter.enter('verified-receipt');
       fs.writeFileSync(
         path.join(profile, 'verified.json'),
         JSON.stringify({
@@ -295,7 +357,7 @@ async function main() {
   app.exit(0);
 }
 
-module.exports = { admittedPaths };
+module.exports = { admittedPaths, createStageReporter, digest };
 // Electron 43's default app dynamically imports its entry; require.main is not
 // this module in that path. Still keep ordinary helper imports side-effect free.
 if (
@@ -305,7 +367,13 @@ if (
     path.resolve(process.argv[1]) === __filename)
 )
   main().catch((error) => {
-    // Do not log key contents, source material or raw persistence objects.
-    console.error('Encrypted upgrade acceptance failed:', error.message);
+    reporter.failed();
+    // Preserve the fixed admission explanation, not arbitrary assertion dumps.
+    if (
+      error.message ===
+      'GitHub-hosted Windows runner only; no user installation access'
+    ) {
+      fs.writeSync(2, `${error.message}\n`);
+    }
     process.exit(1);
   });

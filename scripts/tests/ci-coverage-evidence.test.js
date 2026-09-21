@@ -1,7 +1,11 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { parse } from 'yaml';
 import { expect, it } from 'vitest';
+
+const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 it('runs the entire scripts suite as a mandatory merge gate before long builds', () => {
   const workflow = parse(readFileSync(
@@ -112,4 +116,53 @@ it('makes the native coverage runner mandatory in package, CI and release checks
   expect(upload.with.path).toContain(
     'packages/desktop/coverage/desktop-runs/*/coverage/coverage-final.json',
   );
+});
+
+it('binds both reviewed desktop coverage baselines to the 1.9.18 version-only lockfile change', () => {
+  const lockSha256 = sha256(
+    readFileSync(new URL('../../package-lock.json', import.meta.url)),
+  );
+  const review = JSON.parse(
+    readFileSync(
+      new URL(
+        '../../config/test-baselines/desktop/release-1918-version-environment-review.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+  );
+  expect(review).toMatchObject({
+    schemaVersion: 1,
+    status: 'reviewed-version-only-environment',
+    reference: 'https://github.com/NSIETeam/otto-new/pull/86',
+    lockBefore: '859de95406f35cd4b254d9005cc77605e37a35dcdff45d5c4357c8fbfcacde5f',
+    lockAfter: lockSha256,
+    changedRecords: [
+      'version',
+      'packages[empty].version',
+      'packages/core.version',
+      'packages/desktop.version',
+    ],
+  });
+  expect(review.boundaries).toContain(
+    'No dependency, coverage tool, test configuration, source-site budget or threshold is changed by this review.',
+  );
+
+  for (const platform of [
+    'darwin-arm64-node22-vitest4.json.gz',
+    'win32-x64-node22-vitest4.json.gz',
+  ]) {
+    const baseline = JSON.parse(
+      gunzipSync(
+        readFileSync(
+          new URL(
+            `../../config/test-baselines/desktop/${platform}`,
+            import.meta.url,
+          ),
+        ),
+      ),
+    );
+    expect(baseline.environment.lockSha256).toBe(lockSha256);
+    expect(baseline.review.environmentUpdates.at(-1)).toEqual(review);
+  }
 });

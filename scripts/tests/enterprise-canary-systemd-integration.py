@@ -204,7 +204,7 @@ def main():
         for mode in ['success','drain45','ready-link-delay','ready-link-stuck','migration-exit7','runtime-exit7','oom','residual','hang-stop']:
             case = root / mode; case.mkdir(mode=0o700)
             package = case / 'package'; package.mkdir(mode=0o700)
-            for name in ['canary-worker.mjs','health-check.mjs']:
+            for name in ['canary-worker.mjs','health-check.mjs','license-trust-recovery.mjs']:
                 destination = package / 'tools' / name; destination.parent.mkdir(exist_ok=True); shutil.copyfile(source / 'tools' / name, destination); destination.chmod(0o600)
             write(package / 'tools/migrate-check.mjs', MIGRATION)
             write(package / 'release/run.mjs', RUNTIME)

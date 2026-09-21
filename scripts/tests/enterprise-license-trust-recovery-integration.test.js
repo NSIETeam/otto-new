@@ -47,10 +47,13 @@ describe('one-click License trust-root recovery wiring', () => {
   it('gives the isolated canary a credential only when recovery is staged', () => {
     expect(worker).toContain('licenseRecovery: recovery !== null');
     expect(worker).toContain(
-      "properties.push(`LoadCredential=license-recovery:${transaction}/license-trust-recovery.json`)",
+      '`LoadCredential=license-recovery:${transaction}/license-trust-recovery.json`',
     );
     expect(worker).toContain(
       "`${credentials}/license-recovery`",
+    );
+    expect(worker).toContain(
+      'hash(fs.readFileSync(recoveryFile)) !== config.licenseRecoveryHash',
     );
     expect(worker).toContain(
       "`${VIEW}/package/release/license-public-keys.json`",

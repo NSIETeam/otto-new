@@ -6,6 +6,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runHealthChecks, validateSmsConfiguration } from './health-check.mjs';
+import {
+  applyLicenseTrustRecovery,
+  canonicalRecoveryJson,
+} from './license-trust-recovery.mjs';
 
 const VIEW = '/run/otto-canary';
 const UNIT = /^otto-upgrade-canary-[0-9a-f]{32}\.service$/;
@@ -162,6 +166,7 @@ export function buildUnitArguments({
   nodeRoot,
   uid,
   gid,
+  licenseRecovery = false,
 }) {
   const properties = [
     'Type=exec',
@@ -210,6 +215,11 @@ export function buildUnitArguments({
     'StandardOutput=null',
     'StandardError=null',
   ];
+  if (licenseRecovery) {
+    properties.push(
+      `LoadCredential=license-recovery:${transaction}/license-trust-recovery.json`,
+    );
+  }
   return [
     '--quiet',
     '--wait',
@@ -553,6 +563,14 @@ async function prepare(transaction) {
   );
   config.workerHash = await fileHash(fileURLToPath(import.meta.url));
   config.inputDatabaseHash = await fileHash(`${canary}/work/data.db`);
+  const recoveryPath = `${transaction}/license-trust-recovery.json`;
+  const recovery = fs.existsSync(recoveryPath)
+    ? ordinary(recoveryPath)
+    : null;
+  if (recovery && (recovery.size < 1 || recovery.size > 1024 * 1024))
+    reject('canary-license-recovery-size-invalid');
+  config.licenseRecovery = recovery !== null;
+  config.licenseRecoveryHash = recovery ? await fileHash(recoveryPath) : null;
   config.nonce = randomBytes(16).toString('hex');
   fs.mkdirSync(`${canary}/control`, { mode: 0o755 });
   fs.chmodSync(`${canary}/control`, 0o755);
@@ -589,6 +607,7 @@ async function prepare(transaction) {
     manifestHash: config.manifestHash,
     workerHash: config.workerHash,
     inputDatabaseHash: config.inputDatabaseHash,
+    licenseRecoveryHash: config.licenseRecoveryHash,
     nonce: config.nonce,
     startedAt: Date.now(),
   };
@@ -602,6 +621,7 @@ async function prepare(transaction) {
       transaction,
       packageRoot: `${canary}/package`,
       nodeRoot: path.dirname(path.dirname(fs.realpathSync(process.execPath))),
+      licenseRecovery: recovery !== null,
     },
   };
 }
@@ -711,6 +731,14 @@ async function launch(transaction) {
       result.baselineHash !== witness.baselineHash
     )
       reject('canary-worker-result-invalid');
+    if (
+      (witness.licenseRecoveryHash === null &&
+        result.licenseRecoveryReceipt !== null) ||
+      (witness.licenseRecoveryHash !== null &&
+        (!result.licenseRecoveryReceipt ||
+          typeof result.licenseRecoveryReceipt !== 'object'))
+    )
+      reject('canary-license-recovery-receipt-invalid');
     ordinary(`${transaction}/canary/work/data.db`, { owner: witness.uid });
     const databaseHash = await fileHash(`${transaction}/canary/work/data.db`);
     const resident = `${transaction}/canary/work/resident-recurring-tasks.json`;
@@ -722,6 +750,7 @@ async function launch(transaction) {
       proof,
       databaseHash,
       residentHash,
+      recoveryReceipt: result.licenseRecoveryReceipt,
     });
   } catch (error) {
     try {
@@ -750,6 +779,10 @@ async function launch(transaction) {
 async function verifyDeliverable(transaction) {
   const receipt = json(`${transaction}/canary-deliverable.json`);
   const witness = json(`${transaction}/canary-controller.json`);
+  const result = json(
+    `${transaction}/canary/work/worker-result.json`,
+    witness.uid,
+  );
   if (
     witness.workerHash !== (await fileHash(fileURLToPath(import.meta.url))) ||
     witness.manifestHash !==
@@ -778,6 +811,11 @@ async function verifyDeliverable(transaction) {
     : null;
   if (residentHash !== receipt.residentHash)
     reject('canary-deliverable-resident-changed');
+  if (
+    canonicalRecoveryJson(receipt.recoveryReceipt) !==
+    canonicalRecoveryJson(result.licenseRecoveryReceipt)
+  )
+    reject('canary-license-recovery-receipt-changed');
 }
 
 async function worker() {
@@ -869,6 +907,37 @@ async function worker() {
     ready.buildCommit !== config.buildId
   )
     reject('canary-readiness-identity-mismatch');
+  let licenseRecoveryReceipt = null;
+  if (config.licenseRecovery) {
+    try {
+      const recoveryFile = `${credentials}/license-recovery`;
+      const recoveryMetadata = fs.lstatSync(recoveryFile);
+      if (
+        !recoveryMetadata.isFile() ||
+        recoveryMetadata.isSymbolicLink() ||
+        recoveryMetadata.size < 1 ||
+        recoveryMetadata.size > 1024 * 1024 ||
+        hash(fs.readFileSync(recoveryFile)) !== config.licenseRecoveryHash
+      )
+        reject('canary-license-recovery-credential-invalid');
+      const recovery = JSON.parse(fs.readFileSync(recoveryFile, 'utf8'));
+      const trustedPublicKeys = JSON.parse(
+        fs.readFileSync(
+          `${VIEW}/package/release/license-public-keys.json`,
+          'utf8',
+        ),
+      );
+      const result = await applyLicenseTrustRecovery({
+        baseUrl: `http://127.0.0.1:${ready.port}`,
+        adminToken: env.OTTO_ENTERPRISE_ADMIN_TOKEN,
+        recovery,
+        trustedPublicKeys,
+      });
+      licenseRecoveryReceipt = result.receipt;
+    } catch {
+      reject('canary-license-recovery-failed');
+    }
+  }
   await runHealthChecks({
     baseUrl: `http://127.0.0.1:${ready.port}`,
     expectedVersion: config.version,
@@ -894,6 +963,7 @@ async function worker() {
     runtimeExit: runtimeResult,
     configHash: config.configHash,
     baselineHash: config.baselineHash,
+    licenseRecoveryReceipt,
   });
 }
 

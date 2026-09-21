@@ -75,11 +75,11 @@ function fixture() {
   };
   const envelope = {
     license,
-    signature: sign(
+    signature: `ed25519:${sign(
       null,
       Buffer.from(canonicalRecoveryJson(license)),
       nextKeys.privateKey,
-    ).toString('base64url'),
+    ).toString('base64url')}`,
     signingKeyId: nextKeyId,
   };
   const recovery = {
@@ -102,6 +102,14 @@ function fixture() {
     status,
     recovery,
   };
+}
+
+function resign(input) {
+  input.recovery.envelope.signature = `ed25519:${sign(
+    null,
+    Buffer.from(canonicalRecoveryJson(input.recovery.envelope.license)),
+    input.nextKeys.privateKey,
+  ).toString('base64url')}`;
 }
 
 describe('enterprise License trust-root recovery', () => {
@@ -136,6 +144,7 @@ describe('enterprise License trust-root recovery', () => {
   ])('rejects changed entitlement or identity: %s', (_name, mutate) => {
     const input = fixture();
     mutate(input.recovery);
+    resign(input);
     expect(() =>
       validateLicenseTrustRecovery({
         recovery: input.recovery,
@@ -158,7 +167,10 @@ describe('enterprise License trust-root recovery', () => {
 
   it('rejects signature tampering, wrong current machine and skipped revisions', () => {
     const tampered = fixture();
-    tampered.recovery.envelope.signature = `${tampered.recovery.envelope.signature.slice(0, -1)}A`;
+    tampered.recovery.envelope.signature = tampered.recovery.envelope.signature.replace(
+      /^ed25519:./,
+      (prefix) => (prefix.endsWith('A') ? 'ed25519:B' : 'ed25519:A'),
+    );
     expect(() =>
       validateLicenseTrustRecovery({
         recovery: tampered.recovery,
@@ -169,6 +181,7 @@ describe('enterprise License trust-root recovery', () => {
 
     const wrongMachine = fixture();
     wrongMachine.recovery.envelope.license.machineFingerprint = 'c'.repeat(64);
+    resign(wrongMachine);
     expect(() =>
       validateLicenseTrustRecovery({
         recovery: wrongMachine.recovery,
@@ -179,6 +192,7 @@ describe('enterprise License trust-root recovery', () => {
 
     const skipped = fixture();
     skipped.recovery.envelope.license.revision = 3;
+    resign(skipped);
     expect(() =>
       validateLicenseTrustRecovery({
         recovery: skipped.recovery,

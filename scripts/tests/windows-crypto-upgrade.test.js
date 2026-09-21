@@ -5,7 +5,8 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
-import { admittedPaths } from '../probe-windows-crypto-upgrade.cjs';
+import probeHelpers from '../probe-windows-crypto-upgrade.cjs';
+const { admittedPaths } = probeHelpers;
 
 const probe = fileURLToPath(
   new URL('../probe-windows-crypto-upgrade.cjs', import.meta.url),
@@ -38,6 +39,54 @@ function importProbe(entry, electron = true) {
 }
 
 describe('encrypted data acceptance is a publication gate', () => {
+  it('reproduces the locked failed candidate without production credentials or publication', () => {
+    const workflow = readFileSync(
+      '.github/workflows/crypto-upgrade-repro.yml',
+      'utf8',
+    );
+    expect(workflow).toContain('actions: read');
+    expect(workflow).toContain('contents: read');
+    expect(workflow).not.toMatch(
+      /environment:|: write|secrets\.|pull_request_target|continue-on-error/,
+    );
+    expect(workflow).toContain('35545865735');
+    expect(workflow).toContain('a412c4e39c2199734a7fe219f1834213faf1dbe1');
+    expect(workflow).toContain(
+      '3f28953d9e0c91fb71f912bb0cb6c5bf28c5efd0bd4a5ad82c0c86eadd9938cd',
+    );
+    expect(workflow).toContain('-Phase verify -Version 1.9.17');
+    expect(workflow).not.toMatch(/gh release (create|edit)|systemctl|ssh /);
+  });
+
+  it('reports only fixed stage names, never assertion values or secret payloads', () => {
+    const output = [];
+    const reporter = probeHelpers.createStageReporter((line) =>
+      output.push(line),
+    );
+    reporter.enter('device-identity');
+    reporter.failed(new Error('private-key-and-history-content'));
+    expect(output).toEqual([
+      'OTTO_CRYPTO_STAGE device-identity\n',
+      'OTTO_CRYPTO_FAILURE device-identity\n',
+    ]);
+    expect(() => reporter.enter('private-key-and-history-content')).toThrow(
+      'Invalid probe stage',
+    );
+    expect(output.join('')).not.toContain('private-key-and-history-content');
+  });
+
+  it('captures GUI-host pipe output but prints only sanitized probe markers', () => {
+    const wrapper = readFileSync(
+      'scripts/run-windows-crypto-upgrade.ps1',
+      'utf8',
+    );
+    expect(wrapper).toContain('$start.RedirectStandardError = $true');
+    expect(wrapper).toContain('$start.RedirectStandardOutput = $true');
+    expect(wrapper).toContain('StandardError.ReadToEndAsync()');
+    expect(wrapper).toContain('^OTTO_CRYPTO_(STAGE|FAILURE) [a-z-]+$');
+    expect(wrapper).not.toMatch(/Write-(Host|Output|Error)\s+\$stderr/);
+  });
+
   it('runs admission when Electron dynamically imports the exact entry file', () => {
     const result = importProbe(probe);
     expect(result.error).toBeUndefined();

@@ -14,6 +14,8 @@ $start = [Diagnostics.ProcessStartInfo]::new()
 $start.FileName = $executable
 $start.UseShellExecute = $false
 $start.CreateNoWindow = $true
+$start.RedirectStandardError = $true
+$start.RedirectStandardOutput = $true
 [void]$start.Environment.Remove('ELECTRON_RUN_AS_NODE')
 [void]$start.ArgumentList.Add($probe)
 [void]$start.ArgumentList.Add($Phase)
@@ -21,7 +23,14 @@ if ($Version) { [void]$start.ArgumentList.Add($Version) }
 $child = [Diagnostics.Process]::Start($start)
 if ($null -eq $child) { throw 'Probe did not start' }
 try {
+  $stderrTask = $child.StandardError.ReadToEndAsync()
+  $stdoutTask = $child.StandardOutput.ReadToEndAsync()
   if (-not $child.WaitForExit(120000)) { throw 'Encrypted upgrade probe timed out; no kill or replay' }
+  $stderr = $stderrTask.GetAwaiter().GetResult()
+  [void]$stdoutTask.GetAwaiter().GetResult()
+  foreach ($line in ($stderr -split "`r?`n")) {
+    if ($line -cmatch '^OTTO_CRYPTO_(STAGE|FAILURE) [a-z-]+$') { Write-Host $line }
+  }
   if ($child.ExitCode -ne 0) { throw "Encrypted upgrade probe failed: $($child.ExitCode)" }
 } finally { $child.Dispose() }
 $receipt = Join-Path $env:RUNNER_TEMP ('otto-crypto-upgrade-fixture\' + $(if ($Phase -eq 'seed') { 'seed.json' } else { 'verified.json' }))

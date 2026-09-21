@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "status": "reviewed-version-only-environment",
+  "reference": "https://github.com/NSIETeam/otto-new/pull/86",
+  "recordedAt": "2026-09-21T06:20:00.000Z",
+  "reviewer": "Root agent within the user-authorized 1.9.18 server and fleet migration; not independent human approval",
+  "sourceCommit": "00c7ce33a8fada9c9ab6ed282264ff33bcd03112",
+  "testedMerge": "9b7cf502c450c0bb8036ae77f56bfed1b46b7a23",
+  "ciRun": "https://github.com/NSIETeam/otto-new/actions/runs/35566175408",
+  "ciJob": "https://github.com/NSIETeam/otto-new/actions/runs/35566175408/job/106228326752",
+  "artifactId": 10624354321,
+  "runId": "222b314f-b09c-48db-84e3-021a99f52b26",
+  "receiptSha256": "6a301a3b6f7961ea2e8d153576f9c780ce8c27fbda8538ee637fc14ba4df1709",
+  "coverageSha256": "af740c24cbfadb35f68e81a69caa27b0fe6f22055261fc2da6cb404cdc53691d",
+  "testResultsSha256": "3375be7a40bdbcc773f1a5881e99dd31e51ec5d96d8c0afdaaac11a89eabdf91",
+  "nativeExitCode": 0,
+  "assertionsPassed": 2214,
+  "originalGate": {
+    "status": "failed",
+    "reason": "[desktop-coverage-ratchet] measurement environment differs or is unsupported"
+  },
+  "lockBefore": "859de95406f35cd4b254d9005cc77605e37a35dcdff45d5c4357c8fbfcacde5f",
+  "lockAfter": "c8be049f25a981192c7adcd3c3180161ed7ac52725b22f94f894471126886422",
+  "changedRecords": [
+    "version",
+    "packages[empty].version",
+    "packages/core.version",
+    "packages/desktop.version"
+  ],
+  "reason": "Advance only the root, root lock entry, core workspace and desktop workspace versions from the reviewed 1.9.17 lockfile to 1.9.18. The pull request package-lock patch contains exactly four additions and four deletions, all on these version fields.",
+  "boundaries": [
+    "No dependency, coverage tool, test configuration, source-site budget or threshold is changed by this review.",
+    "The preserved macOS ARM64 run completed all 2214 assertions with native exit code 0; its gate rejected only the exact lockfile identity change.",
+    "The Windows baseline receives the same mechanical version-only lock identity update; this is not a claim that the macOS coverage artifact was produced on Windows.",
+    "All baseline file metrics, uncovered-site signatures, required tests and prior review provenance remain unchanged.",
+    "A new current-source run must pass after this review before merge or release."
+  ]
+}

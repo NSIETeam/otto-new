@@ -15,6 +15,7 @@ DATA_DIR="${OTTO_DATA_DIR:-/var/lib/otto-enterprise}"
 RESIDENT_STATE_PATH="${DATA_DIR}/resident-recurring-tasks.json"
 SERVICE_UNIT="/etc/systemd/system/otto-enterprise.service"
 LOCK_FILE="/run/lock/otto-enterprise-deploy.lock"
+LICENSE_RECOVERY_SOURCE="/etc/otto-enterprise/license-trust-recovery.json"
 TRANSACTION_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
 usage() {
@@ -195,9 +196,27 @@ SERVICE_STOPPED=0
 UPGRADE_SUCCEEDED=0
 RESIDENT_STATE_EXISTED=0
 TARGET_RELEASE_STAGE=""
+LICENSE_RECOVERY_STAGED="${TXN_DIR}/license-trust-recovery.json"
+LICENSE_RECOVERY_SOURCE_HASH=""
+LICENSE_RECOVERY_STAGED_HASH=""
 
 install -o root -g root -m 0600 "$CONFIG_PATH" "$CONFIG_BACKUP"
 install -o root -g root -m 0644 "$SERVICE_UNIT" "$SERVICE_UNIT_BACKUP"
+if [ -e "$LICENSE_RECOVERY_SOURCE" ] || [ -L "$LICENSE_RECOVERY_SOURCE" ]; then
+  [ -f "$LICENSE_RECOVERY_SOURCE" ] && [ ! -L "$LICENSE_RECOVERY_SOURCE" ] \
+    || otto_die "License 信任恢复文件不是安全的普通文件" 3
+  [ "$(stat -c '%u:%g:%a' "$LICENSE_RECOVERY_SOURCE")" = '0:0:600' ] \
+    || otto_die "License 信任恢复文件必须为 root:root 0600" 3
+  LICENSE_RECOVERY_SIZE="$(stat -c '%s' "$LICENSE_RECOVERY_SOURCE")"
+  [[ "$LICENSE_RECOVERY_SIZE" =~ ^[1-9][0-9]*$ ]] \
+    && [ "$LICENSE_RECOVERY_SIZE" -le 1048576 ] \
+    || otto_die "License 信任恢复文件大小无效" 3
+  LICENSE_RECOVERY_SOURCE_HASH="$(sha256sum "$LICENSE_RECOVERY_SOURCE" | awk '{print $1}')"
+  install -o root -g root -m 0600 "$LICENSE_RECOVERY_SOURCE" "$LICENSE_RECOVERY_STAGED"
+  LICENSE_RECOVERY_STAGED_HASH="$(sha256sum "$LICENSE_RECOVERY_STAGED" | awk '{print $1}')"
+  [ "$LICENSE_RECOVERY_SOURCE_HASH" = "$LICENSE_RECOVERY_STAGED_HASH" ] \
+    || otto_die "License 信任恢复文件复制校验失败" 3
+fi
 
 write_rollback_verified_witness() {
   local expected_content marker_file marker_next
@@ -721,6 +740,15 @@ systemctl start otto-enterprise
 OTTO_ALLOW_SMS_DISABLED="$OTTO_ALLOW_SMS_DISABLED" "${INSTALL_ROOT}/deploy/verify.sh"
 sync_live_deployment_filesystems \
   || otto_die "无法在验收后持久化升级状态" 5
+if [ -n "$LICENSE_RECOVERY_SOURCE_HASH" ]; then
+  [ -f "$LICENSE_RECOVERY_SOURCE" ] && [ ! -L "$LICENSE_RECOVERY_SOURCE" ] \
+    && [ "$(stat -c '%u:%g:%a' "$LICENSE_RECOVERY_SOURCE")" = '0:0:600' ] \
+    && [ "$(sha256sum "$LICENSE_RECOVERY_SOURCE" | awk '{print $1}')" = "$LICENSE_RECOVERY_SOURCE_HASH" ] \
+    || otto_die "License 信任恢复源文件在升级期间发生变化，拒绝删除" 5
+  rm -f -- "$LICENSE_RECOVERY_SOURCE"
+  /usr/bin/sync -f "$(dirname -- "$LICENSE_RECOVERY_SOURCE")" \
+    || otto_die "无法持久化 License 信任恢复源文件清理" 5
+fi
 ROLLBACK_NEEDED=0
 SERVICE_STOPPED=0
 UPGRADE_SUCCEEDED=1

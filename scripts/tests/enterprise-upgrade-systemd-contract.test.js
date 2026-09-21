@@ -111,6 +111,9 @@ print(module.service_unit(pathlib.PurePosixPath('/home/runner/work/_temp/private
     expect(workerHarness).toContain("'canary group must not pre-exist in disposable runner'");
     expect(workerHarness).toContain('os.fchown(fd,evidence_owner.st_uid,evidence_owner.st_gid)');
     expect(workerHarness).toContain("report['passed'] = False");
+    expect(workerHarness).toContain(
+      "for name in ['canary-worker.mjs','health-check.mjs','license-trust-recovery.mjs']",
+    );
   });
 
   it('uses a clean environment and network namespace and keeps failure evidence', () => {

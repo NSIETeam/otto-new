@@ -1,5 +1,15 @@
 /** Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0 */
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { createPackage } from '@electron/asar';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -39,6 +49,66 @@ function importProbe(entry, electron = true) {
 }
 
 describe('encrypted data acceptance is a publication gate', () => {
+  it.skipIf(
+    process.platform !== 'win32' ||
+      (!existsSync(electronExecutable) &&
+        process.env.OTTO_REQUIRE_ELECTRON_PROBE_ENTRY !== '1'),
+  )(
+    'hashes actual archive bytes under Electron without disabling ASAR module access',
+    async () => {
+      expect(existsSync(electronExecutable)).toBe(true);
+      const root = mkdtempSync(
+        path.join(tmpdir(), 'otto-crypto-asar-digest-test-'),
+      );
+      if (
+        path.dirname(root) !== path.resolve(tmpdir()) ||
+        !path.basename(root).startsWith('otto-crypto-asar-digest-test-')
+      )
+        throw new Error('Unsafe test cleanup');
+      try {
+        const payload = path.join(root, 'payload');
+        mkdirSync(payload);
+        writeFileSync(path.join(payload, 'fixture.txt'), 'synthetic-content');
+        const archive = path.join(root, 'app.asar');
+        await createPackage(payload, archive);
+        const expected = createHash('sha256')
+          .update(readFileSync(archive))
+          .digest('hex');
+        const entry = path.join(root, 'entry.cjs');
+        writeFileSync(
+          entry,
+          `
+        const fs = require('node:fs');
+        const { app } = require('electron');
+        let step = 'digest';
+        try {
+          const { digest } = require(${JSON.stringify(probe)});
+          const hash = digest(${JSON.stringify(archive)});
+          step = 'virtual-read';
+          if (fs.readFileSync(${JSON.stringify(path.join(archive, 'fixture.txt'))}, 'utf8') !== 'synthetic-content' || process.noAsar === true) throw new Error('ASAR access changed');
+          fs.writeSync(1, hash + '\\n');
+          app.exit(0);
+        } catch (error) { fs.writeSync(2, step + ':' + (error.code || 'failed')); app.exit(1); }
+      `,
+        );
+        const result = spawnSync(electronExecutable, [entry], {
+          env: rejectedEnvironment,
+          encoding: 'utf8',
+          timeout: 15000,
+          windowsHide: true,
+        });
+        expect(result.error).toBeUndefined();
+        expect(result.stderr).not.toContain('EISDIR');
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout.trim()).toBe(expected);
+      } finally {
+        // This exact directory was exclusively created above, never an installation.
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    20000,
+  );
+
   it('reproduces the locked failed candidate without production credentials or publication', () => {
     const workflow = readFileSync(
       '.github/workflows/crypto-upgrade-repro.yml',

@@ -83,7 +83,12 @@ function noRedirect(target) {
   }
 }
 function digest(file) {
-  return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  // Electron treats app.asar as a virtual directory. Checksums must read its
+  // physical bytes without toggling process.noAsar or changing module loading.
+  const physicalFs = process.versions.electron ? require('original-fs') : fs;
+  return createHash('sha256')
+    .update(physicalFs.readFileSync(file))
+    .digest('hex');
 }
 function files(root) {
   const result = {};
@@ -352,7 +357,7 @@ async function main() {
   app.exit(0);
 }
 
-module.exports = { admittedPaths, createStageReporter };
+module.exports = { admittedPaths, createStageReporter, digest };
 // Electron 43's default app dynamically imports its entry; require.main is not
 // this module in that path. Still keep ordinary helper imports side-effect free.
 if (

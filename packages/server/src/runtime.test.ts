@@ -1526,6 +1526,32 @@ describe('CoreSessionRuntime · AskUserQuestion 交互闸门', () => {
 });
 
 describe('CoreSessionRuntime · 工具状态收口', () => {
+  it.each(['replayable', 'never_replay'] as const)('new question detaches only safe read recovery (%s)', async (replayClass) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-recovery-switch-'));
+    try {
+      const recoveryStore = new FileTurnRecoveryStore(root);
+      const store = new InMemorySessionStore();
+      const session = store.createSession({ title: '查询失败后换话题' });
+      let recovery = await recoveryStore.begin({ sessionId: session.sessionId, turnId: 'previous-task', intentHash: turnIntentHash('previous request') });
+      const input = { callId: 'previous-call', name: replayClass === 'replayable' ? 'web_search' : 'send_message', fingerprint: 'old', replayClass };
+      recovery = await recoveryStore.recordStarted(recovery, input);
+      await recoveryStore.recordSucceeded(recovery, { ...input, resultSummary: 'previous result' });
+      const frames: ServerToClient[] = [];
+      store.subscribe(session.sessionId, (frame) => frames.push(frame));
+      const generate = vi.fn(() => (async function* () { yield chunk('新的问题可以继续回答。', 'STOP'); })());
+      const runtime = new CoreSessionRuntime(store, session.sessionId, makeFakeConfig(generate), noOpWorkLogger, { recoveryStore });
+      await runtime.initialize();
+      await runtime.run([{ type: 'text', value: '你好' }], 'local');
+      const blocked = frames.some((frame) => frame.type === 'error' && frame.payload.code === 'recovery_reconciliation_required');
+      expect(blocked).toBe(replayClass !== 'replayable');
+      expect(generate).toHaveBeenCalledTimes(replayClass === 'replayable' ? 1 : 0);
+      if (replayClass === 'replayable') expect(await recoveryStore.load(session.sessionId)).toBeNull();
+      else expect(await recoveryStore.load(session.sessionId)).toMatchObject({ turnId: 'previous-task' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('恢复图与当前路由不匹配时转入核对，而不是崩溃或重放', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'otto-runtime-corrupt-graph-'),

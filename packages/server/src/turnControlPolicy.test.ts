@@ -13,6 +13,33 @@ import {
 
 describe('deriveTurnControlPolicy', () => {
   it.each([
+    '帮我做一份 Word 文档',
+    '把这个 PDF 转成 Word',
+    '将这份材料整理成 PPT',
+    '帮我写个工作报告',
+    'make a Word document',
+    'convert this PDF to docx',
+  ])('recognizes ordinary artifact requests: %s', (text) => {
+    const policy = deriveTurnControlPolicy({ text, source: 'local', toolFree: false });
+    expect(policy.intent).toBe('create_artifact');
+    expect(policy.successCriteria.map((criterion) => criterion.kind)).toContain('artifact');
+    expect(policy.complexity.budget.maxModelRounds).toBeGreaterThan(3);
+  });
+
+  it.each(['做一下唐山市铜工艺品行业的竞品分析', '调研唐山市铜工艺品行业，比较竞品'])('reserves research and synthesis effort: %s', (text) => {
+    const policy = deriveTurnControlPolicy({ text, source: 'local', toolFree: false });
+    expect(policy.intent).toBe('research');
+    expect(policy.complexity.budget.maxModelRounds).toBeGreaterThan(3);
+    expect(policy.complexity.budget.maxModelRounds).toBeLessThanOrEqual(10);
+  });
+
+  it.each(['Word 是什么', '解释 PDF 转 Word 的原理', '什么是竞品分析'])('does not turn conceptual questions into artifact work: %s', (text) => {
+    const policy = deriveTurnControlPolicy({ text, source: 'local', toolFree: false });
+    expect(policy.intent).toBe('answer');
+    expect(policy.riskLevel).toBe('read_only');
+  });
+
+  it.each([
     'D:/otto/agent-publish-validation/report.txt',
     'C:\\Users\\tester\\push\\readme.txt',
     '/tmp/upload/report.txt',

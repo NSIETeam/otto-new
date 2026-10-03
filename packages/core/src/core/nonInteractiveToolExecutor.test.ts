@@ -16,6 +16,8 @@ import {
   Icon,
 } from '../index.js';
 import { Part, Type } from '@google/genai';
+import { GenerateDocumentTool } from '../tools/generate-document.js';
+import { createMockConfig } from '../utils/test-helpers.js';
 
 const mockConfig = {
   getSessionId: () => 'test-session-id',
@@ -64,6 +66,24 @@ describe('executeToolCall', () => {
     } as unknown as ToolRegistry;
 
     abortController = new AbortController();
+  });
+
+  it('records a failed document preflight as an error, not a successful delivery', async () => {
+    const documentTool = new GenerateDocumentTool(createMockConfig(), undefined, undefined,
+      async () => 'synthetic missing dependency');
+    vi.mocked(mockToolRegistry.getTool).mockReturnValue(documentTool);
+    const response = await executeToolCall(mockConfig, {
+      callId: 'doc-failed', name: 'generate_document',
+      args: { content: '# Synthetic report', format: 'report', output_format: 'docx' },
+      isClientInitiated: false, prompt_id: 'synthetic-prompt',
+    }, mockToolRegistry, abortController.signal);
+    expect(response.error?.message).toContain('synthetic missing dependency');
+    expect(response.responseParts).toEqual([{
+      functionResponse: {
+        id: 'doc-failed', name: 'generate_document',
+        response: { error: expect.stringContaining('generate_document FAIL') },
+      },
+    }]);
   });
 
   it('should execute a tool successfully', async () => {

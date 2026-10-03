@@ -201,7 +201,7 @@ describe('OrganizationTree', () => {
   });
 
   it('keeps the unread reminder when the conversation cannot persist the read state', async () => {
-    const enterpriseMessagesList = vi.fn(async () => {
+    const enterpriseMessagesList = vi.fn(async (): Promise<EnterpriseDirectMessage[]> => {
       throw new Error('服务器暂时不可用');
     });
     const onMessageRead = vi.fn();
@@ -230,6 +230,83 @@ describe('OrganizationTree', () => {
     await waitFor(() => expect(enterpriseMessagesList).toHaveBeenCalledWith('acc_2'));
     expect(await screen.findByText('服务器暂时不可用')).toBeTruthy();
     expect(onMessageRead).not.toHaveBeenCalled();
+    expect(screen.queryByText('还没有消息，开始聊聊吧。')).toBeNull();
+    const send = vi.fn();
+    Object.assign(window.otto, { enterpriseMessageSend: send });
+    const draft = screen.getByRole('textbox');
+    fireEvent.change(draft, { target: { value: '保留未发送草稿' } });
+    enterpriseMessagesList.mockImplementation(async () => []);
+    fireEvent.click(screen.getByRole('button', { name: '重新加载消息' }));
+    expect(await screen.findByText('还没有消息，开始聊聊吧。')).toBeTruthy();
+    expect((draft as HTMLTextAreaElement).value).toBe('保留未发送草稿');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('does not show empty history or overlap the initial message request while it is pending', async () => {
+    vi.useFakeTimers();
+    let resolve!: (messages: EnterpriseDirectMessage[]) => void;
+    const enterpriseMessagesList = vi.fn(() => new Promise<EnterpriseDirectMessage[]>((done) => { resolve = done; }));
+    Object.assign(window.otto, { enterpriseMessagesList });
+    render(<DirectMessagePanel
+      member={{ id: 'acc_2', username: 'bob', name: 'Bob', role: 'Manager', department: 'R&D', isAdmin: false, status: 'active' }}
+      currentAccount={authenticatedEnterpriseAccount} initialPosition={{ left: 0, top: 0 }}
+      stackOrder={1} onActivate={vi.fn()} onClose={vi.fn()}
+    />);
+    expect(screen.queryByText('还没有消息，开始聊聊吧。')).toBeNull();
+    expect(screen.getByText('正在加载聊天记录…')).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(enterpriseMessagesList).toHaveBeenCalledTimes(1);
+    await act(async () => { resolve([]); });
+    expect(screen.getByText('还没有消息，开始聊聊吧。')).toBeTruthy();
+  });
+
+  it('pauses automatic retries for identity conflicts without resetting keys or sending a message', async () => {
+    vi.useFakeTimers();
+    const enterpriseMessagesList = vi.fn(async () => {
+      throw new Error('[E2EE_IDENTITY_CONFLICT] 发现多套加密设备身份，已暂停加密迁移');
+    });
+    const enterpriseMessageSecurityReset = vi.fn();
+    const enterpriseMessageSend = vi.fn();
+    Object.assign(window.otto, { enterpriseMessagesList, enterpriseMessageSecurityReset, enterpriseMessageSend });
+    render(<DirectMessagePanel
+      member={{ id: 'acc_2', username: 'bob', name: 'Bob', role: 'Manager', department: 'R&D', isAdmin: false, status: 'active' }}
+      currentAccount={authenticatedEnterpriseAccount} initialPosition={{ left: 0, top: 0 }}
+      stackOrder={1} onActivate={vi.fn()} onClose={vi.fn()}
+    />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(enterpriseMessagesList).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('加密身份需要核对')).toBeTruthy();
+    expect(screen.queryByText('还没有消息，开始聊聊吧。')).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '重新加载消息' })); });
+    expect(enterpriseMessagesList).toHaveBeenCalledTimes(2);
+    expect(enterpriseMessageSecurityReset).not.toHaveBeenCalled();
+    expect(enterpriseMessageSend).not.toHaveBeenCalled();
+  });
+
+  it('retains already loaded history and a draft when a later poll times out', async () => {
+    let poll!: () => void | Promise<void>;
+    vi.spyOn(nonOverlappingPoll, 'startNonOverlappingPoll').mockImplementation((task) => {
+      poll = task;
+      void task();
+      return () => {};
+    });
+    const enterpriseMessagesList = vi.fn().mockResolvedValueOnce([{
+      id: 'preserved-message', senderAccountId: 'acc_2', recipientAccountId: 'acc_1',
+      content: '已经加载的历史', createdAt: '2026-10-01T00:00:00Z', readAt: null,
+    }]).mockRejectedValue(new Error('连接企业服务器超时'));
+    Object.assign(window.otto, { enterpriseMessagesList });
+    render(<DirectMessagePanel
+      member={{ id: 'acc_2', username: 'bob', name: 'Bob', role: 'Manager', department: 'R&D', isAdmin: false, status: 'active' }}
+      currentAccount={authenticatedEnterpriseAccount} initialPosition={{ left: 0, top: 0 }}
+      stackOrder={1} onActivate={vi.fn()} onClose={vi.fn()}
+    />);
+    expect(await screen.findByText('已经加载的历史')).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '未发送草稿' } });
+    await act(async () => { await poll(); });
+    expect(screen.getByText('已经加载的历史')).toBeTruthy();
+    expect(screen.getByText('连接企业服务器超时')).toBeTruthy();
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('未发送草稿');
+    expect(screen.queryByText('还没有消息，开始聊聊吧。')).toBeNull();
   });
 
   it('treats SQLite chat timestamps without a timezone as UTC', () => {
@@ -1022,8 +1099,9 @@ describe('OrganizationTree', () => {
     const scrollIntoView = vi.fn();
     let messagePoll: (() => void | Promise<void>) | undefined;
     vi.spyOn(nonOverlappingPoll, 'startNonOverlappingPoll')
-      .mockImplementation((task, delay) => {
+      .mockImplementation((task, delay, options) => {
         if (delay === 2_000) messagePoll = task;
+        if (options?.runImmediately !== false) void task();
         return () => undefined;
       });
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {

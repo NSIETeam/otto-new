@@ -848,7 +848,7 @@ export class EnterpriseE2eeKeyVault {
 
   /** Read-only discovery. Never turn unreadable/corrupt old keys into a new device. */
   resolveExistingServerScope(scopes: readonly string[], accountId: string): string | null {
-    const found: string[] = [];
+    const found: Array<{ scope: string; deviceId: string; keyFingerprint: string }> = [];
     for (const scope of new Set(scopes)) {
       const filePath = this.keyringPath(scope, accountId);
       let stat: fs.Stats;
@@ -862,13 +862,20 @@ export class EnterpriseE2eeKeyVault {
         throw new Error('加密身份文件类型异常，迁移已停止；请勿删除原文件。');
       }
       // Validate the stored account/scope and OS protection before selecting it.
-      validateKeyring(JSON.parse(this.options.unprotect(fs.readFileSync(filePath, 'utf8'))), scope, accountId);
-      found.push(scope);
+      const keyring = validateKeyring(JSON.parse(this.options.unprotect(fs.readFileSync(filePath, 'utf8'))), scope, accountId);
+      found.push({
+        scope,
+        deviceId: keyring.active.deviceId,
+        keyFingerprint: enterpriseE2eeDeviceKeyFingerprint(keyring.active),
+      });
     }
     if (found.length > 1) {
-      throw new Error('发现多套加密设备身份，已暂停加密迁移，原密钥和历史均未修改。请联系管理员核对，勿清空数据或重新创建设备。');
+      // Public identifiers only: never serialize keyrings or OS-protected data
+      // across IPC. Distinct history namespaces still require explicit recovery.
+      const diagnostic = found.map((item) => `${item.scope} · 设备 ${item.deviceId} · 指纹 ${item.keyFingerprint}`).join('\n');
+      throw new Error('[E2EE_IDENTITY_CONFLICT] 发现多套加密设备身份，已暂停加密迁移，原密钥和历史均未修改。请联系管理员核对，勿清空数据或重新创建设备。\n核对信息（仅公开设备编号与指纹，不含密钥）：\n' + diagnostic);
     }
-    return found[0] ?? null;
+    return found[0]?.scope ?? null;
   }
 
   private save(keyring: DeviceKeyring): void {

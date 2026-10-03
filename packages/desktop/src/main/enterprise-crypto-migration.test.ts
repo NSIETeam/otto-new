@@ -231,6 +231,26 @@ describe('encrypted identity continuity after endpoint migration', () => {
     expect(snapshot(original.root)).toEqual(before);
   });
 
+  it('reports only public conflict identifiers for recovery, without mutating either keyring', () => {
+    const original = endpoint();
+    const oldDevice = original.crypto.localDevice(oldUrl, 'alice');
+    const newDevice = original.crypto.localDevice(newUrl, 'alice');
+    const before = snapshot(original.root);
+    let diagnostic = '';
+    try { original.crypto.resolveServerScope(newUrl, 'alice'); }
+    catch (error) { diagnostic = (error as Error).message; }
+    expect(diagnostic).toContain('[E2EE_IDENTITY_CONFLICT]');
+    for (const [scope, device] of [[oldUrl, oldDevice], [newUrl, newDevice]] as const) {
+      expect(diagnostic).toContain(scope);
+      expect(diagnostic).toContain(device.deviceId);
+      expect(diagnostic).toContain(device.keyFingerprint);
+    }
+    expect(diagnostic).not.toContain('PRIVATE KEY');
+    expect(diagnostic).not.toContain('PUBLIC KEY');
+    expect(diagnostic).not.toContain('protected:');
+    expect(snapshot(original.root)).toEqual(before);
+  });
+
   it('blocks two legacy identities, even when one appears first in the allowlist', () => {
     const original = endpoint();
     original.crypto.localDevice(oldUrl, 'alice');

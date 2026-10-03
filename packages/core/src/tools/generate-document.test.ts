@@ -13,6 +13,7 @@ import {
   type HtmlToImageRenderer,
   normalizeSlidesMarkdown,
   runBrowserScreenshotProcess,
+  runDocumentCommand,
 } from './generate-document.js';
 import { createMockConfig } from '../utils/test-helpers.js';
 import fs from 'fs';
@@ -104,6 +105,86 @@ describe('GenerateDocumentTool', () => {
   });
 
   // --- Validation ---
+  it.each(['system', 'bundled'] as const)('preflights the same %s Python used to generate Word across five successive calls', async (source) => {
+    const runner = vi.fn(async (_file: string, args: string[]) => {
+      if (args[0] !== '-c') fs.writeFileSync(args[2], 'PK synthetic docx');
+    });
+    const systemTool = new GenerateDocumentTool(
+      createMockConfig(), new ChromeHtmlToImageRenderer(null), runner, undefined,
+      () => ({ source, executable: '/selected python/python' }),
+    );
+    for (let round = 1; round <= 5; round += 1) {
+      const result = await systemTool.execute({
+        content: '# Synthetic report', format: 'report', output_format: 'docx',
+        output_path: path.join(tmpDir, `round-${round}.docx`),
+      }, new AbortController().signal);
+      expect(result.llmContent).toContain('generate_document OK');
+    }
+    expect(runner).toHaveBeenCalledWith('/selected python/python',
+      ['-c', 'import docx; import jinja2; import markdown'], expect.any(Object));
+    expect(runner.mock.calls.every(([file]) => file === '/selected python/python')).toBe(true);
+    expect(runner).toHaveBeenCalledTimes(6);
+  });
+
+  it('does not render after its selected Python fails preflight, and recovers when the failure cache expires', async () => {
+    let now = 1000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const runner = vi.fn(async (_file: string, args: string[]) => {
+      if (args[0] !== '-c') fs.writeFileSync(args[2], 'PK recovered');
+    }).mockRejectedValueOnce(new Error('synthetic import failure'));
+    const recovering = new GenerateDocumentTool(createMockConfig(), undefined, runner, undefined,
+      () => ({ source: 'system', executable: '/selected/python' }));
+    const params = { content: '# Report', format: 'report' as const, output_format: 'docx' as const, output_path: path.join(tmpDir, 'recovered.docx') };
+    try {
+      await expect(recovering.execute(params, new AbortController().signal)).rejects.toThrow('系统 Python 运行时检查失败');
+      await expect(recovering.execute(params, new AbortController().signal)).rejects.toThrow('synthetic import failure');
+      expect(runner).toHaveBeenCalledTimes(1);
+      now += 10_001;
+      expect((await recovering.execute(params, new AbortController().signal)).llmContent).toContain('generate_document OK');
+      expect(runner).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it.each(['missing', 'empty', 'engine-error'] as const)('rejects %s output instead of reporting a successful tool call', async (failure) => {
+    const out = path.join(tmpDir, 'failed.docx');
+    const runner = vi.fn(async (_file: string, args: string[]) => {
+      if (failure === 'engine-error') throw new Error('synthetic renderer failed');
+      if (failure === 'empty') fs.writeFileSync(args[2], '');
+    });
+    const failedTool = new GenerateDocumentTool(createMockConfig(),
+      new ChromeHtmlToImageRenderer(null), runner, async () => null);
+    await expect(failedTool.execute({
+      content: '# Report', format: 'report', output_format: 'docx', output_path: out,
+    }, new AbortController().signal)).rejects.toThrow('generate_document FAIL');
+  });
+
+  it('does not mistake a pre-existing document for new output or overwrite it after a failed render', async () => {
+    const out = path.join(tmpDir, 'existing.docx');
+    fs.writeFileSync(out, 'previous good document');
+    const failedTool = new GenerateDocumentTool(createMockConfig(), undefined, async () => {}, async () => null);
+    await expect(failedTool.execute({
+      content: '# New report', format: 'report', output_format: 'docx', output_path: out,
+    }, new AbortController().signal)).rejects.toThrow('generate_document FAIL');
+    expect(fs.readFileSync(out, 'utf8')).toBe('previous good document');
+  });
+
+  it.runIf(process.env['OTTO_REAL_DOCX_SMOKE'] === '1')('creates five consecutive real Word documents with the selected local Python', async () => {
+    for (let round = 1; round <= 5; round += 1) {
+      const out = path.join(tmpDir, `real-${round}.docx`);
+      const text = `Synthetic document round ${round}`;
+      const result = await tool.execute({
+        content: `# Verification\n\n${text}`, title: 'Synthetic verification',
+        format: 'report', output_format: 'docx', output_path: out,
+      }, new AbortController().signal);
+      expect(result.llmContent).toContain('generate_document OK');
+      const zip = await JSZip.loadAsync(fs.readFileSync(out));
+      expect(zip.file('[Content_Types].xml')).not.toBeNull();
+      expect(await zip.file('word/document.xml')!.async('string')).toContain(text);
+    }
+  }, 60_000);
+
   it('rejects empty content', () => {
     expect(tool.validateToolParams({ content: '', format: 'report', output_format: 'pdf' })).toContain('content');
   });
@@ -208,7 +289,7 @@ describe('GenerateDocumentTool', () => {
     const commands: Array<{ file: string; args: readonly string[]; env?: NodeJS.ProcessEnv }> = [];
     const runner: DocumentCommandRunner = vi.fn(async (file, args, options) => {
       commands.push({ file, args, env: options.env });
-      fs.writeFileSync(out, Buffer.from('PK fake docx'));
+      fs.writeFileSync(args[2], Buffer.from('PK fake docx'));
     });
     const docxTool = new GenerateDocumentTool(
       createMockConfig(),
@@ -239,7 +320,9 @@ describe('GenerateDocumentTool', () => {
     expect(commands).toHaveLength(1);
     expect(commands[0].file).toContain('/runtime/darwin-arm64/python/bin/python3');
     expect(commands[0].args[0]).toContain('create_docx.py');
-    expect(commands[0].args[2]).toBe(out);
+    expect(commands[0].args[2]).not.toBe(out);
+    expect(commands[0].args[2]).toMatch(/result\.docx$/);
+    expect(fs.readFileSync(out, 'utf8')).toBe('PK fake docx');
     expect(commands[0].env?.PYTHONPATH).toContain('/runtime/darwin-arm64/python/site-packages');
     expect(commands[0].env?.PYTHONNOUSERSITE).toBe('1');
     expect(commands[0].env?.OTTO_DOCUMENT_AUTHOR).toBeUndefined();
@@ -254,7 +337,7 @@ describe('GenerateDocumentTool', () => {
     const runner: DocumentCommandRunner = vi.fn(async (_file, args) => {
       docWriterScript = String(args[0]);
       generatedMarkdown = fs.readFileSync(String(args[1]), 'utf8');
-      fs.writeFileSync(out, Buffer.from('PK fake docx'));
+      fs.writeFileSync(args[2], Buffer.from('PK fake docx'));
     });
     const docxTool = new GenerateDocumentTool(
       createMockConfig({
@@ -317,13 +400,10 @@ describe('GenerateDocumentTool', () => {
 
   it.runIf(!typstAvailable)('report->pdf fails loud with typst install command when typst is missing', async () => {
     const out = path.join(tmpDir, 'r.pdf');
-    const r = await tool.execute(
+    await expect(tool.execute(
       { content: '# Report\n\nBody', format: 'report', output_format: 'pdf', title: 'R', output_path: out },
       new AbortController().signal,
-    );
-    expect(r.llmContent).toContain('FAIL');
-    expect(r.llmContent.toLowerCase()).toContain('typst');
-    expect(r.llmContent).toContain(
+    )).rejects.toThrow(
       process.platform === 'win32'
         ? 'winget install --id Typst.Typst'
         : 'brew install typst',
@@ -459,13 +539,10 @@ describe('GenerateDocumentTool', () => {
 
   it.runIf(!marpAvailable)('slides->pdf fails loud with marp install command when marp is missing', async () => {
     const out = path.join(tmpDir, 's.pdf');
-    const r = await tool.execute(
+    await expect(tool.execute(
       { content: '# Slide 1\n---\n# Slide 2', format: 'slides', output_format: 'pdf', title: 'S', output_path: out },
       new AbortController().signal,
-    );
-    expect(r.llmContent).toContain('FAIL');
-    expect(r.llmContent.toLowerCase()).toContain('marp');
-    expect(r.llmContent).toContain('@marp-team/marp-cli');
+    )).rejects.toThrow('@marp-team/marp-cli');
   });
 
   it('article->docx fails loud with the Python dependency repair when bundled runtime is unavailable', async () => {
@@ -476,13 +553,10 @@ describe('GenerateDocumentTool', () => {
       vi.fn(),
       vi.fn(async (names) => names.includes('python-docx') ? 'python-docx 未安装：pip install python-docx' : null),
     );
-    const r = await docxTool.execute(
+    await expect(docxTool.execute(
       { content: '# Article\n\nText', format: 'article', output_format: 'docx', title: 'A', output_path: out },
       new AbortController().signal,
-    );
-    expect(r.llmContent).toContain('FAIL');
-    expect(r.llmContent.toLowerCase()).toContain('python-docx');
-    expect(r.llmContent).toContain('pip install python-docx');
+    )).rejects.toThrow('pip install python-docx');
   });
 
   it('passes Marp, Typst, and Pandoc paths as structured argv', async () => {
@@ -527,13 +601,13 @@ describe('GenerateDocumentTool', () => {
     expect(commandRunner).toHaveBeenNthCalledWith(
       1,
       'marp',
-      [expect.stringMatching(/slides\.md$/), '-o', slidesOut, '--allow-local-files'],
+      [expect.stringMatching(/slides\.md$/), '-o', expect.stringMatching(/result\.pdf$/), '--allow-local-files'],
       expect.objectContaining({ signal }),
     );
     expect(commandRunner).toHaveBeenNthCalledWith(
       2,
       'typst',
-      ['compile', expect.stringMatching(/doc\.typ$/), reportOut],
+      ['compile', expect.stringMatching(/doc\.typ$/), expect.stringMatching(/result\.pdf$/)],
       expect.objectContaining({ signal }),
     );
     expect(commandRunner).toHaveBeenNthCalledWith(
@@ -542,10 +616,32 @@ describe('GenerateDocumentTool', () => {
       [
         expect.stringContaining('create_docx.py'),
         expect.stringMatching(/doc\.md$/),
-        docxOut,
+        expect.stringMatching(/result\.docx$/),
       ],
       expect.objectContaining({ signal }),
     );
+  });
+});
+
+describe('doc-writer parser progress', () => {
+  const python = process.platform === 'win32' ? 'python' : 'python3';
+  it.runIf(hasBin(python))('consumes headings and malformed Markdown without looping (no third-party Python packages needed)', async () => {
+    const script = path.resolve(import.meta.dirname, '../../skills-seed/doc-writer/scripts/create_docx.py');
+    await runDocumentCommand(python, ['-B', '-c', [
+      'import ast, re, sys',
+      'from pathlib import Path',
+      'tree = ast.parse(Path(sys.argv[1]).read_text(encoding="utf-8"))',
+      'nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ("parse", "_tbl")]',
+      'scope = {"re": re, "LAYOUT_RE": re.compile(r"<!--\\s*layout:\\s*(\\w[\\w-]*)\\s*-->")}',
+      'exec(compile(ast.Module(body=nodes, type_ignores=[]), sys.argv[1], "exec"), scope)',
+      'for text in ["# Heading\\n\\nBody", "#hashtag", "####### invalid heading", "| incomplete table", "#", "## Section\\n\\n| A | B |\\n|---|---|\\n|1|2|\\n\\nEnd"]:',
+      '    _, sections = scope["parse"](text)',
+      '    assert sections, repr(text)',
+      '    assert any(section["blocks"] for section in sections), repr(text)',
+      '_, sections = scope["parse"]("# Heading\\n\\nBody")',
+      'assert sections[0]["heading"] == "Heading"',
+      'assert sections[0]["blocks"][0]["text"] == "Body"',
+    ].join('\n'), script], { timeout: 3_000 });
   });
 });
 

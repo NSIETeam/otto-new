@@ -794,6 +794,10 @@ export function DirectMessagePanel({
   const [attaching, setAttaching] = useState(false);
   const [attachmentError, setAttachmentError] = useState('');
   const [error, setError] = useState('');
+  const [messageLoadError, setMessageLoadError] = useState('');
+  const [messagesLoaded, setMessagesLoaded] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(true);
+  const retryMessageLoad = useRef<() => Promise<void>>(async () => {});
   const [securityNotice, setSecurityNotice] = useState('');
   const [resettingSecurity, setResettingSecurity] = useState(false);
   const [askingOwnOtto, setAskingOwnOtto] = useState(false);
@@ -841,7 +845,16 @@ export function DirectMessagePanel({
 
   useEffect(() => {
     let active = true;
+    let loading = false;
+    let identityConflict = false;
+    setMessagesLoaded(false);
+    setMessageLoadError('');
+    setMessages([]);
+    knownMessageIds.current = null;
     const load = async (): Promise<void> => {
+      if (!active || loading) return;
+      loading = true;
+      setMessagesLoading(true);
       try {
         const next = await window.otto.enterpriseMessagesList(member.id);
         if (active) {
@@ -862,7 +875,8 @@ export function DirectMessagePanel({
               });
             return unchanged ? current : next;
           });
-          setError('');
+          setMessageLoadError('');
+          setMessagesLoaded(true);
           knownMessageIds.current = new Set(next.map((message) => message.id));
           if (
             previousIds === null
@@ -881,11 +895,21 @@ export function DirectMessagePanel({
           }
         }
       } catch (reason) {
-        if (active) setError(enterpriseCollaborationErrorMessage(reason));
+        if (active) {
+          const message = enterpriseCollaborationErrorMessage(reason);
+          identityConflict = message.includes('[E2EE_IDENTITY_CONFLICT]');
+          setMessageLoadError(message);
+        }
+      } finally {
+        loading = false;
+        if (active) setMessagesLoading(false);
       }
     };
-    void load();
-    const stopPolling = startNonOverlappingPoll(() => load(), 2_000, { runImmediately: false });
+    retryMessageLoad.current = async () => {
+      identityConflict = false;
+      await load();
+    };
+    const stopPolling = startNonOverlappingPoll(() => identityConflict ? undefined : load(), 2_000);
     return () => {
       active = false;
       stopPolling();
@@ -1270,8 +1294,10 @@ export function DirectMessagePanel({
       <div className="otto-direct-chat__messages">
         {messages.length === 0 ? (
           <div className="otto-direct-chat__empty">
-            <strong>还没有消息，开始聊聊吧。</strong>
-            <span>可直接发送文字、图片、Word、PDF；需要整理上下文时可使用 Otto 协作。</span>
+            <strong>{messageLoadError.includes('[E2EE_IDENTITY_CONFLICT]') ? '加密身份需要核对' : messageLoadError ? '聊天记录暂时无法加载' : messagesLoaded ? '还没有消息，开始聊聊吧。' : '正在加载聊天记录…'}</strong>
+            <span>{messageLoadError
+              ? '这不代表历史消息已丢失。请勿清空数据或重新创建设备，修复后可重新加载。'
+              : messagesLoaded ? '可直接发送文字、图片、Word、PDF；需要整理上下文时可使用 Otto 协作。' : '正在读取消息和核对加密设备身份。'}</span>
           </div>
         ) : messages.map((message) => {
           const mine = message.senderAccountId !== member.id;
@@ -1301,6 +1327,14 @@ export function DirectMessagePanel({
         })}
         <div ref={messagesEnd} className="otto-direct-chat__messages-end" aria-hidden="true" />
       </div>
+      {messageLoadError ? (
+        <div className="otto-direct-chat__error" role="alert">
+          <span>{messageLoadError}</span>
+          <button type="button" disabled={messagesLoading} onClick={() => void retryMessageLoad.current()}>
+            重新加载消息
+          </button>
+        </div>
+      ) : null}
       {error ? <div className="otto-direct-chat__error" role="alert">{error}</div> : null}
       <form
         className={'otto-direct-chat__composer' + (dragOver ? ' is-drag-over' : '')}

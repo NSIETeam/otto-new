@@ -774,34 +774,38 @@ export function normalizeSlidesMarkdown(content: string): string {
  * 避免每次都 spawn 全部 10 个探测进程。缺任一目标依赖返回 fail-loud 错误（含平台
  * 安装命令）；全部就绪返回 null。marp 的 spec 会同时探测 marp/marp-cli。
  */
-async function preflightBinaries(names: string[]): Promise<string | null> {
+async function preflightBinaries(
+  names: string[],
+  runtimeResolver: DocumentRuntimeResolver,
+  commandRunner: DocumentCommandRunner,
+): Promise<string | null> {
   const remaining = new Set(names);
   const pythonModules = [
     ['python-docx', 'docx'],
     ['jinja2', 'jinja2'],
     ['markdown', 'markdown'],
   ] as const;
-  const python = resolveDocumentRuntime('python');
-  if (python.source === 'bundled' && (
+  const python = runtimeResolver('python');
+  if (
     remaining.has('python3')
     || pythonModules.some(([packageName]) => remaining.has(packageName))
-  )) {
+  ) {
     const imports = pythonModules
       .filter(([packageName]) => remaining.has(packageName))
       .map(([, importName]) => importName);
     try {
-      if (imports.length > 0) {
-        await runDocumentCommand(
-          python.executable,
-          ['-c', imports.map((name) => `import ${name}`).join('; ')],
-          { env: buildBundledPythonEnvironment(python), timeout: 10_000 },
-        );
-      }
+      // Probe the exact renderer executable, including system fallbacks. Doctor's
+      // python/python3 aliases can resolve to different Windows installations.
+      await commandRunner(
+        python.executable,
+        imports.length ? ['-c', imports.map((name) => `import ${name}`).join('; ')] : ['--version'],
+        { env: buildBundledPythonEnvironment(python), timeout: 10_000 },
+      );
       remaining.delete('python3');
       for (const [packageName] of pythonModules) remaining.delete(packageName);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      return `内置 Python 运行时缺少必需模块（${imports.join(', ')}）：${detail}`;
+      return `${python.source === 'bundled' ? '内置' : '系统'} Python 运行时检查失败（${imports.join(', ')}）：${detail}`;
     }
   }
   if (remaining.size === 0) return null;
@@ -842,8 +846,6 @@ async function preflightBinaries(names: string[]): Promise<string | null> {
     .join('；');
 }
 
-const cachedDependencyPreflight = createCachedDependencyPreflight(preflightBinaries);
-
 export interface GenerateDocumentToolParams {
   content: string;
   format: 'report'|'slides'|'letter'|'resume'|'article'|'table';
@@ -853,12 +855,13 @@ export interface GenerateDocumentToolParams {
 
 export class GenerateDocumentTool extends BaseTool<GenerateDocumentToolParams, ToolResult> {
   static readonly Name: string = 'generate_document';
+  private readonly dependencyPreflight: DependencyPreflight;
 
   constructor(
     private readonly config: Config,
     private readonly htmlRenderer: HtmlToImageRenderer = new ChromeHtmlToImageRenderer(),
     private readonly commandRunner: DocumentCommandRunner = runDocumentCommand,
-    private readonly dependencyPreflight: DependencyPreflight = cachedDependencyPreflight,
+    dependencyPreflight?: DependencyPreflight,
     private readonly runtimeResolver: DocumentRuntimeResolver = resolveDocumentRuntime,
   ) {
     const desc = `Generates polished documents from markdown content.
@@ -895,6 +898,9 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
       false,
       true,
     );
+    this.dependencyPreflight = dependencyPreflight ?? createCachedDependencyPreflight(
+      (names) => preflightBinaries(names, this.runtimeResolver, this.commandRunner),
+    );
   }
 
   validateToolParams(p: GenerateDocumentToolParams): string | null {
@@ -924,9 +930,9 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
     updateOutput?: ProgressReporter,
   ): Promise<ToolResult> {
     const logLabel = 'generate_document.'+(p.output_format || p.format);
-    console.time(logLabel);
     const err = this.validateToolParams(p);
-    if (err) return { llmContent: err, returnDisplay: err };
+    if (err) throw new Error('generate_document FAIL: ' + err);
+    console.time(logLabel);
 
     const { content, format, output_format, title, template_options } = p;
     const trustedIdentity = this.config.getDocumentIdentity();
@@ -938,6 +944,8 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
       : authorStr;
     const outPath = p.output_path || path.join(os.homedir(), 'Desktop', 'generated_'+Date.now()+'.'+output_format);
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-doc-'));
+    // A previous file at the destination is not evidence that this run worked.
+    const renderedPath = path.join(tmpDir, 'result.' + output_format);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     const progress = new DocumentProgress(updateOutput);
 
@@ -947,7 +955,7 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
         await this.genSlides(
           content,
           output_format,
-          outPath,
+          renderedPath,
           tmpDir,
           titleStr,
           template_options || '',
@@ -960,12 +968,12 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
         progress.step('parse', '解析 Markdown 正文');
         progress.step('structure', '生成文档结构');
         progress.step('body', '生成 Markdown 正文');
-        fs.writeFileSync(outPath, '# '+titleStr+'\n'+(bylineStr?'**'+bylineStr+'**\n':'')+'\n'+content);
+        fs.writeFileSync(renderedPath, '# '+titleStr+'\n'+(bylineStr?'**'+bylineStr+'**\n':'')+'\n'+content);
         progress.step('export', '导出 Markdown 文件');
       } else if (output_format === 'docx') {
         await this.genDocx(
           content,
-          outPath,
+          renderedPath,
           tmpDir,
           titleStr,
           authorStr,
@@ -975,12 +983,17 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
           progress,
         );
       } else if (output_format === 'pdf' && ['report','article','letter','resume'].includes(format)) {
-        await this.genTypst(content, format, outPath, tmpDir, titleStr, authorStr, bylineStr, signal, progress);
+        await this.genTypst(content, format, renderedPath, tmpDir, titleStr, authorStr, bylineStr, signal, progress);
       } else {
-        await this.genPandoc(content, outPath, tmpDir, titleStr, bylineStr, output_format, format, signal, progress);
+        await this.genPandoc(content, renderedPath, tmpDir, titleStr, bylineStr, output_format, format, signal, progress);
       }
 
-      const sz = fs.existsSync(outPath) ? fs.statSync(outPath).size : 0;
+      const sz = fs.existsSync(renderedPath) ? fs.statSync(renderedPath).size : 0;
+      if (sz === 0 || !fs.statSync(renderedPath).isFile()) {
+        throw new Error('生成引擎未产出有效文件，请重试；本次不记为生成成功。');
+      }
+      if (signal.aborted) throw new Error('文档生成已取消');
+      fs.copyFileSync(renderedPath, outPath);
       const label = path.basename(outPath)+' ('+format+', '+sz+' bytes)';
       progress.step('done', '生成完成');
       return {
@@ -989,10 +1002,9 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
       };
     } catch (e: unknown) {
       const m = e instanceof Error ? e.message : String(e);
-      if (m.includes('not found') || m.includes('command not found')) {
-        return { llmContent: 'generate_document FAIL: tool not installed. macOS: brew install typst pandoc; npm i -g @marp-team/marp-cli. '+m, returnDisplay: 'generate_document FAIL: tool not installed' };
-      }
-      return { llmContent: 'generate_document FAIL: '+m, returnDisplay: 'generate_document FAIL: '+m };
+      // Resolved ToolResults are successes to both execution engines. Throw so
+      // recovery checkpoints and the model receive a genuine tool failure.
+      throw new Error('generate_document FAIL: ' + m, { cause: e });
     } finally {
       try {
         fs.rmSync(tmpDir, { recursive: true, force: true });

@@ -69,7 +69,7 @@ def parse(text):
                 if hh: cur["blocks"].append({"t": "table", "h": hh, "r": rr})
             tbl = []; in_t = False; continue
         if not line.strip(): i+=1; continue
-        m=re.match(r"^(##)\s+(.+)$",line)
+        m=re.match(r"^(#{1,2})\s+(.+)$",line)
         if m:
             save(); txt=m.group(2).strip(); lm=LAYOUT_RE.search(txt)
             layout="narrative"
@@ -101,6 +101,10 @@ def parse(text):
               not re.match(r"^[-*+]\s+",lines[i]) and not re.match(r"^\d+[.)]\s+",lines[i]) and \
               not lines[i].startswith("|") and not lines[i].startswith("> ") and \
               lines[i].strip() not in ("---","***","___"):
+            p.append(lines[i]); i+=1
+        # Unknown Markdown prefixes must still advance the cursor. Otherwise a
+        # bare '#', '#hashtag' or incomplete table loops forever with empty paras.
+        if not p:
             p.append(lines[i]); i+=1
         cur["blocks"].append({"t":"para","text":"\n".join(p)})
     if tbl:

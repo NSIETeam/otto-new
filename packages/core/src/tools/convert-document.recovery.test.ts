@@ -79,4 +79,61 @@ describe('document conversion outcome and cancellation contract', () => {
     const tool = new ConvertDocumentTool(createMockConfig());
     expect(tool.validateToolParams({ input_paths: [input, second], output_format: 'html', output_path: output })).not.toBeNull();
   });
+
+  it('rejects colliding default batch names before launching any commands', async () => {
+    const second = path.join(root, 'input.txt'); fs.writeFileSync(second, 'second');
+    const runCommand = vi.fn(async (_file: string, args: string[]) => fs.writeFileSync(args[args.indexOf('-o') + 1], 'converted'));
+    const tool = new ConvertDocumentTool(createMockConfig(), { runCommand, preflight: async () => null });
+    await expect(tool.execute({ input_paths: [input, second], output_format: 'html', engine: 'pandoc' }, new AbortController().signal)).rejects.toThrow(/collision|same|同名/i);
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it.each(['-o other.html', '--output=other.html', '--outdir elsewhere', '--convert-to pdf', '-env:UserInstallation=file:///elsewhere', '--toc; echo unsafe'])('rejects output overrides and shell operators: %s', (options) => {
+    expect(new ConvertDocumentTool(createMockConfig()).validateToolParams({ ...params(input, output), options })).not.toBeNull();
+  });
+
+  it('reports a partially completed batch as failure and cleans its staging', async () => {
+    const second = path.join(root, 'second.md'); fs.writeFileSync(second, 'second');
+    let calls = 0;
+    const tool = new ConvertDocumentTool(createMockConfig(), { preflight: async () => null, runCommand: async (_file, args) => {
+      if (++calls === 2) throw new Error('synthetic renderer failed');
+      fs.writeFileSync(args[args.indexOf('-o') + 1], 'first converted');
+    } });
+    await expect(tool.execute({ input_paths: [input, second], output_format: 'html', engine: 'pandoc' }, new AbortController().signal)).rejects.toThrow('1/2 files converted');
+    expect(fs.readFileSync(path.join(root, 'input.html'), 'utf8')).toBe('first converted');
+    expect(fs.readdirSync(root).filter(file => file.startsWith('.otto-convert-'))).toEqual([]);
+  });
+
+  it('isolates LibreOffice and commits its generated basename to the requested name', async () => {
+    const officeInput = path.join(root, 'report.docx'); fs.writeFileSync(officeInput, 'synthetic office');
+    const tool = new ConvertDocumentTool(createMockConfig(), { preflight: async () => null, runCommand: async (_file, args) => {
+      expect(args[0]).toMatch(/^-env:UserInstallation=file:/);
+      fs.writeFileSync(path.join(args[args.indexOf('--outdir') + 1], 'report.html'), 'new office result');
+    } });
+    await tool.execute({ input_path: officeInput, output_path: output, output_format: 'html' }, new AbortController().signal);
+    expect(fs.readFileSync(output, 'utf8')).toBe('new office result');
+  });
+
+  it.each([false, true])('requires new compression output (missing=%s)', async (missing) => {
+    const pdf = path.join(root, 'input.pdf'); fs.writeFileSync(pdf, 'original PDF');
+    const tool = new ConvertDocumentTool(createMockConfig(), { preflight: async () => null, runCommand: async (_file, args) => {
+      if (!missing) fs.writeFileSync(args.find(arg => arg.startsWith('-sOutputFile='))!.slice('-sOutputFile='.length), 'compressed PDF');
+    } });
+    const result = tool.execute({ input_path: pdf, output_format: 'pdf', compress: 2 }, new AbortController().signal);
+    if (missing) await expect(result).rejects.toThrow(/output/); else await result;
+    expect(fs.readFileSync(pdf, 'utf8')).toBe(missing ? 'original PDF' : 'compressed PDF');
+  });
+
+  it.each([false, true])('merges PDF/mixed sources through staged argv commands (mixed=%s)', async (mixed) => {
+    const a = path.join(root, 'a.pdf'); const b = path.join(root, mixed ? 'b.md' : 'b.pdf');
+    fs.writeFileSync(a, 'first'); fs.writeFileSync(b, 'second');
+    const tool = new ConvertDocumentTool(createMockConfig(), { preflight: async () => null, runCommand: async (file, args) => {
+      if (file === 'where' || file === 'which') return;
+      const target = file === 'pdfunite' ? args.at(-1)! : args[args.indexOf('-o') + 1];
+      fs.writeFileSync(target, 'synthetic merged output');
+    } });
+    await tool.execute({ input_paths: [a, b], merge: true, output_format: 'pdf', output_path: output, engine: 'pandoc' }, new AbortController().signal);
+    expect(fs.readFileSync(output, 'utf8')).toBe('synthetic merged output');
+    expect(fs.readdirSync(root).filter(file => file.startsWith('.otto-convert-'))).toEqual([]);
+  });
 });

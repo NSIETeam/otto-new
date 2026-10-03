@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runDocumentCommand, type ExecFileImplementation } from './documentCommand.js';
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 describe('shared document process lifecycle', () => {
   it('does not spawn after cancellation', async () => {
     const controller = new AbortController(); controller.abort();
@@ -47,5 +47,22 @@ describe('shared document process lifecycle', () => {
     try {
       await expect(runDocumentCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { signal: controller.signal, timeout: 2_000 })).rejects.toThrow();
     } finally { clearTimeout(timer); }
+  });
+
+  it('finishes POSIX tree termination even when the launcher exits first', async () => {
+    vi.useFakeTimers();
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    let callback!: Parameters<ExecFileImplementation>[3];
+    const controller = new AbortController();
+    const assertion = expect(runDocumentCommand('synthetic', [], {
+      platform: 'linux', signal: controller.signal,
+      execFileImpl: (_file, _args, options, cb) => {
+        expect(options.detached).toBe(true); callback = cb; return { pid: 12345 };
+      },
+    })).rejects.toThrow();
+    controller.abort(); callback(null, '', '');
+    await vi.advanceTimersByTimeAsync(600);
+    await assertion;
+    expect(kill).toHaveBeenCalledWith(-12345, 'SIGKILL');
   });
 });

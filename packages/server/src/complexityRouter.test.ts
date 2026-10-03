@@ -1,9 +1,19 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 
 import { describe, expect, it } from 'vitest';
-import { routeTurnComplexity } from './complexityRouter.js';
+import { refineComplexityForReadTools, routeTurnComplexity } from './complexityRouter.js';
 
 describe('routeTurnComplexity', () => {
+  it('promotes actual reads once without increasing permissions, parallelism or refilling', () => {
+    const baseline = routeTurnComplexity({ text: '你好', intent: 'answer', riskLevel: 'read_only', toolFree: false });
+    expect(refineComplexityForReadTools(baseline, 'read_only', false)).toBe(baseline);
+    for (const risk of ['local_write', 'external_write', 'destructive'] as const) expect(refineComplexityForReadTools(baseline, risk, true)).toBe(baseline);
+    const promoted = refineComplexityForReadTools(baseline, 'read_only', true);
+    expect(promoted).toMatchObject({ route: baseline.route, recommendedParallelism: baseline.recommendedParallelism, exposesWorkflowTool: false, budget: { maxModelRounds: 10, maxToolCalls: 32, maxReplans: baseline.budget.maxReplans } });
+    expect(refineComplexityForReadTools(promoted, 'read_only', true)).toBe(promoted);
+    const restricted = routeTurnComplexity({ text: '你好', intent: 'answer', riskLevel: 'read_only', toolFree: true });
+    expect(refineComplexityForReadTools(restricted, 'read_only', true)).toBe(restricted);
+  });
   it('keeps a single factual answer on the direct route', () => {
     expect(
       routeTurnComplexity({

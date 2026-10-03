@@ -48,6 +48,30 @@ afterEach(async () => {
 });
 
 describe('FileTurnRecoveryStore', () => {
+  it('checks queued writes atomically instead of trusting an earlier read-only snapshot', async () => {
+    const record = await store.begin({ sessionId: 'race', turnId: 'old', intentHash: 'old' });
+    const write = store.recordStarted(record, { name: 'send_message', replayClass: 'never_replay', fingerprint: 'new' });
+    const abandon = store.abandonReadOnly('race', 'old');
+    await write;
+    expect(await abandon).toBe(false);
+    expect((await store.load('race'))?.tools[0]?.state).toBe('started');
+  });
+
+  it('does not discard accepted but unapplied user steering', async () => {
+    const record = await store.begin({ sessionId: 'steering', turnId: 'old', intentHash: 'old' });
+    const ledger = new TaskContinuityLedger('old', { version: 1, text: '分析资料', source: 'local' });
+    ledger.accept({ version: 1, turnId: 'old', expectedRevision: 1, clientMessageId: 'one', text: '增加来源对比', mode: 'append' });
+    await store.recordContinuity(record, ledger.snapshot());
+    expect(await store.abandonReadOnly('steering', 'old')).toBe(false);
+    expect(await store.load('steering')).not.toBeNull();
+  });
+
+  it('preserves the active recovery record when archival fails', async () => {
+    await store.begin({ sessionId: 'archive-fail', turnId: 'old', intentHash: 'old' });
+    vi.mocked(rename).mockRejectedValueOnce(Object.assign(new Error('disk full'), { code: 'ENOSPC' }));
+    await expect(store.abandonReadOnly('archive-fail', 'old')).rejects.toThrow('disk full');
+    expect((await store.load('archive-fail'))?.turnId).toBe('old');
+  });
   it.each([
     ['web_search', 'replayable', 'succeeded', true],
     ['read_file', 'replayable', 'failed', true],

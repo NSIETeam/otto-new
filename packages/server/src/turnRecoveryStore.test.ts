@@ -48,6 +48,28 @@ afterEach(async () => {
 });
 
 describe('FileTurnRecoveryStore', () => {
+  it.each([
+    ['web_search', 'replayable', 'succeeded', true],
+    ['read_file', 'replayable', 'failed', true],
+    ['use_skill', 'never_replay', 'succeeded', true],
+    ['write_file', 'idempotent', 'succeeded', false],
+    ['send_message', 'never_replay', 'succeeded', false],
+    ['send_message', 'never_replay', 'unknown_outcome', false],
+    ['read_file', 'replayable', 'started', false],
+  ] as const)('archives only settled non-mutating work: %s %s %s', async (name, replayClass, state, allowed) => {
+    let record = await store.begin({ sessionId: 'switch', turnId: 'old', intentHash: 'old' });
+    record = await store.recordStarted(record, { name, replayClass, fingerprint: 'old' });
+    if (state === 'succeeded') await store.recordSucceeded(record, { name, replayClass, fingerprint: 'old' });
+    if (state === 'failed') await store.recordFailed(record, { name, replayClass, fingerprint: 'old' });
+    if (state === 'unknown_outcome') await store.markReconciliationRequired(record, 'unknown external outcome');
+    expect(await store.abandonReadOnly('switch', 'old')).toBe(allowed);
+    if (allowed) {
+      expect(await store.load('switch')).toBeNull();
+      const files = await readdir(path.join(root, 'resolved'));
+      const archived = JSON.parse(await readFile(path.join(root, 'resolved', files[0]), 'utf8'));
+      expect(archived).toMatchObject({ turnId: 'old', resolution: 'abandoned' });
+    } else expect(await store.load('switch')).not.toBeNull();
+  });
   it.each(['EPERM', 'EACCES', 'EBUSY'])(
     'preserves the started record while retrying a transient %s replacement',
     async (code) => {

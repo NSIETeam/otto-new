@@ -494,6 +494,27 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
     });
   });
 
+  it.each([2, 10])('native read work can reach synthesis without exceeding configured cap %i', async (cap) => {
+    let rounds = 0;
+    const execute = vi.fn(async () => ({ llmContent: 'synthetic source', returnDisplay: 'synthetic source' }));
+    const config = makeFakeConfigWithTool([() => (async function* () {
+      rounds++;
+      if (rounds <= 3) yield toolChunk('read_file', `read-${rounds}`);
+      else yield chunk('这些资料说明了三个不同的情况。', 'STOP');
+    })()], execute);
+    (await config.getToolRegistry()).getAllTools()[0].name = 'read_file';
+    vi.spyOn(config, 'getMaxSessionTurns').mockReturnValue(cap);
+    const store = new InMemorySessionStore();
+    const session = store.createSession();
+    const frames: ServerToClient[] = [];
+    store.subscribe(session.sessionId, frame => frames.push(frame));
+    const runtime = new CoreSessionRuntime(store, session.sessionId, config, noOpWorkLogger);
+    await runtime.initialize();
+    await runtime.run([{ type: 'text', value: '帮我看看这个' }], 'local');
+    expect(rounds).toBe(cap === 2 ? 2 : 4);
+    expect(frames.some(frame => frame.type === 'error' && frame.payload.code === 'max_turns')).toBe(cap === 2);
+  });
+
   it('整批工具调用超预算时一个都不执行', async () => {
     const execute = vi.fn(async () => ({
       llmContent: 'unexpected',

@@ -408,6 +408,80 @@ fi
   -mindepth 1 -maxdepth 1 -print -quit)" ]
 SUDO_USER=nobody "$GATEWAY" cleanup-upload enterprise v1.9.14-103-1
 
+# Bounded upload recovery: unaccepted prefixes stay root-only; the runner must
+# compare their digest against its locked local bytes before resuming. No
+# partial file may appear as an accepted installer or advance a public pointer.
+RESUME_TRANSACTION='v1.9.14-104-1'
+RESUME_ROLE='windows-x64-installer'
+RESUME_BYTES='abcdefgh'
+RESUME_SHA="$(printf %s "$RESUME_BYTES" | sha256sum | awk '{print $1}')"
+EMPTY_SHA="$(printf '' | sha256sum | awk '{print $1}')"
+PREFIX_SHA="$(printf abc | sha256sum | awk '{print $1}')"
+SUDO_USER=nobody "$GATEWAY" prepare-upload mirror "$RESUME_TRANSACTION"
+RESUME_DIR="$STATE_ROOT/uploads/mirror/$RESUME_TRANSACTION"
+RESUME_TARGET="$RESUME_DIR/Otto-Setup-1.9.14-win-x64.exe"
+RESUME_PARTIAL="$RESUME_DIR/.upload-Otto-Setup-1.9.14-win-x64.exe-8-$RESUME_SHA.partial"
+resume_status() {
+  SUDO_USER=nobody "$GATEWAY" upload-status mirror "$RESUME_TRANSACTION" \
+    "$RESUME_ROLE" 8 "$RESUME_SHA"
+}
+expected_resume_status() {
+  printf 'upload_state kind=mirror transaction=%s role=%s size=8 sha256=%s offset=%s prefix_sha256=%s complete=%s\n' \
+    "$RESUME_TRANSACTION" "$RESUME_ROLE" "$RESUME_SHA" "$1" "$2" "$3"
+}
+[ "$(resume_status)" = "$(expected_resume_status 0 "$EMPTY_SHA" false)" ]
+if printf abc | SUDO_USER=nobody "$GATEWAY" upload-file mirror \
+  "$RESUME_TRANSACTION" "$RESUME_ROLE" 8 "$RESUME_SHA" 0; then
+  printf 'short resumable upload was accepted\n' >&2; exit 1
+fi
+[ ! -e "$RESUME_TARGET" ]
+[ "$(stat -c '%u:%g:%a:%s' "$RESUME_PARTIAL")" = '0:0:600:3' ]
+[ "$(resume_status)" = "$(expected_resume_status 3 "$PREFIX_SHA" false)" ]
+if printf defgh | SUDO_USER=nobody "$GATEWAY" upload-file mirror \
+  "$RESUME_TRANSACTION" "$RESUME_ROLE" 8 "$RESUME_SHA" 2; then
+  printf 'resumable upload accepted a stale offset\n' >&2; exit 1
+fi
+if SUDO_USER=daemon "$GATEWAY" upload-status mirror \
+  "$RESUME_TRANSACTION" "$RESUME_ROLE" 8 "$RESUME_SHA"; then
+  printf 'rollback principal read upload state\n' >&2; exit 1
+fi
+mv "$RESUME_PARTIAL" "$TEST_ROOT/resume-prefix"
+ln -s "$TEST_ROOT/resume-prefix" "$RESUME_PARTIAL"
+if resume_status; then
+  printf 'upload status followed a symlink\n' >&2; exit 1
+fi
+rm -- "$RESUME_PARTIAL"
+mv "$TEST_ROOT/resume-prefix" "$RESUME_PARTIAL"
+chmod 0666 "$RESUME_PARTIAL"
+if resume_status; then
+  printf 'upload status accepted a writable prefix\n' >&2; exit 1
+fi
+chmod 0600 "$RESUME_PARTIAL"
+if printf WRONG | SUDO_USER=nobody "$GATEWAY" upload-file mirror \
+  "$RESUME_TRANSACTION" "$RESUME_ROLE" 8 "$RESUME_SHA" 3; then
+  printf 'resumable upload accepted a mismatched final digest\n' >&2; exit 1
+fi
+[ ! -e "$RESUME_TARGET" ] && [ ! -e "$RESUME_PARTIAL" ]
+# Shorten only the test container's root-owned gateway alarm. The production
+# source keeps its 1800-second per-attempt bound; there is no environment bypass.
+cp -p "$GATEWAY" "$TEST_ROOT/gateway-before-timeout"
+sed -i 's/^UPLOAD_TIMEOUT_SECONDS=1800$/UPLOAD_TIMEOUT_SECONDS=1/' "$GATEWAY"
+if { printf abc; sleep 2; } | SUDO_USER=nobody "$GATEWAY" upload-file mirror \
+  "$RESUME_TRANSACTION" "$RESUME_ROLE" 8 "$RESUME_SHA" 0; then
+  printf 'upload ignored its bounded timeout\n' >&2; exit 1
+fi
+cp -p "$TEST_ROOT/gateway-before-timeout" "$GATEWAY"
+[ ! -e "$RESUME_TARGET" ]
+[ "$(resume_status)" = "$(expected_resume_status 3 "$PREFIX_SHA" false)" ]
+actual_resume_receipt="$(printf defgh | SUDO_USER=nobody "$GATEWAY" upload-file mirror \
+  "$RESUME_TRANSACTION" "$RESUME_ROLE" 8 "$RESUME_SHA" 3)"
+[ "$actual_resume_receipt" = "uploaded kind=mirror transaction=$RESUME_TRANSACTION role=$RESUME_ROLE size=8 sha256=$RESUME_SHA" ]
+[ ! -e "$RESUME_PARTIAL" ]
+[ "$(resume_status)" = "$(expected_resume_status 8 "$RESUME_SHA" true)" ]
+[ "$(sha256sum "$RESUME_TARGET" | awk '{print $1}')" = "$RESUME_SHA" ]
+SUDO_USER=nobody "$GATEWAY" cleanup-upload mirror "$RESUME_TRANSACTION"
+printf 'resumable upload acceptance passed: prefix, offset, ownership, digest, timeout, receipt\n'
+
 create_mirror_staging() {
   local transaction_id="$1"
   local latest_value="$2"

@@ -437,6 +437,23 @@ fi
 [ ! -e "$RESUME_TARGET" ]
 [ "$(stat -c '%u:%g:%a:%s' "$RESUME_PARTIAL")" = '0:0:600:3' ]
 [ "$(resume_status)" = "$(expected_resume_status 3 "$PREFIX_SHA" false)" ]
+competing_sha="$(printf wrong-id | sha256sum | awk '{print $1}')"
+if SUDO_USER=nobody "$GATEWAY" upload-status mirror "$RESUME_TRANSACTION" \
+  "$RESUME_ROLE" 8 "$competing_sha"; then
+  printf 'upload status accepted a competing unfinished role identity\n' >&2; exit 1
+fi
+if printf x | SUDO_USER=nobody "$GATEWAY" upload-file mirror "$RESUME_TRANSACTION" \
+  "$RESUME_ROLE" 8 "$competing_sha" 0; then
+  printf 'upload opened a second unfinished identity for the same role\n' >&2; exit 1
+fi
+[ "$(resume_status)" = "$(expected_resume_status 3 "$PREFIX_SHA" false)" ]
+isolated_status="$(SUDO_USER=nobody "$GATEWAY" upload-status mirror \
+  "$RESUME_TRANSACTION" mac-arm64-installer 8 "$RESUME_SHA")"
+[ "$isolated_status" = "upload_state kind=mirror transaction=$RESUME_TRANSACTION role=mac-arm64-installer size=8 sha256=$RESUME_SHA offset=0 prefix_sha256=$EMPTY_SHA complete=false" ]
+if SUDO_USER=nobody "$GATEWAY" upload-status mirror \
+  "$RESUME_TRANSACTION" invalid-role 8 "$RESUME_SHA"; then
+  printf 'upload status accepted an unknown role\n' >&2; exit 1
+fi
 if printf defgh | SUDO_USER=nobody "$GATEWAY" upload-file mirror \
   "$RESUME_TRANSACTION" "$RESUME_ROLE" 8 "$RESUME_SHA" 2; then
   printf 'resumable upload accepted a stale offset\n' >&2; exit 1
@@ -457,6 +474,18 @@ if resume_status; then
   printf 'upload status accepted a writable prefix\n' >&2; exit 1
 fi
 chmod 0600 "$RESUME_PARTIAL"
+ln "$RESUME_PARTIAL" "$TEST_ROOT/resume-hardlink"
+if resume_status; then
+  printf 'upload status accepted a multiply-linked prefix\n' >&2; exit 1
+fi
+rm -- "$TEST_ROOT/resume-hardlink"
+if printf defghX | SUDO_USER=nobody "$GATEWAY" upload-file mirror \
+  "$RESUME_TRANSACTION" "$RESUME_ROLE" 8 "$RESUME_SHA" 3; then
+  printf 'resumable upload accepted trailing bytes\n' >&2; exit 1
+fi
+[ ! -e "$RESUME_TARGET" ] && [ ! -e "$RESUME_PARTIAL" ]
+if printf abc | SUDO_USER=nobody "$GATEWAY" upload-file mirror \
+  "$RESUME_TRANSACTION" "$RESUME_ROLE" 8 "$RESUME_SHA" 0; then exit 1; fi
 if printf WRONG | SUDO_USER=nobody "$GATEWAY" upload-file mirror \
   "$RESUME_TRANSACTION" "$RESUME_ROLE" 8 "$RESUME_SHA" 3; then
   printf 'resumable upload accepted a mismatched final digest\n' >&2; exit 1
@@ -473,9 +502,27 @@ fi
 cp -p "$TEST_ROOT/gateway-before-timeout" "$GATEWAY"
 [ ! -e "$RESUME_TARGET" ]
 [ "$(resume_status)" = "$(expected_resume_status 3 "$PREFIX_SHA" false)" ]
-actual_resume_receipt="$(printf defgh | SUDO_USER=nobody "$GATEWAY" upload-file mirror \
-  "$RESUME_TRANSACTION" "$RESUME_ROLE" 8 "$RESUME_SHA" 3)"
-[ "$actual_resume_receipt" = "uploaded kind=mirror transaction=$RESUME_TRANSACTION role=$RESUME_ROLE size=8 sha256=$RESUME_SHA" ]
+# Exercise the actual workflow helper and root receiver together. Only SSH
+# transport is replaced by a local call inside the disposable fixture.
+(
+  source "$REPOSITORY_ROOT/deployment/enterprise-oneclick/ci/upload-file.sh"
+  SSH_OPTIONS=() DEPLOY_USER=nobody DEPLOY_HOST=fixture.invalid
+  ssh() {
+    local -a args=("$@")
+    local index
+    for ((index=0; index<${#args[@]}; index++)); do
+      if [ "${args[$index]}" = /usr/local/sbin/otto-enterprise-ci-deploy ]; then
+        SUDO_USER=nobody "$GATEWAY" "${args[@]:index+1}"
+        return
+      fi
+    done
+    return 2
+  }
+  printf %s "$RESUME_BYTES" > "$TEST_ROOT/resume-payload"
+  otto_upload_file mirror "$RESUME_TRANSACTION" "$RESUME_ROLE" "$TEST_ROOT/resume-payload"
+  # A completed upload is recovered by exact status without retransmission.
+  otto_upload_file mirror "$RESUME_TRANSACTION" "$RESUME_ROLE" "$TEST_ROOT/resume-payload"
+)
 [ ! -e "$RESUME_PARTIAL" ]
 [ "$(resume_status)" = "$(expected_resume_status 8 "$RESUME_SHA" true)" ]
 [ "$(sha256sum "$RESUME_TARGET" | awk '{print $1}')" = "$RESUME_SHA" ]
@@ -1219,6 +1266,26 @@ EXPECTED_RECOVERED_ROLLBACK="recovered_rolled_back transaction=$FAILED_TRANSACTI
 }
 [ "$(<"$FAILED_TRANSACTION_DIR/rolled-back")" = \
   "${EXPECTED_RECOVERED_ROLLBACK#recovered_}" ]
+
+# The direct rollback replay (not only reconcile-deployment) must also isolate
+# the real verifier's stdout and refuse a successful response on bad health.
+direct_rollback_receipt="$(SUDO_USER=daemon "$GATEWAY" rollback-enterprise \
+  "$FAILED_TRANSACTION" 1.9.15 "$FAILED_PACKAGE" "$FAILED_SOURCE" \
+  2> "$TEST_ROOT/direct-rollback.stderr")"
+[ "$direct_rollback_receipt" = "${EXPECTED_RECOVERED_ROLLBACK#recovered_}" ]
+grep -Fq '[Otto Deploy] health checked' "$TEST_ROOT/direct-rollback.stderr"
+printf '%s\n' '#!/bin/bash' 'set -Eeuo pipefail' \
+  "printf '%s\\n' '{\"ok\":false}' '[Otto Deploy] health rejected'" 'exit 7' \
+  > /opt/otto-enterprise/deploy/verify.sh
+if SUDO_USER=daemon "$GATEWAY" rollback-enterprise \
+  "$FAILED_TRANSACTION" 1.9.15 "$FAILED_PACKAGE" "$FAILED_SOURCE" \
+  > "$TEST_ROOT/direct-rollback.stdout" 2> "$TEST_ROOT/direct-rollback.stderr"; then
+  printf 'direct rollback accepted unhealthy restored service\n' >&2; exit 1
+fi
+[ ! -s "$TEST_ROOT/direct-rollback.stdout" ]
+printf 'direct rollback replay acceptance passed: exact stdout and failed-health rejection\n'
+printf '%s\n' '#!/bin/bash' 'set -Eeuo pipefail' 'exit 0' \
+  > /opt/otto-enterprise/deploy/verify.sh
 
 SUDO_USER=nobody "$GATEWAY" prepare-upload enterprise v1.9.14-302-1
 TAMPERED_UPLOAD="$STATE_ROOT/uploads/enterprise/v1.9.14-302-1"

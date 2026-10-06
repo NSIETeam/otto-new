@@ -30,6 +30,16 @@ all mandatory validation succeeds. No such production change has occurred.
   Cloud run `37494806678` retained the corresponding native macOS failures;
   a new full current-head run is required, not an exemption or rerun of stale
   code. The preceding Bash 3.2 fixture uses the production pinned SSH options.
+- `e17ec643` RED: the scoped 1.9.21 evidence test executed 11 assertions,
+  with six expected failures against the unchanged 1.9.20 baseline. Both
+  original native measurements had already passed 2,249 assertions each.
+  GREEN: only the dependency-lock identity and the two displayed preview
+  version literals' measured entry were refreshed from each platform's own
+  receipt. The same evidence target and unchanged runner/ratchet regression
+  targets passed all 103 assertions. The historical review chain, 282 other
+  file entries, required tests, metrics, hints and global thresholds remain
+  unchanged. This limited refresh was explicitly authorized after both raw
+  platform runs and candidate-baseline differential checks passed.
 
 Commands used installed Node 22.23.1 and Vitest 4.1.11. Upstream archives were
 read and hashed, not executed. No shell exploit was executed; quoting tests
@@ -45,6 +55,17 @@ lock/source environment. Receipts and reports remain intact; no thresholds,
 uncovered budgets or required test lists have been lowered. Earlier failed
 Windows runs remain retained, including the packaging fixture failure and
 subsequent 5-second test timeout.
+
+The original macOS run `7667cabb-b815-4ba5-b886-e405018de144` in cloud CI
+`37496022953` likewise passed all 2,249 assertions in 271 files and exited 0;
+its gate rejected only the previous lock/source environment. Both raw failed
+gate records are preserved by the corresponding 1.9.21 platform reviews.
+The updated gzip identities are Windows
+`af5e6ef103449d1e9db84846a502ea9db097398be3807d7001af89a91ad3e598`
+and macOS `e0399fd7a0b9d38a55b97cdf25a848552f86a4cdfab9892f9e26f0c91dec8f8b`.
+A subsequent Windows run `7aaebfd6-9b98-4780-9067-1fdf0f805912` lost its
+execution session without a final receipt. Its partial logs remain retained;
+it is not counted as a successful test or substituted for a completed run.
 
 At branch `9b7a2789`, cloud SQLCipher and actual systemd upgrade checks passed;
 macOS script CI exposed GNU `stat -c` portability and native packaged acceptance

@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "status": "reviewed-version-only-source-and-environment-update",
+  "reference": "https://github.com/NSIETeam/otto-new/pull/89",
+  "recordedAt": "2026-10-06T08:09:37.397Z",
+  "reviewer": "Root agent within the user-authorized 1.9.20 release; not independent human approval",
+  "sourceCommit": "87feadfd26c135b8c98ade7f703dbac185af5751",
+  "testedMerge": null,
+  "ciRun": null,
+  "artifactId": null,
+  "nativeHost": "win32-x64",
+  "runId": "f0d6369b-8fd3-4de2-b8b3-39b00088651a",
+  "parentBaselineSha256": "940b5d77209417cac559b8806a01af996cf7454002a3fc188a5e7fd9667f4bf3",
+  "receiptSha256": "5c21832441835f512e3c218a5037050c8ce8452ccb4496f538ded45324e5d668",
+  "coverageSha256": "007357bcb965c3b1eb9b457131fbf7c2767ea3afcc8da554033549dd4bcfbeff",
+  "testResultsSha256": "7e1d18bfb2d44b556be8a984f9a564b2289b8d0a8e3b34f34d12a794a00d18c3",
+  "sourceManifestSha256": "209bf396649d625da9293c2573f349a623701c8a21530af01eed6fa7f1f149f6",
+  "nativeExitCode": 0,
+  "assertionsPassed": 2247,
+  "testFiles": 271,
+  "originalGate": {
+    "status": "failed",
+    "reason": "[desktop-coverage-ratchet] measurement environment differs or is unsupported"
+  },
+  "environmentBefore": {
+    "platform": "win32",
+    "arch": "x64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "de802562957bceedc5261979b5d3306640a4726be6507436155e8fe6dfa14bac"
+  },
+  "environmentAfter": {
+    "platform": "win32",
+    "arch": "x64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "12a3abee0fb9857c61153f534db63e5e9c97d0dee173784d453d99b5465b0a01"
+  },
+  "changedLockFields": [
+    "version",
+    "packages[empty].version",
+    "packages/core.version",
+    "packages/desktop.version"
+  ],
+  "changedLiterals": [
+    "1.9.19-browser-preview -> 1.9.20-browser-preview",
+    "1.9.19 -> 1.9.20"
+  ],
+  "unchangedEntriesPreserved": 282,
+  "unchangedEntriesSha256": "3d6fe7ae14b9029d29bf6ca655b8b1150ea768ee8841ef64e5a5067080c44655",
+  "unchangedRequiredTestsSha256": "a86755e73e8acd5364ab9327b389445c7e2f280cc20f82a30ccbc83e5b8681ab",
+  "files": [
+    {
+      "file": "src/renderer/browserPreviewBridge.ts",
+      "reason": "Only two displayed version literals advance; pre-existing completely uncovered preview debt is not increased or claimed as a quality improvement.",
+      "beforeEntrySha256": "b7a87964ac0ed2cdd327f0be928be729de1fbea5eac88eacb96ed720dda7cb02",
+      "afterEntrySha256": "c0450d8f3263daf3e12f145643a94980ab77205fc47038398d88501b96a6e68d",
+      "sourceSha256": "6a6da21738fa2649a80d3f2025f6067b3e721d9d7ff26200d4fb63462da58a64",
+      "before": {
+        "lines": {
+          "total": 275,
+          "uncovered": 275
+        },
+        "statements": {
+          "total": 295,
+          "uncovered": 295
+        },
+        "functions": {
+          "total": 147,
+          "uncovered": 147
+        },
+        "branches": {
+          "total": 157,
+          "uncovered": 157
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 275,
+          "uncovered": 275
+        },
+        "statements": {
+          "total": 295,
+          "uncovered": 295
+        },
+        "functions": {
+          "total": 147,
+          "uncovered": 147
+        },
+        "branches": {
+          "total": 157,
+          "uncovered": 157
+        }
+      }
+    }
+  ],
+  "boundaries": [
+    "No threshold, uncovered count, required test, instrumentation hint or unrelated file entry is changed.",
+    "The complete lockfile differs only in four version metadata fields; all dependency, coverage provider and configuration bytes remain unchanged.",
+    "The preview AST/map entry is from this actual platform execution, never borrowed from another platform.",
+    "Original receipts, reports, rejected gate results, historical reviews and 282 unrelated baseline entries remain preserved.",
+    "The verifier and native runner stay read-only. A new full current-source CI must pass before merge or release.",
+    "This record is not new native coverage, independent human review, installed-client acceptance, model quality or commercial signing."
+  ]
+}

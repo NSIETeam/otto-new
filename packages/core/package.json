@@ -1,6 +1,6 @@
 {
   "name": "otto-core",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Otto Core - Core functionality for AI-powered coding assistant",
   "repository": {
     "type": "git",

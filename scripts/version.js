@@ -94,6 +94,13 @@ writeJson(packageLockPath, packageLock);
 // read the root package.json at runtime.
 const versionMarkers = [
   {
+    file: 'docs/server-integration-baseline.json',
+    replacements: [
+      [/("clientVersion":\s*")[0-9A-Za-z.-]+(")/, `$1${newVersion}$2`],
+      [/("serverVersion":\s*")[0-9A-Za-z.-]+(")/, `$1${newVersion}$2`],
+    ],
+  },
+  {
     file: 'packages/desktop/preview/live-bridge.ts',
     replacements: [
       [/Promise\.resolve\('\d+\.\d+\.\d+-browser'\)/, `Promise.resolve('${newVersion}-browser')`],

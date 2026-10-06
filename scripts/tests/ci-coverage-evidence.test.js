@@ -1,5 +1,5 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { parse } from 'yaml';
@@ -217,6 +217,47 @@ it('binds the 1.9.18 browser preview baseline change to the preserved native mea
 
 it.each([
   ['win32', 'win32-x64'], ['darwin', 'darwin-arm64'],
+])('binds the 1.9.20 %s version-only review without increasing any uncovered budget', (name, platform) => {
+  const file = new URL(`../../config/test-baselines/desktop/release-1920-${name}-review.json`, import.meta.url);
+  const review = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  expect(review).toMatchObject({
+    schemaVersion: 1,
+    status: 'reviewed-version-only-source-and-environment-update',
+    reference: 'https://github.com/NSIETeam/otto-new/pull/89',
+    sourceCommit: '87feadfd26c135b8c98ade7f703dbac185af5751',
+    nativeExitCode: 0, assertionsPassed: 2247, testFiles: 271,
+    unchangedEntriesPreserved: 282,
+    changedLockFields: ['version','packages[empty].version','packages/core.version','packages/desktop.version'],
+    environmentAfter: { platform: name, arch: name === 'win32' ? 'x64' : 'arm64', nodeMajor: 22,
+      vitest: '4.1.11', coverageV8: '4.1.11', mapper: 'ast' },
+  });
+  expect(review.files).toHaveLength(1);
+  const entry = review.files[0];
+  expect(entry.file).toBe('src/renderer/browserPreviewBridge.ts');
+  expect(entry.before).toEqual(entry.after);
+  expect(review.changedLiterals).toEqual(['1.9.19-browser-preview -> 1.9.20-browser-preview','1.9.19 -> 1.9.20']);
+  const baseline = JSON.parse(gunzipSync(readFileSync(new URL(
+    `../../config/test-baselines/desktop/${platform}-node22-vitest4.json.gz`, import.meta.url,
+  ))));
+  const unchanged = Object.fromEntries(Object.entries(baseline.files).filter(([source]) => source !== entry.file).sort());
+  expect(createHash('sha256').update(JSON.stringify(unchanged)).digest('hex')).toBe(review.unchangedEntriesSha256);
+  expect(createHash('sha256').update(JSON.stringify(baseline.tests)).digest('hex')).toBe(review.unchangedRequiredTestsSha256);
+  expect(createHash('sha256').update(JSON.stringify(baseline.files[entry.file])).digest('hex')).toBe(entry.afterEntrySha256);
+  expect(baseline.review.environmentUpdates).toContainEqual(review);
+  expect(baseline.review.fileUpdates).toContainEqual(review);
+  expect(baseline.environment).toEqual(review.environmentAfter);
+  for (const field of Object.keys(review.environmentBefore).filter(key => key !== 'lockSha256')) {
+    expect(review.environmentAfter[field]).toBe(review.environmentBefore[field]);
+  }
+  expect(review.environmentAfter.lockSha256).toBe('12a3abee0fb9857c61153f534db63e5e9c97d0dee173784d453d99b5465b0a01');
+  expect(baseline.environment.lockSha256).toBe(createHash('sha256').update(
+    readFileSync(new URL('../../package-lock.json', import.meta.url)),
+  ).digest('hex'));
+  expect(review.boundaries).toContain('No threshold, uncovered count, required test, instrumentation hint or unrelated file entry is changed.');
+});
+
+it.each([
+  ['win32', 'win32-x64'], ['darwin', 'darwin-arm64'],
 ])('binds the 1.9.19 %s scoped review to native evidence without lowering global thresholds', (name, platform) => {
   const review = JSON.parse(readFileSync(new URL(
     `../../config/test-baselines/desktop/release-1919-${name}-review.json`, import.meta.url,
@@ -240,11 +281,21 @@ it.each([
   const unchanged = Object.fromEntries(Object.entries(baseline.files).filter(([file]) => !changed.has(file)).sort());
   expect(createHash('sha256').update(JSON.stringify(unchanged)).digest('hex')).toBe(review.unchangedEntriesSha256);
   expect(baseline.review.environmentUpdates).toContainEqual(review);
+  const versionReview = JSON.parse(readFileSync(new URL(
+    `../../config/test-baselines/desktop/release-1920-${name}-review.json`, import.meta.url,
+  ), 'utf8'));
   for (const entry of review.files) {
-    expect(baseline.files[entry.file].sourceSha256).toBe(entry.sourceSha256);
+    if (entry.file === 'src/renderer/browserPreviewBridge.ts') {
+      expect(versionReview.files[0].beforeEntrySha256).toBe(entry.afterEntrySha256);
+      expect(versionReview.files[0].before).toEqual(entry.after);
+      expect(baseline.files[entry.file].sourceSha256).toBe(versionReview.files[0].sourceSha256);
+    } else {
+      expect(baseline.files[entry.file].sourceSha256).toBe(entry.sourceSha256);
+    }
     expect(baseline.files[entry.file].metrics).toEqual(entry.after);
   }
-  expect(baseline.environment.lockSha256).toBe(review.environmentAfter.lockSha256);
+  expect(versionReview.environmentBefore).toEqual(review.environmentAfter);
+  expect(baseline.environment).toEqual(versionReview.environmentAfter);
   const config = readFileSync(new URL('../../packages/desktop/vitest.config.ts', import.meta.url), 'utf8');
   expect(config).toMatch(/lines:\s*62/);
   expect(config).toMatch(/statements:\s*62/);

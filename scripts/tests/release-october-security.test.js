@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveSharpRuntimePackages } from '../sharp-runtime-assets.mjs';
+import { assertSharpLock } from '../heic-corresponding-source.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(path.join(root, 'package.json'));
@@ -41,6 +42,10 @@ describe('October release security inputs', () => {
     affected.packages['node_modules/sharp'].version = '0.35.4';
     affected.packages['packages/server'].dependencies.sharp = '0.35.4';
     expect(() => resolveSharpRuntimePackages(affected)).toThrow(/unreviewed sharp version/);
+  });
+
+  it('binds corresponding-source inputs to the patched runtime on every shipped target', () => {
+    expect(assertSharpLock(lock)).toHaveLength(6);
   });
 
   it.each(['\n', '\r', '\u2028', '\u2029'])(

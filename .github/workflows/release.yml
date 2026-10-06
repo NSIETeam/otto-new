@@ -2228,21 +2228,9 @@ jobs:
             /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
             prepare-upload mirror "$MIRROR_TRANSACTION_ID"
           upload_file() {
-            local role="$1"
-            local file="$2"
-            local size
-            local digest
-            local expected_receipt
-            local actual_receipt
-            size="$(stat -c '%s' -- "$file")"
-            digest="$(sha256sum -- "$file" | awk '{print $1}')"
-            expected_receipt="uploaded kind=mirror transaction=${MIRROR_TRANSACTION_ID} role=${role} size=${size} sha256=${digest}"
-            actual_receipt="$(ssh "${SSH_OPTIONS[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" -- \
-              /usr/bin/sudo -n -- /usr/local/sbin/otto-enterprise-ci-deploy \
-              upload-file mirror "$MIRROR_TRANSACTION_ID" "$role" "$size" "$digest" \
-              < "$file")"
-            [ "$actual_receipt" = "$expected_receipt" ]
+            otto_upload_file mirror "$MIRROR_TRANSACTION_ID" "$1" "$2"
           }
+          source deployment/enterprise-oneclick/ci/upload-file.sh
           upload_file mac-arm64-installer "mirror-upload/Otto-${VERSION}-arm64.dmg"
           upload_file mac-arm64-blockmap "mirror-upload/Otto-${VERSION}-arm64.dmg.blockmap"
           upload_file mac-x64-installer "mirror-upload/Otto-${VERSION}-x64.dmg"

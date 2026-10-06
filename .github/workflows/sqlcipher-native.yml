@@ -12,6 +12,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/sqlcipher-native.yml'
+      - '.github/workflows/desktop-packaging-validation.yml'
       - 'package-lock.json'
       - 'packages/desktop/package.json'
       - 'packages/desktop/scripts/after-pack.cjs'
@@ -25,6 +26,7 @@ on:
   push:
     paths:
       - '.github/workflows/sqlcipher-native.yml'
+      - '.github/workflows/desktop-packaging-validation.yml'
       - 'package-lock.json'
       - 'packages/desktop/package.json'
       - 'packages/desktop/scripts/after-pack.cjs'

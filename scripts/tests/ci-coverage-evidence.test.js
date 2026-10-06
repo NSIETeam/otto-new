@@ -5,6 +5,11 @@ import { createHash } from 'node:crypto';
 import { parse } from 'yaml';
 import { expect, it } from 'vitest';
 
+function securityVersionReview(name) {
+  const file = new URL(`../../config/test-baselines/desktop/release-1921-${name}-review.json`, import.meta.url);
+  return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
+}
+
 it('runs the entire scripts suite as a mandatory merge gate before long builds', () => {
   const workflow = parse(readFileSync(
     new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8',
@@ -242,10 +247,15 @@ it.each([
   const unchanged = Object.fromEntries(Object.entries(baseline.files).filter(([source]) => source !== entry.file).sort());
   expect(createHash('sha256').update(JSON.stringify(unchanged)).digest('hex')).toBe(review.unchangedEntriesSha256);
   expect(createHash('sha256').update(JSON.stringify(baseline.tests)).digest('hex')).toBe(review.unchangedRequiredTestsSha256);
-  expect(createHash('sha256').update(JSON.stringify(baseline.files[entry.file])).digest('hex')).toBe(entry.afterEntrySha256);
+  const latest = securityVersionReview(name);
+  if (latest) {
+    expect(latest.files[0].beforeEntrySha256).toBe(entry.afterEntrySha256);
+    expect(latest.environmentBefore).toEqual(review.environmentAfter);
+  }
+  expect(createHash('sha256').update(JSON.stringify(baseline.files[entry.file])).digest('hex')).toBe((latest?.files[0] ?? entry).afterEntrySha256);
   expect(baseline.review.environmentUpdates).toContainEqual(review);
   expect(baseline.review.fileUpdates).toContainEqual(review);
-  expect(baseline.environment).toEqual(review.environmentAfter);
+  expect(baseline.environment).toEqual(latest?.environmentAfter ?? review.environmentAfter);
   for (const field of Object.keys(review.environmentBefore).filter(key => key !== 'lockSha256')) {
     expect(review.environmentAfter[field]).toBe(review.environmentBefore[field]);
   }
@@ -289,15 +299,70 @@ it.each([
     if (entry.file === 'src/renderer/browserPreviewBridge.ts') {
       expect(versionReview.files[0].beforeEntrySha256).toBe(entry.afterEntrySha256);
       expect(versionReview.files[0].before).toEqual(entry.after);
-      expect(baseline.files[entry.file].sourceSha256).toBe(versionReview.files[0].sourceSha256);
+      expect(baseline.files[entry.file].sourceSha256).toBe((securityVersionReview(name)?.files[0] ?? versionReview.files[0]).sourceSha256);
     } else {
       expect(baseline.files[entry.file].sourceSha256).toBe(entry.sourceSha256);
     }
     expect(baseline.files[entry.file].metrics).toEqual(entry.after);
   }
   expect(versionReview.environmentBefore).toEqual(review.environmentAfter);
-  expect(baseline.environment).toEqual(versionReview.environmentAfter);
+  expect(baseline.environment).toEqual(securityVersionReview(name)?.environmentAfter ?? versionReview.environmentAfter);
   const config = readFileSync(new URL('../../packages/desktop/vitest.config.ts', import.meta.url), 'utf8');
   expect(config).toMatch(/lines:\s*62/);
   expect(config).toMatch(/statements:\s*62/);
+});
+
+it.each([
+  {
+    name: 'win32', platform: 'win32-x64',
+    runId: '48a84839-64dd-4b3a-bf43-8458f6102111',
+    receiptSha256: 'bdfd4cb2197b2643780281721b3cfeab138771b64e4682899e8c7642f4848fe1',
+    coverageSha256: 'c3214a55f0538ce3d3ba0072fa78c4e0e797a293bd7bbbf20f9c599c70f4537b',
+    testResultsSha256: '83d362d3720bd0b4f1df60898c52498b76f84011a0fe5f6ecc14a9c262a42395',
+  },
+  {
+    name: 'darwin', platform: 'darwin-arm64',
+    runId: '7667cabb-b815-4ba5-b886-e405018de144',
+    receiptSha256: '8c2ef348f969fbecf0ac4f8788e7fa7be49cbd97db01169034011b802b04b308',
+    coverageSha256: 'bf31f75f29fec1743374e40ff02553b8943977d3bdbc2ae5bb3ce7a227c7a25f',
+    testResultsSha256: '41fd895713f210b26f33a1c4871731fa63333ebecf720d8c6ce465ffc53b7608',
+  },
+])('binds the 1.9.21 $name security review to its own native receipt without relaxing coverage', ({ name, platform, runId, receiptSha256, coverageSha256, testResultsSha256 }) => {
+  const review = securityVersionReview(name);
+  expect(review).toMatchObject({
+    schemaVersion: 1, status: 'reviewed-security-dependency-and-version-only-source-update',
+    reference: 'https://github.com/NSIETeam/otto-new/pull/93',
+    nativeHost: platform, nativeExitCode: 0, assertionsPassed: 2249, testFiles: 271,
+    runId, receiptSha256, coverageSha256, testResultsSha256,
+    unchangedEntriesPreserved: 282,
+  });
+  const baseline = JSON.parse(gunzipSync(readFileSync(new URL(
+    `../../config/test-baselines/desktop/${platform}-node22-vitest4.json.gz`, import.meta.url,
+  ))));
+  const before = JSON.parse(readFileSync(new URL(
+    `../../config/test-baselines/desktop/release-1920-${name}-review.json`, import.meta.url,
+  ), 'utf8'));
+  expect(review.environmentBefore).toEqual(before.environmentAfter);
+  expect(review.environmentAfter).toEqual({ ...before.environmentAfter,
+    lockSha256: createHash('sha256').update(readFileSync(new URL('../../package-lock.json', import.meta.url))).digest('hex'),
+  });
+  expect(baseline.environment).toEqual(review.environmentAfter);
+  expect(baseline.review.environmentUpdates).toContainEqual(review);
+  expect(baseline.review.fileUpdates).toContainEqual(review);
+  expect(baseline.fileRevisions).toContainEqual(review);
+  expect(review.changedLiterals).toEqual(['1.9.20-browser-preview -> 1.9.21-browser-preview','1.9.20 -> 1.9.21']);
+  expect(review.files).toHaveLength(1);
+  const entry = review.files[0];
+  expect(entry.file).toBe('src/renderer/browserPreviewBridge.ts');
+  expect(entry.beforeEntrySha256).toBe(before.files[0].afterEntrySha256);
+  expect(entry.before).toEqual(entry.after);
+  expect(entry.before).toEqual(before.files[0].after);
+  expect(createHash('sha256').update(JSON.stringify(baseline.files[entry.file])).digest('hex')).toBe(entry.afterEntrySha256);
+  const unchanged = Object.fromEntries(Object.entries(baseline.files).filter(([file]) => file !== entry.file).sort());
+  expect(Object.keys(unchanged)).toHaveLength(282);
+  expect(createHash('sha256').update(JSON.stringify(unchanged)).digest('hex')).toBe(before.unchangedEntriesSha256);
+  expect(review.unchangedEntriesSha256).toBe(before.unchangedEntriesSha256);
+  expect(createHash('sha256').update(JSON.stringify(baseline.tests)).digest('hex')).toBe(before.unchangedRequiredTestsSha256);
+  expect(review.unchangedRequiredTestsSha256).toBe(before.unchangedRequiredTestsSha256);
+  expect(review.boundaries).toContain('No threshold, uncovered count, required test, instrumentation hint or unrelated file entry is changed.');
 });

@@ -10,6 +10,11 @@ function securityVersionReview(name) {
   return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
 }
 
+function mcpSecurityLockReview(name) {
+  const file = new URL(`../../config/test-baselines/desktop/release-1921-mcp-${name}-review.json`, import.meta.url);
+  return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
+}
+
 it('runs the entire scripts suite as a mandatory merge gate before long builds', () => {
   const workflow = parse(readFileSync(
     new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8',
@@ -255,7 +260,7 @@ it.each([
   expect(createHash('sha256').update(JSON.stringify(baseline.files[entry.file])).digest('hex')).toBe((latest?.files[0] ?? entry).afterEntrySha256);
   expect(baseline.review.environmentUpdates).toContainEqual(review);
   expect(baseline.review.fileUpdates).toContainEqual(review);
-  expect(baseline.environment).toEqual(latest?.environmentAfter ?? review.environmentAfter);
+  expect(baseline.environment).toEqual(mcpSecurityLockReview(name)?.environmentAfter ?? latest?.environmentAfter ?? review.environmentAfter);
   for (const field of Object.keys(review.environmentBefore).filter(key => key !== 'lockSha256')) {
     expect(review.environmentAfter[field]).toBe(review.environmentBefore[field]);
   }
@@ -306,7 +311,7 @@ it.each([
     expect(baseline.files[entry.file].metrics).toEqual(entry.after);
   }
   expect(versionReview.environmentBefore).toEqual(review.environmentAfter);
-  expect(baseline.environment).toEqual(securityVersionReview(name)?.environmentAfter ?? versionReview.environmentAfter);
+  expect(baseline.environment).toEqual(mcpSecurityLockReview(name)?.environmentAfter ?? securityVersionReview(name)?.environmentAfter ?? versionReview.environmentAfter);
   const config = readFileSync(new URL('../../packages/desktop/vitest.config.ts', import.meta.url), 'utf8');
   expect(config).toMatch(/lines:\s*62/);
   expect(config).toMatch(/statements:\s*62/);
@@ -348,7 +353,7 @@ it.each([
     // later SDK fix. The unchanged native runner rejects unreviewed new locks.
     lockSha256: 'caf4dd47890d5475d0d3b5bc869ef2464a803736089268ee674e47c3318a630c',
   });
-  expect(baseline.environment).toEqual(review.environmentAfter);
+  expect(baseline.environment).toEqual(mcpSecurityLockReview(name)?.environmentAfter ?? review.environmentAfter);
   expect(baseline.review.environmentUpdates).toContainEqual(review);
   expect(baseline.review.fileUpdates).toContainEqual(review);
   expect(baseline.fileRevisions).toContainEqual(review);
@@ -367,4 +372,65 @@ it.each([
   expect(createHash('sha256').update(JSON.stringify(baseline.tests)).digest('hex')).toBe(before.unchangedRequiredTestsSha256);
   expect(review.unchangedRequiredTestsSha256).toBe(before.unchangedRequiredTestsSha256);
   expect(review.boundaries).toContain('No threshold, uncovered count, required test, instrumentation hint or unrelated file entry is changed.');
+});
+
+it.each([
+  {
+    name: 'win32', platform: 'win32-x64',
+    runId: '31e6dec6-f7b5-471a-9856-c4073ca98af4',
+    receiptSha256: '79100df86ce02607aa8f10fc4c3ce73fa97873e622d77c376b78265b643257b7',
+    coverageSha256: '18ff38c32f823e11de51f315d23879e83d0999d32b1d47562169f141d9287d64',
+    testResultsSha256: '9e98f0784c6312a00c506cf6673a48f98383a970a1d28fe5f0d9b711943ff975',
+    parentBaselineSha256: 'af5e6ef103449d1e9db84846a502ea9db097398be3807d7001af89a91ad3e598',
+    entriesSha256: '338cd4b5004f73e9bbc9ce3bda2cfc82105a6dac8062198ff73d2240f951e34b',
+  },
+  {
+    name: 'darwin', platform: 'darwin-arm64',
+    runId: 'acfc89cc-438c-4a91-afa7-d1f4bd265a42',
+    receiptSha256: '6100189010ec4d30e38eacbf61357e8ee1e5ca42969e3b4894c82da0b66df70b',
+    coverageSha256: 'f1c201f1d135b2da492c995b2bc54ab17150ccbf87c1525792aa528a96ca1d27',
+    testResultsSha256: 'bae2d7437df98bd74c94985f77185f7a89804b30b93799eb16558763002aa148',
+    parentBaselineSha256: 'e0399fd7a0b9d38a55b97cdf25a848552f86a4cdfab9892f9e26f0c91dec8f8b',
+    entriesSha256: '7a089d1ae7fec01508d85c36b2389ca392e90fb0cab50c2da6a28e99496d6b98',
+  },
+])('binds supplemental MCP $name lock-only review to its own new full native receipt and unchanged 283 budgets', ({ name, platform, entriesSha256, ...binding }) => {
+  const review = mcpSecurityLockReview(name);
+  expect(review).toMatchObject({
+    schemaVersion: 1, status: 'reviewed-mcp-security-lock-only-environment-update',
+    reference: 'https://github.com/NSIETeam/otto-new/pull/93',
+    sourceCommit: '6100f62c34595290f5660389b75c49c276cb0cbc',
+    nativeHost: platform, nativeExitCode: 0, assertionsPassed: 2249, testFiles: 271,
+    dependencyBefore: '1.30.0', dependencyAfter: '1.31.0',
+    originalGate: { status: 'failed', reason: '[desktop-coverage-ratchet] measurement environment differs or is unsupported' },
+    unchangedEntriesPreserved: 283, ...binding,
+  });
+  const previous = securityVersionReview(name);
+  expect(review.environmentBefore).toEqual(previous.environmentAfter);
+  expect(review.environmentAfter).toEqual({ ...previous.environmentAfter,
+    lockSha256: createHash('sha256').update(readFileSync(new URL('../../package-lock.json', import.meta.url))).digest('hex'),
+  });
+  expect(review.changedLockFields).toEqual([
+    'node_modules/@modelcontextprotocol/sdk.version',
+    'node_modules/@modelcontextprotocol/sdk.resolved',
+    'node_modules/@modelcontextprotocol/sdk.integrity',
+    'packages/core.dependencies.@modelcontextprotocol/sdk',
+  ]);
+  expect(review.files).toEqual([]);
+  expect(review.changedLiterals).toEqual([]);
+  const baseline = JSON.parse(gunzipSync(readFileSync(new URL(
+    `../../config/test-baselines/desktop/${platform}-node22-vitest4.json.gz`, import.meta.url,
+  ))));
+  const unchanged = Object.fromEntries(Object.entries(baseline.files).sort());
+  expect(Object.keys(unchanged)).toHaveLength(283);
+  expect(createHash('sha256').update(JSON.stringify(unchanged)).digest('hex')).toBe(entriesSha256);
+  expect(review.unchangedEntriesSha256).toBe(entriesSha256);
+  const requiredHash = 'a86755e73e8acd5364ab9327b389445c7e2f280cc20f82a30ccbc83e5b8681ab';
+  expect(createHash('sha256').update(JSON.stringify(baseline.tests)).digest('hex')).toBe(requiredHash);
+  expect(review.unchangedRequiredTestsSha256).toBe(requiredHash);
+  expect(baseline.environment).toEqual(review.environmentAfter);
+  expect(baseline.review.environmentUpdates.at(-1)).toEqual(review);
+  expect(baseline.review.environmentUpdates).toContainEqual(previous);
+  expect(baseline.review.fileUpdates).not.toContainEqual(review);
+  expect(baseline.fileRevisions).not.toContainEqual(review);
+  expect(review.boundaries).toContain('All 283 file entries, uncovered budgets, required tests, metrics, instrumentation hints and historical reviews are unchanged.');
 });

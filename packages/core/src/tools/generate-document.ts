@@ -743,7 +743,7 @@ PPTX VISUAL GRAMMAR: Start each slide with <!-- layout: cover|statement|split|ti
 
 PPTX QUALITY BOUNDARY: This deterministic renderer is a speed fallback. For a high-aesthetic or flashy deck, load ppt-creator and build a topic-specific custom HTML/CSS/SVG canvas instead of presenting this fallback as premium work.
 
-ENGINES: PPTX -> deterministic 1920x1080 local HTML -> local browser PNG screenshots -> bundled PptxGenJS packaging. Slide PDF/HTML -> Marp. Other PDF -> Typst or Pandoc. docx/html -> Pandoc.
+ENGINES: PPTX -> deterministic 1920x1080 local HTML -> local browser PNG screenshots -> bundled PptxGenJS packaging. Slide PDF/HTML -> Marp. Other PDF -> Typst or Pandoc. DOCX -> available Python doc-writer, or explicitly disclosed built-in basic Word layout when Python is unavailable. HTML -> Pandoc.
 
 DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Python. Markdown needs none. Slide PDF/HTML need marp-cli; other formats may need typst or pandoc. External engines run a doctor preflight and fail loud with an install command if missing (never faking output). macOS: brew install typst pandoc; npm i -g @marp-team/marp-cli. Windows: winget install typst pandoc; npm i -g @marp-team/marp-cli.`;
     super(GenerateDocumentTool.Name, 'GenerateDocument', desc, Icon.Pencil,
@@ -1904,9 +1904,22 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
   ): Promise<void> {
     progress.step('preflight', '预检 Python 公文依赖');
     const missing = await this.dependencyPreflight(['python3', 'python-docx', 'jinja2', 'markdown']);
-    if (missing) throw new Error('generate_document (' + format + ' -> docx) needs doc-writer runtime: ' + missing);
+    if (signal.aborted) throw new Error('文档生成已取消');
+    if (missing) {
+      // Reuse the existing bundled OOXML writer. Never install packages or
+      // pretend the advanced template was used on a machine without Python.
+      progress.step('fallback', '使用内置 Word 基础排版（高级公文引擎不可用，版式仍需核对）');
+      const { exportEditedDocument } = await import('../utils/editableDocument.js');
+      const byline = author ? (department ? `${department} · ${author}` : author) : '';
+      await exportEditedDocument(outPath, `# ${title}\n\n${byline}\n\n${content}`, outPath);
+      return;
+    }
     const script = findBundledDocWriterScript();
     if (!script) throw new Error('generate_document docx needs bundled doc-writer script: create_docx.py not found');
+    // Electron can read its ASAR, but external Python cannot. Always stage the
+    // trusted bundled script in this invocation's private temporary directory.
+    const runnableScript = path.join(tmpDir, 'create_docx.py');
+    fs.writeFileSync(runnableScript, fs.readFileSync(script), { flag: 'wx', mode: 0o600 });
 
     progress.step('parse', '解析 Markdown 正文');
     const mdFile = path.join(tmpDir, 'doc.md');
@@ -1932,7 +1945,7 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
     if (department) pythonEnvironment.OTTO_DOCUMENT_DEPARTMENT = department;
     await this.commandRunner(
       python.executable,
-      [script, mdFile, outPath],
+      [runnableScript, mdFile, outPath],
       { signal, env: pythonEnvironment },
     );
   }

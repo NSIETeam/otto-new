@@ -1,0 +1,271 @@
+{
+  "schemaVersion": 1,
+  "status": "reviewed-scoped-source-and-dependency-environment-update",
+  "reference": "https://github.com/NSIETeam/otto-new/pull/87",
+  "recordedAt": "2026-10-06T05:03:31.892Z",
+  "reviewer": "Root agent within the user-authorized 1.9.19 bug-fix release; not independent human approval",
+  "sourceCommit": "b3a7c01199678926c08da00f3ed9fcba17718155",
+  "ciRun": "https://github.com/NSIETeam/otto-new/actions/runs/37415136657",
+  "artifactId": 11391476295,
+  "runId": "15a610b3-5f15-402f-9d23-663b045783d6",
+  "parentBaselineSha256": "63bfd1af967ec595e0ed9dafbda412d73ba1f4142a3be83a48d9eaadb968cbfc",
+  "receiptSha256": "699c8b89f423b515dc2548f01570c1de3572239de6fb86baf8a461032c0fff84",
+  "sourceManifestSha256": "3b5c7dd836b9682ba534af952298404548464ef868d89930ee015142444da6d5",
+  "coverageSha256": "995eb1ba5cea256942d0b90ddcb3482d4da2d58c20562c80ca96e824ddfe2ca7",
+  "testResultsSha256": "4ca2043b851f8a69e778b63790fb64e95e4018901c04c9a06eb2d3b3ab4f0275",
+  "nativeExitCode": 0,
+  "assertionsPassed": 2234,
+  "testFiles": 270,
+  "originalGate": {
+    "status": "failed",
+    "reason": "[desktop-coverage-ratchet] measurement environment differs or is unsupported"
+  },
+  "environmentBefore": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "c8be049f25a981192c7adcd3c3180161ed7ac52725b22f94f894471126886422"
+  },
+  "environmentAfter": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "de802562957bceedc5261979b5d3306640a4726be6507436155e8fe6dfa14bac"
+  },
+  "dependencyChange": "Electron 43.7.7, patched simple-git/global-agent/argparse and transitive security dependencies; core micromatch becomes upstream picomatch to remove unpatched braces, mem0ai 3.3.1 removes obsolete Jest dependency chains. Complete locked bytes changed; this is NOT a version-only review. Coverage provider, Node major and test configuration remain exact.",
+  "unchangedEntriesPreserved": 278,
+  "files": [
+    {
+      "file": "src/main/enterprise-e2ee.ts",
+      "reason": "Expose only public device identifiers and fingerprints for an actual multi-scope identity conflict; existing OS-protection and migration assertions retain original keys/history. Uncovered counts do not increase.",
+      "beforeEntrySha256": "553c9417a78f104576170e81c2839f7529c16f01a3a591a732d96d889e64294d",
+      "afterEntrySha256": "b4ea997bebb6bcab90465611a7906094cb14c2ca814ba493cb39dbf9a83cc500",
+      "sourceSha256": "6cd5f8cc4f01730a38f5e9c17b1550426e0b0564307479ebae9f11f6ccc4ba36",
+      "before": {
+        "lines": {
+          "total": 506,
+          "uncovered": 66
+        },
+        "statements": {
+          "total": 527,
+          "uncovered": 75
+        },
+        "functions": {
+          "total": 100,
+          "uncovered": 3
+        },
+        "branches": {
+          "total": 434,
+          "uncovered": 79
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 507,
+          "uncovered": 66
+        },
+        "statements": {
+          "total": 529,
+          "uncovered": 75
+        },
+        "functions": {
+          "total": 101,
+          "uncovered": 3
+        },
+        "branches": {
+          "total": 434,
+          "uncovered": 79
+        }
+      }
+    },
+    {
+      "file": "src/renderer/App.tsx",
+      "reason": "Use the same bounded optional-context helper for ordinary and explicitly named expert tasks; explicit success/failure tests preserve task submission without inventing enterprise context. Changed if-notice branches are exercised.",
+      "beforeEntrySha256": "d849d04ea3d9baf7f6a058b55fd976b19d0f00eddb36b2c4914934ccdc9e15d1",
+      "afterEntrySha256": "a189f5e113a00ac02de342f990f166a34a5803b096d212a3fe50ecdaf75f7e3e",
+      "sourceSha256": "05f8b13e5e3bf07e4a28c4b1d878a3290d2cc00134530d8efad3801a22c7127f",
+      "before": {
+        "lines": {
+          "total": 961,
+          "uncovered": 455
+        },
+        "statements": {
+          "total": 1124,
+          "uncovered": 574
+        },
+        "functions": {
+          "total": 311,
+          "uncovered": 189
+        },
+        "branches": {
+          "total": 713,
+          "uncovered": 404
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 960,
+          "uncovered": 442
+        },
+        "statements": {
+          "total": 1124,
+          "uncovered": 560
+        },
+        "functions": {
+          "total": 309,
+          "uncovered": 186
+        },
+        "branches": {
+          "total": 717,
+          "uncovered": 396
+        }
+      }
+    },
+    {
+      "file": "src/renderer/browserPreviewBridge.ts",
+      "reason": "Only two displayed version literals move from 1.9.18 to 1.9.19. Existing unexecuted preview-bridge coverage debt is preserved, not called a quality improvement.",
+      "beforeEntrySha256": "bbab3411c1a45a1456aaa4490d42183ab309a8df9b25247169e09b729b3d8d10",
+      "afterEntrySha256": "b7a87964ac0ed2cdd327f0be928be729de1fbea5eac88eacb96ed720dda7cb02",
+      "sourceSha256": "e574edfa8f1d96a74d4c68f1fa1c97c4c8095e93d15a6effd72a2f3619b84eb7",
+      "before": {
+        "lines": {
+          "total": 275,
+          "uncovered": 275
+        },
+        "statements": {
+          "total": 295,
+          "uncovered": 295
+        },
+        "functions": {
+          "total": 147,
+          "uncovered": 147
+        },
+        "branches": {
+          "total": 157,
+          "uncovered": 157
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 275,
+          "uncovered": 275
+        },
+        "statements": {
+          "total": 295,
+          "uncovered": 295
+        },
+        "functions": {
+          "total": 147,
+          "uncovered": 147
+        },
+        "branches": {
+          "total": 157,
+          "uncovered": 157
+        }
+      }
+    },
+    {
+      "file": "src/renderer/components/OrganizationTree.tsx",
+      "reason": "Separate loading, loaded-empty, transient failure and real identity-conflict states; retain history/drafts and pause automatic identity-conflict retry. Tests cover overlapping load, late resolve/reject after closure and explicit retry. One added uncovered function is the initial no-op retry ref, never a model or external-write path.",
+      "beforeEntrySha256": "099e53bb3794b6d5610cf4bda25719800445ae6f63bfde5bfa92741706b17f06",
+      "afterEntrySha256": "450dffbad0444667951658c36559ef442d6ae14573d20d5c4f800d3e162133ba",
+      "sourceSha256": "9eefb11eb5c181703fcf6af1ccc2c2f56907b7c4d359b0709658fa16f328b4de",
+      "before": {
+        "lines": {
+          "total": 528,
+          "uncovered": 126
+        },
+        "statements": {
+          "total": 605,
+          "uncovered": 167
+        },
+        "functions": {
+          "total": 161,
+          "uncovered": 35
+        },
+        "branches": {
+          "total": 543,
+          "uncovered": 176
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 550,
+          "uncovered": 126
+        },
+        "statements": {
+          "total": 628,
+          "uncovered": 167
+        },
+        "functions": {
+          "total": 164,
+          "uncovered": 36
+        },
+        "branches": {
+          "total": 563,
+          "uncovered": 175
+        }
+      }
+    },
+    {
+      "file": "src/renderer/enterpriseKnowledgePromptContext.ts",
+      "reason": "A five-second optional deadline, empty-query skip, failed/late-response handling and finally timer cleanup; focused tests cover these outcomes. The only remaining line/branch is historical optional evidence formatting.",
+      "beforeEntrySha256": "1b37316a476c502904165dce2188563185161bc77651868f550bfd945f909dd5",
+      "afterEntrySha256": "6a68ec607ae4c77624c35cd0f4d1eb170e984b473828d2e42e88b7f3b576d87b",
+      "sourceSha256": "1a45b09a5236fdc6d3b1d34c6791d3cbca330b4d5215f53311b4e4f7df803b1e",
+      "before": {
+        "lines": {
+          "total": 24,
+          "uncovered": 7
+        },
+        "statements": {
+          "total": 25,
+          "uncovered": 7
+        },
+        "functions": {
+          "total": 8,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 53,
+          "uncovered": 20
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 38,
+          "uncovered": 1
+        },
+        "statements": {
+          "total": 42,
+          "uncovered": 1
+        },
+        "functions": {
+          "total": 14,
+          "uncovered": 0
+        },
+        "branches": {
+          "total": 61,
+          "uncovered": 5
+        }
+      }
+    }
+  ],
+  "boundaries": [
+    "All original native reports, rejected receipts, past reviews and unrelated baseline entries remain unchanged.",
+    "No source is excluded, no instrumentation-ignore hint is added, and line/statement thresholds remain 62.",
+    "The five explicitly reviewed AST/map entries alone are replaced by this platform actual observations; no cross-platform substitution.",
+    "The initial no-op retry-ref function is retained and disclosed coverage debt; no unrelated site/count tolerance is added.",
+    "Current-source native CI, full install/upgrade, signed artifact integrity and rollback gates must still pass before release.",
+    "Coverage is not evidence of arbitrary model quality, installed-client continuity, independent review or commercial code signing."
+  ],
+  "unchangedEntriesSha256": "b060d393240a3e0b1407786dd67ca8b3dc6400a1b9e1c7a44b3ae893c7ddbede"
+}

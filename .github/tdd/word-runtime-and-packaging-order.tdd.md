@@ -24,6 +24,8 @@ dependencies, repeated Word failures and the actual artifact-only build log:
 | Packaging-order GREEN | `7cab9fcf` | Same script test | 8 pass |
 | Native-trigger RED | `b85f86aa` | Same script test, expanded to require both native workflows on packaging changes | 1 intended failure, 8 pass |
 | Native-trigger GREEN | `f9bac13c` | Same expanded script test | 9 pass |
+| Executor-fixture RED | `f743e389` | Core `nonInteractiveToolExecutor.test.ts`, isolated output directory | 1 intended failure, 9 pass |
+| Executor-fixture GREEN | `a9361f7f` | Same target; preserve failing PDF/advanced Word cases and add five real native Word deliveries | 12 pass |
 
 Commands use cached Node 22.23.1 and the owning Vitest configuration:
 
@@ -75,6 +77,28 @@ The tool discloses that limitation. No runtime package download was added.
 These tests do not prove model planning quality or real installation/upgrade.
 Actual final-source installer validation and protected release gates remain
 required; no production release was created during these checks.
+
+## Full-suite follow-up
+
+Candidate CI `37441977509` ran all core tests and exposed one older integration
+fixture that still expected missing Python to fail DOCX (3061 assertions passed,
+1 failed, 20 existing conditional skips). The fixture now exercises a genuinely
+unavailable PDF engine with its complete error assertions unchanged. Added
+integration cases verify five real native Word outputs, model/UI disclosure and
+advanced Python rendering failures still becoming errors with no final output.
+No executor production logic or failure propagation was changed.
+
+After that update, from `packages/core`:
+
+```text
+npx --offline --yes --package=node@22.23.1 node ../../node_modules/vitest/vitest.mjs run --coverage.enabled=false --reporter=dot
+```
+
+Full local result: **226 files pass, 1 existing conditional skipped file;
+3059 assertions pass, 26 existing conditional skips (3085 total)**. No assertion
+failed. Core typecheck and strict lint of the updated integration test passed.
+This is local Windows evidence; the previous failed macOS CI is preserved and
+must not be reused as final candidate acceptance.
 
 The previous artifact-only run `37437955587` failed before packaging because
 native generated output inflated the doctor source count to 76.70 MB. Its

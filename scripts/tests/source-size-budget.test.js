@@ -9,6 +9,8 @@ import {
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { runInNewContext } from 'node:vm';
+import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const repo = path.resolve(import.meta.dirname, '../..');
@@ -32,6 +34,23 @@ function runSize(bytes, payload = 'packages/payload.json') {
 }
 
 describe('reviewed 1.9.15 source budget (not installer size)', () => {
+  it('does not count disposable TypeScript build caches as retained source evidence', () => {
+    const fixture = mkdtempSync(path.join(os.tmpdir(), 'otto-doctor-size-'));
+    try {
+      writeFileSync(path.join(fixture, 'tsconfig.tsbuildinfo'), Buffer.alloc(1024));
+      writeFileSync(path.join(fixture, 'source-manifest.json'), Buffer.alloc(33));
+      writeFileSync(path.join(fixture, 'evidence.json.gz'), Buffer.alloc(44));
+      const source = readFileSync(path.join(repo, 'scripts/doctor.cjs'), 'utf8');
+      const start = source.indexOf('function directorySizeBytes(');
+      const end = source.indexOf('function directoryRawSizeBytes(', start);
+      const measure = runInNewContext(`${source.slice(start, end)}; directorySizeBytes`, {
+        fs, path, SOURCE_SIZE_EXCLUDES: new Set(),
+      });
+      expect(measure(fixture)).toBe(77);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
   it('retains the new feature sources and reviewed measurement evidence within 47 MiB', () => {
     const result = runSize(47 * 1024 * 1024);
     expect(result.status, result.stderr).toBe(0);

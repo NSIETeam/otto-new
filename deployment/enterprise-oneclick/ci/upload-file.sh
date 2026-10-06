@@ -42,7 +42,13 @@ otto_upload_file() {
     # must not be mistaken for an approved resume or a lost-receipt success.
     [ "$(wc -c < "$file" | tr -d '[:space:]')" = "$size" ] \
       && [ "$(sha256sum -- "$file" | awk '{print $1}')" = "$digest" ] || return 2
-    prefix="$(head -c "$offset" -- "$file" | sha256sum | awk '{print $1}')" || return 2
+    # BSD head rejects -c 0. Hash the empty stream explicitly on a fresh
+    # upload; non-empty resume prefixes still read and hash the exact bytes.
+    if [ "$offset" = 0 ]; then
+      prefix="$(printf '' | sha256sum | awk '{print $1}')" || return 2
+    else
+      prefix="$(head -c "$offset" -- "$file" | sha256sum | awk '{print $1}')" || return 2
+    fi
     [ "$state" = "upload_state kind=${kind} transaction=${transaction} role=${role} size=${size} sha256=${digest} offset=${offset} prefix_sha256=${prefix} complete=${complete}" ] || {
       printf 'upload state does not match the locked local prefix\n' >&2
       return 2

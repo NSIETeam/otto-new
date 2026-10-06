@@ -23,6 +23,13 @@ all mandatory validation succeeds. No such production change has occurred.
   five targets, preserved original licenses, new librsvg memory-limit patch,
   and separate native/WASM libheif versions; 93 source/license/native contract
   assertions passed including altered-license and source-integrity rejection.
+- `cacab65b` RED: BSD `head -c 0` reproduced one failure / nine passes on
+  the actual upload helper. GREEN: the empty prefix is explicitly hashed as
+  an empty stream; non-empty byte ranges, exact identity, receipt checks and
+  three-attempt bounds are unchanged. All 31 upload/workflow assertions pass.
+  Cloud run `37494806678` retained the corresponding native macOS failures;
+  a new full current-head run is required, not an exemption or rerun of stale
+  code. The preceding Bash 3.2 fixture uses the production pinned SSH options.
 
 Commands used installed Node 22.23.1 and Vitest 4.1.11. Upstream archives were
 read and hashed, not executed. No shell exploit was executed; quoting tests

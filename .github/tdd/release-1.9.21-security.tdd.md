@@ -50,6 +50,13 @@ all mandatory validation succeeds. No such production change has occurred.
   The live release dependency audit returned no advisories. New original native
   Windows and macOS measurements and a separately authorized lock-only review
   remain required before the final full CI and release.
+- `70864d46` RED: both historical first-1.9.21 review assertions incorrectly
+  expected the subsequent MCP lock (two failures / nine passes). GREEN: bind
+  those preserved original receipts to their actual `caf4dd47` lock instead.
+  The evidence, unchanged runner and unchanged ratchet targets passed all 103
+  assertions. No baseline, production verifier, threshold or budget changed;
+  the original runner still rejects the new lock until the separate authorized
+  native-measurement review is complete.
 
 The upstream SDK advisory is
 [GHSA-6qxp-vccf-f47h](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h).

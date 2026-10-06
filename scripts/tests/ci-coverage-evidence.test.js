@@ -344,7 +344,9 @@ it.each([
   ), 'utf8'));
   expect(review.environmentBefore).toEqual(before.environmentAfter);
   expect(review.environmentAfter).toEqual({ ...before.environmentAfter,
-    lockSha256: createHash('sha256').update(readFileSync(new URL('../../package-lock.json', import.meta.url))).digest('hex'),
+    // Historical native receipts bind the lock actually executed then, not a
+    // later SDK fix. The unchanged native runner rejects unreviewed new locks.
+    lockSha256: 'caf4dd47890d5475d0d3b5bc869ef2464a803736089268ee674e47c3318a630c',
   });
   expect(baseline.environment).toEqual(review.environmentAfter);
   expect(baseline.review.environmentUpdates).toContainEqual(review);

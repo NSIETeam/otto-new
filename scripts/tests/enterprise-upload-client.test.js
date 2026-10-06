@@ -58,6 +58,15 @@ sleep() { :; }
 if [ "$MODE" = bsd-stat ]; then
   stat() { printf '%s\\n' 'stat: illegal option -- c' >&2; return 64; }
 fi
+if [ "$MODE" = bsd-head-empty ]; then
+  head() {
+    if [ "$1" = -c ] && [ "$2" = 0 ]; then
+      printf '%s\\n' 'head: illegal byte count -- 0' >&2
+      return 1
+    fi
+    command head "$@"
+  }
+fi
 ssh() {
   local command='' arg
   [ "$1" = -o ] && [ "$2" = StrictHostKeyChecking=yes ] && \
@@ -109,7 +118,7 @@ printf '%s\\n' client-complete
 }
 
 describe('bounded, identity-checked SSH upload client', () => {
-  it.each(['prefix', 'lost', 'bsd-stat'])(
+  it.each(['prefix', 'lost', 'bsd-stat', 'bsd-head-empty'])(
     'recovers %s without resending accepted bytes',
     (mode) => {
       const result = exercise(mode);

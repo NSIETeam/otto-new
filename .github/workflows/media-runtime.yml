@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/media-runtime.yml'
+      - '.github/workflows/desktop-packaging-validation.yml'
       - 'package-lock.json'
       - 'scripts/*media-runtime*'
       - 'scripts/*sharp-runtime*'
@@ -16,6 +17,7 @@ on:
   push:
     paths:
       - '.github/workflows/media-runtime.yml'
+      - '.github/workflows/desktop-packaging-validation.yml'
       - 'package-lock.json'
       - 'scripts/*media-runtime*'
       - 'scripts/*sharp-runtime*'

@@ -92,6 +92,12 @@ jobs:
           set -euo pipefail
           test "$(node --version)" = "v${NODE_VERSION}"
           npm ci
+      - name: Check clean source before native artifacts
+        run: |
+          set -euo pipefail
+          npm run doctor
+          npm run code-map:check
+          git diff --check
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sqlcipher-native-matrix
@@ -121,9 +127,6 @@ jobs:
       - name: Build application
         run: |
           set -euo pipefail
-          npm run doctor
-          npm run code-map:check
-          git diff --check
           npm run build
           npm run build --workspace=packages/desktop
       - name: Build Windows installer

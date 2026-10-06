@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import JSZip from 'jszip';
 import { executeToolCall } from './nonInteractiveToolExecutor.js';
 import {
   ToolRegistry,
@@ -29,6 +33,7 @@ describe('executeToolCall', () => {
   let mockToolRegistry: ToolRegistry;
   let mockTool: Tool;
   let abortController: AbortController;
+  let documentOutputDir: string;
 
   beforeEach(() => {
     mockTool = {
@@ -66,15 +71,21 @@ describe('executeToolCall', () => {
     } as unknown as ToolRegistry;
 
     abortController = new AbortController();
+    documentOutputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-executor-doc-'));
   });
 
-  it('records a failed document preflight as an error, not a successful delivery', async () => {
+  afterEach(() => {
+    fs.rmSync(documentOutputDir, { recursive: true, force: true });
+  });
+
+  it('records a failed PDF engine preflight as an error, not a successful delivery', async () => {
     const documentTool = new GenerateDocumentTool(createMockConfig(), undefined, undefined,
       async () => 'synthetic missing dependency');
     vi.mocked(mockToolRegistry.getTool).mockReturnValue(documentTool);
     const response = await executeToolCall(mockConfig, {
       callId: 'doc-failed', name: 'generate_document',
-      args: { content: '# Synthetic report', format: 'report', output_format: 'docx' },
+      args: { content: '# Synthetic report', format: 'report', output_format: 'pdf',
+        output_path: path.join(documentOutputDir, 'synthetic.pdf') },
       isClientInitiated: false, prompt_id: 'synthetic-prompt',
     }, mockToolRegistry, abortController.signal);
     expect(response.error?.message).toContain('synthetic missing dependency');
@@ -83,6 +94,46 @@ describe('executeToolCall', () => {
         id: 'doc-failed', name: 'generate_document',
         response: { error: expect.stringContaining('generate_document FAIL') },
       },
+    }]);
+  });
+
+  it('delivers five real native Word files with the layout limitation in model and UI results', async () => {
+    const documentTool = new GenerateDocumentTool(createMockConfig(), undefined, undefined,
+      async () => 'synthetic missing Python dependency');
+    vi.mocked(mockToolRegistry.getTool).mockReturnValue(documentTool);
+    for (let round = 1; round <= 5; round += 1) {
+      const output = path.join(documentOutputDir, `synthetic-${round}.docx`);
+      const response = await executeToolCall(mockConfig, {
+        callId: `doc-native-${round}`, name: 'generate_document',
+        args: { content: '# Synthetic report', format: 'report', output_format: 'docx', output_path: output },
+        isClientInitiated: false, prompt_id: 'synthetic-prompt',
+      }, mockToolRegistry, abortController.signal);
+      expect(response.error).toBeUndefined();
+      expect(String(response.resultDisplay)).toContain('内置 Word 基础排版');
+      const parts = Array.isArray(response.responseParts) ? response.responseParts : [response.responseParts];
+      expect(parts).toContainEqual(expect.objectContaining({ functionResponse: expect.objectContaining({
+        response: { output: expect.stringContaining('内置 Word 基础排版') },
+      }) }));
+      const zip = await JSZip.loadAsync(fs.readFileSync(output));
+      expect(await zip.file('word/document.xml')!.async('string')).toContain('Synthetic report');
+    }
+  });
+
+  it('still records advanced Word renderer failures as errors without a false native delivery', async () => {
+    const output = path.join(documentOutputDir, 'advanced-failed.docx');
+    const documentTool = new GenerateDocumentTool(createMockConfig(), undefined,
+      async () => { throw new Error('synthetic advanced renderer failure'); }, async () => null);
+    vi.mocked(mockToolRegistry.getTool).mockReturnValue(documentTool);
+    const response = await executeToolCall(mockConfig, {
+      callId: 'doc-advanced-failed', name: 'generate_document',
+      args: { content: '# Synthetic report', format: 'report', output_format: 'docx', output_path: output },
+      isClientInitiated: false, prompt_id: 'synthetic-prompt',
+    }, mockToolRegistry, abortController.signal);
+    expect(response.error?.message).toContain('synthetic advanced renderer failure');
+    expect(fs.existsSync(output)).toBe(false);
+    expect(response.responseParts).toEqual([{
+      functionResponse: { id: 'doc-advanced-failed', name: 'generate_document',
+        response: { error: expect.stringContaining('generate_document FAIL') } },
     }]);
   });
 

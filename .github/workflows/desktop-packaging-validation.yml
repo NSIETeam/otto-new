@@ -88,10 +88,42 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install locked dependencies
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
           test "$(node --version)" = "v${NODE_VERSION}"
-          npm ci
+          if [ "$TARGET_PLATFORM" = win32 ]; then
+            # Materialize the lockfile first, then seed the reviewed binary
+            # before executing every dependency lifecycle hook. Never pass a
+            # GitHub credential into upstream postinstall scripts.
+            npm ci --ignore-scripts
+            node packages/desktop/scripts/fetch-win-ripgrep.mjs
+            node --input-type=module <<'NODE'
+          import { constants, copyFileSync, lstatSync, mkdirSync } from 'node:fs';
+          import { verifyRipgrepExecutable } from './packages/desktop/scripts/ripgrep-runtime.mjs';
+          const source = 'packages/desktop/vendor/win/ripgrep/rg.exe';
+          const folder = 'node_modules/@vscode/ripgrep/bin';
+          const destination = `${folder}/rg.exe`;
+          const options = { platform: 'win32', arch: 'x64', requireSourceDigest: true };
+          verifyRipgrepExecutable(source, options);
+          mkdirSync(folder, { recursive: true });
+          if (lstatSync(folder).isSymbolicLink()) throw new Error('ripgrep install directory is a symbolic link');
+          copyFileSync(source, destination, constants.COPYFILE_EXCL);
+          verifyRipgrepExecutable(destination, options);
+          NODE
+            npm rebuild --foreground-scripts
+            npm run postinstall --if-present
+          else
+            node packages/desktop/scripts/prime-vscode-ripgrep-cache.mjs
+            npm ci
+          fi
+          ARCH="$(node -p 'process.arch')"
+          RIPGREP='node_modules/@vscode/ripgrep/bin/rg'
+          if [ "$TARGET_PLATFORM" = win32 ]; then RIPGREP="${RIPGREP}.exe"; fi
+          node packages/desktop/scripts/ripgrep-runtime.mjs "$RIPGREP" \
+            --platform "$TARGET_PLATFORM" --arch "$ARCH" --require-source-digest
+          "$RIPGREP" --version | grep -F 'ripgrep 15.0.0'
       - name: Check clean source before native artifacts
         run: |
           set -euo pipefail

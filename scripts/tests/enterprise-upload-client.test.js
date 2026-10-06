@@ -51,6 +51,9 @@ fixture_prefix_digest="$(printf abc | sha256sum | awk '{print $1}')"
 SSH_OPTIONS=() DEPLOY_USER=fixture DEPLOY_HOST=fixture.invalid
 MIRROR_TRANSACTION_ID=v1.9.20-1-1
 sleep() { :; }
+if [ "$MODE" = bsd-stat ]; then
+  stat() { printf '%s\\n' 'stat: illegal option -- c' >&2; return 64; }
+fi
 ssh() {
   local command='' arg
   for arg in "$@"; do
@@ -100,7 +103,7 @@ printf '%s\\n' client-complete
 }
 
 describe('bounded, identity-checked SSH upload client', () => {
-  it.each(['prefix', 'lost'])(
+  it.each(['prefix', 'lost', 'bsd-stat'])(
     'recovers %s without resending accepted bytes',
     (mode) => {
       const result = exercise(mode);

@@ -767,6 +767,8 @@ describe('App workspace UI integration', () => {
   });
 
   it('queries enterprise memory and launches an explicitly named expert from the main conversation', async () => {
+    const scheduled = vi.spyOn(window, 'setTimeout');
+    const cleared = vi.spyOn(window, 'clearTimeout');
     configureEnterpriseWorkspace();
     harness.workspaceModules.current = [{
       id: 'agent-ppt',
@@ -810,6 +812,13 @@ describe('App workspace UI integration', () => {
       undefined,
       undefined,
     ));
+    const lookupTimers = scheduled.mock.calls
+      .map((call, index) => ({ delay: call[1], handle: scheduled.mock.results[index]?.value }))
+      .filter(({ delay }) => delay === 1_200 || delay === 5_000);
+    expect(lookupTimers.length).toBeGreaterThan(0);
+    for (const { handle } of lookupTimers) {
+      expect(cleared).toHaveBeenCalledWith(handle);
+    }
   });
 
   it('uses the next account right-panel preference on the account-switch render', () => {

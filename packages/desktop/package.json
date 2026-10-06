@@ -261,6 +261,12 @@
       ]
     },
     "win": {
+      "electronLanguages": [
+        "en-US",
+        "en-GB",
+        "zh-CN",
+        "zh-TW"
+      ],
       "target": [
         {
           "target": "nsis",

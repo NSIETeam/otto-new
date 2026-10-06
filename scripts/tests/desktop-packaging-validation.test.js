@@ -132,6 +132,35 @@ describe('artifact-only desktop packaging validation', () => {
     expect(source).not.toContain('OTTO_DOCTOR_SOURCE_SIZE_BUDGET_MB');
   });
 
+  it('prepares reviewed ripgrep before lifecycle execution without leaking a token or dropping hooks', () => {
+    const install = step('Install locked dependencies');
+    expect(install.env?.TARGET_PLATFORM).toBe('${{ matrix.platform }}');
+    const commands = install.run ?? '';
+    expect(commands).toContain('if [ "$TARGET_PLATFORM" = win32 ]; then');
+    expect(commands).toContain('npm ci --ignore-scripts');
+    expect(commands).toContain('node packages/desktop/scripts/fetch-win-ripgrep.mjs');
+    expect(commands).toContain('COPYFILE_EXCL');
+    expect(commands).toContain('requireSourceDigest: true');
+    expect(commands).toContain('npm rebuild --foreground-scripts');
+    expect(commands).toContain('npm run postinstall --if-present');
+    expect(commands.indexOf('npm ci --ignore-scripts')).toBeLessThan(
+      commands.indexOf('node packages/desktop/scripts/fetch-win-ripgrep.mjs'),
+    );
+    expect(commands.indexOf('COPYFILE_EXCL')).toBeLessThan(
+      commands.indexOf('npm rebuild --foreground-scripts'),
+    );
+    const mac = commands.split('\n          else\n')[1] ?? commands.split('\nelse\n')[1] ?? '';
+    expect(mac).toContain('node packages/desktop/scripts/prime-vscode-ripgrep-cache.mjs');
+    expect(mac.indexOf('prime-vscode-ripgrep-cache.mjs')).toBeLessThan(
+      mac.indexOf('npm ci'),
+    );
+    expect(commands).toContain('ripgrep-runtime.mjs "$RIPGREP"');
+    expect(commands).toContain('--platform "$TARGET_PLATFORM" --arch "$ARCH" --require-source-digest');
+    expect(commands).toContain('ripgrep 15.0.0');
+    expect(install.env).not.toHaveProperty('GH_TOKEN');
+    expect(install.env).not.toHaveProperty('GITHUB_TOKEN');
+  });
+
   it('revalidates both native matrices when the diagnostic packaging pipeline changes', () => {
     for (const nativeWorkflow of ['media-runtime.yml', 'sqlcipher-native.yml']) {
       const native = parse(readFileSync(path.join(path.dirname(filename), nativeWorkflow), 'utf8'));

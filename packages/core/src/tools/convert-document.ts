@@ -2,9 +2,10 @@
  * @license Copyright 2026 Felix SPDX-License-Identifier: Apache-2.0
  */
 import { exec } from 'child_process';
-import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
+import { parse as parseArguments } from 'shell-quote';
 import {
   BaseTool, ToolResult, ToolCallConfirmationDetails,
   Icon, ToolLocation,
@@ -14,8 +15,8 @@ import { SchemaValidator } from '../utils/schemaValidator.js';
 import { Config, ApprovalMode } from '../config/config.js';
 import { DoctorService, CommandRunner } from '../services/doctor.js';
 import { resolveDocumentRuntime } from '../services/bundledRuntime.js';
-
-const execAsync = promisify(exec);
+import { runDocumentCommand, type DocumentCommandRunner } from '../services/documentCommand.js';
+import { ToolError, ToolErrorCode } from '../utils/tool-error.js';
 
 /**
  * 执行前置体检：只读复用 DoctorService，但用一个「只放行目标二进制」的 runner，
@@ -23,7 +24,8 @@ const execAsync = promisify(exec);
  * 安装命令）；全部就绪返回 null。注意：libreoffice 的 spec 名是 'libreoffice'
  * （会同时探测 libreoffice/soffice 与 mac .app 兜底）。
  */
-async function preflightBinaries(names: string[]): Promise<string | null> {
+async function preflightBinaries(names: string[], signal: AbortSignal): Promise<string | null> {
+  signal.throwIfAborted();
   const wanted = new Set(names);
   if (
     wanted.has('libreoffice')
@@ -40,7 +42,8 @@ async function preflightBinaries(names: string[]): Promise<string | null> {
     );
     if (!touches) return Promise.reject(new Error('skipped: ' + command));
     return new Promise<string>((resolve, reject) => {
-      exec(command, { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      exec(command, { timeout: timeoutMs, maxBuffer: 1024 * 1024, signal, windowsHide: true }, (err, stdout, stderr) => {
+        if (signal.aborted) { reject(signal.reason); return; }
         const out = (stdout || stderr || '').trim();
         if (err) { if (out) { resolve(out); return; } reject(err); return; }
         resolve(out);
@@ -48,6 +51,7 @@ async function preflightBinaries(names: string[]): Promise<string | null> {
     });
   };
   const report = await new DoctorService(gatedRunner).check();
+  signal.throwIfAborted();
   const missing = report.checks.filter((c) => wanted.has(c.name) && !c.present);
   if (missing.length === 0) return null;
   return missing
@@ -62,10 +66,24 @@ export interface ConvertDocumentToolParams {
   options?: string; merge?: boolean; compress?: number;
 }
 
+export interface ConvertDocumentDependencies {
+  runCommand?: DocumentCommandRunner;
+  preflight?: (names: string[], signal: AbortSignal) => Promise<string | null>;
+}
+
+/** Extra options are argv, never shell source; destinations belong to this tool. */
+function conversionOptions(value = ''): string[] {
+  const parsed = parseArguments(value, key => `$${key}`);
+  if (parsed.some(arg => typeof arg !== 'string' || /^(?:-o|--output|--outdir|--convert-to|-env:UserInstallation)/i.test(arg))) {
+    throw new ToolError(ToolErrorCode.PARAM_INVALID, 'convert_document: options cannot contain shell operators or override output paths');
+  }
+  return parsed as string[];
+}
+
 export class ConvertDocumentTool extends BaseTool<ConvertDocumentToolParams, ToolResult> {
   static readonly Name: string = 'convert_document';
 
-  constructor(private readonly config: Config) {
+  constructor(private readonly config: Config, private readonly dependencies: ConvertDocumentDependencies = {}) {
     const desc = `Lossless document format conversion using pandoc and LibreOffice.
 
 EXAMPLES:
@@ -116,6 +134,22 @@ DEPENDENCIES: pandoc + libreoffice. macOS: brew install pandoc libreoffice. Wind
     if (p.input_path && !fs.existsSync(p.input_path))
       return 'convert_document: file not found: '+p.input_path;
     if (!p.output_format?.trim()) return 'convert_document: output_format required (e.g. pdf, docx, markdown)';
+    if (!/^[a-z][a-z0-9]{0,15}$/.test(p.output_format)) return 'convert_document: invalid output_format';
+    if (p.output_path && !path.isAbsolute(p.output_path)) return 'convert_document: output_path must be absolute';
+    if (p.compress !== undefined && (!Number.isInteger(p.compress) || p.compress < 1 || p.compress > 5)) return 'convert_document: compress must be an integer from 1 to 5';
+    if (p.input_paths && p.input_path) return 'convert_document: choose single or batch inputs, not both';
+    if (p.input_paths && !p.merge && p.output_path) return 'convert_document: batch inputs need separate output paths; omit output_path';
+    if (p.input_paths && !p.merge) {
+      const canonical = (file: string) => process.platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
+      const inputs = new Set(p.input_paths.map(canonical));
+      const outputs = new Set<string>();
+      for (const input of p.input_paths) {
+        const output = canonical(path.join(path.dirname(input), path.basename(input, path.extname(input)) + '.' + p.output_format));
+        if (outputs.has(output) || (inputs.has(output) && output !== canonical(input))) return 'convert_document: same-name batch output collision; use separate conversions and output paths';
+        outputs.add(output);
+      }
+    }
+    try { conversionOptions(p.options); } catch (error) { return (error as Error).message; }
     if (p.merge && (!p.input_paths || p.input_paths.length < 2))
       return 'convert_document/merge: need at least 2 files in input_paths';
     if (p.merge && !p.output_path)
@@ -143,149 +177,152 @@ DEPENDENCIES: pandoc + libreoffice. macOS: brew install pandoc libreoffice. Wind
     return { type:'exec', title:'Confirm: '+this.getDescription(p), command:'convert_document', rootCommand:'convert_document', onConfirm: async ()=>{}};
   }
 
-  async execute(p: ConvertDocumentToolParams, _s: AbortSignal): Promise<ToolResult> {
+  async execute(p: ConvertDocumentToolParams, signal: AbortSignal): Promise<ToolResult> {
+    signal.throwIfAborted();
     const logLabel = 'convert_document.'+(p.output_format || 'single');
     console.time(logLabel);
     const err = this.validateToolParams(p);
-    if (err) { console.timeEnd(logLabel); return { llmContent: err, returnDisplay: err }; }
+    if (err) { console.timeEnd(logLabel); throw new ToolError(ToolErrorCode.PARAM_INVALID, err); }
 
     try {
-      if (p.merge && p.input_paths && p.input_paths.length >= 2) return await this.doMerge(p);
-      if (p.input_paths && p.input_paths.length > 0) return await this.doBatch(p);
-      return await this.doSingle(p);
+      if (p.input_paths && !p.merge) {
+        const results: string[] = [];
+        for (const input_path of p.input_paths) {
+          signal.throwIfAborted();
+          try {
+            const result = await this.convert({ ...p, input_path, input_paths: undefined }, signal);
+            results.push(String(result.returnDisplay));
+          } catch (error) {
+            if (signal.aborted) throw error;
+            throw new ToolError(ToolErrorCode.EXECUTION_FAILED, `convert_document batch incomplete: ${results.length}/${p.input_paths.length} files converted. ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+          }
+        }
+        return { llmContent: results.join('\n'), returnDisplay: `convert_document OK: ${results.length} files batch-converted` };
+      }
+      return await this.convert(p, signal);
     } catch (e: unknown) {
+      signal.throwIfAborted();
       const m = e instanceof Error ? e.message : String(e);
       if (
         m.includes('not found')
         || m.includes('command not found')
         || m.includes('not recognized')
         || m.includes('无法将')
+        || (m.startsWith('spawn ') && (e as NodeJS.ErrnoException).code === 'ENOENT')
       ) {
         const isMac = process.platform === 'darwin';
-        return { llmContent: 'convert_document FAIL: '+m+'. Install: '+(isMac?'brew install pandoc libreoffice':'winget install pandoc LibreOffice'), returnDisplay: 'convert_document FAIL: tool not installed' };
+        throw new ToolError(ToolErrorCode.TOOL_NOT_INSTALLED, 'convert_document: '+m+'. Install: '+(isMac?'brew install pandoc libreoffice':'winget install pandoc LibreOffice'), { cause: e });
       }
-      return { llmContent: 'convert_document FAIL: '+m, returnDisplay: 'convert_document FAIL: '+m };
+      throw e;
     } finally {
       console.timeEnd(logLabel);
     }
   }
 
-  private async doSingle(p: ConvertDocumentToolParams): Promise<ToolResult> {
-    const { input_path: ip, output_format: fmt, engine, options } = p;
-    const ext = path.extname(ip!).slice(1).toLowerCase();
-    const outPath = p.output_path || ip!.replace(/\.[^.]+$/, '.'+fmt);
-    const dir = path.dirname(ip!);
+  private async requireBinaries(names: string[], signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    const missing = await (this.dependencies.preflight ?? preflightBinaries)(names, signal);
+    signal.throwIfAborted();
+    if (missing) throw new ToolError(ToolErrorCode.TOOL_NOT_INSTALLED, 'convert_document: ' + missing);
+  }
 
-    let eng = engine || 'auto';
-    if (eng === 'auto') {
-      const offIn = ['docx','xlsx','pptx','odt','ods','odp'];
-      const offOut = ['pdf','docx','xlsx','pptx','odt','ods','odp'];
-      eng = offIn.includes(ext) || offOut.includes(fmt) ? 'libreoffice' : 'pandoc';
+  private async command(file: string, args: string[], signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    await (this.dependencies.runCommand ?? runDocumentCommand)(file, args, {
+      signal, timeout: 60_000, maxBuffer: 50 * 1024 * 1024,
+    });
+    signal.throwIfAborted();
+  }
+
+  private requireOutput(file: string): void {
+    if (!fs.existsSync(file) || !fs.lstatSync(file).isFile() || fs.statSync(file).size === 0) {
+      throw new ToolError(ToolErrorCode.EXECUTION_FAILED, 'convert_document produced no non-empty output');
     }
+  }
 
-    // Doctor preflight: verify the chosen engine binary is present before we run it,
-    // failing loud (with install command) instead of catching a half-run failure.
-    const engMissing = await preflightBinaries([eng === 'libreoffice' ? 'libreoffice' : 'pandoc']);
-    if (engMissing) throw new Error('convert_document needs ' + eng + ': ' + engMissing);
-
-    if (eng === 'libreoffice') {
-      const loCmd = resolveDocumentRuntime('libreoffice').executable;
-      await execAsync(`${JSON.stringify(loCmd)} --headless --convert-to ${fmt} --outdir "${dir}" "${ip}"${options?' '+options:''}`, { maxBuffer:50*1024*1024 });
-      const loName = path.basename(ip!, path.extname(ip!))+'.'+fmt;
-      const loPath = path.join(dir, loName);
-      if (p.output_path && path.resolve(loPath) !== path.resolve(p.output_path) && fs.existsSync(loPath)) {
-        if (fs.existsSync(p.output_path)) fs.unlinkSync(p.output_path);
-        fs.renameSync(loPath, p.output_path);
-      }
+  private async render(input: string, output: string, p: ConvertDocumentToolParams, signal: AbortSignal): Promise<void> {
+    const ext = path.extname(input).slice(1).toLowerCase();
+    const office = ['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp'];
+    const engine = p.engine && p.engine !== 'auto' ? p.engine
+      : office.includes(ext) || [...office, 'pdf'].includes(p.output_format) ? 'libreoffice' : 'pandoc';
+    const extra = conversionOptions(p.options);
+    await this.requireBinaries([engine], signal);
+    if (engine === 'libreoffice') {
+      const dir = path.dirname(output);
+      // Isolate the profile so a running office app cannot absorb this command.
+      await this.command(resolveDocumentRuntime('libreoffice').executable, [
+        '-env:UserInstallation=' + pathToFileURL(path.join(dir, 'lo-profile')).href,
+        '--headless', '--convert-to', p.output_format, '--outdir', dir, ...extra, input,
+      ], signal);
+      const generated = path.join(dir, path.basename(input, path.extname(input)) + '.' + p.output_format);
+      this.requireOutput(generated);
+      if (generated !== output) fs.renameSync(generated, output);
     } else {
-      let cmd = `pandoc "${ip}" -o "${outPath}"${options?' '+options:''}`;
-      if (fmt === 'pdf' && !cmd.includes('--pdf-engine')) cmd += ' --pdf-engine=xelatex';
-      await execAsync(cmd, { maxBuffer:50*1024*1024 });
+      const args = [input, '-o', output, ...extra];
+      if (p.output_format === 'pdf' && !extra.some(arg => arg.startsWith('--pdf-engine'))) args.push('--pdf-engine=xelatex');
+      await this.command('pandoc', args, signal);
     }
-
-    if (p.compress && fmt === 'pdf' && fs.existsSync(outPath)) {
-      await this.compressPDF(outPath, p.compress);
-    }
-
-    const sz = fs.existsSync(outPath) ? fs.statSync(outPath).size : 0;
-    const label = path.basename(ip!)+' -> '+path.basename(outPath)+' ('+sz+' bytes)';
-    return { llmContent: 'convert_document OK: '+label, returnDisplay: 'convert_document OK: '+label };
+    this.requireOutput(output);
   }
 
-  private async doBatch(p: ConvertDocumentToolParams): Promise<ToolResult> {
-    const results: string[] = [];
-    for (const ip of p.input_paths!) {
-      const sp: ConvertDocumentToolParams = { ...p, input_path: ip, input_paths: undefined, merge: undefined };
-      const r = await this.doSingle(sp);
-      results.push(r.returnDisplay as string);
-    }
-    return { llmContent: 'convert_document batch OK: '+results.length+' files converted\n'+results.join('\n'), returnDisplay: 'convert_document OK: '+results.length+' files batch-converted' };
-  }
-
-  private async hasBinary(name: string): Promise<boolean> {
-    const probe = process.platform === 'win32' ? 'where ' + name : 'command -v ' + name;
-    try { await execAsync(probe); return true; } catch { return false; }
-  }
-
-  private async doMerge(p: ConvertDocumentToolParams): Promise<ToolResult> {
-    const inputs = p.input_paths!;
-    const allPdf = inputs.every((f) => path.extname(f).toLowerCase() === '.pdf');
-    const wantPdf = p.output_format.trim().toLowerCase() === 'pdf';
-
-    // Lossless path: all inputs are PDF and target is PDF -> merge with pdfunite.
-    // This preserves tables, images and styling instead of round-tripping through markdown.
-    if (allPdf && wantPdf) {
-      if (!(await this.hasBinary('pdfunite'))) {
-        return {
-          llmContent: 'convert_document FAIL: merging PDFs needs pdfunite (from poppler), which is not installed. macOS: brew install poppler. Linux: apt install poppler-utils.',
-          returnDisplay: 'convert_document FAIL: pdfunite not installed',
-        };
-      }
-      const args = inputs.map((f) => `"${f}"`).join(' ');
-      await execAsync(`pdfunite ${args} "${p.output_path}"`, { maxBuffer: 100 * 1024 * 1024 });
-      const sz = fs.existsSync(p.output_path!) ? fs.statSync(p.output_path!).size : 0;
-      if (sz === 0) throw new Error('pdfunite produced no output');
-      const label = inputs.length + ' PDFs merged -> ' + path.basename(p.output_path!) + ' (' + sz + ' bytes, lossless)';
-      return { llmContent: 'convert_document OK: ' + label, returnDisplay: 'convert_document OK: ' + label };
-    }
-
-    // Mixed / non-PDF merge still needs pandoc (markdown round-trip, may lose tables/images/styling).
-    // If pandoc is missing, fail loud rather than pretend.
-    if (!(await this.hasBinary('pandoc'))) {
-      return {
-        llmContent: 'convert_document FAIL: merging non-PDF (mixed) documents needs pandoc, which is not installed. For lossless merging, provide all-PDF inputs (uses pdfunite). macOS: brew install pandoc.',
-        returnDisplay: 'convert_document FAIL: pandoc not installed (mixed merge)',
-      };
-    }
-    const tmpDir = path.join(path.dirname(inputs[0]), '.otto-merge-'+Date.now());
-    fs.mkdirSync(tmpDir, { recursive: true });
+  private async convert(p: ConvertDocumentToolParams, signal: AbortSignal): Promise<ToolResult> {
+    const source = p.input_path ?? p.input_paths![0];
+    const output = p.output_path ?? path.join(path.dirname(source), path.basename(source, path.extname(source)) + '.' + p.output_format);
+    fs.mkdirSync(path.dirname(output), { recursive: true });
+    // All writes before commit stay in this newly allocated sibling directory.
+    const stage = fs.mkdtempSync(path.join(path.dirname(output), '.otto-convert-'));
+    const stagedOutput = path.join(stage, 'result.' + p.output_format);
+    let lossless = false;
     try {
-      const mdFiles: string[] = [];
-      for (let i = 0; i < inputs.length; i++) {
-        const mdPath = path.join(tmpDir, 'part_'+i+'.md');
-        await execAsync(`pandoc "${inputs[i]}" -o "${mdPath}" -t markdown`, { maxBuffer:50*1024*1024 });
-        mdFiles.push(mdPath);
+      signal.throwIfAborted();
+      if (p.merge) {
+        const inputs = p.input_paths!;
+        if (inputs.every(file => path.extname(file).toLowerCase() === '.pdf') && p.output_format === 'pdf') {
+          const locator = process.platform === 'win32' ? 'where' : 'which';
+          try { await this.command(locator, ['pdfunite'], signal); }
+          catch (error) {
+            signal.throwIfAborted();
+            throw new ToolError(ToolErrorCode.TOOL_NOT_INSTALLED, 'convert_document: PDF merge needs pdfunite (poppler)', { cause: error });
+          }
+          await this.command('pdfunite', [...inputs, stagedOutput], signal);
+          lossless = true;
+        } else {
+          await this.requireBinaries(['pandoc'], signal);
+          const parts: string[] = [];
+          for (let index = 0; index < inputs.length; index++) {
+            const md = path.join(stage, 'part-' + index + '.md');
+            await this.command('pandoc', [inputs[index], '-o', md, '-t', 'markdown'], signal);
+            this.requireOutput(md);
+            parts.push(fs.readFileSync(md, 'utf8'));
+          }
+          const merged = path.join(stage, 'merged.md');
+          fs.writeFileSync(merged, parts.join('\n\n\\pagebreak\n\n'));
+          await this.render(merged, stagedOutput, p, signal);
+        }
+      } else if (p.compress && path.extname(source).toLowerCase() === '.pdf' && p.output_format === 'pdf') {
+        fs.copyFileSync(source, stagedOutput);
+      } else {
+        await this.render(source, stagedOutput, p, signal);
       }
-      const merged = path.join(tmpDir, 'merged.md');
-      let allContent = '';
-      for (const mf of mdFiles) allContent += fs.readFileSync(mf, 'utf8') + '\n\n\\pagebreak\n\n';
-      fs.writeFileSync(merged, allContent);
-      const sp: ConvertDocumentToolParams = { ...p, input_path: merged, input_paths: undefined, merge: undefined };
-      return await this.doSingle(sp);
+      this.requireOutput(stagedOutput);
+      if (p.compress && p.output_format === 'pdf') {
+        await this.requireBinaries(['ghostscript'], signal);
+        const compressed = path.join(stage, 'compressed.pdf');
+        const settings = ['/default', '/screen', '/ebook', '/printer', '/prepress', '/prepress'];
+        await this.command(process.platform === 'win32' ? 'gswin64c' : 'gs', [
+          '-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4', '-dPDFSETTINGS=' + settings[p.compress],
+          '-dNOPAUSE', '-dQUIET', '-dBATCH', '-sOutputFile=' + compressed, stagedOutput,
+        ], signal);
+        this.requireOutput(compressed);
+        fs.renameSync(compressed, stagedOutput);
+      }
+      signal.throwIfAborted();
+      const size = fs.statSync(stagedOutput).size;
+      fs.renameSync(stagedOutput, output);
+      const label = 'convert_document OK: ' + path.basename(output) + ' (' + size + ' bytes' + (lossless ? ', lossless' : '') + ')';
+      return { llmContent: label, returnDisplay: label };
     } finally {
-      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      fs.rmSync(stage, { recursive: true, force: true });
     }
-  }
-
-  private async compressPDF(file: string, level: number): Promise<void> {
-    // Doctor preflight: PDF compression uses ghostscript. Fail loud if missing.
-    const gsMissing = await preflightBinaries(['ghostscript']);
-    if (gsMissing) throw new Error('convert_document compress needs ghostscript: ' + gsMissing);
-    const settings = ['/default','/screen','/ebook','/printer','/prepress','/prepress'];
-    const s = settings[Math.min(level, 5)];
-    const tmp = file + '.tmp.pdf';
-    const gsCmd = process.platform === 'win32' ? 'gswin64c' : 'gs';
-    await execAsync(`${gsCmd} -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=${s} -dNOPAUSE -dQUIET -dBATCH -sOutputFile="${tmp}" "${file}"`, { maxBuffer:100*1024*1024 });
-    if (fs.existsSync(tmp)) { fs.unlinkSync(file); fs.renameSync(tmp, file); }
   }
 }

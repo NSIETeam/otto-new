@@ -481,7 +481,7 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
     );
 
     await runtime.initialize();
-    await runtime.run([{ type: 'text', value: '回答这个问题' }], 'local');
+    await runtime.run([{ type: 'text', value: '你好' }], 'local');
 
     expect(execute).toHaveBeenCalledTimes(3);
     expect(frames).toContainEqual({
@@ -502,7 +502,7 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
       if (rounds <= 3) yield toolChunk('read_file', `read-${rounds}`);
       else yield chunk('这些资料说明了三个不同的情况。', 'STOP');
     })()], execute);
-    (await config.getToolRegistry()).getAllTools()[0].name = 'read_file';
+    Object.assign((await config.getToolRegistry()).getAllTools()[0], { name: 'read_file' });
     vi.spyOn(config, 'getMaxSessionTurns').mockReturnValue(cap);
     const store = new InMemorySessionStore();
     const session = store.createSession();
@@ -548,7 +548,7 @@ describe('CoreSessionRuntime · 下一代任务控制层', () => {
     );
 
     await runtime.initialize();
-    await runtime.run([{ type: 'text', value: '回答这个问题' }], 'local');
+    await runtime.run([{ type: 'text', value: '你好' }], 'local');
 
     expect(execute).not.toHaveBeenCalled();
     expect(frames).toContainEqual({

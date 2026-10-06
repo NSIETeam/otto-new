@@ -4,6 +4,22 @@ import { runDocumentCommand, type ExecFileImplementation } from './documentComma
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 describe('shared document process lifecycle', () => {
+  it.each([new Error('spawn denied'), 'spawn denied'])('rejects synchronous process-launch failure: %s', async (failure) => {
+    await expect(runDocumentCommand('synthetic', [], { execFileImpl: () => { throw failure; } })).rejects.toThrow('spawn denied');
+  });
+
+  it('settles cancellation without an exit callback even when killing races with exit', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const assertion = expect(runDocumentCommand('synthetic', [], {
+      platform: 'linux', signal: controller.signal,
+      execFileImpl: () => ({ kill: () => { throw new Error('already exited'); } }),
+    })).rejects.toThrow(/cancel/i);
+    controller.abort('cancelled');
+    await vi.advanceTimersByTimeAsync(1600);
+    await assertion;
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('does not spawn after cancellation', async () => {
     const controller = new AbortController(); controller.abort();
     const execFileImpl = vi.fn<ExecFileImplementation>((_file, _args, _options, callback) => callback(null, '', ''));
@@ -37,6 +53,7 @@ describe('shared document process lifecycle', () => {
     const assertion = expect(promise).rejects.toThrow(/timeout|超时/i);
     await vi.advanceTimersByTimeAsync(25);
     callback(null, '', '');
+    await vi.advanceTimersByTimeAsync(600);
     await assertion;
     expect(kill).toHaveBeenCalled();
   });

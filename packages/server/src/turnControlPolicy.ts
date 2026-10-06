@@ -24,13 +24,14 @@ export interface TurnControlInput {
 }
 
 const RESEARCH_PATTERN =
-  /(?:最新|实时|当前|查找|搜索|检索|调研|研究|核实|验证来源|官方来源|比较|对比|look\s*up|search|research|latest|current|compare|verify\s+(?:the\s+)?source)/iu;
+  /(?:最新|实时|当前|查找|搜索|检索|调研|研究|竞品分析|市场分析|行业分析|核实|验证来源|官方来源|比较|对比|look\s*up|search|research|latest|current|compare|verify\s+(?:the\s+)?source)/iu;
 const DIAGNOSE_PATTERN =
   /(?:为什么|原因|排查|诊断|报错|错误|异常|白屏|失效|无法|问题|bug|root\s*cause|diagnos|troubleshoot|error|exception|not\s+working|failed)/iu;
 const CHANGE_PATTERN =
   /(?:修改|修复|实现|升级|优化|重构|新增|添加|移除|删掉|配置|安装|更新|合并|迁移|改造|change|modify|fix|implement|upgrade|refactor|add|remove|configure|install|update|migrate)/iu;
 const ARTIFACT_PATTERN =
-  /(?:生成|创建|制作|导出).{0,12}(?:文档|报告|表格|幻灯片|ppt|图片|图像|文件|安装包|压缩包)|(?:create|generate|export).{0,20}(?:document|report|spreadsheet|slides?|image|file|package)|(?:生成|创建|制作|导出|\bcreate\b|\bgenerate\b|\bexport\b)\s*[`"']?[^\s，,。；;\n]{1,120}\.(?:json|csv|md|txt|html|pdf|docx|xlsx|pptx)\b/iu;
+  /(?:生成|创建|制作|导出|做|写|整理成|转成|转换为).{0,12}(?:文档|报告|表格|幻灯片|ppt|word|pdf|docx|xlsx|图片|图像|文件|安装包|压缩包)|(?:create|generate|export|make|convert).{0,30}(?:document|report|spreadsheet|slides?|image|file|package|word|docx|pdf)|(?:生成|创建|制作|导出|\bcreate\b|\bgenerate\b|\bexport\b)\s*[`"']?[^\s，,。；;\n]{1,120}\.(?:json|csv|md|txt|html|pdf|docx|xlsx|pptx)\b/iu;
+const CONCEPTUAL_REQUEST = /^(?:(?:请)?(?:解释|介绍|说明).*(?:原理|含义)|(?:什么是|what\s+is).+|.+(?:是什么|什么意思))[？?。.!！]?$/iu;
 const ENTERPRISE_PATTERN =
   /(?:企业|园区|组织|部门|员工|工单|客服|许可证|授权|产业园|enterprise|organization|department|ticket|license)/iu;
 const EXTERNAL_WRITE_PATTERN =
@@ -146,6 +147,7 @@ function criteriaFor(
 }
 
 function inferIntent(text: string, source: MessageSource): TurnIntent {
+  if (CONCEPTUAL_REQUEST.test(text) && !EXTERNAL_WRITE_PATTERN.test(text) && !DESTRUCTIVE_PATTERN.test(text)) return 'answer';
   if (
     ENTERPRISE_PATTERN.test(text) &&
     (ENTERPRISE_ACTION_PATTERN.test(text) ||

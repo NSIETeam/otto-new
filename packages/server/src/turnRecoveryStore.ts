@@ -519,25 +519,51 @@ export class FileTurnRecoveryStore {
       if (!record || record.turnId !== turnId) {
         throw new Error('turn recovery record not found');
       }
-      await mkdir(path.join(this.root, 'resolved'), { recursive: true });
-      const resolved = {
-        ...record,
-        resolution,
-        resolvedAt: Date.now(),
-      };
-      const target = path.join(
-        this.root,
-        'resolved',
-        `${hash(sessionId)}-${hash(turnId).slice(0, 16)}.json`,
-      );
-      const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
-      await writeFile(temporary, `${JSON.stringify(resolved, null, 2)}\n`, {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
-      await this.replaceRecord(temporary, target);
-      await unlink(this.pathForSession(sessionId));
+      await this.archiveResolved(record, resolution);
     });
+  }
+
+  /** Check the latest record inside the same serialized operation as archival.
+   * Never discard write receipts or unknown outcomes to unlock a new request. */
+  async abandonReadOnly(sessionId: string, turnId: string): Promise<boolean> {
+    return this.serialize(sessionId, async () => {
+      const record = await this.load(sessionId);
+      if (
+        !record || record.turnId !== turnId || record.status !== 'active' ||
+        (record.continuity && TaskContinuityLedger.restore(record.continuity).pending)
+      ) return false;
+      if (!record.tools.every(tool =>
+        (tool.state === 'succeeded' || tool.state === 'failed') &&
+        (
+          (tool.replayClass === 'replayable' && isParallelSafeToolName(tool.name)) ||
+          ['use_skill', 'ask_user_question', 'delegate_status', 'update_plan', 'todo_write', 'validate_skill_draft'].includes(tool.name)
+        )
+      )) return false;
+      await this.archiveResolved(record, 'abandoned');
+      return true;
+    });
+  }
+
+  private async archiveResolved(record: TurnRecoveryRecord, resolution: TurnRecoveryResolution): Promise<void> {
+    const { sessionId, turnId } = record;
+    await mkdir(path.join(this.root, 'resolved'), { recursive: true });
+    const resolved = {
+      ...record,
+      resolution,
+      resolvedAt: Date.now(),
+    };
+    const target = path.join(
+      this.root,
+      'resolved',
+      `${hash(sessionId)}-${hash(turnId).slice(0, 16)}.json`,
+    );
+    const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(resolved, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    await this.replaceRecord(temporary, target);
+    await unlink(this.pathForSession(sessionId));
   }
 
   async clear(sessionId: string, turnId: string): Promise<void> {

@@ -136,4 +136,13 @@ describe('document conversion outcome and cancellation contract', () => {
     expect(fs.readFileSync(output, 'utf8')).toBe('synthetic merged output');
     expect(fs.readdirSync(root).filter(file => file.startsWith('.otto-convert-'))).toEqual([]);
   });
+
+  it('fails PDF merge cleanly when the merge executable is missing', async () => {
+    const a = path.join(root, 'a.pdf'); const b = path.join(root, 'b.pdf');
+    fs.writeFileSync(a, 'first'); fs.writeFileSync(b, 'second'); fs.writeFileSync(output, 'old artifact');
+    const tool = new ConvertDocumentTool(createMockConfig(), { runCommand: async () => { throw new Error('executable unavailable'); } });
+    await expect(tool.execute({ input_paths: [a, b], merge: true, output_format: 'pdf', output_path: output }, new AbortController().signal)).rejects.toThrow('pdfunite');
+    expect(fs.readFileSync(output, 'utf8')).toBe('old artifact');
+    expect(fs.readdirSync(root).filter(file => file.startsWith('.otto-convert-'))).toEqual([]);
+  });
 });

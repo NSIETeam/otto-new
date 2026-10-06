@@ -72,14 +72,14 @@ import { REPAIR_PLAN_TOOL_NAME, REPAIR_FORMAT_TOOL_NAME, REPAIR_TOOL_DECLARATION
 import { CLAIM_REVIEW_TOOL_NAME, CLAIM_REVIEW_DECLARATION } from './claimEvidenceTools.js';
 import { TurnDirectiveLedger } from './turnDirectiveLedger.js';
 import { TurnConstraintGuard } from './turnConstraints.js';
-import { resolveTurnRequest } from './turnContinuation.js';
+import { isContinuationRequest, resolveTurnRequest } from './turnContinuation.js';
 import {
   incompleteDelivery,
   retainedDeliveryDraft,
   unverifiedDeliveryText,
 } from './incompleteDelivery.js';
 import { hasSuccessfulProcessReceipt, hasFailedVerificationReceipt, verificationKind } from './verificationEvidence.js';
-import { refineComplexityFromObjectives } from './complexityRouter.js';
+import { refineComplexityFromObjectives, refineComplexityForReadTools } from './complexityRouter.js';
 import {
   AdaptiveExecutionCoordinator,
   type AdaptiveAttemptReview,
@@ -697,16 +697,12 @@ export class CoreSessionRuntime implements SessionRuntime {
       .map((part) => part.text ?? '')
       .filter(Boolean)
       .join('\n');
-    const recoveredContinuity = recovery?.continuity ? TaskContinuityLedger.restore(recovery.continuity) : undefined;
-    const resumeUtterance = /^(?:继续(?:吧|执行|处理)?|接着(?:执行|处理)?|continue|proceed)[。.!！]?$/iu.test(submittedText.trim());
+    let recoveredContinuity = recovery?.continuity ? TaskContinuityLedger.restore(recovery.continuity) : undefined;
+    const resumeUtterance = isContinuationRequest(submittedText);
     const workspacePath = this.store.getSession(this.sessionId)?.workspacePath;
     const validOrigin = !context || !!userMessage;
     const canResume = recoveredContinuity && validOrigin && source === 'local' && recoveredContinuity.request.source === source &&
       recoveredContinuity.request.workspacePath === workspacePath && (resumeUtterance || recoveredContinuity.request.text === submittedText || recovery?.intentHash === intentHash);
-    if (recovery && ((recoveredContinuity && !canResume) || (!recoveredContinuity && recovery.intentHash !== intentHash))) {
-      this.fail('recovery_reconciliation_required', '上一项任务仍有未完成工作或待核对的执行结果。请明确继续原任务，或先核对并结束其恢复记录。');
-      this.running = false; this.abort = undefined; return;
-    }
     let requestResolution = resolveTurnRequest({
       text: submittedText,
       source,
@@ -718,6 +714,23 @@ export class CoreSessionRuntime implements SessionRuntime {
           }
         : {}),
     });
+    if (recovery && ((recoveredContinuity && !canResume) || (!recoveredContinuity && recovery.intentHash !== intentHash))) {
+      const canSwitch = validOrigin && source === 'local' && !resumeUtterance && requestResolution.kind === 'fresh' &&
+        (!recoveredContinuity || (recoveredContinuity.request.source === source && recoveredContinuity.request.workspacePath === workspacePath));
+      try {
+        if (canSwitch && await this.recoveryStore?.abandonReadOnly(this.sessionId, recovery.turnId)) {
+          this.pendingRecovery = null;
+          recovery = null;
+          recoveredContinuity = undefined;
+        }
+      } catch {
+        // Archival failure must retain the recovery point and block switching.
+      }
+      if (recovery) {
+        this.fail('recovery_reconciliation_required', '上一项任务仍有写入记录、执行中或待核对的结果。请明确继续原任务，或先核对其恢复记录；不会自动重复操作。');
+        this.running = false; this.abort = undefined; return;
+      }
+    }
     if (canResume && recoveredContinuity) {
       requestResolution = { kind: 'continued', request: recoveredContinuity.request };
       // The ledger was committed before the WS acknowledgement. Recreate a
@@ -1415,6 +1428,10 @@ export class CoreSessionRuntime implements SessionRuntime {
           }
         }
 
+        turnControl.complexity = refineComplexityForReadTools(
+          turnControl.complexity, turnControl.riskLevel,
+          processed.some(call => !!call.name && isParallelSafeToolName(call.name) && !!toolRegistry.getTool(call.name)),
+        );
         const remainingToolCalls =
           turnControl.complexity.budget.maxToolCalls - toolCallCount;
         if (processed.length > remainingToolCalls) {

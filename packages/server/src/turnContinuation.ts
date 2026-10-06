@@ -26,6 +26,10 @@ const normalizedUtterance = (text: string) =>
     .replace(/[。.!！]+$/u, '')
     .trim();
 
+export function isContinuationRequest(text: string): boolean {
+  return CONTINUE.test(normalizedUtterance(text));
+}
+
 export type TurnRequestResolution =
   | { kind: 'fresh'; request: AgentTaskRequest }
   | {
@@ -85,7 +89,7 @@ export function resolveTurnRequest(input: {
       '请明确要继续哪项任务，以及是否调整原来的要求；这句话不会替代具体操作的授权确认。',
     );
   }
-  if (!CONTINUE.test(utterance)) return { kind: 'fresh', request };
+  if (!isContinuationRequest(utterance)) return { kind: 'fresh', request };
 
   const lastUser = [...history]
     .reverse()

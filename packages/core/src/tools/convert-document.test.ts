@@ -148,26 +148,17 @@ describe('ConvertDocumentTool', () => {
     const f = path.join(tmpDir, 'doc.md'); fs.writeFileSync(f, '# Title\n\nBody');
     const out = path.join(tmpDir, 'doc.html');
     // .md -> .html routes to pandoc via auto engine
-    const r = await tool.execute({ input_path: f, output_format: 'html', engine: 'pandoc', output_path: out }, new AbortController().signal);
-    expect(r.llmContent).toContain('FAIL');
-    expect(r.llmContent.toLowerCase()).toContain('pandoc');
-    expect(r.llmContent).toContain('brew install pandoc');
+    await expect(tool.execute({ input_path: f, output_format: 'html', engine: 'pandoc', output_path: out }, new AbortController().signal)).rejects.toThrow(/pandoc/);
+    expect(fs.existsSync(out)).toBe(false);
   });
 
   it.runIf(!libreofficeAvailable)('libreoffice conversion fails loud with install command when libreoffice is missing', async () => {
     const f = path.join(tmpDir, 'doc.md'); fs.writeFileSync(f, '# Title');
     const out = path.join(tmpDir, 'doc.docx');
-    const r = await tool.execute({ input_path: f, output_format: 'docx', engine: 'libreoffice', output_path: out }, new AbortController().signal);
-    expect(r.llmContent).toContain('FAIL');
-    expect(r.llmContent.toLowerCase()).toContain('libreoffice');
-    expect(r.llmContent).toContain(
-      process.platform === 'darwin'
-        ? 'brew install --cask libreoffice'
-        : 'winget install pandoc LibreOffice',
-    );
+    await expect(tool.execute({ input_path: f, output_format: 'docx', engine: 'libreoffice', output_path: out }, new AbortController().signal)).rejects.toThrow(/libreoffice|soffice/i);
+    expect(fs.existsSync(out)).toBe(false);
   });
 
-  // NOTE: pure PDF compression (pdf->pdf + compress) first runs the libreoffice
-  // conversion step, so a ghostscript-only preflight cannot be isolated without
-  // libreoffice present; covered instead at the unit level by the ghostscript spec.
+  // Pure PDF compression stages the input directly. Missing/empty compression
+  // output and preservation of the original are covered by the recovery suite.
 });

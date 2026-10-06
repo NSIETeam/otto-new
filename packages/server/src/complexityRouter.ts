@@ -93,7 +93,7 @@ function budgetFor(
       maxReplans: 6,
     };
   }
-  if (level === 'moderate') {
+  if (level === 'moderate' || route === 'parallel_tools') {
     return {
       maxParallelTools: parallelism,
       maxModelRounds: 10,
@@ -297,6 +297,7 @@ export function routeTurnComplexity(
   }
   if (input.intent === 'research' || input.intent === 'diagnose') {
     return makeProfile(input, {
+      // Retrieval, verification and synthesis need separate model round trips.
       level: score >= 2 ? 'moderate' : 'simple',
       score,
       route: 'parallel_tools',
@@ -326,4 +327,24 @@ export function routeTurnComplexity(
     exposesWorkflowTool: false,
     reasons,
   });
+}
+
+/** Actual registered read tools may reveal work missed by lexical cold-start.
+ * Fixed promotion, not a per-call refill. Authority, route and parallelism stay put. */
+export function refineComplexityForReadTools(
+  baseline: TurnComplexityProfile,
+  riskLevel: TurnRiskLevel,
+  hasRegisteredReadTool: boolean,
+): TurnComplexityProfile {
+  if (
+    !hasRegisteredReadTool ||
+    baseline.route !== 'direct' ||
+    baseline.level !== 'simple' ||
+    riskLevel !== 'read_only'
+  ) return baseline;
+  return {
+    ...baseline,
+    level: 'moderate',
+    budget: { ...baseline.budget, maxModelRounds: 10, maxToolCalls: 32 },
+  };
 }

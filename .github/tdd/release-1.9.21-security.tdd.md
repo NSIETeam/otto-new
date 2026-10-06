@@ -57,6 +57,19 @@ all mandatory validation succeeds. No such production change has occurred.
   assertions. No baseline, production verifier, threshold or budget changed;
   the original runner still rejects the new lock until the separate authorized
   native-measurement review is complete.
+- `211fbab4` RED: the separately authorized MCP lock-only evidence target
+  executed 13 assertions, with two failures and 11 passes before either new
+  review record existed. GREEN: each platform review binds its own new original
+  native measurement to SDK 1.31.0 and the four verified lock fields only.
+  Windows run `31e6dec6-f7b5-471a-9856-c4073ca98af4` and macOS run
+  `acfc89cc-438c-4a91-afa7-d1f4bd265a42` each passed all 2,249 assertions in
+  271 files, with native exit 0. Both original old-environment gate failures
+  remain recorded. All 283 file entries and required tests are byte-equivalent
+  to the preceding reviewed budgets. No test, threshold, metric, hint or
+  historical review changed. The unchanged ratchet accepted both candidate
+  baselines against their original reports; the evidence/runner/ratchet targets
+  passed 105 assertions and the SDK security target passed 30 assertions.
+  A fresh full current-head CI is still required, not implied by this review.
 
 The upstream SDK advisory is
 [GHSA-6qxp-vccf-f47h](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h).
@@ -67,7 +80,9 @@ attack assessment or first-party credential migration. No real credential was
 used or authorization server contacted. The initial default-runtime doctor
 used Node 24; the direct Node 22 doctor could not spawn the local npm command.
 That local launcher failure is retained, not counted as a passing Node 22
-doctor. Tests and typecheck above explicitly used the installed Node 22 binary.
+doctor. Subsequently invoking the installed npm CLI with the actual Node
+22.23.1 binary passed all doctor checks without changing doctor logic or
+runtime identity. Tests and typecheck above explicitly used that Node 22 binary.
 
 Commands used installed Node 22.23.1 and Vitest 4.1.11. Upstream archives were
 read and hashed, not executed. No shell exploit was executed; quoting tests
@@ -91,6 +106,11 @@ gate records are preserved by the corresponding 1.9.21 platform reviews.
 The updated gzip identities are Windows
 `af5e6ef103449d1e9db84846a502ea9db097398be3807d7001af89a91ad3e598`
 and macOS `e0399fd7a0b9d38a55b97cdf25a848552f86a4cdfab9892f9e26f0c91dec8f8b`.
+The supplemental SDK-only reviewed gzip identities are Windows
+`fbd1b4b92835a84387a489535e329f34e4ea9be09604403182f23abe25353550`
+and macOS `211b6097d5d756d5c0e68d8119e0901c5d55b90d332d38eddfc930b814708ca0`.
+The prior files and all original native receipts remain retained; this is an
+appended environment review, not replacement historical measurements.
 A subsequent Windows run `7aaebfd6-9b98-4780-9067-1fdf0f805912` lost its
 execution session without a final receipt. Its partial logs remain retained;
 it is not counted as a successful test or substituted for a completed run.

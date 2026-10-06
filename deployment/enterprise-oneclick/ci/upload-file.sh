@@ -13,7 +13,9 @@ otto_upload_file() {
     *) return 2 ;;
   esac
   [ -f "$file" ] && [ ! -L "$file" ] || return 2
-  size="$(stat -c '%s' -- "$file")" || return 2
+  # POSIX wc accepts both GNU/Linux and BSD/macOS clients. Redirecting the
+  # input avoids option/path interpretation; normalize wc's leading padding.
+  size="$(wc -c < "$file" | tr -d '[:space:]')" || return 2
   digest="$(sha256sum -- "$file" | awk '{print $1}')" || return 2
   [[ "$size" =~ ^[1-9][0-9]{0,9}$ && "$digest" =~ ^[0-9a-f]{64}$ ]] || return 2
   expected="uploaded kind=${kind} transaction=${transaction} role=${role} size=${size} sha256=${digest}"
@@ -38,7 +40,7 @@ otto_upload_file() {
     [ "$complete" = true ] || [ "$complete" = false ] || return 2
     # Recheck the complete local identity after status: a changed local file
     # must not be mistaken for an approved resume or a lost-receipt success.
-    [ "$(stat -c '%s' -- "$file")" = "$size" ] \
+    [ "$(wc -c < "$file" | tr -d '[:space:]')" = "$size" ] \
       && [ "$(sha256sum -- "$file" | awk '{print $1}')" = "$digest" ] || return 2
     prefix="$(head -c "$offset" -- "$file" | sha256sum | awk '{print $1}')" || return 2
     [ "$state" = "upload_state kind=${kind} transaction=${transaction} role=${role} size=${size} sha256=${digest} offset=${offset} prefix_sha256=${prefix} complete=${complete}" ] || {

@@ -1,5 +1,8 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
@@ -149,7 +152,7 @@ describe('artifact-only desktop packaging validation', () => {
     expect(commands.indexOf('COPYFILE_EXCL')).toBeLessThan(
       commands.indexOf('npm rebuild --foreground-scripts'),
     );
-    const mac = commands.split('\n          else\n')[1] ?? commands.split('\nelse\n')[1] ?? '';
+    const mac = commands.split(/\n\s*else\n/)[1] ?? '';
     expect(mac).toContain('node packages/desktop/scripts/prime-vscode-ripgrep-cache.mjs');
     expect(mac.indexOf('prime-vscode-ripgrep-cache.mjs')).toBeLessThan(
       mac.indexOf('npm ci'),
@@ -159,6 +162,56 @@ describe('artifact-only desktop packaging validation', () => {
     expect(commands).toContain('ripgrep 15.0.0');
     expect(install.env).not.toHaveProperty('GH_TOKEN');
     expect(install.env).not.toHaveProperty('GITHUB_TOKEN');
+  });
+
+  it('executes the actual Windows bootstrap with integrity, no-overwrite and link protections', () => {
+    const bootstrap = (step('Install locked dependencies').run ?? '').match(
+      /node --input-type=module <<'NODE'\n([\s\S]*?)\nNODE/,
+    )?.[1];
+    expect(bootstrap).toBeTruthy();
+    const fixture = mkdtempSync(path.join(tmpdir(), 'otto-ripgrep-bootstrap-'));
+    try {
+      const scripts = path.join(fixture, 'packages/desktop/scripts');
+      const vendor = path.join(fixture, 'packages/desktop/vendor/win/ripgrep');
+      const library = path.join(fixture, 'node_modules/@vscode/ripgrep/lib');
+      const bin = path.join(fixture, 'node_modules/@vscode/ripgrep/bin');
+      for (const folder of [scripts, vendor, library]) mkdirSync(folder, { recursive: true });
+      copyFileSync(path.resolve(path.dirname(filename), '../../packages/desktop/scripts/ripgrep-runtime.mjs'), path.join(scripts, 'ripgrep-runtime.mjs'));
+      const bytes = Buffer.alloc(1024 * 1024);
+      bytes.write('MZ');
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      // Isolated synthetic verifier fixture, not a claim of upstream provenance.
+      writeFileSync(path.join(scripts, 'ripgrep-integrity.mjs'),
+        `export const MACOS_RIPGREP_INTEGRITY = {};\nexport const WINDOWS_RIPGREP_INTEGRITY = {'v15.0.0': { executableSha256: '${digest}' }};\n`);
+      writeFileSync(path.join(library, 'postinstall.js'), "const VERSION = 'v15.0.0';\n");
+      const sourceFile = path.join(vendor, 'rg.exe');
+      const destination = path.join(bin, 'rg.exe');
+      writeFileSync(sourceFile, bytes);
+      const run = () => spawnSync(process.execPath, ['--input-type=module', '--eval', bootstrap], { cwd: fixture, encoding: 'utf8', timeout: 15000, windowsHide: true });
+      expect(run().status).toBe(0);
+      expect(readFileSync(destination)).toEqual(bytes);
+
+      const preserved = Buffer.from('previous fixture, never overwrite');
+      writeFileSync(destination, preserved);
+      expect(run().status).not.toBe(0);
+      expect(readFileSync(destination)).toEqual(preserved);
+      rmSync(bin, { recursive: true });
+
+      const corrupt = Buffer.from(bytes);
+      corrupt[100] = 1;
+      writeFileSync(sourceFile, corrupt);
+      expect(run().stderr).toContain('SHA256 mismatch');
+      expect(existsSync(bin)).toBe(false);
+      writeFileSync(sourceFile, bytes);
+
+      const linkTarget = path.join(fixture, 'owned-link-target');
+      mkdirSync(linkTarget);
+      symlinkSync(linkTarget, bin, 'junction');
+      expect(run().stderr).toContain('symbolic link');
+      expect(existsSync(path.join(linkTarget, 'rg.exe'))).toBe(false);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
   });
 
   it('revalidates both native matrices when the diagnostic packaging pipeline changes', () => {

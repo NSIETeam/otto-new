@@ -16,7 +16,7 @@ import { Config } from '../config/config.js';
 import { logger } from '../utils/enhancedLogger.js';
 import { isVSCodeEnvironment } from '../utils/environment/index.js';
 import { isWithinRoot } from '../utils/fileUtils.js';
-import micromatch from 'micromatch';
+import picomatch from 'picomatch';
 
 // --- Constants ---
 
@@ -826,16 +826,16 @@ export class GrepTool extends BaseTool<GrepToolParams, ToolResult> {
         const basename = entry.name;
         if (
           globPattern &&
-          !micromatch.isMatch(relative, globPattern) &&
-          !micromatch.isMatch(basename, globPattern)
+          !picomatch.isMatch(relative, globPattern) &&
+          !picomatch.isMatch(basename, globPattern)
         ) {
           continue;
         }
         if (typeGlob) {
           const typeGlobs = Array.isArray(typeGlob) ? typeGlob : [typeGlob];
           if (
-            !micromatch.isMatch(relative, typeGlobs) &&
-            !micromatch.isMatch(basename, typeGlobs)
+            !picomatch.isMatch(relative, typeGlobs) &&
+            !picomatch.isMatch(basename, typeGlobs)
           ) {
             continue;
           }

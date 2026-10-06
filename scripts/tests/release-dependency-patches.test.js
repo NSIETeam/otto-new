@@ -26,7 +26,7 @@ const qs = requireDependency('qs');
 
 describe('release dependency security patches', () => {
   it.each([
-    ['fast-uri', '3.1.6'],
+    ['fast-uri', '3.1.8'],
     ['qs', '6.16.0'],
   ])(
     'locks %s at the reviewed fix and installs that exact version',
@@ -112,7 +112,7 @@ describe('release dependency security patches (September 2026)', () => {
   // Exact versions are reviewed release inputs, not permission to accept arbitrary
   // newer releases. This test does not install packages or consult the network.
   it.each([
-    ['hono', '4.13.5'],
+    ['hono', '4.13.13'],
     ['js-yaml', '4.3.2'],
     ['gray-matter/node_modules/js-yaml', '3.15.2'],
     ['vitest', '4.1.11'],

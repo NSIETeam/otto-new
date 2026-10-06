@@ -100,7 +100,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(node --version)" = v22.23.1
           npm ci --ignore-scripts
-          test "$(node -p "require('./node_modules/electron/package.json').version")" = 43.2.0
+          test "$(node -p "require('./node_modules/electron/package.json').version")" = 43.7.7
           node node_modules/electron/install.js
       - name: Probe production image worker inside actual native Electron ASAR
         shell: bash

@@ -29,7 +29,8 @@ describe('October release security inputs', () => {
 
   it('removes the vulnerable braces tree rather than disguising a fork or accepting its advisory', () => {
     for (const name of ['braces', 'micromatch']) {
-      expect(Object.keys(lock.packages).some((key) => key.endsWith(`/${name}`))).toBe(false);
+      expect(Object.keys(lock.packages).some((key) =>
+        key === `node_modules/${name}` || key.endsWith(`/node_modules/${name}`))).toBe(false);
     }
     const source = readFileSync(path.join(root, 'packages/core/src/tools/grep.ts'), 'utf8');
     expect(source).toContain("import picomatch from 'picomatch'");

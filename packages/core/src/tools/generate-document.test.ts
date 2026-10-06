@@ -362,6 +362,9 @@ describe('GenerateDocumentTool', () => {
     expect(commands).toHaveLength(1);
     expect(commands[0].file).toContain('/runtime/darwin-arm64/python/bin/python3');
     expect(commands[0].args[0]).toContain('create_docx.py');
+    // External Python cannot read a script inside Electron's app.asar. Stage
+    // trusted source alongside the temporary Markdown before invoking it.
+    expect(path.dirname(String(commands[0].args[0]))).toBe(path.dirname(String(commands[0].args[1])));
     expect(commands[0].args[2]).not.toBe(out);
     expect(commands[0].args[2]).toMatch(/result\.docx$/);
     expect(fs.readFileSync(out, 'utf8')).toBe('PK fake docx');
@@ -375,9 +378,9 @@ describe('GenerateDocumentTool', () => {
   it('docx output enforces trusted Otto name and department instead of a computer login name', async () => {
     const out = path.join(tmpDir, 'trusted-identity.docx');
     let generatedMarkdown = '';
-    let docWriterScript = '';
+    let writerSource = '';
     const runner: DocumentCommandRunner = vi.fn(async (_file, args) => {
-      docWriterScript = String(args[0]);
+      writerSource = fs.readFileSync(String(args[0]), 'utf8');
       generatedMarkdown = fs.readFileSync(String(args[1]), 'utf8');
       fs.writeFileSync(args[2], Buffer.from('PK fake docx'));
     });
@@ -425,7 +428,6 @@ describe('GenerateDocumentTool', () => {
         }),
       }),
     );
-    const writerSource = fs.readFileSync(docWriterScript, 'utf8');
     expect(writerSource).toContain(
       'self.doc.core_properties.last_modified_by=self.m.get("author","")',
     );

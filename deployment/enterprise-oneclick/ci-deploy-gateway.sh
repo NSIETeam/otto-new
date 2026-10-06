@@ -1057,6 +1057,14 @@ def hash_opened(fd):
     return digest
 
 try:
+    # One unfinished identity per fixed destination. Otherwise a principal can
+    # accumulate arbitrarily many zero-length prefixes under different hashes
+    # without consuming the byte quota. Changing identity requires audited
+    # cleanup of the exact transaction, never silently abandoning old bytes.
+    for entry in os.listdir(directory_fd):
+        if (entry.startswith(f'.upload-{name}-') and entry.endswith('.partial')
+            and entry != partial_name):
+            raise ValueError('upload role has a different unfinished identity')
     digest = hashlib.sha256()
     prefix_size = 0
     if is_retry:

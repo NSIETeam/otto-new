@@ -27,6 +27,14 @@ describe('October release security inputs', () => {
     expect(Object.keys(lock.packages).some((key) => key.endsWith('/sprintf-js'))).toBe(false);
   });
 
+  it('removes the vulnerable braces tree rather than disguising a fork or accepting its advisory', () => {
+    for (const name of ['braces', 'micromatch']) {
+      expect(Object.keys(lock.packages).some((key) => key.endsWith(`/${name}`))).toBe(false);
+    }
+    const source = readFileSync(path.join(root, 'packages/core/src/tools/grep.ts'), 'utf8');
+    expect(source).toContain("import picomatch from 'picomatch'");
+  });
+
   it('preserves argparse camel-case APIs used by Mammoth and YAML CLIs', () => {
     const { ArgumentParser } = require('argparse');
     const parser = new ArgumentParser({ addHelp: false });

@@ -41,6 +41,15 @@ const verifierPath = path.join(
 );
 const temporaryDirectories = [];
 
+function npmFixtureEnvironment(npmFixture) {
+  // Windows process environments are case-insensitive. Avoid keeping an
+  // inherited NPM_EXECPATH alongside a lower-case synthetic fixture key.
+  const inherited = Object.fromEntries(Object.entries(process.env).filter(
+    ([name]) => !/^npm_(?:node_)?execpath$/i.test(name),
+  ));
+  return { ...inherited, CI: 'true', npm_execpath: npmFixture, npm_node_execpath: process.execPath };
+}
+
 async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, 'utf8'));
 }
@@ -457,12 +466,7 @@ describe('release dependency audit gate', () => {
       {
         cwd: repoRoot,
         encoding: 'utf8',
-        env: {
-          ...process.env,
-          CI: 'true',
-          npm_execpath: npmFixture,
-          npm_node_execpath: process.execPath,
-        },
+        env: npmFixtureEnvironment(npmFixture),
       },
     );
     expect(result.status).toBe(1);
@@ -499,12 +503,7 @@ describe('release dependency audit gate', () => {
       {
         cwd: repoRoot,
         encoding: 'utf8',
-        env: {
-          ...process.env,
-          CI: 'true',
-          npm_execpath: npmFixture,
-          npm_node_execpath: process.execPath,
-        },
+        env: npmFixtureEnvironment(npmFixture),
       },
     );
     expect(result.status).toBe(1);
@@ -532,12 +531,7 @@ describe('release dependency audit gate', () => {
         {
           cwd: repoRoot,
           encoding: 'utf8',
-          env: {
-            ...process.env,
-            CI: 'true',
-            npm_execpath: npmFixture,
-            npm_node_execpath: process.execPath,
-          },
+          env: npmFixtureEnvironment(npmFixture),
         },
       );
       expect(result.status).toBe(1);

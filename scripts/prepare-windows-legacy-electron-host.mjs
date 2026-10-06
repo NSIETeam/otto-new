@@ -5,6 +5,8 @@ import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 
 export const LEGACY_ELECTRON = Object.freeze({
   version: '43.2.0', bytes: 144326439,
@@ -48,8 +50,11 @@ async function main() {
   }
   mkdirSync(directory, { recursive: false });
   enter('download');
-  const { downloadArtifact } = await import('@electron/get');
-  const { default: extract } = await import('extract-zip');
+  // npm may nest these dependencies under Electron on a clean CI install.
+  // Resolve from Electron's own dependency boundary, not accidental hoisting.
+  const electronRequire = createRequire(createRequire(import.meta.url).resolve('electron/package.json'));
+  const { downloadArtifact } = await import(pathToFileURL(electronRequire.resolve('@electron/get')).href);
+  const extract = electronRequire('extract-zip');
   const zip = await downloadArtifact({
     version: LEGACY_ELECTRON.version, platform: 'win32', arch: 'x64', artifactName: 'electron',
     checksums: { 'electron-v43.2.0-win32-x64.zip': LEGACY_ELECTRON.sha256 },

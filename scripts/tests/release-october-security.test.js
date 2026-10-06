@@ -19,6 +19,7 @@ describe('October release security inputs', () => {
     ['source-map-js', '1.2.2'], ['postcss-selector-parser', '7.1.6'],
     ['global-agent', '4.1.3'], ['argparse', '2.0.1'],
     ['shell-quote', '1.11.0'], ['sharp', '0.35.5'],
+    ['@modelcontextprotocol/sdk', '1.31.0'],
   ])('pins every %s copy to the reviewed fix %s', (name, version) => {
     const entries = Object.entries(lock.packages).filter(([key]) =>
       key === `node_modules/${name}` || key.endsWith(`/node_modules/${name}`));
@@ -31,6 +32,23 @@ describe('October release security inputs', () => {
     expect(manifest('package.json').overrides['shell-quote']).toBe('1.11.0');
     expect(manifest('packages/core/package.json').dependencies['shell-quote']).toBe('1.11.0');
     expect(manifest('packages/server/package.json').dependencies.sharp).toBe('0.35.5');
+    expect(manifest('package.json').overrides['@modelcontextprotocol/sdk']).toBe('1.31.0');
+    expect(manifest('packages/core/package.json').dependencies['@modelcontextprotocol/sdk']).toBe('1.31.0');
+  });
+
+  it('preserves the authorization issuer when the actual SDK parses stored tokens', () => {
+    const { OAuthTokensSchema } = require('@modelcontextprotocol/sdk/shared/auth.js');
+    const token = { access_token: 'synthetic-access-token', token_type: 'Bearer',
+      refresh_token: 'synthetic-refresh-token', issuer: 'https://trusted.example' };
+    // Parse synthetic data only; never contact an authorization/token endpoint.
+    expect(OAuthTokensSchema.parse(token)).toMatchObject(token);
+  });
+
+  it('preserves the authorization issuer when the actual SDK parses registered client information', () => {
+    const { OAuthClientInformationSchema } = require('@modelcontextprotocol/sdk/shared/auth.js');
+    const information = { client_id: 'synthetic-client', client_secret: 'synthetic-secret',
+      issuer: 'https://trusted.example' };
+    expect(OAuthClientInformationSchema.parse(information)).toMatchObject(information);
   });
 
   it('admits the fixed Linux sharp closure and rejects the formerly reviewed affected version', () => {

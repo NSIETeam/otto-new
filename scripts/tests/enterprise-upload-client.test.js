@@ -1,6 +1,12 @@
 /** Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0 */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -10,11 +16,19 @@ const helper = 'deployment/enterprise-oneclick/ci/upload-file.sh';
 // Before implementation, execute the actual workflow's old upload function.
 // Afterwards, execute its shared helper. Never make real SSH/network calls.
 const workflow = parse(readFileSync('.github/workflows/release.yml', 'utf8'));
-const step = workflow.jobs['deploy-update-mirror'].steps.find(s => s.run?.includes('upload_file()'));
+const step = workflow.jobs['deploy-update-mirror'].steps.find((s) =>
+  s.run?.includes('upload_file()'),
+);
 const wrapper = step.run.match(/upload_file\(\) \{[\s\S]*?\n\}/)[0];
-const source = existsSync(helper) ? `${readFileSync(helper, 'utf8')}\n${wrapper}` : wrapper;
-const git = process.platform === 'win32'
-  ? execFileSync('where.exe', ['git'], { encoding: 'utf8' }).trim().split(/\r?\n/)[0] : null;
+const source = existsSync(helper)
+  ? `${readFileSync(helper, 'utf8')}\n${wrapper}`
+  : wrapper;
+const git =
+  process.platform === 'win32'
+    ? execFileSync('where.exe', ['git'], { encoding: 'utf8' })
+        .trim()
+        .split(/\r?\n/)[0]
+    : null;
 const bash = git ? path.resolve(path.dirname(git), '../bin/bash.exe') : 'bash';
 
 function exercise(mode) {
@@ -22,8 +36,13 @@ function exercise(mode) {
   writeFileSync(path.join(fixture, 'payload'), 'abcdefgh');
   try {
     const result = spawnSync(bash, ['--noprofile', '--norc'], {
-      encoding: 'utf8', timeout: 15000,
-      env: { ...process.env, FIXTURE: fixture.replaceAll('\\', '/'), MODE: mode },
+      encoding: 'utf8',
+      timeout: 15000,
+      env: {
+        ...process.env,
+        FIXTURE: fixture.replaceAll('\\', '/'),
+        MODE: mode,
+      },
       input: `set -Eeuo pipefail
 cd "$FIXTURE"
 digest="$(sha256sum payload | awk '{print $1}')"
@@ -67,36 +86,50 @@ fi
 printf '%s\\n' client-complete
 `,
     });
-    return { ...result, trace: existsSync(path.join(fixture, 'trace'))
-      ? readFileSync(path.join(fixture, 'trace'), 'utf8').trim().split(/\r?\n/) : [] };
-  } finally { rmSync(fixture, { recursive: true, force: true }); }
+    return {
+      ...result,
+      trace: existsSync(path.join(fixture, 'trace'))
+        ? readFileSync(path.join(fixture, 'trace'), 'utf8')
+            .trim()
+            .split(/\r?\n/)
+        : [],
+    };
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
 }
 
 describe('bounded, identity-checked SSH upload client', () => {
-  it.each(['prefix', 'lost'])('recovers %s without resending accepted bytes', mode => {
-    const result = exercise(mode);
-    expect(result.error).toBeUndefined();
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe('client-complete\n');
-    expect(result.trace.filter(c => c === 'upload-file')).toHaveLength(1);
-    expect(result.trace).toContain('upload-status');
-  });
+  it.each(['prefix', 'lost'])(
+    'recovers %s without resending accepted bytes',
+    (mode) => {
+      const result = exercise(mode);
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe('client-complete\n');
+      expect(result.trace.filter((c) => c === 'upload-file')).toHaveLength(1);
+      expect(result.trace).toContain('upload-status');
+    },
+  );
   it('stops after exactly three failed attempts', () => {
     const result = exercise('always-fails');
     expect(result.status).not.toBe(0);
-    expect(result.trace.filter(c => c === 'upload-file')).toHaveLength(3);
+    expect(result.trace.filter((c) => c === 'upload-file')).toHaveLength(3);
   });
-  it.each(['bad-prefix', 'status-denied', 'source-change', 'bad-role'])('fails closed before transfer (%s)', mode => {
-    const result = exercise(mode);
-    expect(result.error).toBeUndefined();
-    expect(result.status).not.toBe(0);
-    expect(result.trace.filter(c => c === 'upload-file')).toHaveLength(0);
-    expect(result.stdout).toBe('');
-  });
+  it.each(['bad-prefix', 'status-denied', 'source-change', 'bad-role'])(
+    'fails closed before transfer (%s)',
+    (mode) => {
+      const result = exercise(mode);
+      expect(result.error).toBeUndefined();
+      expect(result.status).not.toBe(0);
+      expect(result.trace.filter((c) => c === 'upload-file')).toHaveLength(0);
+      expect(result.stdout).toBe('');
+    },
+  );
   it('does not relax exact receipt comparison', () => {
     const result = exercise('wrong-receipt');
     expect(result.status).not.toBe(0);
-    expect(result.trace.filter(c => c === 'upload-file')).toHaveLength(1);
+    expect(result.trace.filter((c) => c === 'upload-file')).toHaveLength(1);
     expect(result.stdout).toBe('');
   });
 });

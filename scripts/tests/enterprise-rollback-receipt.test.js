@@ -31,23 +31,32 @@ describe('rollback receipt protocol', () => {
     gateway.indexOf('[ "$COMMAND" = \'deploy\' ] ||'),
   );
   const directTails = [
-    ['already-restored', directRollback.indexOf('    verify_current_deployment \\\n')],
-    ['first-restore', directRollback.lastIndexOf('  verify_current_deployment \\\n')],
+    [
+      'already-restored',
+      directRollback.indexOf('    verify_current_deployment \\\n'),
+    ],
+    [
+      'first-restore',
+      directRollback.lastIndexOf('  verify_current_deployment \\\n'),
+    ],
   ].map(([name, start]) => [
     name,
-    directRollback.slice(start, directRollback.indexOf('    exit 0', start) > start
-      ? directRollback.indexOf('    exit 0', start)
-      : directRollback.indexOf('  exit 0', start)),
+    directRollback.slice(start, directRollback.indexOf('exit 0', start)),
   ]);
 
-  it.each(directTails.flatMap(([name, code]) => [
-    [name, code, 0], [name, code, 7],
-  ]))('returns only the direct rollback receipt (%s, health=%s)', (name, code, status) => {
-    expect(code).toContain('write_once_durable');
-    const result = spawnSync(bash, [], {
-      encoding: 'utf8',
-      timeout: 5000,
-      input: `set -Eeuo pipefail
+  it.each(
+    directTails.flatMap(([name, code]) => [
+      [name, 0, code],
+      [name, 7, code],
+    ]),
+  )(
+    'returns only the direct rollback receipt (%s, health=%s)',
+    (name, status, code) => {
+      expect(code).toContain('write_once_durable');
+      const result = spawnSync(bash, [], {
+        encoding: 'utf8',
+        timeout: 5000,
+        input: `set -Eeuo pipefail
 fail() { printf '%s\\n' "$*" >&2; exit 2; }
 verify_current_deployment() { printf '%s\\n' '{"ok":true}' '[Otto Deploy] health checked'; return ${status}; }
 sync_live_deployment_filesystems() { printf '%s\\n' 'durability barrier' >&2; }
@@ -56,20 +65,21 @@ PREVIOUS_VERSION=fixture PREVIOUS_PACKAGE=fixture PREVIOUS_SOURCE=fixture
 DEPLOYMENT_STATE_DIR=fixture ROLLBACK_RECEIPT='rolled_back exact-locked-identity'
 ${code}
 `,
-    });
-    expect(result.error).toBeUndefined();
-    if (status === 0) {
-      expect(result.status).toBe(0);
-      expect(result.stdout).toBe('rolled_back exact-locked-identity\n');
-      expect(result.stderr).toContain('[Otto Deploy] health checked');
-      expect(result.stderr).toContain('write rolled-back');
-    } else {
-      expect(result.status).not.toBe(0);
-      expect(result.stdout).toBe('');
-      expect(result.stderr).not.toContain('durability barrier');
-      expect(result.stderr).not.toContain('write rolled-back');
-    }
-  });
+      });
+      expect(result.error).toBeUndefined();
+      if (status === 0) {
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe('rolled_back exact-locked-identity\n');
+        expect(result.stderr).toContain('[Otto Deploy] health checked');
+        expect(result.stderr).toContain('write rolled-back');
+      } else {
+        expect(result.status).not.toBe(0);
+        expect(result.stdout).toBe('');
+        expect(result.stderr).not.toContain('durability barrier');
+        expect(result.stderr).not.toContain('write rolled-back');
+      }
+    },
+  );
 
   it.each([0, 7])(
     'keeps health diagnostics separate and rejects failed verification (%s)',

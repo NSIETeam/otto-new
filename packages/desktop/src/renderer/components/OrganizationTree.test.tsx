@@ -260,6 +260,38 @@ describe('OrganizationTree', () => {
     expect(screen.getByText('还没有消息，开始聊聊吧。')).toBeTruthy();
   });
 
+  it.each(['resolve', 'reject'] as const)('ignores a late message %s and a stale poll after the conversation closes', async (outcome) => {
+    let poll!: () => void | Promise<void>;
+    vi.spyOn(nonOverlappingPoll, 'startNonOverlappingPoll').mockImplementation((task) => {
+      poll = task;
+      void task();
+      return () => {};
+    });
+    let resolve!: (messages: EnterpriseDirectMessage[]) => void;
+    let reject!: (error: Error) => void;
+    const enterpriseMessagesList = vi.fn(() => new Promise<EnterpriseDirectMessage[]>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    }));
+    const onMessageRead = vi.fn();
+    Object.assign(window.otto, { enterpriseMessagesList });
+    const view = render(<DirectMessagePanel
+      member={{ id: 'acc_2', username: 'bob', name: 'Bob', role: 'Manager', department: 'R&D', isAdmin: false, status: 'active' }}
+      currentAccount={authenticatedEnterpriseAccount} initialPosition={{ left: 0, top: 0 }}
+      stackOrder={1} onActivate={vi.fn()} onClose={vi.fn()} onMessageRead={onMessageRead}
+    />);
+    await act(async () => { await poll(); });
+    expect(enterpriseMessagesList).toHaveBeenCalledTimes(1);
+    view.unmount();
+    await act(async () => {
+      if (outcome === 'resolve') resolve([]);
+      else reject(new Error('synthetic late timeout'));
+      await poll();
+    });
+    expect(enterpriseMessagesList).toHaveBeenCalledTimes(1);
+    expect(onMessageRead).not.toHaveBeenCalled();
+  });
+
   it('pauses automatic retries for identity conflicts without resetting keys or sending a message', async () => {
     vi.useFakeTimers();
     const enterpriseMessagesList = vi.fn(async () => {

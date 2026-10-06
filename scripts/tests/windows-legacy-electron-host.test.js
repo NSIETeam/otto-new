@@ -3,10 +3,15 @@ import { describe, expect, it } from 'vitest';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
-  admittedHostDirectory, assertHistoricalZip, LEGACY_ELECTRON,
+  admittedHostDirectory, assertHistoricalZip, historicalHostTools, LEGACY_ELECTRON,
 } from '../prepare-windows-legacy-electron-host.mjs';
 
 describe('separate byte-pinned historical test host', () => {
+  it('loads download and extraction from the currently installed Electron dependency boundary', async () => {
+    const tools = await historicalHostTools();
+    expect(typeof tools.downloadArtifact).toBe('function');
+    expect(typeof tools.extract).toBe('function');
+  });
   const env = { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted',
     RUNNER_OS: 'Windows', RUNNER_TEMP: path.resolve('synthetic-fixture'),
     GITHUB_SHA: 'a'.repeat(40), GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1' };

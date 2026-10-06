@@ -34,6 +34,15 @@ export function assertHistoricalZip(bytes) {
   }
 }
 
+export async function historicalHostTools() {
+  // These are Electron's declared tools, including its native-safe extractor.
+  // Old extract-zip is no longer a dependency in the patched Electron release.
+  const electronRequire = createRequire(createRequire(import.meta.url).resolve('electron/package.json'));
+  const { downloadArtifact } = await import(pathToFileURL(electronRequire.resolve('@electron/get')).href);
+  const { extract } = await import(pathToFileURL(electronRequire.resolve('@electron-internal/extract-zip')).href);
+  return { downloadArtifact, extract };
+}
+
 async function main() {
   let stage = 'admission';
   const enter = (value) => { stage = value; console.log(`OTTO_LEGACY_HOST_STAGE ${stage}`); };
@@ -52,9 +61,7 @@ async function main() {
   enter('download');
   // npm may nest these dependencies under Electron on a clean CI install.
   // Resolve from Electron's own dependency boundary, not accidental hoisting.
-  const electronRequire = createRequire(createRequire(import.meta.url).resolve('electron/package.json'));
-  const { downloadArtifact } = await import(pathToFileURL(electronRequire.resolve('@electron/get')).href);
-  const extract = electronRequire('extract-zip');
+  const { downloadArtifact, extract } = await historicalHostTools();
   const zip = await downloadArtifact({
     version: LEGACY_ELECTRON.version, platform: 'win32', arch: 'x64', artifactName: 'electron',
     checksums: { 'electron-v43.2.0-win32-x64.zip': LEGACY_ELECTRON.sha256 },

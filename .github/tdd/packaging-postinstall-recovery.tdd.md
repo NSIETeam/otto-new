@@ -12,7 +12,10 @@ and macOS ARM job `112217208378` failed in `npm ci`: the upstream
 `@vscode/ripgrep` installer repeatedly received HTTP 403 while querying the
 GitHub release API. All five SQLCipher targets and both source-bound matrix
 attestations had succeeded. This was not a formal release or application
-runtime failure. The macOS x64 job was still running when this report was written.
+runtime failure. The macOS x64 job subsequently built its actual DMG but failed
+the runtime probe: ad-hoc signing changes the SQLCipher binary digest, while
+the diagnostic invocation omitted the formal workflow's strict signed-native
+verification option. No formal publication occurred.
 
 ## RED / GREEN
 
@@ -31,18 +34,33 @@ node node_modules/vitest/vitest.mjs run --config scripts/tests/vitest.config.ts 
 
 ## Smallest correction
 
-macOS uses the existing reviewed archive-and-executable cache before `npm ci`.
-Windows first materializes the unchanged lockfile without hooks, obtains and
-verifies the existing reviewed upstream binary, copies it without overwrite,
-then runs **all** rebuild hooks and the root postinstall. All hosts verify the
+All hosts first materialize the unchanged lockfile without hooks, run the source
+preflight before any generated vendor/native outputs, then prepare the reviewed
+binary. macOS uses the existing archive-and-executable cache. Windows verifies
+the existing reviewed upstream binary and copies it without overwrite. All
+hosts then run **all** rebuild hooks and the root postinstall, and verify the
 installed ripgrep digest and version afterwards. No credential is passed to
 npm or its hooks. The release workflow, installer/ASAR ceilings, native probes,
 seals, provenance and publication protections are unchanged.
 
+The first actual-runtime probe now uses `--require-native-code-signature` on
+both macOS architectures, matching the mounted DMG probe and the formal
+workflow. This validates the original attested source digest and requires the
+packaged native code signature; it is not a hash bypass. Windows still requires
+the packaged binary's exact raw digest. The verifier itself is unchanged.
+
+Additional RED/GREEN checkpoints on this task branch:
+
+- `87646723`: RED, four updated/new workflow checks failed, nine passed. These
+  exposed vendor generation before preflight and the missing signed-Mac option.
+- `88db3ec3`: GREEN, the same target passed thirteen tests, including the actual
+  Windows bootstrap integrity/no-overwrite/link fixtures. The ordering and both
+  macOS invocation contracts passed; native-host CI is still required.
+
 ## Verification and remaining admission
 
-Seven focused release/workflow suites passed **67 tests**, including the eleven
-diagnostic workflow tests. Doctor passed at **54.53 MB / 55 MB**, code-map check,
+Seven focused release/workflow suites passed **69 tests**, including thirteen
+diagnostic workflow tests. `npm run doctor` passed at **54.53 MB / 55 MB**, code-map check,
 changed-test ESLint and whitespace checks passed. The YAML branch/ordering
 contract and both inline link-guard branches were exercised; these results are
 not a whole-application coverage percentage or actual installer acceptance.

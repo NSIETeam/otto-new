@@ -94,6 +94,67 @@ describe('packaged server bin host boundary', () => {
 });
 
 describe('desktop packaging contract', () => {
+  it('limits Windows Chromium UI locales to the existing Chinese and English desktop scope', async () => {
+    const desktop = JSON.parse(
+      await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+    );
+    const { doMergeConfigs } = require('app-builder-lib/out/util/config/config.js');
+    const config = doMergeConfigs([desktop.build]);
+    expect(config.win.electronLanguages).toEqual([
+      'en-US', 'en-GB', 'zh-CN', 'zh-TW',
+    ]);
+    for (const locale of config.win.electronLanguages) {
+      expect(config.mac.electronLanguages).toContain(locale);
+    }
+  });
+
+  it('really trims Windows-only UI translations without removing ICU, licenses or runtime resources', async () => {
+    const desktop = JSON.parse(
+      await readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+    );
+    const { doMergeConfigs } = require('app-builder-lib/out/util/config/config.js');
+    const { createElectronFrameworkSupport } = require('app-builder-lib/out/electron/ElectronFramework.js');
+    const { Platform } = require('app-builder-lib/out/index.js');
+    const config = doMergeConfigs([desktop.build]);
+    const root = await mkdtemp(path.join(os.tmpdir(), 'otto-windows-locales-'));
+    try {
+      await mkdir(path.join(root, 'locales'));
+      await mkdir(path.join(root, 'resources'));
+      const required = ['en-US.pak', 'en-GB.pak', 'zh-CN.pak', 'zh-TW.pak'];
+      const unused = ['fr.pak', 'ja.pak', 'de.pak'];
+      const preserved = [
+        'icudtl.dat', 'resources.pak', 'LICENSE.electron.txt',
+        'LICENSES.chromium.html', 'resources/office-font.bin',
+        'locales/LICENSE', 'locales/custom-runtime.bin',
+      ];
+      for (const relative of [
+        'electron.exe', ...preserved,
+        ...[...required, ...unused].map((locale) => `locales/${locale}`),
+      ]) {
+        await writeFile(path.join(root, relative), relative);
+      }
+      const packager = {
+        config, platformSpecificBuildOptions: config.win, platform: Platform.WINDOWS,
+        appInfo: { productFilename: 'Otto' },
+        getResourcesDir: (directory) => path.join(directory, 'resources'),
+      };
+      const framework = await createElectronFrameworkSupport(config, packager);
+      await framework.beforeCopyExtraFiles({ appOutDir: root, packager });
+      for (const locale of required) {
+        expect(await readFile(path.join(root, 'locales', locale), 'utf8')).toBe(`locales/${locale}`);
+      }
+      for (const locale of unused) {
+        await expect(readFile(path.join(root, 'locales', locale))).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+      for (const relative of preserved) {
+        expect(await readFile(path.join(root, relative), 'utf8')).toBe(relative);
+      }
+      expect(await readFile(path.join(root, 'Otto.exe'), 'utf8')).toBe('electron.exe');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it.each(['mac', 'win'])('excludes compiled tests after real %s builder configuration normalization', async (platform) => {
     const desktop = JSON.parse(
       await readFile(path.join(packageRoot, 'package.json'), 'utf8'),

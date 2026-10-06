@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { resolveSharpRuntimePackages } from '../sharp-runtime-assets.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(path.join(root, 'package.json'));
@@ -29,6 +30,17 @@ describe('October release security inputs', () => {
     expect(manifest('package.json').overrides['shell-quote']).toBe('1.11.0');
     expect(manifest('packages/core/package.json').dependencies['shell-quote']).toBe('1.11.0');
     expect(manifest('packages/server/package.json').dependencies.sharp).toBe('0.35.5');
+  });
+
+  it('admits the fixed Linux sharp closure and rejects the formerly reviewed affected version', () => {
+    const packages = resolveSharpRuntimePackages(lock);
+    expect(packages.map(({ version }) => version).sort()).toEqual([
+      '0.35.5', '0.35.5', '1.3.4', '1.3.4',
+    ]);
+    const affected = structuredClone(lock);
+    affected.packages['node_modules/sharp'].version = '0.35.4';
+    affected.packages['packages/server'].dependencies.sharp = '0.35.4';
+    expect(() => resolveSharpRuntimePackages(affected)).toThrow(/unreviewed sharp version/);
   });
 
   it.each(['\n', '\r', '\u2028', '\u2029'])(

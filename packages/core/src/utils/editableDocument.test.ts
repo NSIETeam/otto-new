@@ -8,6 +8,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
+import mammoth from 'mammoth';
 import { exportEditedDocument, extractEditableDocument } from './editableDocument.js';
 import {
   buildBundledPythonEnvironment,
@@ -66,6 +67,9 @@ describe('editableDocument', () => {
     const documentXml = await zip.file('word/document.xml')?.async('string');
     expect(documentXml).toContain('Brief');
     expect(documentXml).toContain('• Done');
+    const relationships = await zip.file('word/_rels/document.xml.rels')?.async('string');
+    expect(relationships).toContain('relationships/styles');
+    expect((await mammoth.convertToHtml({ path: output })).value).toContain('<h1>Brief</h1>');
   });
 
   it('exports markdown edits to a PDF file or fails loud when fpdf2 is missing', async () => {

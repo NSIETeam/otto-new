@@ -126,7 +126,7 @@ describe('GenerateDocumentTool', () => {
     expect(runner).toHaveBeenCalledTimes(6);
   });
 
-  it('does not render after its selected Python fails preflight, and recovers when the failure cache expires', async () => {
+  it('uses disclosed native Word output while Python is missing and recovers advanced rendering after the failure cache expires', async () => {
     let now = 1000;
     vi.spyOn(Date, 'now').mockImplementation(() => now);
     const runner = vi.fn(async (_file: string, args: string[]) => {
@@ -136,8 +136,12 @@ describe('GenerateDocumentTool', () => {
       () => ({ source: 'system', executable: '/selected/python' }));
     const params = { content: '# Report', format: 'report' as const, output_format: 'docx' as const, output_path: path.join(tmpDir, 'recovered.docx') };
     try {
-      await expect(recovering.execute(params, new AbortController().signal)).rejects.toThrow('系统 Python 运行时检查失败');
-      await expect(recovering.execute(params, new AbortController().signal)).rejects.toThrow('synthetic import failure');
+      for (let round = 0; round < 2; round += 1) {
+        const result = await recovering.execute(params, new AbortController().signal);
+        expect(result.llmContent).toContain('内置 Word 基础排版');
+        const zip = await JSZip.loadAsync(fs.readFileSync(params.output_path));
+        expect(await zip.file('word/document.xml')!.async('string')).toContain('Report');
+      }
       expect(runner).toHaveBeenCalledTimes(1);
       now += 10_001;
       expect((await recovering.execute(params, new AbortController().signal)).llmContent).toContain('generate_document OK');
@@ -145,6 +149,44 @@ describe('GenerateDocumentTool', () => {
     } finally {
       vi.restoreAllMocks();
     }
+  });
+
+  it('creates five consecutive actual OOXML Word files without external Python and preserves trusted identity', async () => {
+    const runner = vi.fn(async () => { throw new Error('External renderer must not run'); });
+    const native = new GenerateDocumentTool(createMockConfig({
+      getDocumentIdentity: () => ({ name: '林一', department: '产品部' }),
+    }), undefined, runner, async () => 'Python unavailable');
+    for (let round = 1; round <= 5; round += 1) {
+      const out = path.join(tmpDir, `native-${round}.docx`);
+      const result = await native.execute({
+        title: `测试第${round}轮`, content: '## 正文\n\nA < B & C\n\n- 条目',
+        format: 'report', output_format: 'docx', author: 'computer-login', output_path: out,
+      }, new AbortController().signal);
+      expect(result.llmContent).toContain('generate_document OK');
+      expect(String(result.returnDisplay)).toContain('内置 Word 基础排版');
+      const zip = await JSZip.loadAsync(fs.readFileSync(out));
+      expect(zip.file('[Content_Types].xml')).not.toBeNull();
+      const xml = await zip.file('word/document.xml')!.async('string');
+      expect(xml).toContain(`测试第${round}轮`);
+      expect(xml).toContain('产品部 · 林一');
+      expect(xml).not.toContain('computer-login');
+      expect(xml).toContain('A &lt; B &amp; C');
+      expect(await zip.file('word/_rels/document.xml.rels')!.async('string')).toContain('relationships/styles');
+    }
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('does not write native fallback output after cancellation during the dependency check', async () => {
+    const controller = new AbortController();
+    const out = path.join(tmpDir, 'cancelled-native.docx');
+    const native = new GenerateDocumentTool(createMockConfig(), undefined, undefined, async () => {
+      controller.abort();
+      return 'Python unavailable';
+    });
+    await expect(native.execute({
+      content: '# Report', format: 'report', output_format: 'docx', output_path: out,
+    }, controller.signal)).rejects.toThrow(/取消|abort/i);
+    expect(fs.existsSync(out)).toBe(false);
   });
 
   it.each(['missing', 'empty', 'engine-error'] as const)('rejects %s output instead of reporting a successful tool call', async (failure) => {
@@ -545,7 +587,7 @@ describe('GenerateDocumentTool', () => {
     )).rejects.toThrow('@marp-team/marp-cli');
   });
 
-  it('article->docx fails loud with the Python dependency repair when bundled runtime is unavailable', async () => {
+  it('article->docx uses disclosed built-in layout when the advanced Python runtime is unavailable', async () => {
     const out = path.join(tmpDir, 'a.docx');
     const docxTool = new GenerateDocumentTool(
       createMockConfig(),
@@ -553,10 +595,14 @@ describe('GenerateDocumentTool', () => {
       vi.fn(),
       vi.fn(async (names) => names.includes('python-docx') ? 'python-docx 未安装：pip install python-docx' : null),
     );
-    await expect(docxTool.execute(
+    const result = await docxTool.execute(
       { content: '# Article\n\nText', format: 'article', output_format: 'docx', title: 'A', output_path: out },
       new AbortController().signal,
-    )).rejects.toThrow('pip install python-docx');
+    );
+    expect(result.llmContent).toContain('generate_document OK');
+    expect(String(result.returnDisplay)).toContain('内置 Word 基础排版');
+    const zip = await JSZip.loadAsync(fs.readFileSync(out));
+    expect(await zip.file('word/document.xml')!.async('string')).toContain('Article');
   });
 
   it('passes Marp, Typst, and Pandoc paths as structured argv', async () => {

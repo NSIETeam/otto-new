@@ -78,7 +78,7 @@ describe('enterprise knowledge prompt context', () => {
     vi.setSystemTime(new Date('2026-10-06T00:00:00Z'));
     const observed = new Date(Date.now() - days * 86_400_000).toISOString();
     const context = buildEnterpriseKnowledgePromptContext([{
-      id: 'observed', organizationId: 'org', sourceId: null, title: null,
+      id: 'observed', organizationId: 'org', sourceId: null,
       department: '', category: 'policy', content: '应复核操作依据', contributor: null,
       confidence: 0.9, status: 'active', version: 0, sourceType: 'auto_capture',
       evidenceCount: 4, distinctSessionCount: 3, distinctContributorCount: 2,
@@ -93,11 +93,11 @@ describe('enterprise knowledge prompt context', () => {
   it('formats missing optional evidence and an invalid observation date safely', () => {
     const context = buildEnterpriseKnowledgePromptContext([{
       id: 'empty', organizationId: 'org', sourceId: null, department: null,
-      category: 'policy', content: '', contributor: null, status: 'active',
+      category: 'policy', content: '', contributor: null, confidence: 0, status: 'active',
       sourceType: 'auto_capture', createdAt: 'invalid-date',
     }]);
     expect(context).toContain('范围：全组织');
-    expect(context).not.toContain('证据：');
+    expect(context).not.toContain('条证据');
   });
 
   it('includes citations and excludes pending or archived records', () => {

@@ -21,7 +21,7 @@ export async function lookupEnterpriseKnowledgeContext(
 ): Promise<EnterpriseKnowledgeLookupResult> {
   const trimmed = query.trim();
   if (!trimmed) return { status: 'skipped', context: '' };
-  let timer: ReturnType<typeof window.setTimeout> | undefined;
+  let timer: number | undefined;
   try {
     return await Promise.race([
       Promise.resolve().then(() => list({ query: trimmed })).then(

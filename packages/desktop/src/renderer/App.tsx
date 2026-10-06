@@ -125,6 +125,7 @@ import type {
 import { processEnterpriseAtoaRequest } from './enterpriseAtoaCoordinator.js';
 import { collectAuthorizedAtoaContext } from './a2aContext.js';
 import {
+  buildEnterpriseKnowledgePromptContext,
   enterpriseKnowledgeLookupNotice,
   lookupEnterpriseKnowledgeContext,
 } from './enterpriseKnowledgePromptContext.js';

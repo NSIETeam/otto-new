@@ -48,7 +48,11 @@ cd "$FIXTURE"
 digest="$(sha256sum payload | awk '{print $1}')"
 empty="$(printf '' | sha256sum | awk '{print $1}')"
 fixture_prefix_digest="$(printf abc | sha256sum | awk '{print $1}')"
-SSH_OPTIONS=() DEPLOY_USER=fixture DEPLOY_HOST=fixture.invalid
+# Use the same pinned, non-empty SSH options as the real caller. macOS's
+# Bash 3.2 treats an empty array as unset under nounset; a mock must not
+# invent a transport configuration the release workflow never uses.
+SSH_OPTIONS=(-o StrictHostKeyChecking=yes -o BatchMode=yes)
+DEPLOY_USER=fixture DEPLOY_HOST=fixture.invalid
 MIRROR_TRANSACTION_ID=v1.9.20-1-1
 sleep() { :; }
 if [ "$MODE" = bsd-stat ]; then
@@ -56,6 +60,8 @@ if [ "$MODE" = bsd-stat ]; then
 fi
 ssh() {
   local command='' arg
+  [ "$1" = -o ] && [ "$2" = StrictHostKeyChecking=yes ] && \
+    [ "$3" = -o ] && [ "$4" = BatchMode=yes ] || return 2
   for arg in "$@"; do
     case "$arg" in upload-status|upload-file) command="$arg"; break;; esac
   done

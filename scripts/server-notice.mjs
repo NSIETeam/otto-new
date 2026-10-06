@@ -46,11 +46,11 @@ const sharpLicenseSections = [
   },
   {
     "title": "THIRD-PARTY-NOTICES",
-    "sha256": "25ffcfa69e28b1913ced27ec778b90f24911a1bb3021253577e8b0af55db0d49"
+    "sha256": "6f0d5086e3bcbee12bcdacf5878b31d1104002aeecaeb241d3fff466108082fe"
   },
   {
-    "title": "MOZILLA-MPL-2.0",
-    "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+    "title": "CAIRO-MPL-1.1",
+    "sha256": "53692a2ed6c6a2c6ec9b32dd0b820dfae91e0a1fcdf625ca9ed0bdf8705fcc4f"
   }
 ];
 export const SERVER_NOTICE_ASAR_PATH = 'node_modules/otto-server/NOTICE';
@@ -76,10 +76,10 @@ export function readServerNotice(repoRoot) {
     'libde265 1.0.15',
     'ISC declaration',
     'corresponding-source.tar.gz',
-    'sharp 0.35.4',
-    'libvips 8.18.6',
+    'sharp 0.35.5',
+    'libvips 8.18.7',
     'LGPL-3.0-or-later',
-    'sharp-libvips-corresponding-source-audit-20260909.md',
+    'sharp-libvips-corresponding-source-audit-20261006.md',
   ]) {
     if (!text.includes(required)) {
       throw new Error(

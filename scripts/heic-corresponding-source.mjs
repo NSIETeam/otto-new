@@ -27,6 +27,7 @@ export const SHARP_RUNTIME_INPUTS = Object.freeze(reviewedInputs.sharpRuntimeInp
 const BUNDLED_LICENSE_FILES = Object.freeze([
   'GNU-LGPL-3.0.txt',
   'GNU-GPL-3.0.txt',
+  'Cairo-1.18.6-MPL-1.1.txt',
 ]);
 const requireThat = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -119,12 +120,12 @@ export function assertCleanSource(repoRoot) {
   return { sourceCommit, version, packageBytes, lockBytes, dependencies };
 }
 export function assertSharpLock(lock) {
-  const source = HEIC_SOURCE_INPUTS.find(input => input.file === 'sharp-0.35.4.tgz');
+  const source = HEIC_SOURCE_INPUTS.find(input => input.file === 'sharp-0.35.5.tgz');
   const reviewed = {
-    sharp: { version: '0.35.4', resolved: source.url, integrity: source.integrity },
+    sharp: { version: '0.35.5', resolved: source.url, integrity: source.integrity },
     ...SHARP_RUNTIME_INPUTS,
   };
-  requireThat(lock?.packages?.['packages/server']?.dependencies?.sharp === '0.35.4',
+  requireThat(lock?.packages?.['packages/server']?.dependencies?.sharp === '0.35.5',
     'source sidecar requires the exact reviewed sharp lock');
   return Object.entries(reviewed).map(([name, expected]) => {
     const entry = lock.packages[`node_modules/${name}`];
@@ -502,7 +503,8 @@ export async function buildCorrespondingSource({
     }
     for (const [from, to] of [
       ['docs/heic-corresponding-source.md', 'README.md'],
-      ['docs/sharp-libvips-corresponding-source-audit-20260909.md', 'SHARP-LIBVIPS.md'],
+      ['docs/sharp-libvips-corresponding-source-audit-20261006.md', 'SHARP-LIBVIPS.md'],
+      ['docs/sharp-libvips-corresponding-source-audit-20260909.md', 'SHARP-LIBVIPS-HISTORICAL.md'],
       ['packages/server/NOTICE', 'NOTICE'],
       ['scripts/heic-corresponding-source-inputs.json', 'upstream-inputs.json'],
     ]) {

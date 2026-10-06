@@ -118,7 +118,7 @@ async function stagedFixture(operation) {
       lock.packages[spec.location].integrity = digest(bytes);
     }
     writeFileSync(path.join(repoRoot, 'package-lock.json'), JSON.stringify(lock));
-    writeFileSync(path.join(repoRoot, 'node_modules/sharp/package.json'), JSON.stringify({ name: 'sharp', version: '0.35.4' }));
+    writeFileSync(path.join(repoRoot, 'node_modules/sharp/package.json'), JSON.stringify({ name: 'sharp', version: '0.35.5' }));
     const assets = await materializeSharpRuntimeAssets({ repoRoot, destination: path.join(temporary, 'assets'), fetchArchive: async spec => archives.get(spec.name) });
     await operation({ repoRoot, assets, temporary, lock, fetchArchive: async spec => archives.get(spec.name) });
   } finally { rmSync(temporary, { recursive: true, force: true }); }

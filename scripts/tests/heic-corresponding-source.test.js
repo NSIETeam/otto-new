@@ -45,11 +45,11 @@ const git = (root, ...args) =>
 const lock = () => ({
   lockfileVersion: 3,
   packages: {
-    'packages/server': { dependencies: { 'heic-decode': '2.1.0', sharp: '0.35.4' } },
+    'packages/server': { dependencies: { 'heic-decode': '2.1.0', sharp: '0.35.5' } },
     'node_modules/sharp': {
-      version: '0.35.4',
-      resolved: 'https://registry.npmjs.org/sharp/-/sharp-0.35.4.tgz',
-      integrity: 'sha512-n++8XWcj+jCOr2IOl7h8LbKnGBDY4aPbmprMONBNFdn0ImXqpGVv5zliDs0V9HbmbCQLpbuo2ej9rAoOQTvMDA==',
+      version: '0.35.5',
+      resolved: 'https://registry.npmjs.org/sharp/-/sharp-0.35.5.tgz',
+      integrity: 'sha512-Ywn4OnzGukp7CDMrp08RQ50YKmuwG47brZgIVPTvBaaAfQlRlygrRqSrxdCiL9M+LlzLBiJ68IR1QqvzHyjC7g==',
     },
     ...Object.fromEntries(Object.entries(SHARP_RUNTIME_INPUTS).map(([name, entry]) => [`node_modules/${name}`, { ...entry }])),
     'node_modules/heic-decode': {
@@ -102,22 +102,24 @@ describe('HEIC corresponding-source release inputs', () => {
       expect(() => assertSharpLock(missing)).toThrow(/locked/);
     }
     const ranged = lock();
-    ranged.packages['packages/server'].dependencies.sharp = '^0.35.4';
+    ranged.packages['packages/server'].dependencies.sharp = '^0.35.5';
     expect(() => assertSharpLock(ranged)).toThrow(/reviewed/);
   });
   it('also retains the reviewed sharp/libvips sources, build recipes, relinking inputs and elected MPL license', () => {
     for (const file of [
-      'sharp-0.35.4.tgz', 'sharp-0.35.4-source.tar.gz',
-      'sharp-libvips-1.3.3-build-source.tar.gz', 'sharp-libvips-1.3.3-posix.sh',
-      'build-win64-mxe-8.18.6-source.tar.gz', 'libvips-8.18.6-source-release.tar.xz',
-      'glib-2.89.4-source.tar.xz', 'pango-1.58.2-source.tar.xz',
-      'librsvg-2.62.91-source.tar.xz', 'fribidi-1.0.16-source.tar.xz',
+      'sharp-0.35.5.tgz', 'sharp-0.35.5-source.tar.gz',
+      'sharp-libvips-1.3.4-build-source.tar.gz', 'sharp-libvips-1.3.4-posix.sh',
+      'build-win64-mxe-8.18.7-source.tar.gz', 'libvips-8.18.7-source-release.tar.xz',
+      'glib-2.90.0-source.tar.xz', 'pango-1.58.2-source.tar.xz',
+      'librsvg-2.63.2-source.tar.xz', 'fribidi-1.0.17-source.tar.xz',
       'libexif-0.6.26-source.tar.xz', 'proxy-libintl-0.5-source.tar.gz',
-      'cairo-1.18.4-source.tar.xz', 'glib-without-gregex.patch',
-      'libvips-cpp-soversion.patch', 'sharp-libvips-dev-1.3.3.tgz',
-      'sharp-libvips-win32-x64-1.3.3.tgz', 'vips-dev-x64-web-8.18.6-static.zip',
-      'mxe-observed-d973945-source.tar.gz',
-      'sharp-libvips-1.3.3-THIRD-PARTY-NOTICES.md', 'Mozilla-MPL-2.0.txt',
+      'cairo-1.18.6-source.tar.xz', 'glib-without-gregex.patch',
+      'libvips-cpp-soversion.patch', 'sharp-libvips-dev-1.3.4.tgz',
+      'sharp-libvips-win32-x64-1.3.4.tgz', 'vips-dev-x64-web-8.18.7-static.zip',
+      'mxe-observed-c36160b-source.tar.gz',
+      'sharp-libvips-1.3.4-THIRD-PARTY-NOTICES.md', 'Mozilla-MPL-2.0.txt',
+      'libheif-native-1.23.5-source.tar.gz', 'librsvg-embedded-memory-limit-9106011.patch',
+      'Cairo-1.18.6-MPL-1.1.txt',
     ]) expect(HEIC_SOURCE_INPUTS.some(input => input.file === file), file).toBe(true);
     expect(new Set(HEIC_SOURCE_INPUTS.map(input => input.file)).size).toBe(HEIC_SOURCE_INPUTS.length);
     expect(HEIC_SOURCE_INPUTS.every(input => input.bytes <= 64 * 1024 * 1024)).toBe(true);
@@ -163,7 +165,7 @@ describe('HEIC corresponding-source release inputs', () => {
   it('uses only byte-verified license text from the exact committed source', () => {
     const root = repo();
     mkdirSync(path.join(root, 'scripts/licenses'), { recursive: true });
-    for (const name of ['GNU-LGPL-3.0.txt', 'GNU-GPL-3.0.txt']) {
+    for (const name of ['GNU-LGPL-3.0.txt', 'GNU-GPL-3.0.txt', 'Cairo-1.18.6-MPL-1.1.txt']) {
       const spec = HEIC_SOURCE_INPUTS.find(source => source.file === name);
       const original = Buffer.from(readFileSync(new URL(`../licenses/${name}`, import.meta.url), 'utf8').replaceAll('\r\n', '\n'));
       expect(verifyDownload(original, spec)).toEqual(original);
@@ -172,7 +174,7 @@ describe('HEIC corresponding-source release inputs', () => {
     git(root, 'add', 'scripts/licenses');
     git(root, '-c', 'user.name=Source test', '-c', 'user.email=source-test@invalid.example', 'commit', '-qm', 'reviewed licenses');
     const commit = assertCleanSource(root).sourceCommit;
-    for (const name of ['GNU-LGPL-3.0.txt', 'GNU-GPL-3.0.txt']) {
+    for (const name of ['GNU-LGPL-3.0.txt', 'GNU-GPL-3.0.txt', 'Cairo-1.18.6-MPL-1.1.txt']) {
       const spec = HEIC_SOURCE_INPUTS.find(source => source.file === name);
       expect(readBundledLicense(root, commit, spec)).toHaveLength(spec.bytes);
       writeFileSync(path.join(root, 'scripts/licenses', name), 'uncommitted replacement');
@@ -182,7 +184,7 @@ describe('HEIC corresponding-source release inputs', () => {
     }
     git(root, 'add', 'scripts/licenses');
     git(root, '-c', 'user.name=Source test', '-c', 'user.email=source-test@invalid.example', 'commit', '-qm', 'corrupted licenses');
-    for (const name of ['GNU-LGPL-3.0.txt', 'GNU-GPL-3.0.txt']) {
+    for (const name of ['GNU-LGPL-3.0.txt', 'GNU-GPL-3.0.txt', 'Cairo-1.18.6-MPL-1.1.txt']) {
       const spec = HEIC_SOURCE_INPUTS.find(source => source.file === name);
       expect(() => readBundledLicense(root, assertCleanSource(root).sourceCommit, spec)).toThrow('length mismatch');
     }

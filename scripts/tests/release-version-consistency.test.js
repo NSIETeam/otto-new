@@ -2,7 +2,9 @@
  * @license Copyright 2026 Felix SPDX-License-Identifier: Apache-2.0
  */
 
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -40,6 +42,36 @@ const versionDisplays = [
 ];
 
 describe('release version displays', () => {
+  it('bumps the integration ledger with packages without changing its trust or schema contract', () => {
+    const fixture = mkdtempSync(path.join(os.tmpdir(), 'otto-version-ledger-'));
+    const files = [
+      'scripts/version.js', 'package.json', 'package-lock.json',
+      'packages/core/package.json', 'packages/desktop/package.json',
+      'docs/server-integration-baseline.json',
+      ...versionDisplays.map(({ path: sourcePath }) => sourcePath),
+    ];
+    try {
+      for (const sourcePath of files) {
+        const target = path.join(fixture, sourcePath);
+        mkdirSync(path.dirname(target), { recursive: true });
+        copyFileSync(path.resolve(sourcePath), target);
+      }
+      const original = JSON.parse(readFileSync(path.join(fixture, 'docs/server-integration-baseline.json'), 'utf8'));
+      execFileSync(process.execPath, ['scripts/version.js', 'patch'], { cwd: fixture });
+      const updatedPackage = JSON.parse(readFileSync(path.join(fixture, 'package.json'), 'utf8'));
+      const updatedLedger = JSON.parse(readFileSync(path.join(fixture, 'docs/server-integration-baseline.json'), 'utf8'));
+      expect(updatedPackage.version).not.toBe(version);
+      expect(updatedLedger.release.clientVersion).toBe(updatedPackage.version);
+      expect(updatedLedger.release.serverVersion).toBe(updatedPackage.version);
+      expect(updatedLedger).toEqual({
+        ...original,
+        release: { ...original.release, clientVersion: updatedPackage.version, serverVersion: updatedPackage.version },
+      });
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it.each(versionDisplays)(
     'keeps $path aligned with package.json',
     ({ path: sourcePath, expected }) => {

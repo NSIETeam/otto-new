@@ -136,26 +136,25 @@ describe('artifact-only desktop packaging validation', () => {
   });
 
   it('prepares reviewed ripgrep before lifecycle execution without leaking a token or dropping hooks', () => {
-    const install = step('Install locked dependencies');
+    const materialization = step('Install locked dependencies').run ?? '';
+    expect(materialization).toContain('npm ci --ignore-scripts');
+    expect(materialization).not.toMatch(/fetch-win-ripgrep|prime-vscode-ripgrep|npm rebuild/);
+    const install = step('Execute reviewed dependency lifecycles');
     expect(install.env?.TARGET_PLATFORM).toBe('${{ matrix.platform }}');
     const commands = install.run ?? '';
     expect(commands).toContain('if [ "$TARGET_PLATFORM" = win32 ]; then');
-    expect(commands).toContain('npm ci --ignore-scripts');
     expect(commands).toContain('node packages/desktop/scripts/fetch-win-ripgrep.mjs');
     expect(commands).toContain('COPYFILE_EXCL');
     expect(commands).toContain('requireSourceDigest: true');
     expect(commands).toContain('npm rebuild --foreground-scripts');
     expect(commands).toContain('npm run postinstall --if-present');
-    expect(commands.indexOf('npm ci --ignore-scripts')).toBeLessThan(
-      commands.indexOf('node packages/desktop/scripts/fetch-win-ripgrep.mjs'),
-    );
     expect(commands.indexOf('COPYFILE_EXCL')).toBeLessThan(
       commands.indexOf('npm rebuild --foreground-scripts'),
     );
     const mac = commands.split(/\n\s*else\n/)[1] ?? '';
     expect(mac).toContain('node packages/desktop/scripts/prime-vscode-ripgrep-cache.mjs');
     expect(mac.indexOf('prime-vscode-ripgrep-cache.mjs')).toBeLessThan(
-      mac.indexOf('npm ci'),
+      mac.indexOf('npm rebuild --foreground-scripts'),
     );
     expect(commands).toContain('ripgrep-runtime.mjs "$RIPGREP"');
     expect(commands).toContain('--platform "$TARGET_PLATFORM" --arch "$ARCH" --require-source-digest');
@@ -165,7 +164,7 @@ describe('artifact-only desktop packaging validation', () => {
   });
 
   it('executes the actual Windows bootstrap with integrity, no-overwrite and link protections', () => {
-    const bootstrap = (step('Install locked dependencies').run ?? '').match(
+    const bootstrap = (step('Execute reviewed dependency lifecycles').run ?? '').match(
       /node --input-type=module <<'NODE'\n([\s\S]*?)\nNODE/,
     )?.[1];
     expect(bootstrap).toBeTruthy();
@@ -212,6 +211,32 @@ describe('artifact-only desktop packaging validation', () => {
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
+  });
+
+  it('checks the unchanged source budget before vendor binaries or lifecycle outputs appear', () => {
+    const packageSteps = jobs.package?.steps ?? [];
+    const preflightIndex = packageSteps.findIndex(
+      (item) => item.name === 'Check clean source before native artifacts',
+    );
+    const lifecycleIndex = packageSteps.findIndex(
+      (item) => item.name === 'Execute reviewed dependency lifecycles',
+    );
+    expect(lifecycleIndex).toBeGreaterThan(preflightIndex);
+    for (const item of packageSteps.slice(0, preflightIndex)) {
+      expect(item.run ?? '').not.toMatch(/fetch-win-ripgrep|prime-vscode-ripgrep|npm rebuild/);
+    }
+  });
+
+  it('requires signed-native provenance on both macOS probes without relaxing Windows digests', () => {
+    const probes = step('Probe actual packaged runtime').run ?? '';
+    expect(probes).toContain('native_signature=()');
+    expect(probes).toMatch(
+      /if \[ "\$TARGET_PLATFORM" = darwin \]; then\s+native_signature=\(--require-native-code-signature\)\s+fi/,
+    );
+    expect(probes).toContain('--probe-native --probe-server-bin "${native_signature[@]}"');
+    expect(step('Verify macOS disk image and resource seal').run).toContain(
+      '--require-native-code-signature',
+    );
   });
 
   it('revalidates both native matrices when the diagnostic packaging pipeline changes', () => {

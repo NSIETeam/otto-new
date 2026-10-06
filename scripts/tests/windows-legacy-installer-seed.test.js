@@ -9,6 +9,14 @@ const script = path.resolve('scripts/seed-windows-legacy-install.ps1');
 const source = () => readFileSync(script, 'utf8');
 
 describe('hosted-only fixed historical Windows installer seed', () => {
+  it('retains the historical seed and additionally exercises the published bridge', () => {
+    const workflow = readFileSync('.github/workflows/release.yml', 'utf8');
+    const job = workflow.split('  verify-windows-signature:')[1].split('\n  prepare-release-creation-intent:')[0];
+    expect(job).toContain("legacy_version: ['1.9.14', '1.9.18']");
+    expect(job).toContain('-LegacyVersion');
+    expect(source()).toContain('52f3f0891780d9b996c4f9436a97e73c21fa87d789cf394c2286f1fbfa7e0c0b');
+    expect(source()).toContain('134535882');
+  });
   it('pins the original asset and fails closed before running downloaded bytes', () => {
     const text = source();
     for (const required of [

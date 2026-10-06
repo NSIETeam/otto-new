@@ -33,6 +33,9 @@ export function assertHistoricalZip(bytes) {
 }
 
 async function main() {
+  let stage = 'admission';
+  const enter = (value) => { stage = value; console.log(`OTTO_LEGACY_HOST_STAGE ${stage}`); };
+  try {
   const directory = admittedHostDirectory(process.env, process.platform);
   for (let cursor = directory; ; cursor = path.dirname(cursor)) {
     try {
@@ -44,24 +47,29 @@ async function main() {
     if (cursor === path.dirname(cursor)) break;
   }
   mkdirSync(directory, { recursive: false });
+  enter('download');
   const { downloadArtifact } = await import('@electron/get');
   const { default: extract } = await import('extract-zip');
   const zip = await downloadArtifact({
     version: LEGACY_ELECTRON.version, platform: 'win32', arch: 'x64', artifactName: 'electron',
+    checksums: { 'electron-v43.2.0-win32-x64.zip': LEGACY_ELECTRON.sha256 },
     cacheRoot: path.join(directory, 'download-cache'),
     mirrorOptions: {
       mirror: 'https://github.com/electron/electron/releases/download/',
-      customDir: 'v43.2.0', customFilename: 'electron-v43.2.0-win32-x64.zip',
+      customDir: 'v43.2.0',
     },
   });
   const stat = lstatSync(zip);
+  enter('byte-identity');
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== LEGACY_ELECTRON.bytes) {
     throw new Error('Historical Electron archive is not the bounded regular file');
   }
   assertHistoricalZip(readFileSync(zip));
   // Extraction is allowed only after checking the exact official archive bytes.
+  enter('extract');
   await extract(zip, { dir: directory });
   const executable = path.join(directory, 'electron.exe');
+  enter('runtime-version');
   const observed = spawnSync(executable, ['-p', 'process.versions.electron'], {
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     encoding: 'utf8', timeout: 15_000, windowsHide: true,
@@ -75,6 +83,11 @@ async function main() {
     executableSha256: createHash('sha256').update(readFileSync(executable)).digest('hex'),
   }), { flag: 'wx' });
   console.log('Pinned historical Electron test host verified; not a deliverable dependency.');
+  } catch (error) {
+    console.error(`OTTO_LEGACY_HOST_FAILURE ${stage}`);
+    if (/^[A-Z0-9_-]{1,30}$/.test(error.code || '')) console.error(`OTTO_LEGACY_HOST_CODE ${error.code}`);
+    throw error;
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

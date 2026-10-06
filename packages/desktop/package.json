@@ -153,6 +153,8 @@
       "!**/node_modules/pptxgenjs/dist/pptxgen.bundle.js",
       "!**/node_modules/pptxgenjs/dist/pptxgen.min.js",
       "!**/node_modules/js-tiktoken/dist/**/*.cjs",
+      "!**/node_modules/js-tiktoken/dist/index.js",
+      "!**/node_modules/js-tiktoken/dist/ranks/*.js",
       "!**/node_modules/@otto/native/target/**",
       "!**/node_modules/@otto/native/src/**",
       "!**/node_modules/@otto/native/node_modules/**",

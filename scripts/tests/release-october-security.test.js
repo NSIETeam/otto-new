@@ -16,11 +16,37 @@ describe('October release security inputs', () => {
     ['http-cache-semantics', '4.3.0'], ['proxy-addr', '2.0.8'],
     ['source-map-js', '1.2.2'], ['postcss-selector-parser', '7.1.6'],
     ['global-agent', '4.1.3'], ['argparse', '2.0.1'],
+    ['shell-quote', '1.11.0'], ['sharp', '0.35.5'],
   ])('pins every %s copy to the reviewed fix %s', (name, version) => {
     const entries = Object.entries(lock.packages).filter(([key]) =>
       key === `node_modules/${name}` || key.endsWith(`/node_modules/${name}`));
     expect(entries.length).toBeGreaterThan(0);
     for (const [, entry] of entries) expect(entry.version).toBe(version);
+  });
+
+  it('keeps the direct and overridden dependency declarations on the reviewed fixes', () => {
+    const manifest = (file) => JSON.parse(readFileSync(path.join(root, file), 'utf8'));
+    expect(manifest('package.json').overrides['shell-quote']).toBe('1.11.0');
+    expect(manifest('packages/core/package.json').dependencies['shell-quote']).toBe('1.11.0');
+    expect(manifest('packages/server/package.json').dependencies.sharp).toBe('0.35.5');
+  });
+
+  it.each(['\n', '\r', '\u2028', '\u2029'])(
+    'rejects a line terminator %j after a shell comment instead of quoting an unsafe command',
+    (separator) => {
+      const { quote } = require('shell-quote');
+      // Inspect quoting only. Never execute the resulting shell text.
+      expect(() => quote(['echo', 'ok', { comment: 'note' }, `value${separator}unexpected`]))
+        .toThrow(TypeError);
+    },
+  );
+
+  it('preserves safe shell quoting and the parse API used by Otto tools', () => {
+    const { quote, parse } = require('shell-quote');
+    const tokens = ['tool', 'a b', "quote'example", '中文路径'];
+    expect(parse(quote(tokens))).toEqual(tokens);
+    expect(parse('tool --output "a b.docx"')).toEqual(['tool', '--output', 'a b.docx']);
+    expect(() => quote(['echo', 'ok', { comment: 'note' }, 'safe'])).not.toThrow();
   });
 
   it('removes sprintf-js through compatible consumers, not an audit suppression', () => {

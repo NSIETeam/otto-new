@@ -107,6 +107,31 @@ describe('artifact-only desktop packaging validation', () => {
     );
   });
 
+  it('checks the source budget before downloading or generating native build outputs', () => {
+    const packageSteps = jobs.package?.steps ?? [];
+    const preflightIndex = packageSteps.findIndex(
+      (item) => item.name === 'Check clean source before native artifacts',
+    );
+    const installIndex = packageSteps.findIndex(
+      (item) => item.name === 'Install locked dependencies',
+    );
+    const downloadIndex = packageSteps.findIndex((item) =>
+      item.uses?.startsWith('actions/download-artifact@'),
+    );
+    const nativeBuildIndex = packageSteps.findIndex(
+      (item) => item.name === 'Build current-source Otto native runtime',
+    );
+    expect(preflightIndex).toBeGreaterThan(installIndex);
+    expect(preflightIndex).toBeLessThan(downloadIndex);
+    expect(preflightIndex).toBeLessThan(nativeBuildIndex);
+    const preflight = packageSteps[preflightIndex]?.run ?? '';
+    expect(preflight).toContain('npm run doctor');
+    expect(preflight).toContain('npm run code-map:check');
+    expect(preflight).toContain('git diff --check');
+    expect(step('Build application').run).not.toContain('npm run doctor');
+    expect(source).not.toContain('OTTO_DOCTOR_SOURCE_SIZE_BUDGET_MB');
+  });
+
   it('retains the formal installer and ASAR ceilings and uses the existing runtime probes', () => {
     const gate =
       step('Verify final artifact and preserve source-bound receipt').run ?? '';

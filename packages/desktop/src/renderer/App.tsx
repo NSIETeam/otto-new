@@ -124,7 +124,10 @@ import type {
 } from './enterpriseAtoaCoordinator.js';
 import { processEnterpriseAtoaRequest } from './enterpriseAtoaCoordinator.js';
 import { collectAuthorizedAtoaContext } from './a2aContext.js';
-import { buildEnterpriseKnowledgePromptContext } from './enterpriseKnowledgePromptContext.js';
+import {
+  enterpriseKnowledgeLookupNotice,
+  lookupEnterpriseKnowledgeContext,
+} from './enterpriseKnowledgePromptContext.js';
 import {
   ModuleActionDraftRegistry,
   handleModuleActionConversation,
@@ -1681,20 +1684,12 @@ function WorkspaceContent({
               edition === 'enterprise'
               && moduleCapabilities.organizationFeatures?.knowledge === true
             ) {
-              try {
-                const knowledge = await Promise.race([
-                  window.otto.enterpriseKnowledgeList({ query: task }),
-                  new Promise<never>((_, reject) => {
-                    window.setTimeout(
-                      () => reject(new Error('enterprise knowledge lookup timeout')),
-                      1_200,
-                    );
-                  }),
-                ]);
-                expertKnowledgeContext = buildEnterpriseKnowledgePromptContext(knowledge);
-              } catch {
-                actions.postSystemNote('企业知识检索暂不可用；专家仍会启动，但未附加企业知识上下文。');
-              }
+              const lookup = await lookupEnterpriseKnowledgeContext(
+                task, (input) => window.otto.enterpriseKnowledgeList(input),
+              );
+              expertKnowledgeContext = lookup.context;
+              const notice = enterpriseKnowledgeLookupNotice(lookup.status);
+              if (notice) actions.postSystemNote(notice);
             }
             const customAgent = expert.customAgentId
               ? customAgents.find((agent) => agent.id === expert.customAgentId)
@@ -1758,17 +1753,12 @@ function WorkspaceContent({
         moduleCapabilities.organizationFeatures?.knowledge === true &&
         text.trim()
       ) {
-        try {
-          const knowledge = await Promise.race([
-            window.otto.enterpriseKnowledgeList({ query: text.trim() }),
-            new Promise<never>((_, reject) => {
-              window.setTimeout(() => reject(new Error('enterprise knowledge lookup timeout')), 1_200);
-            }),
-          ]);
-          authorizedContext = buildEnterpriseKnowledgePromptContext(knowledge);
-        } catch {
-          actions.postSystemNote('企业知识检索暂不可用；本轮将继续回答，但未附加企业知识上下文。');
-        }
+        const lookup = await lookupEnterpriseKnowledgeContext(
+          text, (input) => window.otto.enterpriseKnowledgeList(input),
+        );
+        authorizedContext = lookup.context;
+        const notice = enterpriseKnowledgeLookupNotice(lookup.status);
+        if (notice) actions.postSystemNote(notice);
       }
       if (pendingAgent) {
         const customAgent = pendingAgent.customAgentId

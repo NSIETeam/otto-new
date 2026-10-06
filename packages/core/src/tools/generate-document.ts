@@ -844,7 +844,6 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
           titleStr,
           authorStr,
           departmentStr,
-          format,
           signal,
           progress,
         );
@@ -1898,7 +1897,6 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
     title: string,
     author: string,
     department: string,
-    format: string,
     signal: AbortSignal,
     progress: DocumentProgress,
   ): Promise<void> {

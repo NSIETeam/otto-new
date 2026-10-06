@@ -176,6 +176,23 @@ describe('GenerateDocumentTool', () => {
     expect(runner).not.toHaveBeenCalled();
   });
 
+  it('uses the trusted name without inventing a department in native Word output', async () => {
+    const out = path.join(tmpDir, 'native-name-only.docx');
+    const native = new GenerateDocumentTool(createMockConfig({
+      getDocumentIdentity: () => ({ name: '林一', department: '' }),
+    }), undefined, undefined, async () => 'Python unavailable');
+    const result = await native.execute({
+      title: '署名检查', content: '合成正文', format: 'report',
+      output_format: 'docx', author: 'untrusted-login', output_path: out,
+    }, new AbortController().signal);
+    expect(String(result.returnDisplay)).toContain('内置 Word 基础排版');
+    const zip = await JSZip.loadAsync(fs.readFileSync(out));
+    const xml = await zip.file('word/document.xml')!.async('string');
+    expect(xml).toContain('林一');
+    expect(xml).not.toContain(' · ');
+    expect(xml).not.toContain('untrusted-login');
+  });
+
   it('does not write native fallback output after cancellation during the dependency check', async () => {
     const controller = new AbortController();
     const out = path.join(tmpDir, 'cancelled-native.docx');

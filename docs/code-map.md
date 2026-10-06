@@ -99,6 +99,16 @@ flowchart LR
   Verify --> Artifact[Versionless Preview artifact; no release or tag]
 ```
 
+## Artifact-only desktop packaging validation
+
+`desktop-packaging-validation.yml` manually admits the exact latest `internal`
+commit, reuses the attested SQLCipher matrix, and builds the current-source Otto
+native runtime on each Windows/macOS host before packaging. Existing content,
+native probes, macOS resource seals and installer byte budgets gate the actual
+NSIS/DMG artifacts. Diagnostic artifacts retain source identity and SHA-256;
+they are not update channels, install/upgrade acceptance, commercial signatures
+or public releases. Only the protected `release.yml` may publish or deploy.
+
 ## Fast lookup
 
 | Need | Start here | Boundary / evidence |

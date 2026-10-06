@@ -1,0 +1,220 @@
+name: Desktop Packaging Validation
+
+# Diagnostic artifacts only. Publication, update channels and deployment remain
+# exclusively in the protected release workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-packaging-validation-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22.23.1'
+  ELECTRON_VERSION: '43.7.7'
+  RUST_TOOLCHAIN: '1.97.1'
+  SQLCIPHER_SOURCE_REVISION: e2a6040f2ae5cfff2b3e08eb3320007d93cdf3fc
+
+jobs:
+  validate-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require exact internal source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "NSIETeam/otto-new"
+          test "$GITHUB_REF" = "refs/heads/internal"
+          git fetch --no-tags origin internal
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          test "$GITHUB_SHA" = "$(git rev-parse origin/internal)"
+
+  sqlcipher-native:
+    needs: validate-source
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/sqlcipher-native.yml
+    with:
+      require_attestation: true
+
+  package:
+    name: Package ${{ matrix.platform }}-${{ matrix.arch }} without publication
+    needs: [validate-source, sqlcipher-native]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      attestations: read
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            platform: win32
+            arch: x64
+            cargo_target: x86_64-pc-windows-msvc
+          - runner: macos-15-intel
+            platform: darwin
+            arch: x64
+            cargo_target: x86_64-apple-darwin
+          - runner: macos-15
+            platform: darwin
+            arch: arm64
+            cargo_target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.11'
+      - name: Install locked dependencies
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v${NODE_VERSION}"
+          npm ci
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: sqlcipher-native-matrix
+          path: native/sqlcipher
+      - name: Verify SQLCipher source and attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-sqlcipher-native-assets.mjs \
+            --expected-build-commit "$GITHUB_SHA" \
+            --expected-source-revision "$SQLCIPHER_SOURCE_REVISION" \
+            --expected-runtime-version "$ELECTRON_VERSION" \
+            --require-matrix-manifest
+          gh attestation verify native/sqlcipher/matrix-manifest.json --repo "$GITHUB_REPOSITORY"
+          while IFS= read -r -d '' binding; do
+            gh attestation verify "$binding" --repo "$GITHUB_REPOSITORY"
+          done < <(find native/sqlcipher -type f -name better_sqlite3.node -print0)
+      - name: Build current-source Otto native runtime
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target "${{ matrix.cargo_target }}"
+          rustup default "$RUST_TOOLCHAIN"
+          node scripts/otto-native-runtime.mjs build \
+            --target "${{ matrix.platform }}-${{ matrix.arch }}" \
+            --build-commit "$GITHUB_SHA" --toolchain "$RUST_TOOLCHAIN" --probe
+      - name: Build application
+        run: |
+          set -euo pipefail
+          npm run doctor
+          npm run code-map:check
+          git diff --check
+          npm run build
+          npm run build --workspace=packages/desktop
+      - name: Build Windows installer
+        id: windows-package
+        if: matrix.platform == 'win32'
+        working-directory: packages/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          set -euo pipefail
+          node scripts/fetch-win-ripgrep.mjs
+          npx --no-install electron-builder --win nsis --x64 --publish never
+      - name: Build macOS disk image
+        id: macos-package
+        if: matrix.platform == 'darwin'
+        working-directory: packages/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          set -euo pipefail
+          npm run prepare:ripgrep:mac
+          npx --no-install electron-builder --mac dmg --${{ matrix.arch }} --publish never \
+            --config.mac.identity=null --config.mac.hardenedRuntime=false \
+            --config.mac.notarize=false --config.dmg.sign=false
+      - name: Mark completed packaging
+        id: package
+        run: test "${{ steps.windows-package.outcome }}" = success || test "${{ steps.macos-package.outcome }}" = success
+      - name: Probe actual packaged runtime
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_PLATFORM" = win32 ]; then
+            archive=packages/desktop/release/win-unpacked/resources/app.asar
+          elif [ "$TARGET_ARCH" = arm64 ]; then
+            archive=packages/desktop/release/mac-arm64/Otto.app/Contents/Resources/app.asar
+          else
+            archive=packages/desktop/release/mac/Otto.app/Contents/Resources/app.asar
+          fi
+          node packages/desktop/scripts/verify-packaged-content.mjs "$archive" --max-bytes 125829120
+          node packages/desktop/scripts/verify-packaged-runtime.mjs "$archive" \
+            --platform "$TARGET_PLATFORM" --arch "$TARGET_ARCH" \
+            --expected-build-commit "$GITHUB_SHA" --probe-native --probe-server-bin
+      - name: Verify macOS disk image and resource seal
+        if: matrix.platform == 'darwin'
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          dmg="packages/desktop/release/Otto-${version}-${TARGET_ARCH}.dmg"
+          hdiutil verify "$dmg"
+          mount_point="$(mktemp -d)"
+          trap 'hdiutil detach "$mount_point"; rmdir "$mount_point"' EXIT
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "$dmg" >/dev/null
+          app="$mount_point/Otto.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          node packages/desktop/scripts/verify-packaged-runtime.mjs \
+            "$app/Contents/Resources/app.asar" --platform darwin --arch "$TARGET_ARCH" \
+            --expected-build-commit "$GITHUB_SHA" --require-native-code-signature
+      - name: Verify final artifact and preserve source-bound receipt
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, statSync, writeFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { resolveWindowsInstallerBudget, resolveMacInstallerBudget } from './packages/desktop/scripts/installer-size-budget.mjs';
+          const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
+          const windows = process.env.TARGET_PLATFORM === 'win32';
+          const name = windows ? `Otto-Setup-${version}-win-x64.exe` : `Otto-${version}-${process.env.TARGET_ARCH}.dmg`;
+          const filename = `packages/desktop/release/${name}`;
+          const { maxBytes } = windows ? resolveWindowsInstallerBudget({}) : resolveMacInstallerBudget({});
+          const size = statSync(filename).size;
+          const sha256 = createHash('sha256').update(readFileSync(filename)).digest('hex');
+          const passed = size > 0 && size <= maxBytes;
+          writeFileSync('packages/desktop/release/packaging-validation.json', JSON.stringify({ sourceCommit: process.env.GITHUB_SHA, workflowRunId: process.env.GITHUB_RUN_ID, version, name, size, maxBytes, sha256, passed, publication: false, commercialSigning: false, installUpgradeAcceptance: false }, null, 2) + '\n');
+          console.log(`${name}: ${size} bytes / ${maxBytes} byte ceiling; sha256=${sha256}`);
+          if (!passed || size > maxBytes) throw new Error('Final installer exceeds unchanged release budget');
+          NODE
+      - name: Preserve validation artifacts
+        if: ${{ always() && steps.package.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-packaging-validation-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
+          path: |
+            packages/desktop/release/*.exe
+            packages/desktop/release/*.dmg
+            packages/desktop/release/packaging-validation.json
+          if-no-files-found: error
+          retention-days: 14

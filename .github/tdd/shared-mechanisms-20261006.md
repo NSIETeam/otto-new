@@ -7,16 +7,16 @@ request is part of this change. All new test inputs are synthetic.
 
 ## RED checkpoints
 
-- `2a7c627c`: common Chinese Word/PDF requests and competitive analysis were
+- `baf02629`: common Chinese Word/PDF requests and competitive analysis were
   classified with a three-round budget; failed read work blocked a new question.
   Nine server assertions failed. Eight conversion assertions reproduced resolved
   failure text, stale/missing/empty output and ineffective cancellation.
-- `8a8ef28a`: runtime still stopped legitimate registered reads after three
+- `0bc3594c`: runtime still stopped legitimate registered reads after three
   rounds, and there was no atomic read-only abandonment operation. Nine server
   assertions failed; the explicitly configured two-round cap remained enforced.
-- `d59730ca`: extracted the existing document command runner without changing
+- `ccdd07a9`: extracted the existing document command runner without changing
   behavior, then reproduced three cancellation/timeout outcome failures.
-- `315c50d8`: two further assertions reproduced a POSIX launcher exiting before
+- `579823e8`: two further assertions reproduced a POSIX launcher exiting before
   its helpers were forcibly terminated, and colliding batch output names being
   silently overwritten.
 

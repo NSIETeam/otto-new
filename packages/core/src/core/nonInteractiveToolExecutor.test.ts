@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import JSZip from 'jszip';
 import { executeToolCall } from './nonInteractiveToolExecutor.js';
 import {
   ToolRegistry,
@@ -29,6 +33,7 @@ describe('executeToolCall', () => {
   let mockToolRegistry: ToolRegistry;
   let mockTool: Tool;
   let abortController: AbortController;
+  let documentOutputDir: string;
 
   beforeEach(() => {
     mockTool = {
@@ -66,6 +71,11 @@ describe('executeToolCall', () => {
     } as unknown as ToolRegistry;
 
     abortController = new AbortController();
+    documentOutputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-executor-doc-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(documentOutputDir, { recursive: true, force: true });
   });
 
   it('records a failed document preflight as an error, not a successful delivery', async () => {
@@ -74,7 +84,8 @@ describe('executeToolCall', () => {
     vi.mocked(mockToolRegistry.getTool).mockReturnValue(documentTool);
     const response = await executeToolCall(mockConfig, {
       callId: 'doc-failed', name: 'generate_document',
-      args: { content: '# Synthetic report', format: 'report', output_format: 'docx' },
+      args: { content: '# Synthetic report', format: 'report', output_format: 'docx',
+        output_path: path.join(documentOutputDir, 'synthetic.docx') },
       isClientInitiated: false, prompt_id: 'synthetic-prompt',
     }, mockToolRegistry, abortController.signal);
     expect(response.error?.message).toContain('synthetic missing dependency');

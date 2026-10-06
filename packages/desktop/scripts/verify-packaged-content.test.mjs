@@ -3,8 +3,10 @@
  */
 
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
 import { finished } from 'node:stream/promises';
 import asar from '@electron/asar';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -107,6 +109,38 @@ describe('packaged content gate', () => {
     expect(MAX_APP_ASAR_BYTES).toBe(120 * 1024 * 1024);
   });
 
+  it('rejects exact forbidden roots and compiler output outside known package prefixes', () => {
+    const entries = [
+      '/node_modules/@otto/native/src',
+      '/node_modules/custom/target/debug/helper.bin',
+      '/node_modules/custom/target/release/helper.bin',
+      '/node_modules/custom/worker.rs',
+    ];
+    expect(findForbiddenAsarEntries(entries).map(({ entry }) => entry)).toEqual(
+      entries.map((entry) => entry.slice(1)),
+    );
+    expect(
+      findForbiddenAsarEntries([
+        '/node_modules/custom/target/runtime/helper.js',
+      ]),
+    ).toEqual([]);
+  });
+
+  it('keeps violation previews bounded while reporting the complete count', async () => {
+    const archive = await createArchive(
+      Object.fromEntries(
+        Array.from({ length: 25 }, (_, index) => [
+          `dist/fixture-${index}.js.map`,
+          '{}',
+        ]),
+      ),
+    );
+    expect(() => verifyPackagedContent(archive)).toThrow(
+      'contains 25 forbidden entries',
+    );
+    expect(() => verifyPackagedContent(archive)).toThrow('... and 5 more');
+  });
+
   it('audits a real asar archive and enforces its byte budget', async () => {
     const archive = await createArchive({
       'dist/main/index.js': 'console.log("otto")',
@@ -121,6 +155,50 @@ describe('packaged content gate', () => {
     expect(() => verifyPackagedContent(archive, { maxBytes: 1 })).toThrow(
       'app.asar exceeds size budget',
     );
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid byte budgets before reading ASAR contents (%s)',
+    async (maxBytes) => {
+      const archive = await createArchive({
+        [SERVER_NOTICE_ASAR_PATH]: reviewedNotice,
+      });
+      expect(() => verifyPackagedContent(archive, { maxBytes })).toThrow(
+        'invalid app.asar size budget',
+      );
+    },
+  );
+
+  it('executes the real gate CLI, preserving default/custom budgets and usage errors', async () => {
+    const archive = await createArchive({
+      [SERVER_NOTICE_ASAR_PATH]: reviewedNotice,
+    });
+    const verifier = path.join(
+      import.meta.dirname,
+      'verify-packaged-content.mjs',
+    );
+    const run = (args) =>
+      spawnSync(process.execPath, [verifier, ...args], {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 15_000,
+      });
+    for (const args of [
+      [archive],
+      [archive, '--max-bytes', String(MAX_APP_ASAR_BYTES)],
+    ]) {
+      const result = run(args);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain('[packaged-content] verified');
+    }
+    const missingArgument = run([]);
+    expect(missingArgument.status).toBe(1);
+    expect(missingArgument.stderr).toContain(
+      'usage: verify-packaged-content.mjs',
+    );
+    const invalidBudget = run([archive, '--max-bytes', 'invalid']);
+    expect(invalidBudget.status).toBe(1);
+    expect(invalidBudget.stderr).toContain('invalid app.asar size budget');
   });
 
   it('blocks a real asar archive containing source maps', async () => {

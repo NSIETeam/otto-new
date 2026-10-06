@@ -95,6 +95,17 @@ export function findForbiddenAsarEntries(entries) {
       violations.push({ entry, reason: `forbidden prefix: ${reason}` });
       continue;
     }
+    // LangChain uses js-tiktoken/lite with separately loaded ranks. The full
+    // index embeds all rank tables, and dist/ranks duplicates that unused data.
+    // Keep the lite entry, shared implementation, metadata and license files.
+    if (
+      /(?:^|\/)node_modules\/js-tiktoken\/dist\/(?:index\.js|ranks\/[^/]+\.js)$/u.test(
+        lowerEntry,
+      )
+    ) {
+      violations.push({ entry, reason: 'duplicate tokenizer payload' });
+      continue;
+    }
     if (lowerEntry.endsWith('.map')) {
       violations.push({ entry, reason: 'source map' });
       continue;

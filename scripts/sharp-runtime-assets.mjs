@@ -16,14 +16,14 @@ export function resolveSharpRuntimePackages(lock, targets = ENTERPRISE_SHARP_TAR
   requireThat(Array.isArray(targets) && targets.length > 0 && new Set(targets).size === targets.length && targets.every(target => reviewedTargets.has(target)), 'unsupported or duplicate sharp target');
   if (!lock.packages['packages/server']?.dependencies?.sharp) return [];
   const sharp = lock.packages['node_modules/sharp'];
-  requireThat(sharp?.version === '0.35.4' && lock.packages['packages/server'].dependencies.sharp === sharp.version, 'unreviewed sharp version');
+  requireThat(sharp?.version === '0.35.5' && lock.packages['packages/server'].dependencies.sharp === sharp.version, 'unreviewed sharp version');
   return targets.flatMap(target => {
     const [platform, arch] = target.split('-');
     return (platform === 'win32' ? ['sharp'] : ['sharp', 'sharp-libvips']).map(stem => {
       const name = `@img/${stem}-${target}`;
       const location = `node_modules/${name}`;
       const entry = lock.packages[location];
-      const version = stem === 'sharp' ? sharp.version : '1.3.3';
+      const version = stem === 'sharp' ? sharp.version : '1.3.4';
       const url = `https://registry.npmjs.org/${name}/-/${stem}-${target}-${version}.tgz`;
       requireThat(entry?.version === version && sharp.optionalDependencies?.[name] === version, 'missing or mismatched required sharp target package');
       requireThat(entry.resolved === url && /^sha512-[A-Za-z0-9+/]{86}==$/.test(entry.integrity), 'sharp target registry or integrity is not pinned');

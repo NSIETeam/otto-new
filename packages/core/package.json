@@ -1,6 +1,6 @@
 {
   "name": "otto-core",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Otto Core - Core functionality for AI-powered coding assistant",
   "repository": {
     "type": "git",
@@ -76,7 +76,7 @@
     "pdf2json": "^3.1.6",
     "picomatch": "4.0.4",
     "pptxgenjs": "4.0.1",
-    "shell-quote": "^1.10.0",
+    "shell-quote": "1.11.0",
     "simple-git": "4.0.2",
     "strip-ansi": "^7.1.0",
     "undici": "7.30.0",

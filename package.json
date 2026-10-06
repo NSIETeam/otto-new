@@ -1,6 +1,6 @@
 {
   "name": "otto-ai",
-  "version": "1.9.20",
+  "version": "1.9.21",
   "engines": {
     "node": ">=22.16.0"
   },
@@ -202,7 +202,7 @@
     "picomatch@^2.0.0": "^2.3.2",
     "protobufjs": "^7.6.5",
     "postcss": "^8.5.26",
-    "shell-quote": "^1.10.0",
+    "shell-quote": "1.11.0",
     "underscore": "^1.13.8",
     "vite": "7.3.6",
     "wrap-ansi": "^7.0.0"

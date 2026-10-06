@@ -1372,7 +1372,7 @@ if [ "$COMMAND" = 'rollback-enterprise' ]; then
     [ "$(<"${DEPLOYMENT_STATE_DIR}/rolled-back")" = "$ROLLBACK_RECEIPT" ] \
       || fail 'enterprise rollback receipt changed'
     verify_current_deployment \
-      "$PREVIOUS_VERSION" "$PREVIOUS_PACKAGE" "$PREVIOUS_SOURCE"
+      "$PREVIOUS_VERSION" "$PREVIOUS_PACKAGE" "$PREVIOUS_SOURCE" >&2
     sync_live_deployment_filesystems
     write_once_durable "${DEPLOYMENT_STATE_DIR}/rolled-back" "$ROLLBACK_RECEIPT"
     printf '%s\n' "$ROLLBACK_RECEIPT"
@@ -1465,7 +1465,7 @@ if [ "$COMMAND" = 'rollback-enterprise' ]; then
   systemctl daemon-reload
   systemctl start otto-enterprise
   verify_current_deployment \
-    "$PREVIOUS_VERSION" "$PREVIOUS_PACKAGE" "$PREVIOUS_SOURCE"
+    "$PREVIOUS_VERSION" "$PREVIOUS_PACKAGE" "$PREVIOUS_SOURCE" >&2
   sync_live_deployment_filesystems
   write_once_durable "${DEPLOYMENT_STATE_DIR}/rolled-back" "$ROLLBACK_RECEIPT"
   printf '%s\n' "$ROLLBACK_RECEIPT"

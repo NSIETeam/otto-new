@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveSharpRuntimePackages } from '../sharp-runtime-assets.mjs';
-import { assertSharpLock } from '../heic-corresponding-source.mjs';
+import { assertSharpLock, HEIC_SOURCE_INPUTS, SHARP_RUNTIME_INPUTS } from '../heic-corresponding-source.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(path.join(root, 'package.json'));
@@ -46,6 +46,28 @@ describe('October release security inputs', () => {
 
   it('binds corresponding-source inputs to the patched runtime on every shipped target', () => {
     expect(assertSharpLock(lock)).toHaveLength(6);
+  });
+
+  it('retains the upgraded copyleft sources and memory-limit patch without replacing the distinct HEIC WASM source', () => {
+    const files = HEIC_SOURCE_INPUTS.map(({ file }) => file);
+    for (const file of ['glib-2.90.0-source.tar.xz', 'fribidi-1.0.17-source.tar.xz',
+      'cairo-1.18.6-source.tar.xz', 'libheif-native-1.23.5-source.tar.gz',
+      'libheif-1.23.2-source.tar.gz', 'librsvg-2.63.2-source.tar.xz',
+      'librsvg-embedded-memory-limit-9106011.patch', 'Cairo-1.18.6-MPL-1.1.txt']) {
+      expect(files, file).toContain(file);
+    }
+    for (const entry of Object.values(SHARP_RUNTIME_INPUTS)) {
+      expect(entry.versions).toMatchObject({ glib: '2.90.0', fribidi: '1.0.17',
+        cairo: '1.18.6', heif: '1.23.5', rsvg: '2.63.2', vips: '8.18.7' });
+    }
+  });
+
+  it('identifies the actual native release and upstream elected Cairo license in the shipped notice', () => {
+    const notice = readFileSync(path.join(root, 'packages/server/NOTICE'), 'utf8');
+    expect(notice).toContain('sharp 0.35.5 / libvips 8.18.7');
+    expect(notice).toContain('MPL-1.1 for cairo');
+    expect(notice).toContain('----- BEGIN SHARP CAIRO-MPL-1.1 -----');
+    expect(notice).toContain('sharp-libvips-corresponding-source-audit-20261006.md');
   });
 
   it.each(['\n', '\r', '\u2028', '\u2029'])(

@@ -88,16 +88,24 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install locked dependencies
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v${NODE_VERSION}"
+          npm ci --ignore-scripts
+      - name: Check clean source before native artifacts
+        run: |
+          set -euo pipefail
+          npm run doctor
+          npm run code-map:check
+          git diff --check
+      - name: Execute reviewed dependency lifecycles
         env:
           TARGET_PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
-          test "$(node --version)" = "v${NODE_VERSION}"
           if [ "$TARGET_PLATFORM" = win32 ]; then
-            # Materialize the lockfile first, then seed the reviewed binary
-            # before executing every dependency lifecycle hook. Never pass a
-            # GitHub credential into upstream postinstall scripts.
-            npm ci --ignore-scripts
+            # Source preflight has completed before generating vendor outputs.
+            # Never pass a GitHub credential into upstream lifecycle scripts.
             node packages/desktop/scripts/fetch-win-ripgrep.mjs
             node --input-type=module <<'NODE'
           import { constants, copyFileSync, lstatSync, mkdirSync } from 'node:fs';
@@ -112,24 +120,17 @@ jobs:
           copyFileSync(source, destination, constants.COPYFILE_EXCL);
           verifyRipgrepExecutable(destination, options);
           NODE
-            npm rebuild --foreground-scripts
-            npm run postinstall --if-present
           else
             node packages/desktop/scripts/prime-vscode-ripgrep-cache.mjs
-            npm ci
           fi
+          npm rebuild --foreground-scripts
+          npm run postinstall --if-present
           ARCH="$(node -p 'process.arch')"
           RIPGREP='node_modules/@vscode/ripgrep/bin/rg'
           if [ "$TARGET_PLATFORM" = win32 ]; then RIPGREP="${RIPGREP}.exe"; fi
           node packages/desktop/scripts/ripgrep-runtime.mjs "$RIPGREP" \
             --platform "$TARGET_PLATFORM" --arch "$ARCH" --require-source-digest
           "$RIPGREP" --version | grep -F 'ripgrep 15.0.0'
-      - name: Check clean source before native artifacts
-        run: |
-          set -euo pipefail
-          npm run doctor
-          npm run code-map:check
-          git diff --check
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sqlcipher-native-matrix
@@ -199,10 +200,14 @@ jobs:
           else
             archive=packages/desktop/release/mac/Otto.app/Contents/Resources/app.asar
           fi
+          native_signature=()
+          if [ "$TARGET_PLATFORM" = darwin ]; then
+            native_signature=(--require-native-code-signature)
+          fi
           node packages/desktop/scripts/verify-packaged-content.mjs "$archive" --max-bytes 125829120
           node packages/desktop/scripts/verify-packaged-runtime.mjs "$archive" \
             --platform "$TARGET_PLATFORM" --arch "$TARGET_ARCH" \
-            --expected-build-commit "$GITHUB_SHA" --probe-native --probe-server-bin
+            --expected-build-commit "$GITHUB_SHA" --probe-native --probe-server-bin "${native_signature[@]}"
       - name: Verify macOS disk image and resource seal
         if: matrix.platform == 'darwin'
         env:

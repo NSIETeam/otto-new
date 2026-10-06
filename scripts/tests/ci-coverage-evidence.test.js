@@ -327,7 +327,7 @@ it.each([
     coverageSha256: 'bf31f75f29fec1743374e40ff02553b8943977d3bdbc2ae5bb3ce7a227c7a25f',
     testResultsSha256: '41fd895713f210b26f33a1c4871731fa63333ebecf720d8c6ce465ffc53b7608',
   },
-])('binds the 1.9.21 $name security review to its own native receipt without relaxing coverage', ({ name, platform, runId, receiptSha256, coverageSha256, testResultsSha256 }) => {
+])('binds the historical first 1.9.21 $name review to its measured lock and native receipt without relaxing coverage', ({ name, platform, runId, receiptSha256, coverageSha256, testResultsSha256 }) => {
   const review = securityVersionReview(name);
   expect(review).toMatchObject({
     schemaVersion: 1, status: 'reviewed-security-dependency-and-version-only-source-update',

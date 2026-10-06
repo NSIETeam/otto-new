@@ -102,7 +102,9 @@ function versionAtLeast(version, minimum) {
 function directorySizeBytes(dir, topLevelStats = new Map(), topLevelName = '') {
   let total = 0;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (SOURCE_SIZE_EXCLUDES.has(entry.name)) continue;
+    // Incremental compiler caches are disposable, unlike retained audit and
+    // coverage evidence. Re-running typecheck must not consume the source cap.
+    if (SOURCE_SIZE_EXCLUDES.has(entry.name) || entry.name.endsWith('.tsbuildinfo')) continue;
     const fullPath = path.join(dir, entry.name);
     const topName = topLevelName || entry.name;
     try {

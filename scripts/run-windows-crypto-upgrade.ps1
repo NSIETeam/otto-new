@@ -8,7 +8,9 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 }
 if (-not $env:RUNNER_TEMP -or -not $env:GITHUB_WORKSPACE) { throw 'Missing runner roots' }
 if ($Phase -eq 'verify' -and $Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Missing candidate version' }
-$executable = Join-Path $env:GITHUB_WORKSPACE 'node_modules\electron\dist\electron.exe'
+$executable = if ($Phase -eq 'seed') {
+  Join-Path $env:RUNNER_TEMP 'otto-legacy-electron-host\electron.exe'
+} else { Join-Path $env:GITHUB_WORKSPACE 'node_modules\electron\dist\electron.exe' }
 $probe = Join-Path $env:GITHUB_WORKSPACE 'scripts\probe-windows-crypto-upgrade.cjs'
 $start = [Diagnostics.ProcessStartInfo]::new()
 $start.FileName = $executable

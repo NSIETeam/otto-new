@@ -243,6 +243,7 @@ vi.mock('./components/ChatView.js', () => ({
           <button type="button" onClick={() => void onSend('查看最新园区公告', 'local')}>query-announcement-chat</button>
           <button type="button" onClick={() => void onSend('在企业知识里查请假制度', 'local')}>query-enterprise-memory-chat</button>
           <button type="button" onClick={() => void onSend('让PPT 创作专家制作融资路演', 'local')}>launch-expert-chat</button>
+          <button type="button" onClick={() => void onSend('请分析铜工艺品行业的竞争格局', 'local')}>ordinary-research-chat</button>
         </>
       ) : null}
       {onRespondQuestion ? (
@@ -767,6 +768,8 @@ describe('App workspace UI integration', () => {
   });
 
   it('queries enterprise memory and launches an explicitly named expert from the main conversation', async () => {
+    const scheduled = vi.spyOn(window, 'setTimeout');
+    const cleared = vi.spyOn(window, 'clearTimeout');
     configureEnterpriseWorkspace();
     harness.workspaceModules.current = [{
       id: 'agent-ppt',
@@ -810,6 +813,50 @@ describe('App workspace UI integration', () => {
       undefined,
       undefined,
     ));
+    const lookupTimers = scheduled.mock.calls
+      .map((call, index) => ({ delay: call[1], handle: scheduled.mock.results[index]?.value }))
+      .filter(({ delay }) => delay === 1_200 || delay === 5_000);
+    expect(lookupTimers.length).toBeGreaterThan(0);
+    for (const { handle } of lookupTimers) {
+      expect(cleared).toHaveBeenCalledWith(handle);
+    }
+  });
+
+  it.each(['ready', 'failed'] as const)('continues ordinary research with truthful optional-knowledge state %s', async (status) => {
+    configureEnterpriseWorkspace({ park_service: false });
+    const enterpriseKnowledgeList = vi.fn<Window['otto']['enterpriseKnowledgeList']>();
+    if (status === 'ready') enterpriseKnowledgeList.mockResolvedValue([]);
+    else enterpriseKnowledgeList.mockRejectedValue(new Error('synthetic permission failure'));
+    Object.assign(window.otto, { enterpriseKnowledgeList });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'ordinary-research-chat' }));
+    await waitFor(() => expect(harness.storeActions.sendMessage).toHaveBeenCalledWith(
+      '请分析铜工艺品行业的竞争格局', 'local', undefined, undefined, '',
+    ));
+    expect(enterpriseKnowledgeList).toHaveBeenCalledWith({ query: '请分析铜工艺品行业的竞争格局' });
+    if (status === 'failed') {
+      expect(harness.storeActions.postSystemNote).toHaveBeenCalledWith(expect.stringContaining('不引用企业知识'));
+      expect(harness.storeActions.postSystemNote).not.toHaveBeenCalledWith(expect.stringContaining('服务器不提供服务'));
+    } else expect(harness.storeActions.postSystemNote).not.toHaveBeenCalled();
+  });
+
+  it('launches an explicitly named expert after an optional knowledge failure without fabricating context', async () => {
+    configureEnterpriseWorkspace();
+    harness.workspaceModules.current = [{
+      id: 'agent-ppt', label: 'PPT 创作专家', category: 'common', icon: 'agent',
+      availability: 'available', activation: { kind: 'agent', profileId: 'ppt' },
+    }];
+    const enterpriseKnowledgeList = vi.fn().mockRejectedValue(new Error('synthetic permission failure'));
+    Object.assign(window.otto, { enterpriseKnowledgeList });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'launch-expert-chat' }));
+    await waitFor(() => expect(harness.storeActions.launchAgentProfileWithPrompt).toHaveBeenCalledWith(
+      'PPT 创作专家', 'ppt', '制作融资路演', 'local', undefined, '', undefined, undefined,
+    ));
+    expect(harness.storeActions.postSystemNote).toHaveBeenCalledWith(expect.stringContaining('不引用企业知识'));
+    expect(harness.storeActions.sendMessage).not.toHaveBeenCalled();
   });
 
   it('uses the next account right-panel preference on the account-switch render', () => {

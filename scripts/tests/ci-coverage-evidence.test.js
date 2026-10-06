@@ -1,11 +1,9 @@
 /** @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0 */
 import { readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { parse } from 'yaml';
 import { expect, it } from 'vitest';
-
-const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 it('runs the entire scripts suite as a mandatory merge gate before long builds', () => {
   const workflow = parse(readFileSync(
@@ -118,10 +116,7 @@ it('makes the native coverage runner mandatory in package, CI and release checks
   );
 });
 
-it('binds both reviewed desktop coverage baselines to the 1.9.18 version-only lockfile change', () => {
-  const lockSha256 = sha256(
-    readFileSync(new URL('../../package-lock.json', import.meta.url)),
-  );
+it('preserves the historical 1.9.18 version-only lock review without claiming it measures later dependencies', () => {
   const review = JSON.parse(
     readFileSync(
       new URL(
@@ -136,7 +131,7 @@ it('binds both reviewed desktop coverage baselines to the 1.9.18 version-only lo
     status: 'reviewed-version-only-environment',
     reference: 'https://github.com/NSIETeam/otto-new/pull/86',
     lockBefore: '859de95406f35cd4b254d9005cc77605e37a35dcdff45d5c4357c8fbfcacde5f',
-    lockAfter: lockSha256,
+    lockAfter: 'c8be049f25a981192c7adcd3c3180161ed7ac52725b22f94f894471126886422',
     changedRecords: [
       'version',
       'packages[empty].version',
@@ -162,8 +157,7 @@ it('binds both reviewed desktop coverage baselines to the 1.9.18 version-only lo
         ),
       ),
     );
-    expect(baseline.environment.lockSha256).toBe(lockSha256);
-    expect(baseline.review.environmentUpdates.at(-1)).toEqual(review);
+    expect(baseline.review.environmentUpdates).toContainEqual(review);
   }
 });
 
@@ -217,9 +211,41 @@ it('binds the 1.9.18 browser preview baseline change to the preserved native mea
         ),
       ),
     );
-    expect(sha256(JSON.stringify(baseline.files[review.file]))).toBe(
-      review.afterEntrySha256,
-    );
-    expect(baseline.review.fileUpdates.at(-1)).toEqual(review);
+    expect(baseline.review.fileUpdates).toContainEqual(review);
   }
+});
+
+it.each([
+  ['win32', 'win32-x64'], ['darwin', 'darwin-arm64'],
+])('binds the 1.9.19 %s scoped review to native evidence without lowering global thresholds', (name, platform) => {
+  const review = JSON.parse(readFileSync(new URL(
+    `../../config/test-baselines/desktop/release-1919-${name}-review.json`, import.meta.url,
+  ), 'utf8'));
+  const baseline = JSON.parse(gunzipSync(readFileSync(new URL(
+    `../../config/test-baselines/desktop/${platform}-node22-vitest4.json.gz`, import.meta.url,
+  ))));
+  expect(review).toMatchObject({
+    reference: 'https://github.com/NSIETeam/otto-new/pull/87',
+    nativeExitCode: 0, assertionsPassed: 2234, testFiles: 270,
+    environmentAfter: { platform: name, arch: name === 'win32' ? 'x64' : 'arm64', nodeMajor: 22,
+      vitest: '4.1.11', coverageV8: '4.1.11', mapper: 'ast' },
+  });
+  expect(review.files.map(entry => entry.file).sort()).toEqual([
+    'src/main/enterprise-e2ee.ts', 'src/renderer/App.tsx',
+    'src/renderer/browserPreviewBridge.ts', 'src/renderer/components/OrganizationTree.tsx',
+    'src/renderer/enterpriseKnowledgePromptContext.ts',
+  ].sort());
+  expect(review.unchangedEntriesPreserved).toBe(Object.keys(baseline.files).length - 5);
+  const changed = new Set(review.files.map(entry => entry.file));
+  const unchanged = Object.fromEntries(Object.entries(baseline.files).filter(([file]) => !changed.has(file)).sort());
+  expect(createHash('sha256').update(JSON.stringify(unchanged)).digest('hex')).toBe(review.unchangedEntriesSha256);
+  expect(baseline.review.environmentUpdates).toContainEqual(review);
+  for (const entry of review.files) {
+    expect(baseline.files[entry.file].sourceSha256).toBe(entry.sourceSha256);
+    expect(baseline.files[entry.file].metrics).toEqual(entry.after);
+  }
+  expect(baseline.environment.lockSha256).toBe(review.environmentAfter.lockSha256);
+  const config = readFileSync(new URL('../../packages/desktop/vitest.config.ts', import.meta.url), 'utf8');
+  expect(config).toMatch(/lines:\s*62/);
+  expect(config).toMatch(/statements:\s*62/);
 });

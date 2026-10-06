@@ -113,7 +113,8 @@ export function probePackagedSharp(archivePath, { executable, target, sourceFixt
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(`packaged Electron media probe failed: ${result.stderr}`);
     const proof = JSON.parse(result.stdout.trim());
-    if (proof.passed !== true || `${proof.platform}-${proof.arch}` !== target || proof.electron !== '43.2.0'
+    const expectedElectron = JSON.parse(readFileSync(path.join(repoRoot, 'packages/desktop/package.json'), 'utf8')).build.electronVersion;
+    if (proof.passed !== true || `${proof.platform}-${proof.arch}` !== target || proof.electron !== expectedElectron
       || proof.sharp !== '0.35.4' || proof.libvips !== '8.18.6') throw new Error('packaged Electron media proof mismatch');
     return proof;
   } finally { rmSync(work, { recursive: true, force: true }); }

@@ -8,6 +8,50 @@ import {
   evaluateEnterpriseKnowledgeApplicability,
 } from './enterpriseKnowledgeApplicability.js';
 
+export type EnterpriseKnowledgeLookupResult =
+  | { status: 'ready'; context: string }
+  | { status: 'skipped' | 'timeout' | 'failed'; context: '' };
+
+/** Optional context must not indefinitely block a turn. The IPC request itself
+ * cannot be cancelled here; observe late rejection, but never attach late data
+ * to a different turn or report a local deadline as a server outage. */
+export async function lookupEnterpriseKnowledgeContext(
+  query: string,
+  list: (input: { query: string }) => Promise<EnterpriseKnowledgeItem[]>,
+): Promise<EnterpriseKnowledgeLookupResult> {
+  const trimmed = query.trim();
+  if (!trimmed) return { status: 'skipped', context: '' };
+  let timer: number | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => list({ query: trimmed })).then(
+        (items): EnterpriseKnowledgeLookupResult => ({
+          status: 'ready', context: buildEnterpriseKnowledgePromptContext(items),
+        }),
+      ),
+      new Promise<EnterpriseKnowledgeLookupResult>((resolve) => {
+        timer = window.setTimeout(() => resolve({ status: 'timeout', context: '' }), 5_000);
+      }),
+    ]);
+  } catch {
+    return { status: 'failed', context: '' };
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer);
+  }
+}
+
+export function enterpriseKnowledgeLookupNotice(
+  status: EnterpriseKnowledgeLookupResult['status'],
+): string | null {
+  if (status === 'timeout') {
+    return '本轮在等待时间内未取得企业知识，继续处理但不引用企业知识；这不代表服务器已停止服务。';
+  }
+  if (status === 'failed') {
+    return '本轮未能读取企业知识，继续处理但不引用企业知识；如需依赖企业制度，请先检查登录、权限和连接后重试。';
+  }
+  return null;
+}
+
 function compact(value: string | null | undefined, maximum: number): string {
   const normalized = (value ?? '').replace(/\s+/g, ' ').trim();
   return normalized.length > maximum ? `${normalized.slice(0, maximum - 1)}…` : normalized;

@@ -1,5 +1,7 @@
 # Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0
 # A fixed historical seed for one disposable hosted runner, never workstation repair.
+[CmdletBinding()]
+param([ValidateSet('1.9.14','1.9.18')][string]$LegacyVersion = '1.9.14')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
@@ -14,9 +16,16 @@ if ($runnerRoot -match '\s' -or -not [IO.Directory]::Exists($runnerRoot) -or
     $runnerRoot -eq [IO.Path]::GetPathRoot($runnerRoot).TrimEnd('\')) { throw 'Unsafe hosted fixture parent' }
 $installRoot = Join-Path $runnerRoot 'otto-packaged-runtime'
 $evidenceRoot = Join-Path $runnerRoot ('otto-legacy-seed-' + [Guid]::NewGuid().ToString('N'))
-$legacyUrl = 'https://github.com/Felix201209/otto-releases/releases/download/v1.9.14/Otto-Setup-1.9.14-win-x64.exe'
-$expectedBytes = 124070431L
-$expectedSha = '9f6223960468fb568f18f5806f6f5045ded74303d1c0752f0360af1c05ba1e3b'
+$pinned = if ($LegacyVersion -eq '1.9.14') {
+  @{ url='https://github.com/Felix201209/otto-releases/releases/download/v1.9.14/Otto-Setup-1.9.14-win-x64.exe'; bytes=124070431L;
+     sha='9f6223960468fb568f18f5806f6f5045ded74303d1c0752f0360af1c05ba1e3b' }
+} else {
+  @{ url='https://59.110.154.44:7777/downloads/Otto-Setup-1.9.18-win-x64.exe'; bytes=134535882L;
+     sha='52f3f0891780d9b996c4f9436a97e73c21fa87d789cf394c2286f1fbfa7e0c0b' }
+}
+$legacyUrl = $pinned.url
+$expectedBytes = $pinned.bytes
+$expectedSha = $pinned.sha
 # Verified in the fixed EXE's NSIS header and its 5b91afc2 source (builder 26.15.3).
 $guid = 'bc38908e-1ce2-5555-aca4-b7da2295894c'
 $installKey = "Software\$guid"
@@ -67,7 +76,7 @@ try {
   }
   Assert-NoOttoProcess
   $phase = 'download'
-  $installer = Join-Path $evidenceRoot 'Otto-Setup-1.9.14-win-x64.exe'
+  $installer = Join-Path $evidenceRoot "Otto-Setup-$LegacyVersion-win-x64.exe"
   $handler = [Net.Http.HttpClientHandler]::new()
   $handler.AllowAutoRedirect = $false
   # Normal OS TLS/certificate validation; redirects stay on fixed official HTTPS hosts.
@@ -78,8 +87,9 @@ try {
   $response = $null
   try {
     for ($redirect = 0; $redirect -le 3; $redirect++) {
-      if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or -not $uri.IsDefaultPort -or
-          $uri.Host -notin @('github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com')) { throw 'Unapproved redirect' }
+      $officialGithub = $uri.IsDefaultPort -and $uri.Host -in @('github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com')
+      $fixedBridge = $LegacyVersion -eq '1.9.18' -and $uri.AbsoluteUri -ceq $legacyUrl
+      if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or -not ($officialGithub -or $fixedBridge)) { throw 'Unapproved redirect' }
       $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Get, $uri)
       try { $response = $client.SendAsync($request, [Net.Http.HttpCompletionOption]::ResponseHeadersRead, $cancellation.Token).GetAwaiter().GetResult() }
       finally { $request.Dispose() }
@@ -149,7 +159,7 @@ try {
     $fileHashes[$relative] = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
   }
   $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $installRoot 'Otto.exe')).ProductVersion
-  if ($version -notin @('1.9.14','1.9.14.0')) { throw 'Historical executable version mismatch' }
+  if ($version -notin @($LegacyVersion,"$LegacyVersion.0")) { throw 'Historical executable version mismatch' }
   $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser, [Microsoft.Win32.RegistryView]::Registry64)
   $installed = $null; $uninstall = $null
   try {
@@ -158,7 +168,7 @@ try {
     $registeredRoot = [string]$installed.GetValue('InstallLocation')
     $command = [string]$uninstall.GetValue('UninstallString')
     if (-not $registeredRoot -or [IO.Path]::GetFullPath($registeredRoot).TrimEnd('\') -ine $installRoot -or
-        $uninstall.GetValue('DisplayVersion') -ne '1.9.14' -or
+        $uninstall.GetValue('DisplayVersion') -ne $LegacyVersion -or
         $command -notin @(('"' + (Join-Path $installRoot 'Uninstall Otto.exe') + '" /currentuser'), ('"' + (Join-Path $installRoot 'Uninstall Otto.exe') + '"'))) { throw 'Historical registration is not bound to the isolated root' }
   } finally {
     if ($null -ne $installed) { $installed.Dispose() }
@@ -166,11 +176,11 @@ try {
     $base.Dispose()
   }
   Save-Seed 'seed-receipt.json' ([ordered]@{ schemaVersion=1; source=$env:GITHUB_SHA; workflowRun=$env:GITHUB_RUN_ID; attempt=1;
-    version='1.9.14'; installRoot=$installRoot; installerSha256=$expectedSha; installerBytes=$expectedBytes; installedFiles=$fileHashes;
-    registeredRoot=$registeredRoot; displayVersion='1.9.14'; noOttoProcessObserved=$true; passed=$true;
+    version=$LegacyVersion; installRoot=$installRoot; installerSha256=$expectedSha; installerBytes=$expectedBytes; installedFiles=$fileHashes;
+    registeredRoot=$registeredRoot; displayVersion=$LegacyVersion; noOttoProcessObserved=$true; passed=$true;
     scope='Historical seed only. The following candidate install and existing four safety cases must also pass. No data migration, every-old-client or signed-device guarantee.';
     boundaries=@('The legacy installer may internally retry or terminate processes; this harness does neither.', 'Registration, protocol and shortcuts are expected writes on this disposable hosted runner, not confinement to the installation directory.', 'No force-run flag is supplied. Process observations are not a continuous GUI or network trace.') })
-  Write-Host "Verified historical 1.9.14 seed; next step must upgrade this same root. Evidence=$evidenceRoot"
+  Write-Host "Verified historical $LegacyVersion seed; next step must upgrade this same root. Evidence=$evidenceRoot"
 } catch {
   Save-Seed 'seed-failure.json' ([ordered]@{ phase=$phase; reason=$_.Exception.Message; passed=$false; harnessKilled=$false; harnessReplayed=$false })
   throw

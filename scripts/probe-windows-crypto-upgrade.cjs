@@ -114,7 +114,9 @@ async function main() {
   noRedirect(install);
   const executable = path.join(install, 'Otto.exe');
   reporter.enter('electron-host');
-  const electronHost = path.join(
+  const electronHost = phase === 'seed' ? path.join(
+    process.env.RUNNER_TEMP, 'otto-legacy-electron-host', 'electron.exe',
+  ) : path.join(
     path.dirname(require.resolve('electron/package.json')),
     'dist',
     'electron.exe',
@@ -124,6 +126,15 @@ async function main() {
     electronHost.toLowerCase(),
     'Probe must use the pinned Electron host',
   );
+  if (phase === 'seed') {
+    noRedirect(electronHost);
+    const hostReceipt = JSON.parse(fs.readFileSync(path.join(path.dirname(electronHost), 'host-receipt.json'), 'utf8'));
+    assert.equal(hostReceipt.source, process.env.GITHUB_SHA);
+    assert.equal(hostReceipt.workflowRun, process.env.GITHUB_RUN_ID);
+    assert.equal(hostReceipt.version, '43.2.0');
+    assert.equal(hostReceipt.zipSha256, 'eba5f5088af40ecb364fe258809c79a5234c6ece5a75c64722772eba01b02786');
+    assert.equal(hostReceipt.executableSha256, digest(electronHost));
+  }
   if (!process.versions.electron || process.env.ELECTRON_RUN_AS_NODE === '1')
     throw new Error('Full Electron runtime required');
   const { app, safeStorage } = require('electron');
@@ -171,7 +182,11 @@ async function main() {
     runtime.stdout.trim(),
     'Installed app and probe Electron versions differ',
   );
-  if (phase === 'seed') assert.equal(version, '1.9.14');
+  if (phase === 'seed') {
+    const expectedVersion = process.argv[3] || '1.9.14';
+    assert(['1.9.14', '1.9.18'].includes(expectedVersion), 'Unapproved historical version');
+    assert.equal(version, expectedVersion);
+  }
   else assert.equal(version, process.argv[3], 'Candidate version mismatch');
   const vaultDirectory = path.join(profile, 'keys');
   const historyDirectory = path.join(profile, 'history');

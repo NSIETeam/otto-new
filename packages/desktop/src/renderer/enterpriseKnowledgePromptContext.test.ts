@@ -2,10 +2,104 @@
  * @license Copyright 2026 Otto SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, expect, it } from 'vitest';
-import { buildEnterpriseKnowledgePromptContext } from './enterpriseKnowledgePromptContext.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  buildEnterpriseKnowledgePromptContext,
+  enterpriseKnowledgeLookupNotice,
+  lookupEnterpriseKnowledgeContext,
+} from './enterpriseKnowledgePromptContext.js';
+
+describe('bounded optional enterprise knowledge lookup', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('skips an empty query without allocating work or a timer', async () => {
+    vi.useFakeTimers();
+    const list = vi.fn();
+    expect(await lookupEnterpriseKnowledgeContext('  ', list)).toEqual({ status: 'skipped', context: '' });
+    expect(list).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('allows a normal two-second reply and clears the deadline', async () => {
+    vi.useFakeTimers();
+    const list = vi.fn(() => new Promise<[]>(resolve => window.setTimeout(() => resolve([]), 2_000)));
+    const lookup = lookupEnterpriseKnowledgeContext('  查询  ', list);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await lookup).toEqual({ status: 'ready', context: '' });
+    expect(list).toHaveBeenCalledWith({ query: '查询' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('reports a local deadline rather than an outage and ignores late data', async () => {
+    vi.useFakeTimers();
+    let finish!: (items: []) => void;
+    const lookup = lookupEnterpriseKnowledgeContext('制度', () => new Promise(resolve => { finish = resolve; }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    const result = await lookup;
+    expect(result).toEqual({ status: 'timeout', context: '' });
+    expect(enterpriseKnowledgeLookupNotice(result.status)).toContain('不代表服务器已停止服务');
+    finish([]);
+    await Promise.resolve();
+    expect(result.status).toBe('timeout');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('observes late rejection after a deadline without leaking another warning', async () => {
+    vi.useFakeTimers();
+    let reject!: (error: Error) => void;
+    const lookup = lookupEnterpriseKnowledgeContext('制度', () => new Promise((_, fail) => { reject = fail; }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect((await lookup).status).toBe('timeout');
+    reject(new Error('private server details'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([true, false])('clears the timer for a synchronous or asynchronous failure (%s)', async (sync) => {
+    vi.useFakeTimers();
+    const result = await lookupEnterpriseKnowledgeContext('制度', () => {
+      if (sync) throw new Error('secret');
+      return Promise.reject(new Error('secret'));
+    });
+    expect(result).toEqual({ status: 'failed', context: '' });
+    expect(enterpriseKnowledgeLookupNotice(result.status)).toContain('登录、权限和连接');
+    expect(enterpriseKnowledgeLookupNotice(result.status)).not.toContain('secret');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['ready', 'skipped'] as const)('does not invent an error for %s', (status) => {
+    expect(enterpriseKnowledgeLookupNotice(status)).toBeNull();
+  });
+});
 
 describe('enterprise knowledge prompt context', () => {
+  it.each([10, 100])('labels observed evidence and its age without calling a self-description verified (%s days)', (days) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-06T00:00:00Z'));
+    const observed = new Date(Date.now() - days * 86_400_000).toISOString();
+    const context = buildEnterpriseKnowledgePromptContext([{
+      id: 'observed', organizationId: 'org', sourceId: null,
+      department: '', category: 'policy', content: '应复核操作依据', contributor: null,
+      confidence: 0.9, status: 'active', version: 0, sourceType: 'auto_capture',
+      evidenceCount: 4, distinctSessionCount: 3, distinctContributorCount: 2,
+      verifiedEvidenceCount: 1, lastObservedAt: observed, createdAt: observed,
+    }]);
+    expect(context).toContain('组织可靠度 90%');
+    expect(context).toContain('4 条证据；3 个会话；2 名贡献者；1 条已验证');
+    expect(context.includes('超过 90 天')).toBe(days > 90);
+    vi.useRealTimers();
+  });
+
+  it('formats missing optional evidence and an invalid observation date safely', () => {
+    const context = buildEnterpriseKnowledgePromptContext([{
+      id: 'empty', organizationId: 'org', sourceId: null, department: null,
+      category: 'policy', content: '', contributor: null, confidence: 0, status: 'active',
+      sourceType: 'auto_capture', createdAt: 'invalid-date',
+    }]);
+    expect(context).toContain('范围：全组织');
+    expect(context).not.toContain('条证据');
+  });
+
   it('includes citations and excludes pending or archived records', () => {
     const context = buildEnterpriseKnowledgePromptContext([
       {

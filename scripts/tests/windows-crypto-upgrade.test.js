@@ -49,6 +49,13 @@ function importProbe(entry, electron = true) {
 }
 
 describe('encrypted data acceptance is a publication gate', () => {
+  it('uses a separately pinned historical Electron host rather than dropping the runtime equality gate', () => {
+    const runner = readFileSync('scripts/run-windows-crypto-upgrade.ps1', 'utf8');
+    expect(runner).toContain('otto-legacy-electron-host');
+    const workflow = readFileSync('.github/workflows/release.yml', 'utf8');
+    expect(workflow).toContain('scripts/prepare-windows-legacy-electron-host.mjs');
+    expect(readFileSync(probe, 'utf8')).toContain('Installed app and probe Electron versions differ');
+  });
   it.skipIf(
     process.platform !== 'win32' ||
       (!existsSync(electronExecutable) &&

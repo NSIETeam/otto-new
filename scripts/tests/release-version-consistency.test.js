@@ -48,6 +48,8 @@ describe('release version displays', () => {
       'scripts/version.js', 'package.json', 'package-lock.json',
       'packages/core/package.json', 'packages/desktop/package.json',
       'docs/server-integration-baseline.json',
+      'config/test-baselines/desktop/win32-x64-node22-vitest4.json.gz',
+      'config/test-baselines/desktop/darwin-arm64-node22-vitest4.json.gz',
       ...versionDisplays.map(({ path: sourcePath }) => sourcePath),
     ];
     try {
@@ -57,6 +59,8 @@ describe('release version displays', () => {
         copyFileSync(path.resolve(sourcePath), target);
       }
       const original = JSON.parse(readFileSync(path.join(fixture, 'docs/server-integration-baseline.json'), 'utf8'));
+      const reviewedBaselines = files.filter(file => file.endsWith('.json.gz'))
+        .map(file => [file, readFileSync(path.join(fixture, file))]);
       execFileSync(process.execPath, ['scripts/version.js', 'patch'], { cwd: fixture });
       const updatedPackage = JSON.parse(readFileSync(path.join(fixture, 'package.json'), 'utf8'));
       const updatedLedger = JSON.parse(readFileSync(path.join(fixture, 'docs/server-integration-baseline.json'), 'utf8'));
@@ -67,6 +71,9 @@ describe('release version displays', () => {
         ...original,
         release: { ...original.release, clientVersion: updatedPackage.version, serverVersion: updatedPackage.version },
       });
+      for (const [file, originalBytes] of reviewedBaselines) {
+        expect(readFileSync(path.join(fixture, file)).equals(originalBytes), file).toBe(true);
+      }
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }

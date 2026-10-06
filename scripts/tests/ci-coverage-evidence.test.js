@@ -250,6 +250,9 @@ it.each([
     expect(review.environmentAfter[field]).toBe(review.environmentBefore[field]);
   }
   expect(review.environmentAfter.lockSha256).toBe('12a3abee0fb9857c61153f534db63e5e9c97d0dee173784d453d99b5465b0a01');
+  expect(baseline.environment.lockSha256).toBe(createHash('sha256').update(
+    readFileSync(new URL('../../package-lock.json', import.meta.url)),
+  ).digest('hex'));
   expect(review.boundaries).toContain('No threshold, uncovered count, required test, instrumentation hint or unrelated file entry is changed.');
 });
 
@@ -278,11 +281,21 @@ it.each([
   const unchanged = Object.fromEntries(Object.entries(baseline.files).filter(([file]) => !changed.has(file)).sort());
   expect(createHash('sha256').update(JSON.stringify(unchanged)).digest('hex')).toBe(review.unchangedEntriesSha256);
   expect(baseline.review.environmentUpdates).toContainEqual(review);
+  const versionReview = JSON.parse(readFileSync(new URL(
+    `../../config/test-baselines/desktop/release-1920-${name}-review.json`, import.meta.url,
+  ), 'utf8'));
   for (const entry of review.files) {
-    expect(baseline.files[entry.file].sourceSha256).toBe(entry.sourceSha256);
+    if (entry.file === 'src/renderer/browserPreviewBridge.ts') {
+      expect(versionReview.files[0].beforeEntrySha256).toBe(entry.afterEntrySha256);
+      expect(versionReview.files[0].before).toEqual(entry.after);
+      expect(baseline.files[entry.file].sourceSha256).toBe(versionReview.files[0].sourceSha256);
+    } else {
+      expect(baseline.files[entry.file].sourceSha256).toBe(entry.sourceSha256);
+    }
     expect(baseline.files[entry.file].metrics).toEqual(entry.after);
   }
-  expect(baseline.environment.lockSha256).toBe(review.environmentAfter.lockSha256);
+  expect(versionReview.environmentBefore).toEqual(review.environmentAfter);
+  expect(baseline.environment).toEqual(versionReview.environmentAfter);
   const config = readFileSync(new URL('../../packages/desktop/vitest.config.ts', import.meta.url), 'utf8');
   expect(config).toMatch(/lines:\s*62/);
   expect(config).toMatch(/statements:\s*62/);

@@ -22,6 +22,8 @@ dependencies, repeated Word failures and the actual artifact-only build log:
 | Minimal Word GREEN | `c3a4fe93` | Same two files | 49 pass, 2 existing conditional skips |
 | Packaging-order RED | `d5ff2cfb` | `scripts/tests/desktop-packaging-validation.test.js` | 1 intended failure, 7 pass |
 | Packaging-order GREEN | `7cab9fcf` | Same script test | 8 pass |
+| Native-trigger RED | `b85f86aa` | Same script test, expanded to require both native workflows on packaging changes | 1 intended failure, 8 pass |
+| Native-trigger GREEN | `f9bac13c` | Same expanded script test | 9 pass |
 
 Commands use cached Node 22.23.1 and the owning Vitest configuration:
 
@@ -43,7 +45,7 @@ npx --offline --yes --package=node@22.23.1 node node_modules/vitest/vitest.mjs r
 | Python receives a real private temporary script path, not an ASAR path | Same file | PASS |
 | Advanced-engine error, missing output and empty output still fail | Same file | PASS |
 | Heading styles are linked and Mammoth recognizes an actual Heading1 | `editableDocument.test.ts` | PASS |
-| Source preflight precedes native download/build; fixed budgets and no publication remain enforced | Packaging workflow test | 8 PASS |
+| Source preflight precedes native download/build; both native workflows revalidate packaging changes; fixed budgets and no publication remain enforced | Packaging workflow test | 9 PASS |
 
 Final expanded core command, from `packages/core`:
 

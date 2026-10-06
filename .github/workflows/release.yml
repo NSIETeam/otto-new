@@ -967,6 +967,10 @@ jobs:
     name: Verify Windows installer and packaged runtime
     needs: build
     runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        legacy_version: ['1.9.14', '1.9.18']
     timeout-minutes: 20
     permissions:
       contents: read
@@ -1013,7 +1017,10 @@ jobs:
 
       - name: Seed the fixed historical Windows installation
         shell: pwsh
-        run: ./scripts/seed-windows-legacy-install.ps1
+        run: ./scripts/seed-windows-legacy-install.ps1 -LegacyVersion '${{ matrix.legacy_version }}'
+
+      - name: Prepare the byte-pinned historical Electron test host
+        run: node scripts/prepare-windows-legacy-electron-host.mjs
 
       - name: Prepare pinned Electron test host
         shell: bash
@@ -1021,7 +1028,7 @@ jobs:
 
       - name: Seed OS-protected encrypted data with the historical installed app
         shell: pwsh
-        run: ./scripts/run-windows-crypto-upgrade.ps1 -Phase seed
+        run: ./scripts/run-windows-crypto-upgrade.ps1 -Phase seed -Version '${{ matrix.legacy_version }}'
 
       - name: Install and load the packaged SQLCipher binding
         shell: pwsh
@@ -1121,7 +1128,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: windows-crypto-upgrade-${{ needs.build.outputs.version }}
+          name: windows-crypto-upgrade-${{ needs.build.outputs.version }}-from-${{ matrix.legacy_version }}
           path: |
             ${{ runner.temp }}/otto-crypto-upgrade-fixture/seed.json
             ${{ runner.temp }}/otto-crypto-upgrade-fixture/verified.json
@@ -1132,7 +1139,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: windows-legacy-seed-${{ needs.build.outputs.version }}
+          name: windows-legacy-seed-${{ needs.build.outputs.version }}-from-${{ matrix.legacy_version }}
           path: ${{ runner.temp }}/otto-legacy-seed-*/*.json
           if-no-files-found: warn
           retention-days: 30
@@ -1141,7 +1148,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: windows-upgrade-acceptance-${{ needs.build.outputs.version }}
+          name: windows-upgrade-acceptance-${{ needs.build.outputs.version }}-from-${{ matrix.legacy_version }}
           path: ${{ runner.temp }}/otto-upgrade-acceptance-*/*.json
           if-no-files-found: warn
           retention-days: 30

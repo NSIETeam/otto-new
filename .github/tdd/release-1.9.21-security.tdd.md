@@ -40,6 +40,27 @@ all mandatory validation succeeds. No such production change has occurred.
   file entries, required tests, metrics, hints and global thresholds remain
   unchanged. This limited refresh was explicitly authorized after both raw
   platform runs and candidate-baseline differential checks passed.
+- `006be094` RED: the newly published MCP advisory was reproduced using the
+  installed SDK's schemas and synthetic stored credentials only: four failures
+  and 26 passes. GREEN: SDK 1.31.0 preserves the issuer in both token and client
+  information schemas; all 30 assertions passed under Node 22.23.1. The root
+  override, direct core declaration and four lock fields changed; dependency
+  edges did not. The existing MCP connection, network guard and OAuth targets
+  passed all 97 assertions; core typecheck and code-map check also passed.
+  The live release dependency audit returned no advisories. New original native
+  Windows and macOS measurements and a separately authorized lock-only review
+  remain required before the final full CI and release.
+
+The upstream SDK advisory is
+[GHSA-6qxp-vccf-f47h](https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h).
+Inspection found Otto uses its own OAuth provider and guarded HTTP transports,
+not the SDK `authProvider` credential store. These regressions prove the fixed
+SDK schema behavior and unchanged Otto test contracts, not a complete OAuth
+attack assessment or first-party credential migration. No real credential was
+used or authorization server contacted. The initial default-runtime doctor
+used Node 24; the direct Node 22 doctor could not spawn the local npm command.
+That local launcher failure is retained, not counted as a passing Node 22
+doctor. Tests and typecheck above explicitly used the installed Node 22 binary.
 
 Commands used installed Node 22.23.1 and Vitest 4.1.11. Upstream archives were
 read and hashed, not executed. No shell exploit was executed; quoting tests

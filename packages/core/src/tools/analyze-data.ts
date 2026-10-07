@@ -17,6 +17,8 @@ import { Type } from '@google/genai';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import { Config, ApprovalMode } from '../config/config.js';
 import { DoctorService, CommandRunner } from '../services/doctor.js';
+import { ToolError, ToolErrorCode } from '../utils/tool-error.js';
+import type { WorkBook } from 'xlsx';
 
 const execAsync = promisify(exec);
 
@@ -106,7 +108,7 @@ EXAMPLES:
 INPUT: CSV, JSON, XLSX, Parquet.
 CHART OUTPUT: png/svg/terminal. On CSV/JSON, pie/bar/line/scatter/histogram all render as real SVG with ZERO dependencies (no gnuplot). A png request auto-writes a real .svg.
 
-DEPENDENCIES: pie/bar/line/scatter/histogram charts on CSV/JSON + CSV/JSON pivot need NO external tools (pure TS). box charts, charts on xlsx/parquet, and summary/query/transform/export_excel still use duckdb and/or gnuplot; those paths run a doctor preflight and fail loudly with an install command if the binary is missing (never faking output). macOS: brew install duckdb gnuplot.`;
+DEPENDENCIES: pie/bar/line/scatter/histogram charts on CSV/JSON + CSV/JSON pivot need NO external tools (pure TS). Excel export from CSV/JSON/XLS/XLSX uses bundled SheetJS and produces real XLSX bytes. Parquet export, box charts, charts on xlsx/parquet, and summary/query/transform still use duckdb and/or gnuplot; those paths run a doctor preflight and fail loudly with an install command if the binary is missing (never faking output). macOS: brew install duckdb gnuplot.`;
     super(AnalyzeDataTool.Name, 'AnalyzeData', desc, Icon.Info, {
       type: Type.OBJECT,
       properties: {
@@ -228,14 +230,15 @@ DEPENDENCIES: pie/bar/line/scatter/histogram charts on CSV/JSON + CSV/JSON pivot
 
   async execute(
     p: AnalyzeDataToolParams,
-    _s: AbortSignal,
+    signal: AbortSignal,
   ): Promise<ToolResult> {
+    signal.throwIfAborted();
     const logLabel = 'analyze_data.' + (p.operation || 'unknown');
     console.time(logLabel);
     const err = this.validateToolParams(p);
     if (err) {
       console.timeEnd(logLabel);
-      return { llmContent: err, returnDisplay: err };
+      throw new ToolError(ToolErrorCode.PARAM_INVALID, err);
     }
     try {
       let r = '';
@@ -265,31 +268,27 @@ DEPENDENCIES: pie/bar/line/scatter/histogram charts on CSV/JSON + CSV/JSON pivot
           );
           break;
         case 'export_excel':
-          r = await this.doExportExcel(p.input_path, p.output_path);
+          r = await this.doExportExcel(p.input_path, p.output_path, signal);
           break;
         default:
-          return {
-            llmContent: 'analyze_data FAIL: unknown operation',
-            returnDisplay: 'analyze_data FAIL: unknown op',
-          };
+          throw new ToolError(ToolErrorCode.PARAM_INVALID, 'analyze_data: unknown operation');
       }
+      signal.throwIfAborted();
       return {
         llmContent: 'analyze_data OK: ' + r,
         returnDisplay: 'analyze_data OK: ' + r.split('\n')[0],
       };
     } catch (e: unknown) {
+      signal.throwIfAborted();
+      if (e instanceof ToolError) throw e;
       const m = e instanceof Error ? e.message : String(e);
       if (m.includes('not found') || /duckdb|gnuplot/i.test(m))
-        return {
-          llmContent:
-            'analyze_data FAIL: tool not installed. macOS: brew install duckdb; brew install gnuplot. Windows: winget install DuckDB; choco install gnuplot. Details: ' +
-            m,
-          returnDisplay: 'analyze_data FAIL: tool not installed',
-        };
-      return {
-        llmContent: 'analyze_data FAIL: ' + m,
-        returnDisplay: 'analyze_data FAIL: ' + m,
-      };
+        throw new ToolError(ToolErrorCode.TOOL_NOT_INSTALLED,
+          'analyze_data FAIL: tool not installed. macOS: brew install duckdb; brew install gnuplot. Windows: winget install DuckDB; choco install gnuplot. Details: ' + m,
+          { cause: e });
+      // The execution engines record resolved ToolResults as success. Preserve
+      // failures as typed errors, rather than a misleading successful step.
+      throw new ToolError(ToolErrorCode.EXECUTION_FAILED, 'analyze_data FAIL: ' + m, { cause: e });
     } finally {
       console.timeEnd(logLabel);
     }
@@ -1461,23 +1460,51 @@ ${body}
     const result = await this.duckdb(sql);
     return 'Pivot (' + g + ': ' + a + ')\n' + output + '\n\n' + result;
   }
-  private async doExportExcel(f: string, out?: string): Promise<string> {
+  private async doExportExcel(f: string, out: string | undefined, signal: AbortSignal): Promise<string> {
     const output = out || f.replace(/\.[^.]+$/, '_export.xlsx');
+    if (!path.isAbsolute(output) || path.extname(output).toLowerCase() !== '.xlsx')
+      throw new ToolError(ToolErrorCode.PARAM_INVALID, 'export_excel requires an absolute .xlsx output path');
     const e = path.extname(f).toLowerCase();
-    if (e === '.xlsx' || e === '.xls') {
-      fs.copyFileSync(f, output);
-      return 'Copied: ' + output;
+    const XLSX = await import('xlsx');
+    signal.throwIfAborted();
+    fs.mkdirSync(path.dirname(output), { recursive: true });
+    const staging = fs.mkdtempSync(path.join(path.dirname(output), '.otto-excel-'));
+    const rendered = path.join(staging, 'result.xlsx');
+    try {
+      if (['.csv', '.json', '.xlsx', '.xls'].includes(e)) {
+        let workbook: WorkBook;
+        if (e === '.json') {
+          const rows: unknown = JSON.parse(fs.readFileSync(f, 'utf8'));
+          if (!Array.isArray(rows) || !rows.every(row => row !== null && typeof row === 'object' && !Array.isArray(row)))
+            throw new ToolError(ToolErrorCode.PARAM_INVALID, 'Excel JSON input must be an array of records');
+          workbook = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), 'Data');
+        } else {
+          // Buffer IO works in Node ESM and Electron ASAR alike. XLS is parsed
+          // and re-encoded; merely changing its extension is not conversion.
+          workbook = e === '.csv'
+            ? XLSX.read(fs.readFileSync(f, 'utf8'), { type: 'string' })
+            : XLSX.read(fs.readFileSync(f), { type: 'buffer' });
+        }
+        fs.writeFileSync(rendered, XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer', compression: true }));
+      } else {
+        await this.requireDuckdb('export_excel');
+        signal.throwIfAborted();
+        await this.duckdb('COPY (SELECT * FROM ' + this.tbl(f) + ") TO '" +
+          rendered.replace(/'/g, "''") + "' (FORMAT XLSX)");
+      }
+      signal.throwIfAborted();
+      const bytes = fs.readFileSync(rendered);
+      if (bytes.subarray(0, 2).toString() !== 'PK' ||
+          XLSX.read(bytes, { type: 'buffer' }).SheetNames.length === 0)
+        throw new Error('Excel engine did not produce a valid XLSX workbook');
+      // Commit only the verified new result, preserving any old destination
+      // when parsing, engine execution or cancellation fails.
+      fs.renameSync(rendered, output);
+      return 'Exported: ' + output;
+    } finally {
+      fs.rmSync(staging, { recursive: true, force: true });
     }
-    // Writing an .xlsx from csv/json/parquet goes through duckdb; gate on it first.
-    await this.requireDuckdb('export_excel');
-    await this.duckdb(
-      'COPY (SELECT * FROM ' +
-        this.tbl(f) +
-        ") TO '" +
-        output.replace(/'/g, "''") +
-        "' (FORMAT XLSX)",
-    );
-    return 'Exported: ' + output;
   }
   // Doctor preflight: fail loud (with install command) before touching duckdb.
   private async requireDuckdb(op: string): Promise<void> {

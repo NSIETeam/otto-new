@@ -20,6 +20,9 @@ describe.each(workflows)('$name real native integration prerequisite', ({ source
     expect(setup).toContain('OTTO_NATIVE_RELEASE_TOOLCHAIN');
     expect(setup).toContain('rustup toolchain install "$rust_toolchain" --profile minimal');
     expect(setup).toContain('cargo "+$rust_toolchain" build --locked');
+    expect(setup).toContain('cargo "+$rust_toolchain" test --locked');
+    expect(setup.indexOf('cargo "+$rust_toolchain" test --locked'))
+      .toBeLessThan(setup.indexOf('cargo "+$rust_toolchain" build --locked'));
     expect(setup).toContain('--manifest-path otto-native/Cargo.toml --bin otto-native');
     expect(setup).toContain('--target-dir otto-native/target');
     expect(setup).toContain('test -x otto-native/target/debug/otto-native');
@@ -32,4 +35,16 @@ describe.each(workflows)('$name real native integration prerequisite', ({ source
 
 it('uses identical current-source prerequisites for CI and the release quality gate', () => {
   expect(step(workflows[0].source)).toBe(step(workflows[1].source));
+});
+
+it('runs the native behavior and optional-backend tests on each real installer host', () => {
+  const source = readFileSync(path.join(root, '.github/workflows/desktop-packaging-validation.yml'), 'utf8');
+  const start = source.indexOf('      - name: Build current-source Otto native runtime');
+  const end = source.indexOf('\n      - name:', start + 1);
+  const setup = source.slice(start, end);
+  expect(setup).toContain('cargo test --locked --manifest-path otto-native/Cargo.toml');
+  expect(setup).toContain('--target "${{ matrix.cargo_target }}"');
+  expect(setup.indexOf('cargo test --locked'))
+    .toBeLessThan(setup.indexOf('node scripts/otto-native-runtime.mjs build'));
+  expect(setup).not.toMatch(/continue-on-error|\|\| true|--no-default-features|--lib/i);
 });

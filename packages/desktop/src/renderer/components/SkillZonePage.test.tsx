@@ -103,11 +103,13 @@ describe('SkillZonePage', () => {
       localSkillName: 'auto-budget',
       visibility: 'department',
     }));
+    expect(await screen.findByRole('status')).toHaveProperty('textContent', '已提交审核');
 
     fireEvent.click(screen.getByRole('button', { name: '审核' }));
     expect(await screen.findByRole('button', { name: '公司上架' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '公司上架' }));
     await waitFor(() => expect(enterpriseSkillReview).toHaveBeenCalledWith('skill-1', 'approve', 'company'));
+    expect(await screen.findByRole('status')).toHaveProperty('textContent', 'Skill 已通过审核并上架');
   });
 });
 
@@ -173,4 +175,48 @@ it('切走审核页后到达的旧审核结果不能覆盖当前市场，再次�
   fireEvent.click(screen.getByRole('button', { name: '审核' }));
   await screen.findByRole('heading', { name: '新审核技能' });
   expect(reviewRequests).toBe(2);
+});
+
+it('切走我的 Skill 后迟到的本机技能和投稿记录不能覆盖市场或污染再次进入的结果', async () => {
+  type LocalSkills = Array<{ name: string; description: string; kind: string }>;
+  let resolveLocal!: (items: LocalSkills) => void;
+  let resolveShared!: (items: EnterpriseSkillMarketItem[]) => void;
+  const oldLocal = new Promise<LocalSkills>(resolve => { resolveLocal = resolve; });
+  const oldShared = new Promise<EnterpriseSkillMarketItem[]>(resolve => { resolveShared = resolve; });
+  const localList = vi.fn().mockImplementationOnce(() => oldLocal)
+    .mockResolvedValue([{ name: '新本机技能', description: '本次读取的本机内容', kind: 'auto' }]);
+  let mineRequests = 0;
+  const list = vi.fn(async (input: { scope?: string }) => {
+    if (input.scope !== 'mine') return [skill({ name: '当前市场技能' })];
+    mineRequests++;
+    return mineRequests === 1 ? oldShared : [skill({ name: '新投稿技能' })];
+  });
+  Object.assign(window, { otto: installBridge({ enterpriseSkillLocalList: localList, enterpriseSkillList: list }) });
+  render(<SkillZonePage accountId="mine-stale-response" isAdmin={false} onBack={vi.fn()} />);
+  await screen.findByRole('heading', { name: '当前市场技能' });
+  fireEvent.click(screen.getByRole('button', { name: '我的 Skill' }));
+  await waitFor(() => {
+    expect(localList).toHaveBeenCalledTimes(1);
+    expect(mineRequests).toBe(1);
+  });
+  expect(screen.getByText('正在读取本机 Skill…')).toBeTruthy();
+  expect(screen.getByText('正在读取投稿记录…')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '市场' }));
+  await screen.findByRole('heading', { name: '当前市场技能' });
+
+  await act(async () => {
+    resolveLocal([{ name: '过期本机技能', description: '旧请求内容', kind: 'auto' }]);
+    resolveShared([skill({ name: '过期投稿技能' })]);
+    await Promise.all([oldLocal, oldShared]);
+  });
+  expect(screen.getByRole('heading', { name: '当前市场技能' })).toBeTruthy();
+  expect(screen.queryByText('过期投稿技能')).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: '我的 Skill' }));
+  await screen.findByText('新本机技能');
+  await screen.findByText('新投稿技能');
+  expect(screen.queryByText('过期本机技能')).toBeNull();
+  expect(screen.queryByText('过期投稿技能')).toBeNull();
+  expect(localList).toHaveBeenCalledTimes(2);
+  expect(mineRequests).toBe(2);
 });

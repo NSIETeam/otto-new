@@ -1482,9 +1482,21 @@ ${body}
         } else {
           // Buffer IO works in Node ESM and Electron ASAR alike. XLS is parsed
           // and re-encoded; merely changing its extension is not conversion.
+          const bytes = fs.readFileSync(f);
+          if (e === '.xlsx') {
+            const { default: JSZip } = await import('jszip');
+            const archive = await JSZip.loadAsync(bytes).catch(cause => {
+              throw new ToolError(ToolErrorCode.PARAM_INVALID, 'Excel XLSX input is not a valid workbook', { cause });
+            });
+            if (!archive.file('xl/workbook.xml') || !archive.file('[Content_Types].xml'))
+              throw new Error('Excel XLSX input is not a valid workbook');
+          } else if (e === '.xls' && !bytes.subarray(0, 8).equals(Buffer.from('d0cf11e0a1b11ae1', 'hex'))) {
+            throw new Error('Excel XLS input requires a binary workbook; use CSV for delimited text');
+          }
+          signal.throwIfAborted();
           workbook = e === '.csv'
-            ? XLSX.read(fs.readFileSync(f, 'utf8'), { type: 'string' })
-            : XLSX.read(fs.readFileSync(f), { type: 'buffer' });
+            ? XLSX.read(bytes.toString('utf8'), { type: 'string' })
+            : XLSX.read(bytes, { type: 'buffer' });
         }
         fs.writeFileSync(rendered, XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer', compression: true }));
       } else {

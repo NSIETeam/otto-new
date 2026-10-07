@@ -147,4 +147,16 @@ describe('AnalyzeDataTool file delivery outcomes', () => {
     await expect(exportExcel(file)).rejects.toThrow(/array of records/);
     expect(fs.existsSync(path.join(root, 'result.xlsx'))).toBe(false);
   });
+
+  it.each(['=SUM(1)', '=1+1', '="plain text"'])('keeps CSV formula-like content %s as literal text', async literal => {
+    const quoted = '"' + literal.replace(/"/g, '""') + '"';
+    const file = input('literal.csv', `name,amount,note\n合成,2,${quoted}\n`);
+    await exportExcel(file);
+    const workbook = XLSX.read(fs.readFileSync(path.join(root, 'result.xlsx')), { type: 'buffer' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    expect(sheet.C2.f).toBeUndefined();
+    expect(sheet.C2.t).toBe('s');
+    expect(sheet.C2.v).toBe(literal);
+    expect(sheet.B2.v).toBe(2);
+  });
 });

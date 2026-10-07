@@ -1,6 +1,6 @@
 {
   "name": "otto-core",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Otto Core - Core functionality for AI-powered coding assistant",
   "repository": {
     "type": "git",
@@ -37,7 +37,7 @@
     "@google/genai": "1.35.0",
     "@langchain/core": "1.2.4",
     "@langchain/langgraph": "1.4.8",
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/api-logs": "0.221.0",
     "@opentelemetry/core": "2.10.0",
@@ -76,7 +76,7 @@
     "pdf2json": "^3.1.6",
     "picomatch": "4.0.4",
     "pptxgenjs": "4.0.1",
-    "shell-quote": "^1.10.0",
+    "shell-quote": "1.11.0",
     "simple-git": "4.0.2",
     "strip-ansi": "^7.1.0",
     "undici": "7.30.0",

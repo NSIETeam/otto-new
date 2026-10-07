@@ -799,10 +799,19 @@ case "${SUDO_USER:-}" in
 esac
 if [ "$COMMAND" = 'prepare-upload' ] \
   || [ "$COMMAND" = 'cleanup-upload' ] \
+  || [ "$COMMAND" = 'upload-status' ] \
   || [ "$COMMAND" = 'upload-file' ]; then
-  if [ "$COMMAND" = 'upload-file' ]; then
-    [ "$#" -eq 6 ] \
-      || fail 'usage: upload-file KIND TRANSACTION ROLE SIZE SHA256'
+  if [ "$COMMAND" = 'upload-file' ] || [ "$COMMAND" = 'upload-status' ]; then
+    RESUME_OFFSET=0
+    RESUMABLE_UPLOAD=false
+    if [ "$COMMAND" = 'upload-file' ] && [ "$#" -eq 7 ]; then
+      RESUME_OFFSET="$7"
+      RESUMABLE_UPLOAD=true
+    else
+      [ "$#" -eq 6 ] || fail 'usage: upload-status/upload-file KIND TRANSACTION ROLE SIZE SHA256 [OFFSET]'
+    fi
+    [[ "$RESUME_OFFSET" =~ ^(0|[1-9][0-9]{0,9})$ ]] \
+      || fail 'upload resume offset is invalid'
   else
     [ "$#" -eq 3 ] || fail "usage: ${COMMAND} KIND TRANSACTION"
   fi
@@ -853,7 +862,7 @@ if [ "$COMMAND" = 'prepare-upload' ] \
     trap - EXIT
     exit 0
   fi
-  if [ "$COMMAND" = 'upload-file' ]; then
+  if [ "$COMMAND" = 'upload-file' ] || [ "$COMMAND" = 'upload-status' ]; then
     UPLOAD_ROLE="$4"
     EXPECTED_SIZE="$5"
     EXPECTED_SHA256="$6"
@@ -937,11 +946,24 @@ if [ "$COMMAND" = 'prepare-upload' ] \
     esac
     [ "$EXPECTED_SIZE" -le "$FILE_SIZE_LIMIT" ] \
       || fail 'upload exceeds its role-specific size limit'
+    [ "$RESUME_OFFSET" -le "$EXPECTED_SIZE" ] \
+      || fail 'upload resume offset exceeds the locked file size'
     [ -d "$TRANSACTION_UPLOAD_DIR" ] && [ ! -L "$TRANSACTION_UPLOAD_DIR" ] \
       || fail 'upload transaction directory is missing or unsafe'
     [ "$(stat -c '%u:%g:%a' "$TRANSACTION_UPLOAD_DIR")" = '0:0:700' ] \
       || fail 'upload transaction directory owner or mode is invalid'
     TARGET_UPLOAD_PATH="${TRANSACTION_UPLOAD_DIR}/${UPLOAD_NAME}"
+    PARTIAL_UPLOAD_NAME=".upload-${UPLOAD_NAME}-${EXPECTED_SIZE}-${EXPECTED_SHA256}.partial"
+    PARTIAL_UPLOAD_PATH="${TRANSACTION_UPLOAD_DIR}/${PARTIAL_UPLOAD_NAME}"
+    PARTIAL_SIZE=0
+    if [ -e "$PARTIAL_UPLOAD_PATH" ] || [ -L "$PARTIAL_UPLOAD_PATH" ]; then
+      [ -f "$PARTIAL_UPLOAD_PATH" ] && [ ! -L "$PARTIAL_UPLOAD_PATH" ] \
+        || fail 'upload prefix is unsafe'
+      [ "$(stat -c '%u:%g:%a:%h' "$PARTIAL_UPLOAD_PATH")" = '0:0:600:1' ] \
+        || fail 'upload prefix owner, mode or link count is invalid'
+      PARTIAL_SIZE="$(stat -c '%s' "$PARTIAL_UPLOAD_PATH")"
+      [ "$PARTIAL_SIZE" -le "$EXPECTED_SIZE" ] || fail 'upload prefix exceeds the locked file size'
+    fi
     UPLOAD_RETRY='false'
     if [ -e "$TARGET_UPLOAD_PATH" ] || [ -L "$TARGET_UPLOAD_PATH" ]; then
       [ -f "$TARGET_UPLOAD_PATH" ] && [ ! -L "$TARGET_UPLOAD_PATH" ] \
@@ -953,7 +975,8 @@ if [ "$COMMAND" = 'prepare-upload' ] \
         || fail 'existing upload target does not match the retry identity'
       UPLOAD_RETRY='true'
     fi
-    if [ "$UPLOAD_RETRY" = 'false' ]; then
+    if [ "$COMMAND" = 'upload-file' ] && [ "$UPLOAD_RETRY" = 'false' ]; then
+      [ "$RESUME_OFFSET" = "$PARTIAL_SIZE" ] || fail 'upload resume offset is stale'
       CURRENT_TRANSACTION_BYTES=0
       UPLOAD_SCAN_FILE="$(mktemp "${LOCKS_ROOT}/.upload-quota-scan.XXXXXXXX")"
       chmod 0600 "$UPLOAD_SCAN_FILE"
@@ -971,7 +994,7 @@ if [ "$COMMAND" = 'prepare-upload' ] \
       done < "$UPLOAD_SCAN_FILE"
       rm -f -- "$UPLOAD_SCAN_FILE"
       trap - EXIT
-      RESULTING_TRANSACTION_BYTES="$((CURRENT_TRANSACTION_BYTES + EXPECTED_SIZE))"
+      RESULTING_TRANSACTION_BYTES="$((CURRENT_TRANSACTION_BYTES + EXPECTED_SIZE - PARTIAL_SIZE))"
       [ "$RESULTING_TRANSACTION_BYTES" -le "$TRANSACTION_SIZE_LIMIT" ] \
         || fail 'upload transaction exceeds its total size limit'
       AVAILABLE_KIB="$(df -Pk -- "$TRANSACTION_UPLOAD_DIR" | awk 'NR == 2 { print $4 }')"
@@ -980,24 +1003,28 @@ if [ "$COMMAND" = 'prepare-upload' ] \
       # The deploy/publish phase creates a root-only staging copy. Before
       # accepting this stream, reserve space for the incoming bytes, a complete
       # copy of the resulting transaction, and an operational safety margin.
-      REQUIRED_KIB="$(((EXPECTED_SIZE + RESULTING_TRANSACTION_BYTES + 1023) / 1024 + MIN_UPLOAD_FREE_RESERVE_KIB))"
+      REQUIRED_KIB="$(((EXPECTED_SIZE - PARTIAL_SIZE + RESULTING_TRANSACTION_BYTES + 1023) / 1024 + MIN_UPLOAD_FREE_RESERVE_KIB))"
       [ "$AVAILABLE_KIB" -ge "$REQUIRED_KIB" ] \
         || fail 'upload filesystem does not have the required free-space reserve'
     fi
     /usr/bin/python3 -I -S /dev/fd/3 \
       "$TRANSACTION_UPLOAD_DIR" "$UPLOAD_NAME" "$EXPECTED_SIZE" \
-      "$EXPECTED_SHA256" "$UPLOAD_TIMEOUT_SECONDS" "$UPLOAD_RETRY" 3<<'PY'
+      "$EXPECTED_SHA256" "$UPLOAD_TIMEOUT_SECONDS" "$UPLOAD_RETRY" \
+      "$PARTIAL_UPLOAD_NAME" "$RESUME_OFFSET" "$RESUMABLE_UPLOAD" \
+      "$COMMAND" "$UPLOAD_KIND" "$TRANSACTION_ID" "$UPLOAD_ROLE" 3<<'PY'
 import hashlib
 import os
-import secrets
 import signal
 import stat
 import sys
+import time
 
-directory, name, raw_size, expected_digest, raw_timeout, raw_retry = sys.argv[1:]
+directory, name, raw_size, expected_digest, raw_timeout, raw_retry, partial_name, raw_offset, raw_resume, command, kind, transaction, role = sys.argv[1:]
 expected_size = int(raw_size)
 timeout = int(raw_timeout)
 is_retry = raw_retry == 'true'
+offset = int(raw_offset)
+keep_prefix = raw_resume == 'true'
 
 def timeout_upload(_signum, _frame):
     raise TimeoutError('upload timed out')
@@ -1008,9 +1035,38 @@ directory_fd = os.open(
     directory,
     os.O_RDONLY | os.O_DIRECTORY | getattr(os, 'O_NOFOLLOW', 0),
 )
-temporary_name = f'.upload-{secrets.token_hex(16)}'
-temporary_fd = -1
+partial_fd = -1
+accepted = False
+invalid_stream = False
+received = offset
+last_progress = time.monotonic()
+
+def verify_opened(fd):
+    metadata = os.fstat(fd)
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0
+        or metadata.st_gid != 0 or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_nlink != 1 or metadata.st_size > expected_size):
+        raise ValueError('opened upload file has unsafe metadata')
+    return metadata
+
+def hash_opened(fd):
+    os.lseek(fd, 0, os.SEEK_SET)
+    digest = hashlib.sha256()
+    while chunk := os.read(fd, 1024 * 1024):
+        digest.update(chunk)
+    return digest
+
 try:
+    # One unfinished identity per fixed destination. Otherwise a principal can
+    # accumulate arbitrarily many zero-length prefixes under different hashes
+    # without consuming the byte quota. Changing identity requires audited
+    # cleanup of the exact transaction, never silently abandoning old bytes.
+    for entry in os.listdir(directory_fd):
+        if (entry.startswith(f'.upload-{name}-') and entry.endswith('.partial')
+            and entry != partial_name):
+            raise ValueError('upload role has a different unfinished identity')
+    digest = hashlib.sha256()
+    prefix_size = 0
     if is_retry:
         existing_fd = os.open(
             name,
@@ -1018,70 +1074,85 @@ try:
             dir_fd=directory_fd,
         )
         try:
-            metadata = os.fstat(existing_fd)
-            existing_digest = hashlib.sha256()
-            while True:
-                existing_chunk = os.read(existing_fd, 1024 * 1024)
-                if not existing_chunk:
-                    break
-                existing_digest.update(existing_chunk)
-            if (
-                metadata.st_uid != 0
-                or metadata.st_gid != 0
-                or stat.S_IMODE(metadata.st_mode) != 0o600
-                or metadata.st_size != expected_size
-                or existing_digest.hexdigest() != expected_digest
-            ):
+            metadata = verify_opened(existing_fd)
+            existing_digest = hash_opened(existing_fd)
+            if metadata.st_size != expected_size or existing_digest.hexdigest() != expected_digest:
                 raise ValueError('existing upload target changed during retry')
+            prefix_size = expected_size
+            digest = existing_digest if command == 'upload-status' or offset == expected_size else hashlib.sha256()
         finally:
             os.close(existing_fd)
     else:
-        temporary_fd = os.open(
-            temporary_name,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0),
-            0o600,
-            dir_fd=directory_fd,
-        )
-    digest = hashlib.sha256()
-    remaining = expected_size
+        try:
+            partial_fd = os.open(partial_name, os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), dir_fd=directory_fd)
+        except FileNotFoundError:
+            if command != 'upload-status':
+                partial_fd = os.open(partial_name, os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600, dir_fd=directory_fd)
+                os.fsync(directory_fd)
+        if partial_fd >= 0:
+            prefix_size = verify_opened(partial_fd).st_size
+            digest = hash_opened(partial_fd)
+    if command == 'upload-status':
+        print(f'upload_state kind={kind} transaction={transaction} role={role} size={expected_size} sha256={expected_digest} offset={prefix_size} prefix_sha256={digest.hexdigest()} complete={str(is_retry).lower()}')
+        sys.exit(0)
+    if not is_retry and prefix_size != offset:
+        raise ValueError('upload prefix changed before resume')
+    if is_retry and offset not in (0, expected_size):
+        raise ValueError('accepted upload retry offset is invalid')
+    remaining = expected_size - offset
+    print(f'upload_progress kind={kind} transaction={transaction} role={role} bytes={received}/{expected_size}', file=sys.stderr, flush=True)
     while remaining:
-        chunk = sys.stdin.buffer.read(min(1024 * 1024, remaining))
+        chunk = os.read(0, min(1024 * 1024, remaining))
         if not chunk:
-            raise ValueError('upload ended before the declared size')
+            raise EOFError('upload paused before the declared size')
         if not is_retry:
             view = memoryview(chunk)
             while view:
-                written = os.write(temporary_fd, view)
+                written = os.write(partial_fd, view)
                 if written <= 0:
                     raise OSError('upload write made no progress')
                 view = view[written:]
         digest.update(chunk)
         remaining -= len(chunk)
-    if sys.stdin.buffer.read(1):
+        received += len(chunk)
+        if time.monotonic() - last_progress >= 30:
+            print(f'upload_progress kind={kind} transaction={transaction} role={role} bytes={received}/{expected_size}', file=sys.stderr, flush=True)
+            last_progress = time.monotonic()
+    if os.read(0, 1):
+        invalid_stream = True
         raise ValueError('upload exceeded the declared size')
     if digest.hexdigest() != expected_digest:
+        invalid_stream = True
         raise ValueError('upload digest does not match the declared sha256')
     if not is_retry:
-        os.fsync(temporary_fd)
-        os.close(temporary_fd)
-        temporary_fd = -1
+        os.fsync(partial_fd)
+        os.close(partial_fd)
+        partial_fd = -1
         os.rename(
-            temporary_name,
+            partial_name,
             name,
             src_dir_fd=directory_fd,
             dst_dir_fd=directory_fd,
         )
         os.fsync(directory_fd)
+    accepted = True
 finally:
     signal.alarm(0)
-    if temporary_fd >= 0:
-        os.close(temporary_fd)
-    try:
-        os.unlink(temporary_name, dir_fd=directory_fd)
-    except FileNotFoundError:
-        pass
+    if partial_fd >= 0:
+        if command == 'upload-file':
+            os.fsync(partial_fd)
+        os.close(partial_fd)
+    if command == 'upload-file' and not accepted:
+        print(f'upload_paused kind={kind} transaction={transaction} role={role} bytes={received}/{expected_size}', file=sys.stderr, flush=True)
+        if not keep_prefix or invalid_stream:
+            try:
+                os.unlink(partial_name, dir_fd=directory_fd)
+                os.fsync(directory_fd)
+            except FileNotFoundError:
+                pass
     os.close(directory_fd)
 PY
+    if [ "$COMMAND" = 'upload-status' ]; then exit 0; fi
     [ "$(stat -c '%u:%g:%a' "$TARGET_UPLOAD_PATH")" = '0:0:600' ] \
       || fail 'accepted upload target owner or mode is invalid'
     printf 'uploaded kind=%s transaction=%s role=%s size=%s sha256=%s\n' \
@@ -1372,7 +1443,7 @@ if [ "$COMMAND" = 'rollback-enterprise' ]; then
     [ "$(<"${DEPLOYMENT_STATE_DIR}/rolled-back")" = "$ROLLBACK_RECEIPT" ] \
       || fail 'enterprise rollback receipt changed'
     verify_current_deployment \
-      "$PREVIOUS_VERSION" "$PREVIOUS_PACKAGE" "$PREVIOUS_SOURCE"
+      "$PREVIOUS_VERSION" "$PREVIOUS_PACKAGE" "$PREVIOUS_SOURCE" >&2
     sync_live_deployment_filesystems
     write_once_durable "${DEPLOYMENT_STATE_DIR}/rolled-back" "$ROLLBACK_RECEIPT"
     printf '%s\n' "$ROLLBACK_RECEIPT"
@@ -1465,7 +1536,7 @@ if [ "$COMMAND" = 'rollback-enterprise' ]; then
   systemctl daemon-reload
   systemctl start otto-enterprise
   verify_current_deployment \
-    "$PREVIOUS_VERSION" "$PREVIOUS_PACKAGE" "$PREVIOUS_SOURCE"
+    "$PREVIOUS_VERSION" "$PREVIOUS_PACKAGE" "$PREVIOUS_SOURCE" >&2
   sync_live_deployment_filesystems
   write_once_durable "${DEPLOYMENT_STATE_DIR}/rolled-back" "$ROLLBACK_RECEIPT"
   printf '%s\n' "$ROLLBACK_RECEIPT"

@@ -115,7 +115,7 @@ export function probePackagedSharp(archivePath, { executable, target, sourceFixt
     const proof = JSON.parse(result.stdout.trim());
     const expectedElectron = JSON.parse(readFileSync(path.join(repoRoot, 'packages/desktop/package.json'), 'utf8')).build.electronVersion;
     if (proof.passed !== true || `${proof.platform}-${proof.arch}` !== target || proof.electron !== expectedElectron
-      || proof.sharp !== '0.35.4' || proof.libvips !== '8.18.6') throw new Error('packaged Electron media proof mismatch');
+      || proof.sharp !== '0.35.5' || proof.libvips !== '8.18.7' || proof.rsvg !== '2.63.2') throw new Error('packaged Electron media proof mismatch');
     return proof;
   } finally { rmSync(work, { recursive: true, force: true }); }
 }

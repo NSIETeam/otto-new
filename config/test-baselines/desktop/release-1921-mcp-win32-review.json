@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "status": "reviewed-mcp-security-lock-only-environment-update",
+  "reference": "https://github.com/NSIETeam/otto-new/pull/93",
+  "reviewer": "Root agent within the explicit user-authorized supplemental MCP review; not independent human approval",
+  "sourceCommit": "6100f62c34595290f5660389b75c49c276cb0cbc",
+  "nativeExitCode": 0,
+  "assertionsPassed": 2249,
+  "testFiles": 271,
+  "originalGate": {
+    "status": "failed",
+    "reason": "[desktop-coverage-ratchet] measurement environment differs or is unsupported"
+  },
+  "changedLockFields": [
+    "node_modules/@modelcontextprotocol/sdk.version",
+    "node_modules/@modelcontextprotocol/sdk.resolved",
+    "node_modules/@modelcontextprotocol/sdk.integrity",
+    "packages/core.dependencies.@modelcontextprotocol/sdk"
+  ],
+  "advisory": "https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h",
+  "dependencyBefore": "1.30.0",
+  "dependencyAfter": "1.31.0",
+  "files": [],
+  "changedLiterals": [],
+  "unchangedEntriesPreserved": 283,
+  "unchangedRequiredTestsSha256": "a86755e73e8acd5364ab9327b389445c7e2f280cc20f82a30ccbc83e5b8681ab",
+  "boundaries": [
+    "All 283 file entries, uncovered budgets, required tests, metrics, instrumentation hints and historical reviews are unchanged.",
+    "Only the lock identity and an appended environment review change; dependency edges, coverage tools, configuration, native runner and verifier do not change.",
+    "Both platforms original full native tests passed before this encoding. Each review binds its own original receipt and retains the rejected prior-environment gate.",
+    "Fresh full current-source CI remains mandatory before merge or release. This record is not installation, model quality, independent human certification or commercial signing."
+  ],
+  "recordedAt": "2026-10-06T23:37:32.175Z",
+  "testedMerge": null,
+  "ciRun": null,
+  "artifactId": null,
+  "nativeHost": "win32-x64",
+  "runId": "31e6dec6-f7b5-471a-9856-c4073ca98af4",
+  "parentBaselineSha256": "af5e6ef103449d1e9db84846a502ea9db097398be3807d7001af89a91ad3e598",
+  "receiptSha256": "79100df86ce02607aa8f10fc4c3ce73fa97873e622d77c376b78265b643257b7",
+  "coverageSha256": "18ff38c32f823e11de51f315d23879e83d0999d32b1d47562169f141d9287d64",
+  "testResultsSha256": "9e98f0784c6312a00c506cf6673a48f98383a970a1d28fe5f0d9b711943ff975",
+  "sourceManifestSha256": "38f15ff47cae22bb9f6fb14b93e9578b0e7d692b166fc0b584502fed3e94ec24",
+  "unchangedEntriesSha256": "338cd4b5004f73e9bbc9ce3bda2cfc82105a6dac8062198ff73d2240f951e34b",
+  "environmentBefore": {
+    "platform": "win32",
+    "arch": "x64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "caf4dd47890d5475d0d3b5bc869ef2464a803736089268ee674e47c3318a630c"
+  },
+  "environmentAfter": {
+    "platform": "win32",
+    "arch": "x64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "d56ea3f52db33ad5cabbcc92aa4b0e2326176dac467a15fafc0f76862b931b41"
+  }
+}

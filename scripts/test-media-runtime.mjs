@@ -38,7 +38,7 @@ export function mediaProbeProgram(releaseRoot, fixture, workerModule = 'src/medi
     let rejected = false;
     try { await processMarketImage(Buffer.from('invalid image')); } catch { rejected = true; }
     if (!rejected) throw Error('packaged invalid image accepted');
-    console.log(JSON.stringify({passed:true,platform:process.platform,arch:process.arch,node:process.version,electron:process.versions.electron || null,sharp:sharp.versions.sharp,libvips:sharp.versions.vips,jpegOrientation:true,heicRedPixels:true,invalidImageRejected:true}));
+    console.log(JSON.stringify({passed:true,platform:process.platform,arch:process.arch,node:process.version,electron:process.versions.electron || null,sharp:sharp.versions.sharp,libvips:sharp.versions.vips,rsvg:sharp.versions.rsvg,jpegOrientation:true,heicRedPixels:true,invalidImageRejected:true}));
   `;
 }
 
@@ -87,7 +87,7 @@ export async function testMediaRuntime({ repoRoot = defaultRepo, target, workDir
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(`isolated media worker failed: ${result.stderr}`);
     const proof = JSON.parse(result.stdout.trim());
-    if (proof.passed !== true || proof.platform + '-' + proof.arch !== target || proof.sharp !== '0.35.4' || proof.libvips !== '8.18.6') throw new Error('isolated media proof identity mismatch');
+    if (proof.passed !== true || proof.platform + '-' + proof.arch !== target || proof.sharp !== '0.35.5' || proof.libvips !== '8.18.7' || proof.rsvg !== '2.63.2') throw new Error('isolated media proof identity mismatch');
     report.proof = proof;
     report.archives = assets.packages.map(({ name, archiveSha256, integrity }) => ({ name, archiveSha256, integrity }));
     report.passed = true;

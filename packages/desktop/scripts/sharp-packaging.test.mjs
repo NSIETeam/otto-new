@@ -67,16 +67,16 @@ async function packagedFixture(variant, operation) {
     mkdirSync(sourceRoot);
     const integrity = 'sha512-' + createHash('sha512').update('fixture').digest('base64');
     writeFileSync(path.join(sourceRoot, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: {
-      'packages/server': { dependencies: { sharp: '0.35.4' } },
-      'node_modules/sharp': { version: '0.35.4', optionalDependencies: { '@img/sharp-win32-x64': '0.35.4' } },
-      'node_modules/@img/sharp-win32-x64': { version: '0.35.4', os: ['win32'], cpu: ['x64'], integrity, resolved: 'https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.4.tgz' },
+      'packages/server': { dependencies: { sharp: '0.35.5' } },
+      'node_modules/sharp': { version: '0.35.5', optionalDependencies: { '@img/sharp-win32-x64': '0.35.5' } },
+      'node_modules/@img/sharp-win32-x64': { version: '0.35.5', os: ['win32'], cpu: ['x64'], integrity, resolved: 'https://registry.npmjs.org/@img/sharp-win32-x64/-/sharp-win32-x64-0.35.5.tgz' },
       'node_modules/heic-decode': { version: '2.1.0' }, 'node_modules/libheif-js': { version: '1.23.2' },
     } }));
     const files = {
-      'node_modules/sharp/package.json': JSON.stringify({ name: 'sharp', version: '0.35.4' }),
+      'node_modules/sharp/package.json': JSON.stringify({ name: 'sharp', version: '0.35.5' }),
       'node_modules/heic-decode/package.json': JSON.stringify({ name: 'heic-decode', version: variant === 'wrong-js' ? '1.0.0' : '2.1.0' }),
       'node_modules/libheif-js/package.json': JSON.stringify({ name: 'libheif-js', version: '1.23.2' }),
-      'node_modules/@img/sharp-win32-x64/package.json': JSON.stringify({ name: '@img/sharp-win32-x64', version: variant === 'wrong-native' ? '0.0.1' : '0.35.4', os: ['win32'], cpu: ['x64'] }),
+      'node_modules/@img/sharp-win32-x64/package.json': JSON.stringify({ name: '@img/sharp-win32-x64', version: variant === 'wrong-native' ? '0.0.1' : '0.35.5', os: ['win32'], cpu: ['x64'] }),
       'node_modules/@img/sharp-win32-x64/lib/sharp.node': 'native-test-bytes-not-executed',
       'node_modules/sharp/dist/index.cjs': '', 'node_modules/heic-decode/index.js': '', 'node_modules/heic-decode/lib.js': '',
       'node_modules/libheif-js/wasm-bundle.js': '', 'node_modules/libheif-js/libheif-wasm/libheif-bundle.js': '',

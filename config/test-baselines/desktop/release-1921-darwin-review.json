@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "status": "reviewed-security-dependency-and-version-only-source-update",
+  "reference": "https://github.com/NSIETeam/otto-new/pull/93",
+  "recordedAt": "2026-10-06T16:51:21.955Z",
+  "reviewer": "Root agent within the user-authorized 1.9.21 release; not independent human approval",
+  "sourceCommit": "b9a614b42321019db5461e2423242a31e9cd8671",
+  "testedMerge": "87132c3fd2952360945fd82dced48c0329eaa510",
+  "ciRun": "https://github.com/NSIETeam/otto-new/actions/runs/37496022953",
+  "artifactId": 11427839059,
+  "nativeHost": "darwin-arm64",
+  "runId": "7667cabb-b815-4ba5-b886-e405018de144",
+  "parentBaselineSha256": "d5759836bd48d5f91187218aae12c2ecdb5e556dfb8c94e1ea0f2b26fa99cc02",
+  "receiptSha256": "8c2ef348f969fbecf0ac4f8788e7fa7be49cbd97db01169034011b802b04b308",
+  "coverageSha256": "bf31f75f29fec1743374e40ff02553b8943977d3bdbc2ae5bb3ce7a227c7a25f",
+  "testResultsSha256": "41fd895713f210b26f33a1c4871731fa63333ebecf720d8c6ce465ffc53b7608",
+  "sourceManifestSha256": "ff4362cfa4241e1ddc9278baae25db3e5320ac6cdb90575d8552aff854350883",
+  "nativeExitCode": 0,
+  "assertionsPassed": 2249,
+  "testFiles": 271,
+  "originalGate": {
+    "status": "failed",
+    "reason": "[desktop-coverage-ratchet] measurement environment differs or is unsupported"
+  },
+  "environmentBefore": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "12a3abee0fb9857c61153f534db63e5e9c97d0dee173784d453d99b5465b0a01"
+  },
+  "environmentAfter": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "nodeMajor": 22,
+    "vitest": "4.1.11",
+    "coverageV8": "4.1.11",
+    "mapper": "ast",
+    "configSha256": "194406480ef8731bffc98159cd7a3484c6a16e8e995d0bc2b73a7acd6b20da26",
+    "lockSha256": "caf4dd47890d5475d0d3b5bc869ef2464a803736089268ee674e47c3318a630c"
+  },
+  "changedLockFields": [
+    "version",
+    "packages[empty].version",
+    "packages/core.version",
+    "packages/desktop.version",
+    "packages/core.dependencies.shell-quote",
+    "packages/server.dependencies.sharp",
+    "node_modules/sharp",
+    "node_modules/shell-quote",
+    "node_modules/@img/sharp*"
+  ],
+  "reviewedLockChanges": [
+    "node_modules/@img/sharp-darwin-arm64",
+    "node_modules/@img/sharp-darwin-x64",
+    "node_modules/@img/sharp-freebsd-wasm32",
+    "node_modules/@img/sharp-libvips-darwin-arm64",
+    "node_modules/@img/sharp-libvips-darwin-x64",
+    "node_modules/@img/sharp-libvips-linux-arm",
+    "node_modules/@img/sharp-libvips-linux-arm64",
+    "node_modules/@img/sharp-libvips-linux-ppc64",
+    "node_modules/@img/sharp-libvips-linux-riscv64",
+    "node_modules/@img/sharp-libvips-linux-s390x",
+    "node_modules/@img/sharp-libvips-linux-x64",
+    "node_modules/@img/sharp-libvips-linuxmusl-arm64",
+    "node_modules/@img/sharp-libvips-linuxmusl-x64",
+    "node_modules/@img/sharp-linux-arm",
+    "node_modules/@img/sharp-linux-arm64",
+    "node_modules/@img/sharp-linux-ppc64",
+    "node_modules/@img/sharp-linux-riscv64",
+    "node_modules/@img/sharp-linux-s390x",
+    "node_modules/@img/sharp-linux-x64",
+    "node_modules/@img/sharp-linuxmusl-arm64",
+    "node_modules/@img/sharp-linuxmusl-x64",
+    "node_modules/@img/sharp-wasm32",
+    "node_modules/@img/sharp-webcontainers-wasm32",
+    "node_modules/@img/sharp-win32-arm64",
+    "node_modules/@img/sharp-win32-ia32",
+    "node_modules/@img/sharp-win32-x64",
+    "node_modules/sharp",
+    "node_modules/shell-quote",
+    "packages/core",
+    "packages/server"
+  ],
+  "changedLiterals": [
+    "1.9.20-browser-preview -> 1.9.21-browser-preview",
+    "1.9.20 -> 1.9.21"
+  ],
+  "unchangedEntriesPreserved": 282,
+  "unchangedEntriesSha256": "86802e69851150f7cd01768bd8f6fe0f32b4c8d859e7a0decb12172c89f49415",
+  "unchangedRequiredTestsSha256": "a86755e73e8acd5364ab9327b389445c7e2f280cc20f82a30ccbc83e5b8681ab",
+  "files": [
+    {
+      "file": "src/renderer/browserPreviewBridge.ts",
+      "reason": "Only two displayed version literals advance; pre-existing completely uncovered preview debt is not increased or claimed as a quality improvement.",
+      "beforeEntrySha256": "c0450d8f3263daf3e12f145643a94980ab77205fc47038398d88501b96a6e68d",
+      "afterEntrySha256": "e1c1eb27544e74ebbc0b0249e75b5717696f9d7f12e1a15b25d1df51056e2bcf",
+      "sourceSha256": "f35b9a8379a5e9af47c49c923d7741a993aee7118514c4153e409d3411a9a3de",
+      "before": {
+        "lines": {
+          "total": 275,
+          "uncovered": 275
+        },
+        "statements": {
+          "total": 295,
+          "uncovered": 295
+        },
+        "functions": {
+          "total": 147,
+          "uncovered": 147
+        },
+        "branches": {
+          "total": 157,
+          "uncovered": 157
+        }
+      },
+      "after": {
+        "lines": {
+          "total": 275,
+          "uncovered": 275
+        },
+        "statements": {
+          "total": 295,
+          "uncovered": 295
+        },
+        "functions": {
+          "total": 147,
+          "uncovered": 147
+        },
+        "branches": {
+          "total": 157,
+          "uncovered": 157
+        }
+      }
+    }
+  ],
+  "boundaries": [
+    "No threshold, uncovered count, required test, instrumentation hint or unrelated file entry is changed.",
+    "The lock differs only in four release metadata fields and reviewed shell-quote/sharp native package identities, edges and explicit libc metadata. Coverage provider and configuration bytes are unchanged.",
+    "The preview AST/map entry is from this actual platform execution, never borrowed from another platform.",
+    "Original receipts, reports, rejected gate results, historical reviews and 282 unrelated baseline entries remain preserved.",
+    "The verifier and native runner stay read-only. A new full current-source CI must pass before merge or release.",
+    "This record is not new native coverage, independent human review, installed-client acceptance, model quality or commercial signing."
+  ]
+}

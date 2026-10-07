@@ -12,12 +12,12 @@ import { collectEnterpriseRuntimeDependencies, copyEnterpriseRuntimeDependencies
 
 const digest = bytes => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
 function lockFixture() {
-  const packages = { 'packages/server': { dependencies: { sharp: '0.35.4' } },
-    'node_modules/sharp': { version: '0.35.4', optionalDependencies: {} } };
+  const packages = { 'packages/server': { dependencies: { sharp: '0.35.5' } },
+    'node_modules/sharp': { version: '0.35.5', optionalDependencies: {} } };
   for (const target of ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64']) {
     for (const stem of (target === 'win32-x64' ? ['sharp'] : ['sharp', 'sharp-libvips'])) {
       const name = `@img/${stem}-${target}`;
-      const version = stem === 'sharp' ? '0.35.4' : '1.3.3';
+      const version = stem === 'sharp' ? '0.35.5' : '1.3.4';
       packages['node_modules/sharp'].optionalDependencies[name] = version;
       packages[`node_modules/${name}`] = { version, cpu: [target.split('-')[1]], os: [target.split('-')[0]],
         resolved: `https://registry.npmjs.org/${name}/-/${name.split('/')[1]}-${version}.tgz`, integrity: digest(Buffer.from(name)) };
@@ -63,7 +63,7 @@ describe('locked target-specific sharp runtime', () => {
     if (variant === 'integrity') addon.integrity = 'sha1-weak';
     if (variant === 'registry') addon.resolved = 'https://other.example/package.tgz';
     if (variant === 'cpu') addon.cpu = ['arm64'];
-    if (variant === 'range') lock.packages['node_modules/sharp'].optionalDependencies['@img/sharp-linux-x64'] = '^0.35.4';
+    if (variant === 'range') lock.packages['node_modules/sharp'].optionalDependencies['@img/sharp-linux-x64'] = '^0.35.5';
     if (variant === 'sharpVersion') addon.version = '0.35.3';
     expect(() => resolveSharpRuntimePackages(lock)).toThrow();
   });
@@ -118,7 +118,7 @@ async function stagedFixture(operation) {
       lock.packages[spec.location].integrity = digest(bytes);
     }
     writeFileSync(path.join(repoRoot, 'package-lock.json'), JSON.stringify(lock));
-    writeFileSync(path.join(repoRoot, 'node_modules/sharp/package.json'), JSON.stringify({ name: 'sharp', version: '0.35.4' }));
+    writeFileSync(path.join(repoRoot, 'node_modules/sharp/package.json'), JSON.stringify({ name: 'sharp', version: '0.35.5' }));
     const assets = await materializeSharpRuntimeAssets({ repoRoot, destination: path.join(temporary, 'assets'), fetchArchive: async spec => archives.get(spec.name) });
     await operation({ repoRoot, assets, temporary, lock, fetchArchive: async spec => archives.get(spec.name) });
   } finally { rmSync(temporary, { recursive: true, force: true }); }

@@ -2466,10 +2466,10 @@ describe('enterprise CI deployment gateway contract', () => {
     );
     expect(gateway).toContain('UPLOAD_TIMEOUT_SECONDS=1800');
     expect(gateway).toContain(
-      'RESULTING_TRANSACTION_BYTES="$((CURRENT_TRANSACTION_BYTES + EXPECTED_SIZE))"',
+      'RESULTING_TRANSACTION_BYTES="$((CURRENT_TRANSACTION_BYTES + EXPECTED_SIZE - PARTIAL_SIZE))"',
     );
     expect(gateway).toContain(
-      'EXPECTED_SIZE + RESULTING_TRANSACTION_BYTES + 1023',
+      'EXPECTED_SIZE - PARTIAL_SIZE + RESULTING_TRANSACTION_BYTES + 1023',
     );
     expect(gateway).toContain('EXPANDED_ARCHIVE_BYTES="$(/usr/bin/python3');
     expect(gateway).toContain('EXPANDED_ARCHIVE_BYTES + 1023');
@@ -2647,7 +2647,7 @@ describe('enterprise CI deployment gateway contract', () => {
     expect(rollbackOwnerPreSync).toBeLessThan(rollbackOwnerMove);
     expect(gateway).toContain('os.O_EXCL');
     expect(gateway).toContain("getattr(os, 'O_NOFOLLOW', 0)");
-    expect(gateway).toContain('os.fsync(temporary_fd)');
+    expect(gateway).toContain('os.fsync(partial_fd)');
     expect(gateway).toContain('os.fsync(directory_fd)');
     expect(gateway).toContain(
       "|| fail 'transaction upload directory does not contain the exact file set'",
@@ -2668,7 +2668,7 @@ describe('enterprise CI deployment gateway contract', () => {
       'prepare-upload enterprise "$DEPLOY_TRANSACTION_ID"',
     );
     expect(deployWorkflow).toContain(
-      'upload-file enterprise "$DEPLOY_TRANSACTION_ID" "$role" "$size" "$digest"',
+      'otto_upload_file enterprise "$DEPLOY_TRANSACTION_ID" "$1" "$2"',
     );
     expect(deployWorkflow).toContain(
       'cleanup-upload enterprise "$DEPLOY_TRANSACTION_ID"',
@@ -2680,7 +2680,7 @@ describe('enterprise CI deployment gateway contract', () => {
       'prepare-upload mirror "$MIRROR_TRANSACTION_ID"',
     );
     expect(releaseWorkflow).toContain(
-      'upload-file mirror "$MIRROR_TRANSACTION_ID" "$role" "$size" "$digest"',
+      'otto_upload_file mirror "$MIRROR_TRANSACTION_ID" "$1" "$2"',
     );
     expect(releaseWorkflow).toContain(
       'cleanup-upload mirror "$MIRROR_TRANSACTION_ID"',
@@ -2689,6 +2689,7 @@ describe('enterprise CI deployment gateway contract', () => {
       "if: ${{ always() && steps.mirror_ssh.outcome == 'success' }}",
     );
     for (const workflow of [deployWorkflow, releaseWorkflow]) {
+      expect(workflow).toContain('source deployment/enterprise-oneclick/ci/upload-file.sh');
       expect(workflow).not.toContain("install -d -m 0700 '$REMOTE_DIR'");
       expect(workflow).not.toMatch(/^\s*scp\s/gm);
     }

@@ -1497,6 +1497,22 @@ ${body}
           workbook = e === '.csv'
             ? XLSX.read(bytes.toString('utf8'), { type: 'string' })
             : XLSX.read(bytes, { type: 'buffer' });
+          if (e === '.csv') {
+            // CSV has no formula type. Preserve formula-like source text while
+            // retaining numeric inference for ordinary cells. cellFormula:false
+            // does not disable SheetJS's CSV formula promotion.
+            const literalWorkbook = XLSX.read(bytes.toString('utf8'), { type: 'string', raw: true });
+            for (const name of literalWorkbook.SheetNames) {
+              const literals = literalWorkbook.Sheets[name];
+              const sheet = workbook.Sheets[name];
+              for (const address of Object.keys(literals)) {
+                if (address.startsWith('!')) continue;
+                const value = literals[address].v;
+                if (typeof value === 'string' && value.startsWith('='))
+                  sheet[address] = { t: 's', v: value };
+              }
+            }
+          }
         }
         fs.writeFileSync(rendered, XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer', compression: true }));
       } else {

@@ -257,6 +257,7 @@ These concerns belong outside the kernel boundary. Kernel files **must not impor
 - `packages/core/src/tools/convert-document.js`, `generate-document.js` — Office document generation.
 - `packages/core/src/tools/ppt/` — PowerPoint tooling.
 - These are tools called *by* the kernel, not part of it.
+- `services/desktopPdf.ts` is an optional host capability for text-only basic PDF output. The desktop host supplies the executable/helper paths to embedded and detached runtimes; core does not import Electron. `desktop/src/main/pdf-renderer.ts` owns the isolated browser, denies networking/permissions/scripts, and uses disposable staging/profile directories. CLI/server runtimes without this host capability retain their explicit external-engine requirements.
 
 ### Repo-Specific Integrations
 

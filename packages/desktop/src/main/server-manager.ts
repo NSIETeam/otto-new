@@ -395,6 +395,12 @@ export class ServerManager {
    * 确保有可用 server，返回其端点。已尽量幂等：可重复调用（重连场景）。
    */
   async ensure(): Promise<EnsuredServer> {
+    // Host-selected paths only; the model and incoming HTTP fields cannot
+    // select code. Both embedded and detached runtimes receive this capability.
+    if (process.versions.electron) {
+      process.env.OTTO_DESKTOP_PDF_EXECUTABLE = process.execPath;
+      process.env.OTTO_DESKTOP_PDF_HELPER = path.join(__dirname, 'pdf-renderer.js');
+    }
     if (this.mainEnsurePromise) return this.mainEnsurePromise;
     this.throwIfShuttingDown();
     const operation = this.ensureOnce();

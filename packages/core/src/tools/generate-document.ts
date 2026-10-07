@@ -25,6 +25,7 @@ import {
 import { startProcessWatchdog } from '../utils/processWatchdog.js';
 
 import { runDocumentCommand, type DocumentCommandRunner } from '../services/documentCommand.js';
+import { assertCompletePdf, hasDesktopPdfRenderer, renderDesktopPdf } from '../services/desktopPdf.js';
 export { runDocumentCommand, type DocumentCommandRunner, type RunDocumentCommandOptions, type ExecFileImplementation } from '../services/documentCommand.js';
 export type DependencyPreflight = (names: string[]) => Promise<string | null>;
 export type DocumentRuntimeResolver = (
@@ -743,9 +744,9 @@ PPTX VISUAL GRAMMAR: Start each slide with <!-- layout: cover|statement|split|ti
 
 PPTX QUALITY BOUNDARY: This deterministic renderer is a speed fallback. For a high-aesthetic or flashy deck, load ppt-creator and build a topic-specific custom HTML/CSS/SVG canvas instead of presenting this fallback as premium work.
 
-ENGINES: PPTX -> deterministic 1920x1080 local HTML -> local browser PNG screenshots -> bundled PptxGenJS packaging. Slide PDF/HTML -> Marp. Other PDF -> Typst or Pandoc. DOCX -> available Python doc-writer, or explicitly disclosed built-in basic Word layout when Python is unavailable. HTML -> Pandoc.
+ENGINES: PPTX -> deterministic 1920x1080 local HTML -> local browser PNG screenshots -> bundled PptxGenJS packaging. Slide PDF/HTML -> Marp. Other PDF -> Typst or Pandoc. Desktop PDF can use the bundled isolated Chromium basic layout when external engines are unavailable (text, headings, lists and tables; no images or custom templates). DOCX -> available Python doc-writer, or explicitly disclosed built-in basic Word layout when Python is unavailable. HTML -> Pandoc.
 
-DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Python. Markdown needs none. Slide PDF/HTML need marp-cli; other formats may need typst or pandoc. External engines run a doctor preflight and fail loud with an install command if missing (never faking output). macOS: brew install typst pandoc; npm i -g @marp-team/marp-cli. Windows: winget install typst pandoc; npm i -g @marp-team/marp-cli.`;
+DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Python. Markdown needs none. Desktop basic PDF uses the bundled Chromium engine, not Python/Typst/Marp; custom or image-heavy PDF still needs the external engine. Slide HTML needs marp-cli; other formats may need typst or pandoc. External engines run a doctor preflight and fail loud with an install command if missing (never faking output). macOS: brew install typst pandoc; npm i -g @marp-team/marp-cli. Windows: winget install typst pandoc; npm i -g @marp-team/marp-cli.`;
     super(GenerateDocumentTool.Name, 'GenerateDocument', desc, Icon.Pencil,
       {
         type: Type.OBJECT,
@@ -847,6 +848,8 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
           signal,
           progress,
         );
+      } else if (output_format === 'pdf' && format === 'table' && hasDesktopPdfRenderer()) {
+        await this.genBasicPdf(content, renderedPath, titleStr, bylineStr, signal, progress);
       } else if (output_format === 'pdf' && ['report','article','letter','resume'].includes(format)) {
         await this.genTypst(content, format, renderedPath, tmpDir, titleStr, authorStr, bylineStr, signal, progress);
       } else {
@@ -913,6 +916,11 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
     // PDF/HTML slides render via Marp. Fail loud if missing.
     progress.step('preflight', '预检 Marp 依赖');
     const missing = await this.dependencyPreflight(['marp']);
+    if (signal.aborted) throw new Error('文档生成已取消');
+    if (missing && fmt === 'pdf' && hasDesktopPdfRenderer()) {
+      await this.genBasicPdf(slides, outPath, title, author, signal, progress, 'slides');
+      return;
+    }
     if (missing) throw new Error('generate_document/slides needs marp: ' + missing);
     const mdFile = path.join(tmpDir, 'slides.md');
     progress.step('body', '生成幻灯片正文');
@@ -1852,6 +1860,11 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
     // Doctor preflight: typst-rendered PDFs (report/article/letter/resume) need typst.
     progress.step('preflight', '预检 Typst 依赖');
     const missing = await this.dependencyPreflight(['typst']);
+    if (signal.aborted) throw new Error('文档生成已取消');
+    if (missing && hasDesktopPdfRenderer()) {
+      await this.genBasicPdf(content, outPath, title, byline, signal, progress);
+      return;
+    }
     if (missing) throw new Error('generate_document (' + format + ' -> pdf) needs typst: ' + missing);
     progress.step('parse', '解析 Markdown 正文');
     const typFile = path.join(tmpDir, 'doc.typ');
@@ -1863,6 +1876,15 @@ DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Pyt
     progress.step('body', '生成 PDF 正文');
     progress.step('export', '导出 PDF 文件');
     await this.commandRunner('typst', ['compile', typFile, outPath], { signal });
+  }
+  private async genBasicPdf(
+    content: string, outputPath: string, title: string, byline: string,
+    signal: AbortSignal, progress: DocumentProgress, layout: 'document' | 'slides' = 'document',
+  ): Promise<void> {
+    progress.step('fallback', '使用内置 PDF 基础排版（图片与自定义模板不渲染，版式需核对）');
+    progress.step('export', '导出 PDF 文件');
+    await renderDesktopPdf({ content, outputPath, title, byline, layout, signal }, this.commandRunner);
+    assertCompletePdf(outputPath);
   }
   private async genPandoc(
     content: string,

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
 import { extractPdfTextWithCache } from './fileUtils.js';
 import { buildBundledPythonEnvironment, resolveDocumentRuntime } from '../services/bundledRuntime.js';
+import { hasDesktopPdfRenderer, renderDesktopPdf } from '../services/desktopPdf.js';
 
 export type EditableDocumentFormat = 'text' | 'markdown' | 'docx' | 'pdf';
 
@@ -158,6 +159,10 @@ function runPdfWriter(script: string, inputPath: string, outPath: string): Promi
 }
 
 async function writePdfFromMarkdown(markdown: string, outPath: string): Promise<void> {
+  if (hasDesktopPdfRenderer()) {
+    await renderDesktopPdf({ content: markdown, outputPath: outPath });
+    return;
+  }
   const script = findBundledPdfWriterScript();
   if (!script) throw new Error('PDF 编辑稿导出失败：create_pdf.py 未随包分发。');
   const tmpDir = await fs.promises.mkdtemp(path.join(path.dirname(outPath), '.otto-pdf-edit-'));
@@ -184,5 +189,6 @@ export async function exportEditedDocument(
   } else {
     await fs.promises.writeFile(outPath, content, 'utf8');
   }
-  return { ok: true, path: outPath, format, message: '已保存编辑稿：' + path.basename(outPath) };
+  return { ok: true, path: outPath, format, message: '已保存编辑稿：' + path.basename(outPath)
+    + (format === 'pdf' && hasDesktopPdfRenderer() ? '（内置 PDF 基础排版；图片与自定义模板不渲染）' : '') };
 }

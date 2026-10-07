@@ -169,6 +169,7 @@ export function verifyPackagedRuntime(
 
   for (const entry of [
     'dist/main/index.js',
+    'dist/main/pdf-renderer.js',
     'dist/preload/index.js',
     'dist/renderer/index.html',
     'dist/renderer/desktop-pet.html',

@@ -157,6 +157,8 @@
       "!**/node_modules/js-tiktoken/dist/ranks/*.js",
       "!**/node_modules/@otto/native/target/**",
       "!**/node_modules/@otto/native/src/**",
+      "!**/node_modules/@otto/native/vendor/**/Cargo.*",
+      "!**/node_modules/@otto/native/vendor/**/*.rs",
       "!**/node_modules/@otto/native/node_modules/**",
       "!**/node_modules/@otto/native/Cargo.*",
       "!**/node_modules/@otto/native/tsconfig*.json",

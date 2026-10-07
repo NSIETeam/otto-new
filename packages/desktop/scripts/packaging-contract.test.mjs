@@ -197,6 +197,7 @@ describe('desktop packaging contract', () => {
     for (const relative of [
       'package.json',
       'dist/main/index.js',
+      'dist/main/pdf-renderer.js',
       'dist/main/enterprise-client.js',
       'dist/main/desktop-pet-drag.js',
       'dist/preload/index.js',

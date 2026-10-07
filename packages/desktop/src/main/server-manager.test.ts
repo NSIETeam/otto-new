@@ -332,6 +332,8 @@ describe('detached server runtime identity', () => {
       expect(command).toBe(executable);
       expect(args[1]).toBe('start');
       expect(options.env?.ELECTRON_RUN_AS_NODE).toBe(electron ? '1' : undefined);
+      expect(options.env?.OTTO_DESKTOP_PDF_EXECUTABLE).toBe(electron ? executable : undefined);
+      if (electron) expect(options.env?.OTTO_DESKTOP_PDF_HELPER).toMatch(/pdf-renderer\.js$/);
       expect(options.env?.OTTO_SQLCIPHER_NATIVE_BINDING)
         .toBe(explicitBinding ?? (electron ? packagedBinding : undefined));
       expect(options).toMatchObject({ detached: true, stdio: ['ignore', 'pipe', 'pipe'] });

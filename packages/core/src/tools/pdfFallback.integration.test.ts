@@ -7,6 +7,7 @@ import { GenerateDocumentTool, ChromeHtmlToImageRenderer } from './generate-docu
 import { exportEditedDocument } from '../utils/editableDocument.js';
 import { createMockConfig } from '../utils/test-helpers.js';
 import * as commands from '../services/documentCommand.js';
+import { renderDesktopPdf } from '../services/desktopPdf.js';
 
 const pdf = Buffer.from('%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n%%EOF\n');
 let root: string;
@@ -65,7 +66,7 @@ describe('bundled desktop PDF fallback', () => {
     const out = path.join(root, 'edited.pdf');
     const result = await exportEditedDocument(out, '# 修订稿\n\n中文段落', out);
     expect(result.ok).toBe(true);
-    expect(fs.readFileSync(out)).toEqual(pdf);
+    expect(fs.readFileSync(out).equals(pdf)).toBe(true);
     expect(runner).toHaveBeenCalledOnce();
     expect(html[0]).toContain('修订稿');
   });
@@ -128,5 +129,65 @@ describe('bundled desktop PDF fallback', () => {
     runner.mockRejectedValueOnce(new Error('printer failed'));
     await expect(exportEditedDocument(out, '# edit', out)).rejects.toThrow();
     expect(fs.readFileSync(out, 'utf8')).toBe('previous user document');
+  });
+
+  it('does not truncate an existing edited PDF when staging copy fails', async () => {
+    const out = path.join(root, 'disk-full.pdf');
+    fs.writeFileSync(out, 'previous user document');
+    const copy = vi.spyOn(fs, 'copyFileSync').mockImplementationOnce(() => { throw new Error('synthetic disk full'); });
+    await expect(exportEditedDocument(out, '# edit', out)).rejects.toThrow('disk full');
+    expect(fs.readFileSync(out, 'utf8')).toBe('previous user document');
+    copy.mockRestore();
+  });
+
+  it('falls back for slide PDF without Marp, with explicit page breaks', async () => {
+    const result = await tool().execute({ content: '# 第一页\n介绍\n\n---\n\n# 第二页\n结论',
+      format: 'slides', output_format: 'pdf', output_path: path.join(root, 'slides.pdf') },
+    new AbortController().signal);
+    expect(result.returnDisplay).toContain('内置 PDF 基础排版');
+    expect(html[0].match(/class="slide"/g)).toHaveLength(2);
+    expect(html[0]).toContain('320mm 180mm');
+  });
+
+  it('does not start printing after cancellation during engine preflight', async () => {
+    const controller = new AbortController();
+    const cancelled = new GenerateDocumentTool(createMockConfig(), new ChromeHtmlToImageRenderer(null), runner,
+      async () => { controller.abort(); return 'missing'; });
+    await expect(cancelled.execute({ content: 'body', format: 'article', output_format: 'pdf',
+      output_path: path.join(root, 'not-started.pdf') }, controller.signal)).rejects.toThrow('取消');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('renders lists, quotations and literal fenced code without active markup', async () => {
+    await renderDesktopPdf({ outputPath: path.join(root, 'syntax.pdf'),
+      content: '# 标题\n\n1. 编号\n2) 第二项\n\n- 无序\n\n> 引用\n\n---\n\n```html\n<div>纯文本</div>\n```\n\n## 小节\n**强调**与 *斜体*\n\n```\n未闭合代码块' }, runner);
+    expect(html[0]).toContain('<ol>');
+    expect(html[0]).toContain('<ul>');
+    expect(html[0]).toContain('<blockquote>');
+    expect(html[0]).toContain('<hr>');
+    expect(html[0]).toContain('&lt;div&gt;纯文本&lt;/div&gt;');
+    expect(html[0]).toContain('<em>斜体</em>');
+    expect(html[0]).toContain('未闭合代码块');
+  });
+
+  it('rejects missing host capability and an already cancelled request without starting a child', async () => {
+    const controller = new AbortController(); controller.abort();
+    await expect(renderDesktopPdf({ content: 'body', outputPath: path.join(root, 'none.pdf'), signal: controller.signal }, runner)).rejects.toThrow('取消');
+    vi.stubEnv('OTTO_DESKTOP_PDF_HELPER', '');
+    await expect(renderDesktopPdf({ content: 'body', outputPath: path.join(root, 'none.pdf') }, runner)).rejects.toThrow('不可用');
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it('preserves an existing PDF when cancelled after staging but before publication', async () => {
+    const out = path.join(root, 'publish-cancelled.pdf');
+    fs.writeFileSync(out, 'previous user document');
+    const controller = new AbortController();
+    const copy = fs.copyFileSync;
+    vi.spyOn(fs, 'copyFileSync').mockImplementationOnce((from, to, mode) => {
+      copy(from, to, mode); controller.abort();
+    });
+    await expect(renderDesktopPdf({ content: 'body', outputPath: out, signal: controller.signal }, runner)).rejects.toThrow('取消');
+    expect(fs.readFileSync(out, 'utf8')).toBe('previous user document');
+    expect(fs.readdirSync(root).some((file) => file.startsWith('.otto-pdf-publish-'))).toBe(false);
   });
 });

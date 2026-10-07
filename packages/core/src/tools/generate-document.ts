@@ -746,7 +746,7 @@ PPTX QUALITY BOUNDARY: This deterministic renderer is a speed fallback. For a hi
 
 ENGINES: PPTX -> deterministic 1920x1080 local HTML -> local browser PNG screenshots -> bundled PptxGenJS packaging. Slide PDF/HTML -> Marp. Other PDF -> Typst or Pandoc. Desktop PDF can use the bundled isolated Chromium basic layout when external engines are unavailable (text, headings, lists and tables; no images or custom templates). DOCX -> available Python doc-writer, or explicitly disclosed built-in basic Word layout when Python is unavailable. HTML -> Pandoc.
 
-DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Python. Markdown needs none. Slide PDF/HTML need marp-cli; other formats may need typst or pandoc. External engines run a doctor preflight and fail loud with an install command if missing (never faking output). macOS: brew install typst pandoc; npm i -g @marp-team/marp-cli. Windows: winget install typst pandoc; npm i -g @marp-team/marp-cli.`;
+DEPENDENCIES: PPTX needs a local Chrome/Edge/Chromium browser and never runs Python. Markdown needs none. Desktop basic PDF uses the bundled Chromium engine, not Python/Typst/Marp; custom or image-heavy PDF still needs the external engine. Slide HTML needs marp-cli; other formats may need typst or pandoc. External engines run a doctor preflight and fail loud with an install command if missing (never faking output). macOS: brew install typst pandoc; npm i -g @marp-team/marp-cli. Windows: winget install typst pandoc; npm i -g @marp-team/marp-cli.`;
     super(GenerateDocumentTool.Name, 'GenerateDocument', desc, Icon.Pencil,
       {
         type: Type.OBJECT,

@@ -135,7 +135,17 @@ export async function renderDesktopPdf(
       { env: rendererEnvironment(), signal, timeout: 45_000 });
     if (signal.aborted) throw new Error('PDF 生成已取消');
     assertCompletePdf(pdf);
-    fs.copyFileSync(pdf, request.outputPath);
+    // Publish on the destination filesystem only after rendering and validation.
+    // Disk-full/copy failures must not truncate a previously saved edited PDF.
+    const publish = fs.mkdtempSync(path.join(path.dirname(request.outputPath), '.otto-pdf-publish-'));
+    try {
+      const ready = path.join(publish, 'ready.pdf');
+      fs.copyFileSync(pdf, ready);
+      if (signal.aborted) throw new Error('PDF 生成已取消');
+      fs.renameSync(ready, request.outputPath);
+    } finally {
+      fs.rmSync(publish, { recursive: true, force: true });
+    }
   } finally {
     await fs.promises.rm(temp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
       .catch(() => undefined); // Disposable staging; do not replace the real error.

@@ -51,15 +51,24 @@ export async function printIsolatedPdf(html: string, output: string, profile: st
   }
 }
 
-if (require.main === module) {
+export async function runPdfRenderer(html: string, output: string, profile: string): Promise<void> {
   // The parent also bounds and kills the entire tree. Never keep an orphan app.
   const deadline = setTimeout(() => app.exit(1), 40_000);
-  printIsolatedPdf(process.argv[2], process.argv[3], process.argv[4]).then(() => {
-    clearTimeout(deadline);
-    app.exit(0);
-  }, () => {
+  try {
+    await printIsolatedPdf(html, output, profile);
+  } catch {
     clearTimeout(deadline);
     console.error('Isolated PDF rendering failed; the original document was not modified.');
     app.exit(1);
-  });
+    return;
+  } finally {
+    clearTimeout(deadline);
+  }
+  app.exit(0);
+}
+
+// Electron's require.main is its internal bootstrap, not the app entry. Compare
+// its explicit argv entry; importing this helper for tests never starts an app.
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename)) {
+  void runPdfRenderer(process.argv[2], process.argv[3], process.argv[4]);
 }

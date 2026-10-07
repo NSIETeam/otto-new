@@ -105,4 +105,46 @@ describe('AnalyzeDataTool file delivery outcomes', () => {
     await expect(exportExcel(file, output)).rejects.toThrow(/xlsx/i);
     expect(fs.existsSync(output)).toBe(false);
   });
+
+  it.each(['xlsx', 'xls'])('rejects text disguised as a %s workbook', async extension => {
+    const file = input(`disguised.${extension}`, 'not a workbook');
+    await expect(exportExcel(file)).rejects.toThrow(/workbook|格式|Excel/i);
+    expect(fs.existsSync(path.join(root, 'result.xlsx'))).toBe(false);
+  });
+
+  it('supports five consecutive mixed spreadsheet exports in the same tool instance', async () => {
+    for (let round = 1; round <= 5; round++) {
+      const csv = round % 2 === 1;
+      const file = input(`round-${round}.${csv ? 'csv' : 'json'}`, csv
+        ? `name,amount\n合成${round},${round}\n`
+        : JSON.stringify([{ name: `合成${round}`, amount: round }]));
+      const output = path.join(root, `round-${round}.xlsx`);
+      expect((await exportExcel(file, output)).llmContent).toContain('analyze_data OK');
+      const workbook = XLSX.read(fs.readFileSync(output), { type: 'buffer' });
+      expect(XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]))
+        .toEqual([{ name: `合成${round}`, amount: round }]);
+    }
+  });
+
+  it('preserves all sheets and formula cells when exporting an existing XLSX', async () => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['name'], ['甲']]), '一');
+    const sheet = XLSX.utils.aoa_to_sheet([[2, 3, 5]]);
+    sheet.C1.f = 'A1+B1';
+    XLSX.utils.book_append_sheet(workbook, sheet, '二');
+    const file = path.join(root, 'input.xlsx');
+    const source = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    fs.writeFileSync(file, source);
+    await exportExcel(file);
+    const actual = XLSX.read(fs.readFileSync(path.join(root, 'result.xlsx')), { type: 'buffer' });
+    expect(actual.SheetNames).toEqual(['一', '二']);
+    expect(actual.Sheets['二'].C1.f).toBe('A1+B1');
+    expect(fs.readFileSync(file)).toEqual(source);
+  });
+
+  it('rejects malformed JSON records without leaving a final spreadsheet', async () => {
+    const file = input('scalar.json', '[1,null]');
+    await expect(exportExcel(file)).rejects.toThrow(/array of records/);
+    expect(fs.existsSync(path.join(root, 'result.xlsx'))).toBe(false);
+  });
 });

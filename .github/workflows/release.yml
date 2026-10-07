@@ -586,6 +586,9 @@ jobs:
           [[ "$rust_toolchain" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           rustup toolchain install "$rust_toolchain" --profile minimal
           unset CARGO_BUILD_TARGET
+          cargo "+$rust_toolchain" test --locked \
+            --manifest-path otto-native/Cargo.toml \
+            --target-dir otto-native/target
           cargo "+$rust_toolchain" build --locked \
             --manifest-path otto-native/Cargo.toml --bin otto-native \
             --target-dir otto-native/target

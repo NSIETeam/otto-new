@@ -1,5 +1,6 @@
 /** Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0 */
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -9,8 +10,56 @@ import { assertSharpLock, HEIC_SOURCE_INPUTS, SHARP_RUNTIME_INPUTS } from '../he
 const root = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(path.join(root, 'package.json'));
 const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+const cargoLock = readFileSync(path.join(root, 'otto-native/Cargo.lock'), 'utf8');
+const cargoPackages = cargoLock.split('[[package]]').slice(1).map((entry) => ({
+  name: /^name = "([^"]+)"$/m.exec(entry)?.[1],
+  version: /^version = "([^"]+)"$/m.exec(entry)?.[1],
+}));
 
 describe('October release security inputs', () => {
+  it('does not retain the affected libcrux ChaCha20 package in the release lock', () => {
+    // RUSTSEC-2026-0124: also check optional/stale lock entries, not only the
+    // active RustCrypto backend. An absent optional package is acceptable.
+    for (const entry of cargoPackages.filter(({ name }) => name === 'libcrux-chacha20poly1305')) {
+      expect(entry.version).toMatch(/^0\.0\.(?:[89]|[1-9]\d+)$/);
+    }
+  });
+
+  it('uses the fixed lru cache dependency without changing MLS protocol pins', () => {
+    const manifest = readFileSync(path.join(root, 'otto-native/Cargo.toml'), 'utf8');
+    expect(manifest).toContain('lru = "=0.16.3"');
+    expect(cargoPackages.filter(({ name }) => name === 'lru')).toEqual([
+      { name: 'lru', version: '0.16.3' },
+    ]);
+    expect(manifest).toContain('openmls = "=0.8.1"');
+    expect(manifest).toContain('openmls_rust_crypto = "=0.5.1"');
+  });
+
+  it('identifies the optional backend as a licensed manifest-only patch, not a rewritten crypto fork', () => {
+    const vendor = path.join(root, 'otto-native/vendor/hpke-rs-libcrux-0.6.1');
+    const source = readFileSync(path.join(vendor, 'src/lib.rs'));
+    expect(createHash('sha256').update(source).digest('hex')).toBe(
+      '27606b7e8230159c685f381e92722cd8e7467fa00a929d994cd10cd0e6295fc5');
+    const manifest = readFileSync(path.join(vendor, 'Cargo.toml'), 'utf8');
+    expect(manifest).toContain('license = "MPL-2.0"');
+    expect(manifest).toContain('[dependencies.libcrux-aead]\nversion = "=0.0.8"');
+    expect(manifest).toContain('[dependencies.libcrux-traits]\nversion = "=0.0.7"');
+    // Reversing exactly the two dependency requirements restores the complete
+    // original normalized manifest; no feature, algorithm or backend is hidden.
+    const original = manifest
+      .replace('[dependencies.libcrux-aead]\nversion = "=0.0.8"',
+        '[dependencies.libcrux-aead]\nversion = "0.0.7"')
+      .replace('[dependencies.libcrux-traits]\nversion = "=0.0.7"',
+        '[dependencies.libcrux-traits]\nversion = "0.0.6"');
+    expect(createHash('sha256').update(original).digest('hex')).toBe(
+      '53b8904a337c827ecc94ff7e34bda091ba5fc1f4d3762625fe11f3d491ee5d75');
+    const license = readFileSync(path.join(vendor, 'LICENSE-MPL-2.0.txt'), 'utf8');
+    expect(license).toContain('Mozilla Public License Version 2.0');
+    expect(license).toContain('Exhibit B');
+    expect(readFileSync(path.join(vendor, 'NOTICE.md'), 'utf8'))
+      .toContain('modified dependency manifest, not an unchanged crates.io release');
+  });
+
   it.each([
     ['electron', '43.7.7'], ['simple-git', '4.0.2'],
     ['@grpc/grpc-js', '1.14.5'], ['fast-uri', '3.1.8'],

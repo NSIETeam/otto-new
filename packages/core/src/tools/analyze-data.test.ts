@@ -193,19 +193,16 @@ describe('AnalyzeDataTool', () => {
 
   it('line chart fails loud on non-numeric columns (does not fake a chart)', async () => {
     const f = writeCsv('cat.csv', 'name,city\nAlice,NYC\nBob,LA');
-    const r = await tool.execute({ input_path: f, operation: 'chart', chart_type: 'line', x_column: 'name', y_column: 'city' }, sig());
-    expect(r.llmContent).toContain('FAIL');
-    expect(r.llmContent.toLowerCase()).toContain('numeric');
+    await expect(tool.execute({ input_path: f, operation: 'chart', chart_type: 'line', x_column: 'name', y_column: 'city' }, sig()))
+      .rejects.toThrow(/numeric/);
   });
 
   // --- box chart still needs gnuplot -> doctor preflight fail-loud when missing ---
   it('box chart fails loud when gnuplot is missing (with install command)', async () => {
     const f = writeCsv('box.csv', 'g,v\nA,10\nA,20\nB,5');
-    const r = await tool.execute({ input_path: f, operation: 'chart', chart_type: 'box', x_column: 'g', y_column: 'v' }, sig());
     // gnuplot is not installed in this env -> must fail loud with install hint
-    expect(r.llmContent).toContain('FAIL');
-    expect(r.llmContent.toLowerCase()).toContain('gnuplot');
-    expect(r.llmContent).toContain('brew install gnuplot');
+    await expect(tool.execute({ input_path: f, operation: 'chart', chart_type: 'box', x_column: 'g', y_column: 'v' }, sig()))
+      .rejects.toThrow(/brew install gnuplot/);
   });
 
   // --- doctor preflight: duckdb-dependent ops fail loud when duckdb is missing ---
@@ -215,22 +212,21 @@ describe('AnalyzeDataTool', () => {
   // 真实行为——缺 duckdb 时必须 fail loud 并给出安装提示，不允许假成功。
   it('summary fails loud with duckdb install command when duckdb is missing', async () => {
     const f = writeCsv('s.csv', 'a,b\n1,2');
-    const r = await tool.execute({ input_path: f, operation: 'summary' }, sig());
     if (!(await preflightBinaries(['duckdb']))) {
+      const r = await tool.execute({ input_path: f, operation: 'summary' }, sig());
       expect(r.llmContent).toContain('analyze_data OK');
       return;
     }
-    expect(r.llmContent).toContain('FAIL');
-    expect(r.llmContent.toLowerCase()).toContain('duckdb');
-    expect(r.llmContent).toContain('brew install duckdb');
+    await expect(tool.execute({ input_path: f, operation: 'summary' }, sig()))
+      .rejects.toThrow(/brew install duckdb/);
   });
 
-  it('export_excel from CSV fails loud when duckdb is missing', async () => {
+  it('export_excel from CSV uses the bundled writer', async () => {
     const f = writeCsv('e.csv', 'a,b\n1,2');
     const out = path.join(tmpDir, 'out.xlsx');
     const r = await tool.execute({ input_path: f, operation: 'export_excel', output_path: out }, sig());
-    expect(r.llmContent).toContain('FAIL');
-    expect(r.llmContent.toLowerCase()).toContain('duckdb');
+    expect(r.llmContent).toContain('analyze_data OK');
+    expect(fs.readFileSync(out).subarray(0, 2).toString()).toBe('PK');
   });
 
   // --- 2-D cross-tab pivot (pure TS, no duckdb) ---

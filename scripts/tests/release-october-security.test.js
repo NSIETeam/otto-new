@@ -1,5 +1,6 @@
 /** Copyright 2026 Otto. SPDX-License-Identifier: Apache-2.0 */
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -32,6 +33,31 @@ describe('October release security inputs', () => {
     ]);
     expect(manifest).toContain('openmls = "=0.8.1"');
     expect(manifest).toContain('openmls_rust_crypto = "=0.5.1"');
+  });
+
+  it('identifies the optional backend as a licensed manifest-only patch, not a rewritten crypto fork', () => {
+    const vendor = path.join(root, 'otto-native/vendor/hpke-rs-libcrux-0.6.1');
+    const source = readFileSync(path.join(vendor, 'src/lib.rs'));
+    expect(createHash('sha256').update(source).digest('hex')).toBe(
+      '27606b7e8230159c685f381e92722cd8e7467fa00a929d994cd10cd0e6295fc5');
+    const manifest = readFileSync(path.join(vendor, 'Cargo.toml'), 'utf8');
+    expect(manifest).toContain('license = "MPL-2.0"');
+    expect(manifest).toContain('[dependencies.libcrux-aead]\nversion = "=0.0.8"');
+    expect(manifest).toContain('[dependencies.libcrux-traits]\nversion = "=0.0.7"');
+    // Reversing exactly the two dependency requirements restores the complete
+    // original normalized manifest; no feature, algorithm or backend is hidden.
+    const original = manifest
+      .replace('[dependencies.libcrux-aead]\nversion = "=0.0.8"',
+        '[dependencies.libcrux-aead]\nversion = "0.0.7"')
+      .replace('[dependencies.libcrux-traits]\nversion = "=0.0.7"',
+        '[dependencies.libcrux-traits]\nversion = "0.0.6"');
+    expect(createHash('sha256').update(original).digest('hex')).toBe(
+      '53b8904a337c827ecc94ff7e34bda091ba5fc1f4d3762625fe11f3d491ee5d75');
+    const license = readFileSync(path.join(vendor, 'LICENSE-MPL-2.0.txt'), 'utf8');
+    expect(license).toContain('Mozilla Public License Version 2.0');
+    expect(license).toContain('Exhibit B');
+    expect(readFileSync(path.join(vendor, 'NOTICE.md'), 'utf8'))
+      .toContain('modified dependency manifest, not an unchanged crates.io release');
   });
 
   it.each([

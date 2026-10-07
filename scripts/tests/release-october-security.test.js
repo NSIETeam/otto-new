@@ -9,8 +9,31 @@ import { assertSharpLock, HEIC_SOURCE_INPUTS, SHARP_RUNTIME_INPUTS } from '../he
 const root = path.resolve(import.meta.dirname, '../..');
 const require = createRequire(path.join(root, 'package.json'));
 const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+const cargoLock = readFileSync(path.join(root, 'otto-native/Cargo.lock'), 'utf8');
+const cargoPackages = cargoLock.split('[[package]]').slice(1).map((entry) => ({
+  name: /^name = "([^"]+)"$/m.exec(entry)?.[1],
+  version: /^version = "([^"]+)"$/m.exec(entry)?.[1],
+}));
 
 describe('October release security inputs', () => {
+  it('does not retain the affected libcrux ChaCha20 package in the release lock', () => {
+    // RUSTSEC-2026-0124: also check optional/stale lock entries, not only the
+    // active RustCrypto backend. An absent optional package is acceptable.
+    for (const entry of cargoPackages.filter(({ name }) => name === 'libcrux-chacha20poly1305')) {
+      expect(entry.version).toMatch(/^0\.0\.(?:[89]|[1-9]\d+)$/);
+    }
+  });
+
+  it('uses the fixed lru cache dependency without changing MLS protocol pins', () => {
+    const manifest = readFileSync(path.join(root, 'otto-native/Cargo.toml'), 'utf8');
+    expect(manifest).toContain('lru = "=0.16.3"');
+    expect(cargoPackages.filter(({ name }) => name === 'lru')).toEqual([
+      { name: 'lru', version: '0.16.3' },
+    ]);
+    expect(manifest).toContain('openmls = "=0.8.1"');
+    expect(manifest).toContain('openmls_rust_crypto = "=0.5.1"');
+  });
+
   it.each([
     ['electron', '43.7.7'], ['simple-git', '4.0.2'],
     ['@grpc/grpc-js', '1.14.5'], ['fast-uri', '3.1.8'],

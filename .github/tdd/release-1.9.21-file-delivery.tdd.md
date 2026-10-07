@@ -19,6 +19,16 @@ baseline changes are part of this repair.
   as XLS/XLSX being silently accepted. The other eleven delivery tests passed.
 - `92834e2f`: all 47 focused tests passed after workbook container validation.
   Final core typecheck passed. TDD checkpoint commits are retained, not rewritten.
+- `01ca7ec7`: three executed CSV literal tests failed: `=SUM(1)` and `=1+1`
+  became formulas; `="plain text"` lost its original expression text. Thirteen
+  other delivery tests passed. No formula was opened, executed or sent out.
+- `32c2a773`: the same delivery target and existing data target passed all 50
+  tests. Raw CSV literal cells replace only formula-like text in the inferred
+  workbook; ordinary numeric cells and existing XLSX formulas remain intact.
+  Core typecheck, touched-file ESLint and code-map validation passed.
+  The final full local core rerun passed 3,074 tests with the same 27 existing
+  skips and zero failures (227 passed files, 1 existing skipped file, 123.86s).
+  Measured coverage: 53.35% statements / 46.25% branches / 54.65% lines.
 
 An initial test-only fixture used SheetJS ESM file IO without its Node filesystem
 binding. The fixture was corrected to buffer IO before the first RED checkpoint;
@@ -53,6 +63,7 @@ CI and actual installers must still pass before release.
 | Five consecutive mixed CSV/JSON exports work in one tool instance | delivery tests | PASS |
 | Existing XLSX sheets and formula cells survive export, source unchanged | delivery tests | PASS |
 | Existing SVG chart and CSV pivot behavior remains covered | existing data tests | PASS |
+| CSV formula-like text remains exact string data, without formula cells | three delivery regressions | PASS |
 
 ## Boundaries
 
